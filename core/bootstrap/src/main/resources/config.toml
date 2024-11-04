@@ -1,0 +1,24 @@
+baseDir = "target/orion_root"
+
+[git]
+storagePath = "repos"
+
+[accessControl]
+url = "local+ssh://orion"
+
+[transports]
+defaultAddress = "localhost"
+
+[transports.git]
+port = 9418
+enabled = false
+
+[transports.http]
+port = 8000
+
+[transports.https]
+port = 8443
+
+[transports.ssh]
+port = 8022
+

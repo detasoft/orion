@@ -3,63 +3,61 @@
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>pro.deta.orion</groupId>
+  <parent>
+    <groupId>pro.deta.orion</groupId>
+    <artifactId>bom</artifactId>
+    <version>${revision}</version>
+    <relativePath>./bom/pom.xml</relativePath>
+  </parent>
   <artifactId>orion</artifactId>
-  <version>${revision}</version>
 
   <name>orion</name>
   <url>https://www.deta.pro/orion</url>
   <packaging>pom</packaging>
 
   <properties>
-    <revision>1.0-SNAPSHOT</revision>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.release>17</maven.compiler.release>
+    <maven.compiler.release>21</maven.compiler.release>
     <jgit.version>7.0.0.202409031743-r</jgit.version>
-    <bouncycastle.version>1.78.1</bouncycastle.version>
+    <dagger.version>2.52</dagger.version>
+    <lombok.version>1.18.34</lombok.version>
+    <testcontainers.version>1.20.4</testcontainers.version>
+    <assertj.version>3.26.3</assertj.version>
+    <jetty.version>12.0.12</jetty.version>
+    <jackson.version>2.17.2</jackson.version>
+    <mockito.version>5.3.1</mockito.version>
+    <acme4j.version>3.5.0</acme4j.version>
   </properties>
 
   <modules>
-    <module>bootstrap</module>
-    <module>git-engine</module>
-    <module>common</module>
-    <module>application</module>
-    <module>settings</module>
-    <module>rbac</module>
+    <module>bom</module>
+    <module>core</module>
+    <module>integration</module>
+    <module>tests</module>
+    <module>net</module>
   </modules>
 
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>application</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>common</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>settings</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>git-engine</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>rbac</artifactId>
-        <version>${project.version}</version>
-      </dependency>
-
-      <dependency>
         <groupId>org.projectlombok</groupId>
         <artifactId>lombok</artifactId>
-        <version>1.18.34</version>
+        <version>${lombok.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.google.dagger</groupId>
+        <artifactId>dagger</artifactId>
+        <version>${dagger.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>commons-io</groupId>
+        <artifactId>commons-io</artifactId>
+        <version>2.16.1</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-compress</artifactId>
+        <version>1.27.1</version>
       </dependency>
       <dependency>
         <groupId>org.junit</groupId>
@@ -89,25 +87,34 @@
         <version>${jgit.version}</version>
       </dependency>
       <dependency>
+        <groupId>org.eclipse.jgit</groupId>
+        <artifactId>org.eclipse.jgit.ssh.apache</artifactId>
+        <version>${jgit.version}</version>
+      </dependency>
+
+      <!-- Jetty dependencies -->
+      <dependency>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-servlets</artifactId>
+        <version>${jetty.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.eclipse.jetty</groupId>
+        <artifactId>jetty-server</artifactId>
+        <version>${jetty.version}</version>
+      </dependency>
+
+      <dependency>
         <groupId>ch.qos.logback</groupId>
         <artifactId>logback-classic</artifactId>
-        <version>1.3.6</version>
+        <version>1.4.12</version>
       </dependency>
       <dependency>
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-api</artifactId>
         <version>2.0.16</version>
       </dependency>
-      <dependency>
-        <groupId>org.bouncycastle</groupId>
-        <artifactId>bcprov-jdk18on</artifactId>
-        <version>${bouncycastle.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.bouncycastle</groupId>
-        <artifactId>bcpkix-jdk18on</artifactId>
-        <version>${bouncycastle.version}</version>
-      </dependency>
+
 
       <dependency>
         <groupId>com.google.guava</groupId>
@@ -117,12 +124,12 @@
       <dependency>
         <groupId>com.fasterxml.jackson.dataformat</groupId>
         <artifactId>jackson-dataformat-yaml</artifactId>
-        <version>2.17.2</version>
+        <version>${jackson.version}</version>
       </dependency>
       <dependency>
         <groupId>com.fasterxml.jackson.dataformat</groupId>
         <artifactId>jackson-dataformat-xml</artifactId>
-        <version>2.17.2</version>
+        <version>${jackson.version}</version>
       </dependency>
       <dependency>
         <groupId>io.github.dvgaba</groupId>
@@ -133,8 +140,37 @@
       <dependency>
         <groupId>org.assertj</groupId>
         <artifactId>assertj-core</artifactId>
-        <version>3.26.3</version>
-        <scope>test</scope>
+        <version>${assertj.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers</artifactId>
+        <version>${testcontainers.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>${testcontainers.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mockito</groupId>
+        <artifactId>mockito-core</artifactId>
+        <version>${mockito.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mockito</groupId>
+        <artifactId>mockito-junit-jupiter</artifactId>
+        <version>${mockito.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.shredzone.acme4j</groupId>
+        <artifactId>acme4j-client</artifactId>
+        <version>${acme4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.shredzone.acme4j</groupId>
+        <artifactId>acme4j-utils</artifactId>
+        <version>${acme4j.version}</version>
       </dependency>
     </dependencies>
 
@@ -145,21 +181,23 @@
       <groupId>org.projectlombok</groupId>
       <artifactId>lombok</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.google.dagger</groupId>
+      <artifactId>dagger</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-api</artifactId>
-      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter-params</artifactId>
-      <scope>test</scope>
     </dependency>
   </dependencies>
 
   <build>
-    <pluginManagement><!-- lock down plugins versions to avoid using Maven defaults (may be moved to parent pom) -->
+    <pluginManagement><!-- lock down plugins versions to avoid using Maven defaults (maybe moved to parent pom) -->
       <plugins>
         <!-- clean lifecycle, see https://maven.apache.org/ref/current/maven-core/lifecycles.html#clean_Lifecycle -->
         <plugin>
@@ -174,6 +212,20 @@
         <plugin>
           <artifactId>maven-compiler-plugin</artifactId>
           <version>3.13.0</version>
+          <configuration>
+            <annotationProcessorPaths>
+              <path>
+                <groupId>com.google.dagger</groupId>
+                <artifactId>dagger-compiler</artifactId>
+                <version>${dagger.version}</version>
+              </path>
+              <path>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+              </path>
+            </annotationProcessorPaths>
+          </configuration>
         </plugin>
         <plugin>
           <artifactId>maven-surefire-plugin</artifactId>
