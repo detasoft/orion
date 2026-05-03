@@ -3,7 +3,6 @@ package pro.deta.orion.auth;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import org.eclipse.jgit.lib.Repository;
 import pro.deta.orion.auth.check.data.FetchRepositorySecurityCheck;
 
 import java.net.SocketAddress;
@@ -18,7 +17,7 @@ public final class Permission<O> {
     public static final Permission<String> REPOSITORY_CREATE = new Permission<>("REPOSITORY_CREATE", String.class);
     public static final Permission<String> REPOSITORY_READ = new Permission<>("REPOSITORY_READ", String.class);
     public static final Permission<FetchRepositorySecurityCheck> REPOSITORY_FETCH = new Permission<>("REPOSITORY_FETCH", FetchRepositorySecurityCheck.class);
-    public static final Permission<Repository> REPOSITORY_WRITE = new Permission<>("REPOSITORY_WRITE", Repository.class);
+    public static final Permission<String> REPOSITORY_WRITE = new Permission<>("REPOSITORY_WRITE", String.class);
 
     public static final Permission<String> BRANCH_PULL = new Permission<>("BRANCH_PULL", String.class);
     public static final Permission<String> BRANCH_PUSH = new Permission<>("BRANCH_PUSH", String.class);

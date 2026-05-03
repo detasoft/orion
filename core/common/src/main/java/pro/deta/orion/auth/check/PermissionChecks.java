@@ -82,7 +82,19 @@ public class PermissionChecks {
         List<AccessControl.Grant> g = userIdentity.getGrants();
         List<AccessControl.Grant> matchedGrant = filterGrants(g, GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, (value) -> matchExpressionValue(value, repository)));
         if (!matchedGrant.isEmpty()) {
-            log.debug("Check ALLOW_TO_CREATE_REPO passed for {} on {}", userIdentity, matchedGrant);
+            log.debug("Check ALLOW_READ_ACCESS passed for {} on {}", userIdentity, matchedGrant);
+            return ALLOW;
+        }
+        return DENY;
+    });
+
+    public final PermissionChecker<String> ALLOW_WRITE_ACCESS = createFor(REPOSITORY_WRITE, "Allow write access", (userIdentity, repository) -> {
+        List<AccessControl.Grant> g = userIdentity.getGrants();
+        List<AccessControl.Grant> matchedGrant = filterGrants(g,
+                GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, (value) -> matchExpressionValue(value, repository)),
+                GrantMatcher.of(AccessControl.GrantKey.WRITE));
+        if (!matchedGrant.isEmpty()) {
+            log.debug("Check ALLOW_WRITE_ACCESS passed for {} on {}", userIdentity, matchedGrant);
             return ALLOW;
         }
         return DENY;

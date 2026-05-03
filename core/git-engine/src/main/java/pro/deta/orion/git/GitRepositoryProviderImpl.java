@@ -36,7 +36,7 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
 
     @Inject
     public GitRepositoryProviderImpl(@GitStorageDir Path gitStorageDir, OrionJGitSystemReader systemReader) {
-        this.gitStorageDir = gitStorageDir;
+        this.gitStorageDir = gitStorageDir.toAbsolutePath().normalize();
         FileUtils.mkdirs(this.gitStorageDir);
         log.warn("Git storage set to {}", this.gitStorageDir);
         GitUtils.gitConfigure(systemReader);
@@ -44,17 +44,26 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
 
     @Override
     public boolean exists(String repositoryName) {
-        return gitStorageDir.resolve(repositoryName).toFile().exists();
+        try {
+            return resolveRepository(repositoryName).storagePath().toFile().exists();
+        } catch (IllegalArgumentException e) {
+            log.warn("Rejected invalid repository name {}", repositoryName);
+            return false;
+        }
     }
 
     @Override
     public Result<Repository> find(String repositoryName) {
         try {
-            Repository r = repositoryCache.computeIfAbsent(repositoryName, (name) -> openRepository(repositoryName, false));
+            ResolvedRepository repository = resolveRepository(repositoryName);
+            Repository r = repositoryCache.computeIfAbsent(repository.cacheKey(), (name) -> openRepository(repositoryName, repository.storagePath(), false));
             if (r == null) {
                 return new Result.Failure<>(NOT_FOUND);
             }
             return new Result.Success<>(r);
+        } catch (IllegalArgumentException e) {
+            log.warn("Rejected invalid repository name {}", repositoryName);
+            return new Result.Failure<>(GENERAL, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Error while looking for a repository {}", repositoryName, e);
             return new Result.Failure<>(GENERAL, e);
@@ -64,11 +73,15 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
     @Override
     public Result<Repository> findOrCreate(String repositoryName) {
         try {
-            Repository r = repositoryCache.computeIfAbsent(repositoryName, (name) -> openRepository(repositoryName, true));
+            ResolvedRepository repository = resolveRepository(repositoryName);
+            Repository r = repositoryCache.computeIfAbsent(repository.cacheKey(), (name) -> openRepository(repositoryName, repository.storagePath(), true));
             if (r == null) {
                 return new Result.Failure<>(NOT_FOUND);
             }
             return new Result.Success<>(r);
+        } catch (IllegalArgumentException e) {
+            log.warn("Rejected invalid repository name {}", repositoryName);
+            return new Result.Failure<>(GENERAL, e.getMessage(), e);
         } catch (Exception e) {
             log.error("Error while looking for a repository {}", repositoryName, e);
             return new Result.Failure<>(GENERAL, e);
@@ -85,9 +98,8 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
         };
     }
 
-    private Repository openRepository(String repositoryName, boolean createIfNotExist) {
+    private Repository openRepository(String repositoryName, Path repositoryStoragePath, boolean createIfNotExist) {
         try {
-            Path repositoryStoragePath = gitStorageDir.resolve(repositoryName);
             File storagePathFile = repositoryStoragePath.toFile();
             if (!storagePathFile.exists()) {
                 if (!createIfNotExist)
@@ -107,11 +119,41 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
         }
     }
 
+    private ResolvedRepository resolveRepository(String repositoryName) {
+        if (repositoryName == null || repositoryName.isBlank()) {
+            throw new IllegalArgumentException("Repository name must not be empty");
+        }
+
+        Path relativePath = Path.of(repositoryName);
+        if (relativePath.isAbsolute()) {
+            throw new IllegalArgumentException("Repository name must be relative");
+        }
+        for (Path segment : relativePath) {
+            String segmentName = segment.toString();
+            if (segmentName.isBlank() || ".".equals(segmentName) || "..".equals(segmentName)) {
+                throw new IllegalArgumentException("Repository name contains an unsafe path segment");
+            }
+        }
+
+        Path normalizedRelativePath = relativePath.normalize();
+        if (normalizedRelativePath.getNameCount() == 0) {
+            throw new IllegalArgumentException("Repository name must not resolve to storage root");
+        }
+        Path storagePath = gitStorageDir.resolve(normalizedRelativePath).normalize();
+        if (!storagePath.startsWith(gitStorageDir) || storagePath.equals(gitStorageDir)) {
+            throw new IllegalArgumentException("Repository path escapes git storage root");
+        }
+        return new ResolvedRepository(normalizedRelativePath.toString(), storagePath);
+    }
+
     private void initialRepositoryCreation(Repository r) {
         try {
             r.create(true);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private record ResolvedRepository(String cacheKey, Path storagePath) {
     }
 }

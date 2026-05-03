@@ -50,15 +50,19 @@ public class GitInternalService {
                 gitCommand = cmdResolved.apply(streams.getInputStream());
                 String repositoryName = gitCommand.getRepositoryName();
                 Thread.currentThread().setName(MessageFormatter.format("Serving {} [{}] ({})", clientId, new Object[]{requestId, gitCommand}).getMessage());
-                if (!repositoryProvider.exists(repositoryName) && gitCommand.isRead())
+                boolean repositoryExists = repositoryProvider.exists(repositoryName);
+                if (!repositoryExists && gitCommand.isRead())
                     return;
                 try {
 
                     Result<Repository> r = null;
-                    if (gitCommand.isWrite() && !repositoryProvider.exists(repositoryName)) {
+                    if (gitCommand.isWrite() && !repositoryExists) {
                         permissionChecker().ALLOW_TO_CREATE_REPO.assertThat(gitCommand.getRepositoryName());
                         r = repositoryProvider.findOrCreate(repositoryName);
                     } else {
+                        if (gitCommand.isWrite()) {
+                            permissionChecker().ALLOW_WRITE_ACCESS.assertThat(repositoryName);
+                        }
                         r = repositoryProvider.find(repositoryName);
                     }
 
@@ -88,6 +92,8 @@ public class GitInternalService {
                 } catch (ServiceMayNotContinueException e) {
                     writeErrorIntoOS(streams.getOutputStream(), e.getMessage());
                 }
+            } catch (OrionSecurityException e) {
+                log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
             } catch (SecurityException e) {
                 log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
             } catch (Exception e) {
@@ -156,19 +162,31 @@ public class GitInternalService {
 
     public static GitCommand parseGitCommand(String cmd, List<String> extraProperties) {
         log.debug("Command is : [{}]", cmd);
-        String[] parts = cmd.split("\\x00");
-        String[] commands = parts[0].split(" ");
+        if (cmd == null || cmd.isBlank()) {
+            throw new IllegalArgumentException("Malformed git command: empty command");
+        }
+        String[] parts = cmd.split("\\x00", -1);
+        String commandPart = parts.length > 0 ? parts[0].trim() : "";
+        String[] commands = commandPart.split("\\s+");
+        if (commands.length < 2 || commands[0].isBlank() || commands[1].isBlank()) {
+            throw new IllegalArgumentException("Malformed git command: " + commandPart);
+        }
         GitCommand.Command command = GitCommand.Command.parseFrom(commands[0]);
         String locator = commands[1];
         locator = locator.replaceAll("[^a-zA-Z0-9\\-_\\.\\/]","");
+        if (locator.isBlank()) {
+            throw new IllegalArgumentException("Malformed git command: empty repository locator");
+        }
         GitCommand gcmd = new GitCommand(command, locator);
         for (int i = 1; i < parts.length; i++) {
             if (parts[i]== null || parts[i].isBlank())
                 continue;
             parseAndSetProperty(gcmd, parts[i]);
         }
-        for (String ep : extraProperties) {
-            parseAndSetProperty(gcmd, ep);
+        if (extraProperties != null) {
+            for (String ep : extraProperties) {
+                parseAndSetProperty(gcmd, ep);
+            }
         }
         if (command.isUnknown()) {
             log.warn("Received UNKNOWN COMMAND {} [{}}] ", commands[0], gcmd);
@@ -178,10 +196,18 @@ public class GitInternalService {
     }
 
     private static void parseAndSetProperty(GitCommand gcmd, String parts) {
-        String[] prop = parts.split("=");
-        if (prop.length > 1)
-            gcmd.addProperty(prop[0], prop[1]);
-        else
-            gcmd.addProperty(prop[0], "");
+        if (parts == null || parts.isBlank()) {
+            return;
+        }
+        int separator = parts.indexOf('=');
+        if (separator < 0) {
+            gcmd.addProperty(parts, "");
+            return;
+        }
+        String name = parts.substring(0, separator);
+        if (name.isBlank()) {
+            return;
+        }
+        gcmd.addProperty(name, parts.substring(separator + 1));
     }
 }
