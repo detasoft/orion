@@ -10,3 +10,5 @@
 - After committing, run the Maven test command. If it fails and the failure is fixed, create the follow-up fix commit with the exact same commit message as the original commit so the commits can be squashed later.
 - If the Maven test command fails and cannot be fixed in the current turn, report the failure and the relevant error output.
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
+- Prefer ordinary loops and straightforward control flow over Java Stream API unless streams make the code noticeably more readable.
+- When asked to add comments or explanations to classes, add class-level comments only. Do not add method or constructor comments unless explicitly requested.
