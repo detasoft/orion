@@ -28,7 +28,7 @@ class GitInternalServiceTest {
             AccessControl.Grant repositoryGrant = new AccessControl.Grant("repository-only", new ArrayList<>())
                     .addKey(AccessControl.GrantKey.REPOSITORY, "project");
             getSc().setUserIdentity(new InternalUserImpl("reader", List.of(repositoryGrant)));
-            TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider();
+            TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(true);
             GitInternalService service = new GitInternalService(repositoryProvider, null);
             IOEStreamProvider streams = StreamUtils.newInstance(
                     new ByteArrayInputStream(new byte[0]),
@@ -43,25 +43,49 @@ class GitInternalServiceTest {
         }
     }
 
+    @Test
+    @DisplayName("upload-pack for a missing repository does not create it")
+    void uploadPackForMissingRepositoryDoesNotCreateRepository() {
+        TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
+        GitInternalService service = new GitInternalService(repositoryProvider, null);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        IOEStreamProvider streams = StreamUtils.newInstance(
+                new ByteArrayInputStream(new byte[0]),
+                output,
+                new ByteArrayOutputStream());
+
+        service.service("test-client", streams, "request-1",
+                ignoredInput -> GitInternalService.parseGitCommand("git-upload-pack /project.git", List.of("version=2")));
+
+        assertThat(repositoryProvider.findCalled).isFalse();
+        assertThat(repositoryProvider.findOrCreateCalled).isFalse();
+        assertThat(output.size()).isZero();
+    }
+
     private static final class TrackingRepositoryProvider implements GitRepositoryProvider {
+        private final boolean repositoryExists;
         private boolean findCalled;
         private boolean findOrCreateCalled;
 
+        private TrackingRepositoryProvider(boolean repositoryExists) {
+            this.repositoryExists = repositoryExists;
+        }
+
         @Override
         public boolean exists(String repositoryName) {
-            return true;
+            return repositoryExists;
         }
 
         @Override
         public Result<Repository> find(String repositoryName) {
             findCalled = true;
-            throw new AssertionError("find must not be called when write access is denied");
+            throw new AssertionError("find must not be called in this test");
         }
 
         @Override
         public Result<Repository> findOrCreate(String repositoryName) {
             findOrCreateCalled = true;
-            throw new AssertionError("findOrCreate must not be called for an existing repository");
+            throw new AssertionError("findOrCreate must not be called in this test");
         }
 
         @Override

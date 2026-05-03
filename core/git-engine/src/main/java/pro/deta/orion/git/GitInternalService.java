@@ -11,15 +11,14 @@ import org.slf4j.helpers.MessageFormatter;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.data.FetchRepositorySecurityCheck;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
 import pro.deta.orion.git.util.GitUtils;
-import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.Result.Failure;
 import pro.deta.orion.util.stream.IOEStreamProvider;
-import pro.deta.orion.util.stream.TeeOutputStream;
 
 import java.io.*;
 import java.util.*;
@@ -33,64 +32,23 @@ import static pro.deta.orion.git.util.GitUtils.writeErrorIntoOS;
 @Slf4j
 public class GitInternalService {
     private final GitRepositoryProvider repositoryProvider;
-    private final OrionProvider orionProvider;
+    private final OrionEventManager eventManager;
 
     @Inject
-    public GitInternalService(GitRepositoryProvider repositoryProvider, OrionProvider orionProvider) {
+    public GitInternalService(GitRepositoryProvider repositoryProvider, OrionEventManager eventManager) {
         this.repositoryProvider = repositoryProvider;
-        this.orionProvider = orionProvider;
+        this.eventManager = eventManager;
     }
 
     public void service(String clientId, IOEStreamProvider streams, String requestId, Function<InputStream, GitCommand> cmdResolved) {
         OrionUtils.wrapRunnableWithThreadName(MessageFormatter.format("Serving {} []", clientId, requestId).getMessage(), () -> {
             GitCommand gitCommand = null;
-
             try {
                 gitCommand = cmdResolved.apply(streams.getInputStream());
-                String repositoryName = gitCommand.getRepositoryName();
                 Thread.currentThread().setName(MessageFormatter.format("Serving {} [{}] ({})", clientId, new Object[]{requestId, gitCommand}).getMessage());
-                boolean repositoryExists = repositoryProvider.exists(repositoryName);
-                if (!repositoryExists && gitCommand.isRead())
-                    return;
-                try {
-
-                    Result<Repository> r = null;
-                    if (gitCommand.isWrite() && !repositoryExists) {
-                        permissionChecker().ALLOW_TO_CREATE_REPO.assertThat(gitCommand.getRepositoryName());
-                        r = repositoryProvider.findOrCreate(repositoryName);
-                    } else {
-                        if (gitCommand.isWrite()) {
-                            permissionChecker().ALLOW_WRITE_ACCESS.assertThat(repositoryName);
-                        }
-                        r = repositoryProvider.find(repositoryName);
-                    }
-
-                    Repository r1 = switch (r) {
-                        case Result.Success<Repository>(var success) -> success;
-                        case Failure<Repository>(var code, var message, var throwable) ->
-                                throw new IllegalStateException("Unexpected value: " + code + " / " + message, throwable);
-                        default -> throw new IllegalStateException("Unexpected value: " + r);
-                    };
-
-                    Set<String> extraParameters = gitCommand.getProperties().entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.toSet());
-                    switch (gitCommand.getCommand()) {
-                        case UPLOAD:
-                            UploadPack uploadPack = GitUtils.uploadPack(r1, extraParameters);
-                            attachHooks(uploadPack, repositoryName);
-                            GitUtils.upload(uploadPack, streams);
-                            break;
-                        case RECEIVE:
-                            ReceivePack receivePack = GitUtils.receivePack(r1);
-                            attachHooks(receivePack, repositoryName);
-                            GitUtils.receive(receivePack, streams);
-                            break;
-                        default:
-                            writeErrorIntoOS(streams.getOutputStream(), "unknown command");
-                            break;
-                    }
-                } catch (ServiceMayNotContinueException e) {
-                    writeErrorIntoOS(streams.getOutputStream(), e.getMessage());
-                }
+                serveCommand(gitCommand, streams);
+            } catch (ServiceMayNotContinueException e) {
+                writeErrorIntoOS(streams.getOutputStream(), e.getMessage());
             } catch (OrionSecurityException e) {
                 log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
             } catch (SecurityException e) {
@@ -101,11 +59,71 @@ public class GitInternalService {
         });
     }
 
+    private void serveCommand(GitCommand gitCommand, IOEStreamProvider streams) throws IOException, ServiceMayNotContinueException, OrionSecurityException {
+        String repositoryName = gitCommand.getRepositoryName();
+        Optional<Repository> repository = openRepositoryFor(gitCommand, repositoryName);
+        if (repository.isEmpty()) {
+            return;
+        }
+
+        switch (gitCommand.getCommand()) {
+            case UPLOAD -> upload(gitCommand, repository.get(), repositoryName, streams);
+            case RECEIVE -> receive(repository.get(), repositoryName, streams);
+            default -> writeErrorIntoOS(streams.getOutputStream(), "unknown command");
+        }
+    }
+
+    private Optional<Repository> openRepositoryFor(GitCommand gitCommand, String repositoryName) throws OrionSecurityException {
+        boolean repositoryExists = repositoryProvider.exists(repositoryName);
+        if (!repositoryExists && gitCommand.isRead()) {
+            return Optional.empty();
+        }
+
+        Result<Repository> repositoryResult;
+        if (gitCommand.isWrite() && !repositoryExists) {
+            permissionChecker().ALLOW_TO_CREATE_REPO.assertThat(repositoryName);
+            repositoryResult = repositoryProvider.findOrCreate(repositoryName);
+        } else {
+            if (gitCommand.isWrite()) {
+                permissionChecker().ALLOW_WRITE_ACCESS.assertThat(repositoryName);
+            }
+            repositoryResult = repositoryProvider.find(repositoryName);
+        }
+        return Optional.of(repositoryFrom(repositoryResult));
+    }
+
+    private static Repository repositoryFrom(Result<Repository> result) {
+        return switch (result) {
+            case Result.Success<Repository>(var repository) -> repository;
+            case Failure<Repository>(var code, var message, var throwable) ->
+                    throw new IllegalStateException("Unexpected value: " + code + " / " + message, throwable);
+            default -> throw new IllegalStateException("Unexpected value: " + result);
+        };
+    }
+
+    private void upload(GitCommand gitCommand, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+        UploadPack uploadPack = GitUtils.uploadPack(repository, extraParameters(gitCommand));
+        attachHooks(uploadPack, repositoryName);
+        GitUtils.upload(uploadPack, streams);
+    }
+
+    private void receive(Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+        ReceivePack receivePack = GitUtils.receivePack(repository);
+        attachHooks(receivePack, repositoryName);
+        GitUtils.receive(receivePack, streams);
+    }
+
+    private static Set<String> extraParameters(GitCommand gitCommand) {
+        return gitCommand.getProperties().entrySet().stream()
+                .map(e -> e.getKey() + "=" + e.getValue())
+                .collect(Collectors.toSet());
+    }
+
     private void attachHooks(ReceivePack rp, String repositoryName) {
         rp.setPostReceiveHook(new PostReceiveHook() {
             @Override
             public void onPostReceive(ReceivePack rp, Collection<ReceiveCommand> commands) {
-                orionProvider.getEventManager().publish(() -> {
+                eventManager.publish(() -> {
                     GitReceiveOrionEvent event = new GitReceiveOrionEvent(repositoryName, getSc().getUserIdentity().getUserId());
                     for (ReceiveCommand sc : commands) {
                         event.addReceiveEventRef(sc.getRefName(), sc.getOldId(), sc.getNewId(), sc.getType(), sc.getResult());
@@ -120,7 +138,7 @@ public class GitInternalService {
         up.setPostUploadHook(new PostUploadHook() {
             @Override
             public void onPostUpload(PackStatistics stats) {
-                orionProvider.getEventManager().publish(new GitUploadOrionEvent(repositoryName, stats));
+                eventManager.publish(new GitUploadOrionEvent(repositoryName, stats));
             }
         });
         up.setPreUploadHook(new PreUploadHook() {

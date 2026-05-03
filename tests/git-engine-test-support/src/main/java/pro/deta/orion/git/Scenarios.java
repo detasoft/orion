@@ -13,6 +13,7 @@ import pro.deta.orion.util.stream.ServerIO;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -25,6 +26,7 @@ public final class Scenarios {
     private static final String FIRST_COMMIT_ID_TOKEN = "{{FIRST_COMMIT_ID}}";
     private static final String FIRST_COMMIT_PUSH_PACK_TOKEN = "{{FIRST_COMMIT_PUSH_PACK}}";
     private static final String FIRST_COMMIT_FETCH_PACK_TOKEN = "{{FIRST_COMMIT_FETCH_PACK}}";
+    private static final String REPOSITORY_NAME = "project.git";
 
     private static final String FIRST_COMMIT_PUSH_PACK = """
             PACK\\00\\00\\00\\02\\00\\00\\00\\03\\92\\0Ax\\9C\\95\\CBA\\0A\\021\\0C@\\D1}O\\91\\BD0$M\\D3X\\90\\C1\\AD\\17p\\DFN\\83\\16\\A6\\0E\\94z\\7F\\E7\\0A\\EE>\\0F\\FE\\1CfPP\\13%\\F2\\A8\\9EC\\14\\8B\\5C\\AA\\0F\\E5*\\95bb\\E1r\\B6*V\\97\\BF\\F3}\\0Cx\\EE\\B9\\B6\\DE\\06<\\E0Vr5\\FD\\DC_=\\B7}\\D9\\8E\\BE\\02)+\\FB\\E4\\85\\E0\\82\\84\\E8N\\EDmN\\FB{tA\\A2\\FB\\01\\E1&-\\CB\\AF\\01x\\9C340031Q042f\\98\\AB<\\FF\\07{\\D3{\\96\\C8.!\\CE\\C9\\F7t\\0E\\FCL\\14\\E7\\00\\00\\92\\07\\0A\\8D3x\\9C362\\04\\00\\011\\00\\97BrM\\D9(JJL\\00\\EA6rE\\88\\90\\02p\\89\\1E\\FA
@@ -74,9 +76,28 @@ public final class Scenarios {
         runSteps(repository, assertions, listEmptyRepositoryRefs());
     }
 
+    public static void fetchEmptyRepository(GitCommandServer server, SoftAssertions assertions) {
+        runSteps(server, assertions, listEmptyRepositoryRefs());
+    }
+
     public static void pushFirstCommitThenListAndFetch(Repository repository, SoftAssertions assertions) {
         runSteps(repository, assertions,
                 listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                listMasterAfterPush(),
+                fetchMasterAfterPush());
+    }
+
+    public static void pushFirstCommitThenListAndFetch(GitCommandServer server, SoftAssertions assertions) {
+        runSteps(server, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                listMasterAfterPush(),
+                fetchMasterAfterPush());
+    }
+
+    public static void pushFirstCommitThenListAndFetchFromReceive(GitCommandServer server, SoftAssertions assertions) {
+        runSteps(server, assertions,
                 pushFirstCommitWithCapabilities(),
                 listMasterAfterPush(),
                 fetchMasterAfterPush());
@@ -111,16 +132,23 @@ public final class Scenarios {
     }
 
     private static ProtocolStep uploadPackStep(String name, String transcript) {
-        return new ProtocolStep(name, transcript, Scenarios::uploadPack);
+        return new ProtocolStep(name, "git-upload-pack /" + REPOSITORY_NAME, List.of("version=2"), transcript, Scenarios::uploadPack);
     }
 
     private static ProtocolStep receivePackStep(String name, String transcript) {
-        return new ProtocolStep(name, transcript, Scenarios::receivePack);
+        return new ProtocolStep(name, "git-receive-pack /" + REPOSITORY_NAME, List.of(), transcript, Scenarios::receivePack);
     }
 
     private static void runSteps(Repository repository, SoftAssertions assertions, ProtocolStep... steps) {
         for (ProtocolStep step : steps) {
             runStep(repository, assertions, step);
+            assertions.assertAll();
+        }
+    }
+
+    private static void runSteps(GitCommandServer server, SoftAssertions assertions, ProtocolStep... steps) {
+        for (ProtocolStep step : steps) {
+            runStep(server, assertions, step);
             assertions.assertAll();
         }
     }
@@ -132,6 +160,20 @@ public final class Scenarios {
             testPipeScenario(
                     new AssertiveIOClient(step.transcript(), assertions),
                     step.server(repository),
+                    assertions);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while running Git protocol step: " + step.name(), e);
+        }
+    }
+
+    private static void runStep(GitCommandServer server, SoftAssertions assertions, ProtocolStep step) {
+        log.debug("Running Git protocol step '{}' through git server command '{}'", step.name(), step.commandLine());
+
+        try {
+            testPipeScenario(
+                    new AssertiveIOClient(step.transcript(), assertions),
+                    server.serverFor(step.commandLine(), step.extraProperties()),
                     assertions);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -190,11 +232,18 @@ public final class Scenarios {
 
     private record ProtocolStep(
             String name,
+            String commandLine,
+            List<String> extraProperties,
             String transcript,
             Function<Repository, IoConsumer<ServerIO>> serverFactory) {
 
         IoConsumer<ServerIO> server(Repository repository) {
             return serverFactory.apply(repository);
         }
+    }
+
+    @FunctionalInterface
+    public interface GitCommandServer {
+        IoConsumer<ServerIO> serverFor(String commandLine, List<String> extraProperties);
     }
 }
