@@ -33,7 +33,7 @@ public class S3GitRepositoryIT extends BaseOrionTest implements S3ServerRule.Abs
     @Disabled("investigation needed")
     @DisplayName("first pushed commit can be listed and fetched")
     void pushFirstCommitThenFetchIt() throws IOException {
-        runScenarioInFreshRepository(Scenarios::pushFirstCommitThenListAndFetchWithoutCapabilities);
+        runScenarioInFreshRepository(Scenarios::pushFirstCommitThenListAndFetchWithoutReceivePackAdvertisement);
     }
 
     private void runScenarioInFreshRepository(BiConsumer<Repository, SoftAssertions> scenario) throws IOException {

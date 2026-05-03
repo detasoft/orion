@@ -43,13 +43,13 @@ public final class Scenarios {
             C:0000
             """);
 
-    private static final String PUSH_FIRST_COMMIT_WITH_CAPABILITIES = script("""
+    private static final String PUSH_FIRST_COMMIT_WITH_RECEIVE_PACK_ADVERTISEMENT = script("""
             S:009d0000000000000000000000000000000000000000 capabilities^{}\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:00950000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/heads/master\\00 report-status side-band-64k agent=git/2.42.00000{{FIRST_COMMIT_PUSH_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0030\\01000eunpack ok\\0A0019ok refs/heads/master\\0A00000000
             """);
 
-    private static final String PUSH_FIRST_COMMIT_WITHOUT_CAPABILITIES = script("""
+    private static final String PUSH_FIRST_COMMIT_WITHOUT_RECEIVE_PACK_ADVERTISEMENT = script("""
             C:00950000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/heads/master\\00 report-status side-band-64k agent=git/2.42.00000{{FIRST_COMMIT_PUSH_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0030\\01000eunpack ok\\0A0019ok refs/heads/master\\0A00000000
             """);
@@ -103,10 +103,10 @@ public final class Scenarios {
                 fetchMasterAfterPush());
     }
 
-    public static void pushFirstCommitThenListAndFetchWithoutCapabilities(Repository repository, SoftAssertions assertions) {
+    public static void pushFirstCommitThenListAndFetchWithoutReceivePackAdvertisement(Repository repository, SoftAssertions assertions) {
         runSteps(repository, assertions,
                 listEmptyRepositoryRefs(),
-                pushFirstCommitWithoutCapabilities(),
+                pushFirstCommitWithoutReceivePackAdvertisement(),
                 listMasterAfterPush(),
                 fetchMasterAfterPush());
     }
@@ -116,11 +116,11 @@ public final class Scenarios {
     }
 
     private static ProtocolStep pushFirstCommitWithCapabilities() {
-        return receivePackStep("push first commit after receive-pack capabilities", PUSH_FIRST_COMMIT_WITH_CAPABILITIES);
+        return receivePackStep("push first commit after receive-pack advertisement", PUSH_FIRST_COMMIT_WITH_RECEIVE_PACK_ADVERTISEMENT);
     }
 
-    private static ProtocolStep pushFirstCommitWithoutCapabilities() {
-        return receivePackStep("push first commit without receive-pack capabilities", PUSH_FIRST_COMMIT_WITHOUT_CAPABILITIES);
+    private static ProtocolStep pushFirstCommitWithoutReceivePackAdvertisement() {
+        return receivePackStep("push first commit without receive-pack advertisement", PUSH_FIRST_COMMIT_WITHOUT_RECEIVE_PACK_ADVERTISEMENT);
     }
 
     private static ProtocolStep listMasterAfterPush() {
