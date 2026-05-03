@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.PublicKey;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 public sealed interface Auth {
@@ -52,6 +53,14 @@ public sealed interface Auth {
         return new LocalSshAuthKeyPair(username, Optional.of(keyPair), publicKeys, repositoryName);
     }
 
+    default boolean matchesLocalRepository(String repositoryName) {
+        return switch (this) {
+            case LocalNoneAuth noneAuth -> Objects.equals(noneAuth.localRepositoryName(), repositoryName);
+            case LocalSshAuthKeyPair localAuthKeyPair -> Objects.equals(localAuthKeyPair.localRepositoryName(), repositoryName);
+            default -> false;
+        };
+    }
+
     static void injectIntoGitCommand(Auth auth, TransportCommand gitCommand, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
         switch (auth) {
             case HttpAuth httpAuth -> injectUsernameAndPassword(gitCommand, httpAuth.username(), httpAuth.password());
@@ -82,4 +91,3 @@ public sealed interface Auth {
     static class Logger {
     }
 }
-

@@ -72,7 +72,7 @@ public class GitInternalStorage implements OrionApplicationStageEventListener {
     }
 
     private boolean isSameRepository(GitReceiveOrionEvent event, GitAccessParams area) {
-        return true;
+        return area.getAuth().matchesLocalRepository(event.getRepositoryName());
     }
 
     public GitAccessParams registerArea(OrionStageCallResult result, String name, String location, String username, Object credential, String branch, Consumer<GitReceiveOrionEvent> eventConsumer) {
