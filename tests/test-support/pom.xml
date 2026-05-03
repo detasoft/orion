@@ -28,6 +28,11 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>test-duration-recorder</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <dependency>
             <groupId>org.testcontainers</groupId>

@@ -16,6 +16,7 @@
 
     <modules>
         <module>git-engine-test-support</module>
+        <module>test-duration-recorder</module>
         <module>integration-test</module>
         <module>test-support</module>
     </modules>

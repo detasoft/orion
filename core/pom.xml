@@ -23,4 +23,12 @@
         <module>git-engine-s3</module>
         <module>communication</module>
     </modules>
+
+    <dependencies>
+        <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>test-duration-recorder</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

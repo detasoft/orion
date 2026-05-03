@@ -18,4 +18,12 @@
         <module>git-transport</module>
         <module>http-core</module>
     </modules>
+
+    <dependencies>
+        <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>test-duration-recorder</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

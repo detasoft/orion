@@ -5,24 +5,18 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>orion</artifactId>
+        <groupId>pro.deta.orion.tests</groupId>
+        <artifactId>tests</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-    <groupId>pro.deta.orion.integration</groupId>
-    <artifactId>integration</artifactId>
-    <packaging>pom</packaging>
 
-    <modules>
-        <module>cloudflare-api</module>
-    </modules>
+    <artifactId>test-duration-recorder</artifactId>
 
     <dependencies>
         <dependency>
-            <groupId>pro.deta.orion.tests</groupId>
-            <artifactId>test-duration-recorder</artifactId>
-            <scope>test</scope>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
         </dependency>
     </dependencies>
 </project>
