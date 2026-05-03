@@ -20,7 +20,7 @@
     <maven.compiler.release>21</maven.compiler.release>
     <jgit.version>7.0.0.202409031743-r</jgit.version>
     <dagger.version>2.52</dagger.version>
-    <lombok.version>1.18.34</lombok.version>
+    <lombok.version>1.18.44</lombok.version>
     <testcontainers.version>1.20.4</testcontainers.version>
     <assertj.version>3.26.3</assertj.version>
     <jetty.version>12.0.12</jetty.version>
