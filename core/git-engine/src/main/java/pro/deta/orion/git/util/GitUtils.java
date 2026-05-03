@@ -6,7 +6,6 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.PacketLineOut;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.UploadPack;
-import org.eclipse.jgit.util.SystemReader;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.stream.IOEStreamProvider;
 
@@ -70,10 +69,6 @@ public final class GitUtils {
         } catch (Exception e) {
             log.error("Failed to write Git protocol error response", e);
         }
-    }
-
-    public static void installJGitSystemReader(SystemReader systemReader) {
-        SystemReader.setInstance(systemReader);
     }
 
     private static int gitProtocolTimeoutSeconds() {

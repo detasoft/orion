@@ -3,10 +3,12 @@ package pro.deta.orion.git;
 import org.assertj.core.api.SoftAssertions;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.ReceiveCommand;
-import org.eclipse.jgit.util.SystemReader;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContextHolder;
@@ -20,12 +22,29 @@ import java.util.List;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.git.JGitRuntimeAssertions.assertControlledJGitSystemReaderInstalled;
+import static pro.deta.orion.git.JGitRuntimeAssertions.installDefaultControlledJGitRuntime;
 import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 
 @DisplayName("Git internal service protocol")
+@ResourceLock("jgit-system-reader")
 class GitInternalServiceProtocolTest extends BaseOrionTest {
     @TempDir
     private Path gitStorageDir;
+
+    @BeforeEach
+    void installControlledJGitRuntime() {
+        installDefaultControlledJGitRuntime();
+    }
+
+    @AfterEach
+    void resetControlledJGitRuntime() {
+        try {
+            assertControlledJGitSystemReaderInstalled();
+        } finally {
+            installDefaultControlledJGitRuntime();
+        }
+    }
 
     @Test
     @DisplayName("existing repository can be pushed, listed and fetched without a network transport")
@@ -67,9 +86,8 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     }
 
     private GitRepositoryProviderImpl newRepositoryProvider() {
-        return new GitRepositoryProviderImpl(
-                gitStorageDir,
-                new OrionJGitSystemReader(SystemReader.getInstance(), gitStorageDir.resolve("work")));
+        assertControlledJGitSystemReaderInstalled();
+        return new GitRepositoryProviderImpl(gitStorageDir);
     }
 
     private static Scenarios.GitCommandServer gitServer(GitInternalService service) {

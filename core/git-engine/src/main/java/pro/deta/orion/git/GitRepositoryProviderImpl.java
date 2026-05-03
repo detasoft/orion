@@ -10,10 +10,8 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.ServiceMayNotContinueException;
 import org.eclipse.jgit.transport.resolver.ServiceNotAuthorizedException;
 import org.eclipse.jgit.transport.resolver.ServiceNotEnabledException;
-import org.eclipse.jgit.util.SystemReader;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.config.GitStorageDir;
-import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.Result;
 
@@ -35,11 +33,10 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
     private final ConcurrentMap<String, Repository> repositoryCache = new ConcurrentHashMap<>();
 
     @Inject
-    public GitRepositoryProviderImpl(@GitStorageDir Path gitStorageDir, OrionJGitSystemReader systemReader) {
+    public GitRepositoryProviderImpl(@GitStorageDir Path gitStorageDir) {
         this.gitStorageDir = gitStorageDir.toAbsolutePath().normalize();
         FileUtils.mkdirs(this.gitStorageDir);
         log.warn("Git storage set to {}", this.gitStorageDir);
-        GitUtils.installJGitSystemReader(systemReader);
     }
 
     @Override

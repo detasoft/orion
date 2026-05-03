@@ -1,21 +1,40 @@
 package pro.deta.orion.git;
 
 import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.util.SystemReader;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import pro.deta.orion.util.Result;
 
 import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.git.JGitRuntimeAssertions.assertControlledJGitSystemReaderInstalled;
+import static pro.deta.orion.git.JGitRuntimeAssertions.installDefaultControlledJGitRuntime;
 
 @DisplayName("Git repository provider path validation")
+@ResourceLock("jgit-system-reader")
 class GitRepositoryProviderImplTest {
     @TempDir
     private Path gitStorageDir;
+
+    @BeforeEach
+    void installControlledJGitRuntime() {
+        installDefaultControlledJGitRuntime();
+    }
+
+    @AfterEach
+    void resetControlledJGitRuntime() {
+        try {
+            assertControlledJGitSystemReaderInstalled();
+        } finally {
+            installDefaultControlledJGitRuntime();
+        }
+    }
 
     @Test
     @DisplayName("nested repository names are allowed")
@@ -53,6 +72,7 @@ class GitRepositoryProviderImplTest {
     }
 
     private GitRepositoryProviderImpl newProvider() {
-        return new GitRepositoryProviderImpl(gitStorageDir, new OrionJGitSystemReader(SystemReader.getInstance(), gitStorageDir.resolve("work")));
+        assertControlledJGitSystemReaderInstalled();
+        return new GitRepositoryProviderImpl(gitStorageDir);
     }
 }

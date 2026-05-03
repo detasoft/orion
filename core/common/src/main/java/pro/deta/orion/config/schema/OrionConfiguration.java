@@ -4,6 +4,8 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
 import javax.inject.Singleton;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @RequiredArgsConstructor
 @Data
@@ -19,6 +21,21 @@ public class OrionConfiguration {
     @Data
     public static class InternalGitServer {
         private String storagePath = "repos";
+        private JGitConfig jgit = new JGitConfig();
+    }
+
+    @Data
+    public static class JGitConfig {
+        private String hostname = "localhost";
+        private String osName = "Linux";
+        private String defaultCharset = "UTF-8";
+        private String timezone = "UTC";
+        private String locale = "und";
+        private Map<String, String> properties = new LinkedHashMap<>();
+        private Map<String, String> environment = new LinkedHashMap<>();
+        private Map<String, String> systemConfig = new LinkedHashMap<>();
+        private Map<String, String> userConfig = new LinkedHashMap<>();
+        private Map<String, String> jgitConfig = new LinkedHashMap<>();
     }
 
     @Data

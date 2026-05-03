@@ -4,9 +4,7 @@ import dagger.Module;
 import dagger.Provides;
 import dagger.multibindings.IntoSet;
 
-import jakarta.inject.Named;
 import jakarta.inject.Singleton;
-import org.eclipse.jgit.util.SystemReader;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -18,6 +16,7 @@ import pro.deta.orion.config.*;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.GitRepositoryProviderImpl;
+import pro.deta.orion.git.OrionJGitRuntime;
 import pro.deta.orion.internal.GitInternalStorage;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.transport.git.GitNativeTransportService;
@@ -86,6 +85,12 @@ public class OrionRuntimeModule {
     }
 
     @Provides
+    @IntoSet
+    static OrionApplicationStageEventListener orionJGitRuntime(OrionJGitRuntime orionJGitRuntime) {
+        return orionJGitRuntime;
+    }
+
+    @Provides
     @WorkDir
     Path workDir(ConfigurationContext configurationContext) {
         return configurationContext.getWorkDir();
@@ -112,13 +117,6 @@ public class OrionRuntimeModule {
     @GitStorageDir
     Path gitStorageDir(ConfigurationContext configurationContext) {
         return configurationContext.getGitStoragePath();
-    }
-
-
-    @Provides
-    @Named("default")
-    SystemReader localGitServerSystemReader() {
-        return SystemReader.getInstance();
     }
 
 //    OrionConfiguration.ACLStorageType storageType(OrionConfiguration orionConfiguration) {
