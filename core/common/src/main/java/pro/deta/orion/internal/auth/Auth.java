@@ -9,6 +9,7 @@ import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactory;
 import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.util.KeyUtils;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.PublicKey;
@@ -48,9 +49,31 @@ public sealed interface Auth {
     }
 
     static LocalSshAuthKeyPair getLocalAuthInstance(String username, List<PublicKey> publicKeys, String repositoryName) {
+        return getLocalAuthInstance(username, publicKeys, repositoryName, null);
+    }
+
+    static LocalSshAuthKeyPair getLocalAuthInstance(String username, List<PublicKey> publicKeys, String repositoryName, String localSshPrivateKeyPath) {
+        KeyPair keyPair = readConfiguredLocalSshKey(localSshPrivateKeyPath).orElseGet(Auth::generateLocalSshKeyPair);
+        return new LocalSshAuthKeyPair(username, Optional.of(keyPair), publicKeys, repositoryName);
+    }
+
+    private static Optional<KeyPair> readConfiguredLocalSshKey(String privateKeyPath) {
+        if (privateKeyPath == null || privateKeyPath.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.ofNullable(KeyUtils.readKeyFromFile(Path.of(privateKeyPath))
+                    .valueOrWarning("Can't read local SSH private key {}", privateKeyPath));
+        } catch (InvalidPathException e) {
+            Logger.log.warn("Can't read local SSH private key from invalid path {}", privateKeyPath, e);
+            return Optional.empty();
+        }
+    }
+
+    private static KeyPair generateLocalSshKeyPair() {
         KeyPair keyPair = KeyUtils.generateRSAKeyPair().valueOrFailure("Couldn't generate key");
         Logger.log.info("Generated keypair to access via SSH protocol: {}", keyPair.getPublic());
-        return new LocalSshAuthKeyPair(username, Optional.of(keyPair), publicKeys, repositoryName);
+        return keyPair;
     }
 
     default boolean matchesLocalRepository(String repositoryName) {

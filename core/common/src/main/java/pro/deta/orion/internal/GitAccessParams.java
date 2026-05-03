@@ -54,7 +54,7 @@ public class GitAccessParams {
     public GitAccessParams(Path checkoutDir, List<PublicKey> trustedKeys, OrionConfiguration.AppTransport appTransport,
                            URI initialUri,
                            String username,
-                           Object credential,
+                           String credential,
                            String branchName,
                            Consumer<GitReceiveOrionEvent> eventConsumer,
                            OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider
@@ -67,7 +67,7 @@ public class GitAccessParams {
         switch (initialUri.getScheme()) {
             case "local+ssh" -> {
                 uri = GitAccessScheme.SSH.format(username, appTransport.getSsh(), initialUri.getHost());
-                auth = getLocalAuthInstance(username, trustedKeys, initialUri.getHost());
+                auth = getLocalAuthInstance(username, trustedKeys, initialUri.getHost(), credential);
             }
             case "local" -> {
                 uri = GitAccessScheme.GIT.format(null, appTransport.getGit(), initialUri.getHost());

@@ -75,7 +75,7 @@ public class GitInternalStorage implements OrionApplicationStageEventListener {
         return area.getAuth().matchesLocalRepository(event.getRepositoryName());
     }
 
-    public GitAccessParams registerArea(OrionStageCallResult result, String name, String location, String username, Object credential, String branch, Consumer<GitReceiveOrionEvent> eventConsumer) {
+    public GitAccessParams registerArea(OrionStageCallResult result, String name, String location, String username, String credential, String branch, Consumer<GitReceiveOrionEvent> eventConsumer) {
         URI uri = URI.create(location);
         Path checkoutPath = storageArea.resolve(name);
         FileUtils.mkdirs(checkoutPath);
