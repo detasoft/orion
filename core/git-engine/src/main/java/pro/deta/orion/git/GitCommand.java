@@ -27,15 +27,23 @@ public class GitCommand {
     }
 
     public boolean isRead() {
-        return command == Command.RECEIVE;
-    }
-
-    public boolean isWrite() {
         return command == Command.UPLOAD;
     }
 
+    public boolean isWrite() {
+        return command == Command.RECEIVE;
+    }
+
     enum Command {
-        UPLOAD, RECEIVE, UNKNOWN;
+        /**
+         * Uploads pack data from the server to the client, so repository access is read-only.
+         */
+        UPLOAD,
+        /**
+         * Receives pack data from the client on the server, so repository access is write.
+         */
+        RECEIVE,
+        UNKNOWN;
 
         public static Command parseFrom(String s) {
             if ("git-upload-pack".equalsIgnoreCase(s))
