@@ -26,7 +26,10 @@ public class AssertiveIOClient implements IoConsumer<ClientIO> {
     public void accept(ClientIO client) throws IOException {
         for (DirectionalByteArrayOutputStream stream : state) {
             switch (stream.getDirection()) {
-                case C -> stream.writeTo(client.getSend());
+                case C -> {
+                    stream.writeTo(client.getSend());
+                    client.getSend().flush();
+                }
                 case S -> {
                     byte[] expected = stream.toByteArray();
 

@@ -37,6 +37,7 @@ public class Chunk {
 
     public boolean writeTo(OutputStream outputStream) throws IOException {
         outputStream.write(data);
+        outputStream.flush();
         if (flagToClose) {
             return false;
         }
