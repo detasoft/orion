@@ -20,7 +20,7 @@ import java.util.function.BiConsumer;
 @Slf4j
 @ExtendWith(S3ServerRule.class)
 @DisplayName("Git protocol through the S3 NIO filesystem provider")
-public class S3SPIGitInteractionTest extends BaseOrionTest implements S3ServerRule.AbstractClientAware, S3ServerRule.ServerSideAware {
+public class S3SPIGitInteractionIT extends BaseOrionTest implements S3ServerRule.AbstractClientAware, S3ServerRule.ServerSideAware {
     static {
         System.setProperty("s3.spi.endpoint-protocol", "http");
     }

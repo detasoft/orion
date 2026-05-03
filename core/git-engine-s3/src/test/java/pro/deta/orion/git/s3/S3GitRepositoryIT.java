@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ExtendWith(S3ServerRule.class)
 @Setter
 @DisplayName("Git repository stored directly in S3")
-public class S3GitRepositoryTest extends BaseOrionTest implements S3ServerRule.AbstractClientAware {
+public class S3GitRepositoryIT extends BaseOrionTest implements S3ServerRule.AbstractClientAware {
     private AbstractClient abstractClient;
 
     @Test

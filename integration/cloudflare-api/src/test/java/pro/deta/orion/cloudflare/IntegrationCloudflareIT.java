@@ -9,16 +9,22 @@ import pro.deta.orion.cloudflare.model.Zone;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
 public class IntegrationCloudflareIT {
 
     @Test
     public void integrationCloudflareTest() {
-        updateCloudFlareDns("deta.pro", "jump.deta.pro", "A", "18.156.78.214");
-        updateCloudFlareDns("deta.pro", "jump.deta.pro", "TXT", "JOPA");
+        CloudflareConfig config = new CloudflareConfig();
+        assumeTrue(config.getApiToken() != null && !config.getApiToken().isBlank(),
+                "CLOUDFLARE_API_TOKEN is required for Cloudflare integration tests");
+
+        updateCloudFlareDns(config, "deta.pro", "jump.deta.pro", "A", "18.156.78.214");
+        updateCloudFlareDns(config, "deta.pro", "jump.deta.pro", "TXT", "JOPA");
     }
 
-    public boolean updateCloudFlareDns(String zoneName, String name, String type, String value) {
-        CloudflareClientImpl impl = new CloudflareClientImpl(new CloudflareConfig());
+    public boolean updateCloudFlareDns(CloudflareConfig config, String zoneName, String name, String type, String value) {
+        CloudflareClientImpl impl = new CloudflareClientImpl(config);
         CloudflareResponse<List<Zone>> cfZones = impl.findZone(zoneName);
         if (cfZones.getResultInfo().getTotalCount() != 1)
             throw new IllegalStateException("Cloudflare API returned non-1 zones: " + cfZones.getResultInfo().getCount() + " / " + cfZones.getResult());
