@@ -5,6 +5,18 @@ import lombok.Setter;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Base type for events sent through {@code OrionEventManager}.
+ *
+ * <p>An Orion event is a domain-level message passed inside the same JVM. It is not a network message and it is not a
+ * persisted audit log entry by itself. Each subclass is the event payload: it names the event type through its Java class
+ * and stores the data handlers need to react to it.</p>
+ *
+ * <p>Events are sealed so the supported event set is explicit and easy to audit. The event manager marks an event as
+ * processed after all registered handlers for its concrete class have run. The flag is intentionally small: it is useful
+ * for tests and diagnostics, but event handlers should communicate real state changes through their own domain objects
+ * or services.</p>
+ */
 @Getter
 @Setter
 public sealed abstract class OrionEvent permits GitReceiveOrionEvent, GitUploadOrionEvent, VolatileUserAdded, RequestToAclUpdate {

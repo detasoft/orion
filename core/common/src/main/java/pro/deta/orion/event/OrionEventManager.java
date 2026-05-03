@@ -1,13 +1,9 @@
 package pro.deta.orion.event;
 
 import com.lmax.disruptor.EventHandler;
-import com.lmax.disruptor.EventTranslator;
 import com.lmax.disruptor.TimeoutException;
-import com.lmax.disruptor.dsl.Disruptor;
-import com.lmax.disruptor.util.DaemonThreadFactory;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.ApplicationState;
@@ -21,10 +17,24 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+/**
+ * Application-wide asynchronous event bus for Orion events.
+ *
+ * <p>An event is a concrete {@link OrionEvent} subclass that describes something that already happened or must be
+ * reacted to elsewhere in the application. Current examples include git receive/upload notifications, volatile ACL user
+ * additions and ACL reload requests. Events should carry the data their handlers need, because handlers run later and
+ * outside the original request flow.</p>
+ *
+ * <p>The manager owns a single root Disruptor and starts/stops it with the application lifecycle. Event dispatch is
+ * intentionally simple: handlers are registered by the concrete event class and are invoked only for that exact class.
+ * There is no superclass/interface dispatch.</p>
+ *
+ * <p>Handlers run on the Disruptor daemon thread, so they should be quick and should not rely on request-thread
+ * ThreadLocals. If a handler needs request context, the publisher must copy the required data into the event object.</p>
+ */
 @Singleton
 @Slf4j
 @RequiredArgsConstructor(onConstructor_ = @Inject)
@@ -74,7 +84,6 @@ public class OrionEventManager implements OrionApplicationStageEventListener {
             c.accept(event);
         }
     }
-
 
     public <T extends OrionEvent> void registerTypeHandler(Class<T> classCanonicalName, Consumer<T> consumer) {
         //noinspection unchecked
