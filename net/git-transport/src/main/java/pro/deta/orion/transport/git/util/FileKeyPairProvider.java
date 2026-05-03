@@ -1,4 +1,4 @@
-package pro.deta.orion.git.util;
+package pro.deta.orion.transport.git.util;
 
 import java.io.File;
 import java.io.FileInputStream;

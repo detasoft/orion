@@ -1,4 +1,4 @@
-package pro.deta.orion.git;
+package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
 import lombok.Data;
@@ -17,7 +17,7 @@ import pro.deta.orion.util.Result;
 import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
 
-import static pro.deta.orion.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
+import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Data
 @Slf4j

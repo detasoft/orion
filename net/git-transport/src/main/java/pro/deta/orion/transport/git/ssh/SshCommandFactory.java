@@ -1,4 +1,4 @@
-package pro.deta.orion.git.ssh;
+package pro.deta.orion.transport.git.ssh;
 
 import jakarta.inject.Inject;
 import lombok.RequiredArgsConstructor;
@@ -7,7 +7,8 @@ import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
-import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.auth.Permission;
+import pro.deta.orion.auth.SecurityContextHolder;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.util.GitUtils;
@@ -25,7 +26,7 @@ import java.util.stream.Collectors;
 
 import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.PermissionChecks.permissionChecker;
-import static pro.deta.orion.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
+import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Slf4j
 @RequiredArgsConstructor(onConstructor_ = @Inject)
@@ -41,48 +42,67 @@ public class SshCommandFactory implements CommandFactory {
         if (commandLine.startsWith("git-"))
             return new GitSshCommand(commandLine);
         else {
-            return new OtherSshCommand(channelSession, commandLine);
+            return new OtherSshCommand(commandLine);
         }
     }
 
     @RequiredArgsConstructor
     private class OtherSshCommand extends CloseOnDestroyCommand {
-        private final ChannelSession channelSession;
         private final String commandLine;
 
         @Override
         public void start(ChannelSession channel, Environment env) throws IOException {
             orionExecutor.submit(() -> {
-                if (SET_KEY.equalsIgnoreCase(commandLine)) {
-                    ByteBuffer bb = ByteBuffer.allocate(256);
-                    try {
-                        String username = channel.getSession().getUsername();
-                        StringBuilder publicKeyBuilder = new StringBuilder();
-                        ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream);
-                        // for US_ASCII 1-byte encoding we can decode by parts.
-                        while (readableByteChannel.read(bb.rewind()) >= 0) {
-                            publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
+                int returnCode = 0;
+                try (SecurityContextHolder ignored = new SecurityContextHolder()) {
+                    getSc().setUserIdentity(channel.getSession().getAttribute(SSH_AUTHENTICATED_USER));
+                    getSc().with(Permission.REQUEST_ID, channel.getSession().toString());
+                    permissionChecker().ALLOW_ANONYMOUS_ACCESS.assertThat();
+
+                    if (SET_KEY.equalsIgnoreCase(commandLine)) {
+                        ByteBuffer bb = ByteBuffer.allocate(256);
+                        try {
+                            String username = channel.getSession().getUsername();
+                            StringBuilder publicKeyBuilder = new StringBuilder();
+                            ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream);
+                            // for US_ASCII 1-byte encoding we can decode by parts.
+                            while (readableByteChannel.read(bb.rewind()) >= 0) {
+                                publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
+                            }
+                            String publicKey = publicKeyBuilder.toString();
+                            orionExecutor.submit(() -> orionProvider.getAccessControlService().addKeyToUser(username, publicKey));
+                            outputStream.write(("Public: " + publicKey + " added successfully as authentication method for user " + username).getBytes(StandardCharsets.UTF_8));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
                         }
-                        String publicKey = publicKeyBuilder.toString();
-                        orionExecutor.submit(() -> orionProvider.getAccessControlService().addKeyToUser(username, publicKey));
-                        outputStream.write(("Public: " + publicKey + " added successfully as authentication method for user " + username).getBytes(StandardCharsets.UTF_8));
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                    exitCallback.onExit(0);
-                } else if (SHUTDOWN.equalsIgnoreCase(commandLine)) {
-                    orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
-                    exitCallback.onExit(0);
-                } else {
-                    try {
+                    } else if (SHUTDOWN.equalsIgnoreCase(commandLine)) {
+                        permissionChecker().ALLOW_TO_SHUTDOWN.assertThat(SHUTDOWN);
+                        orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
+                    } else {
                         log.warn("SSH Transport Unknown command: {}", commandLine);
                         outputStream.write("Unknown command".getBytes(StandardCharsets.UTF_8));
-                    } catch (IOException e) {
-                        log.warn("SSH Transport Unknown command: {}", commandLine, e);
+                        returnCode = 127;
                     }
-                    exitCallback.onExit(127);
+                } catch (OrionSecurityException e) {
+                    log.warn(e.getMessage());
+                    writePlainError("ACCESS_DENIED");
+                    returnCode = 10;
+                } catch (Exception e) {
+                    log.warn("SSH Transport command failed: {}", commandLine, e);
+                    writePlainError("Command failed");
+                    returnCode = -1;
+                } finally {
+                    exitCallback.onExit(returnCode);
                 }
             });
+        }
+
+        private void writePlainError(String message) {
+            try {
+                outputStream.write(message.getBytes(StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                log.warn("SSH Transport command failed to write response: {}", commandLine, e);
+            }
         }
     }
 
@@ -94,8 +114,9 @@ public class SshCommandFactory implements CommandFactory {
         public void start(ChannelSession channelSession, Environment environment) {
             orionExecutor.submit(() -> {
                 int returnCode = 0;
-                try {
+                try (SecurityContextHolder ignored = new SecurityContextHolder()) {
                     getSc().setUserIdentity(channelSession.getSession().getAttribute(SSH_AUTHENTICATED_USER));
+                    getSc().with(Permission.REQUEST_ID, channelSession.getSession().toString());
                     permissionChecker().ALLOW_ANONYMOUS_ACCESS.assertThat();
                     List<String> envs = environment.getEnv().entrySet().stream().filter(e -> e.getKey().startsWith("GIT_")).map(e -> e.getValue()).collect(Collectors.toList());
                     try (IOEStreamProvider streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
@@ -113,6 +134,5 @@ public class SshCommandFactory implements CommandFactory {
                 }
             });
         }
-
     }
 }

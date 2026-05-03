@@ -183,7 +183,7 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     }
 
     public enum GrantKey {
-        REPOSITORY, BRANCH, FORCE, READ, WRITE, CREATE, NETWORK_SOURCE, NETWORK_PORT
+        REPOSITORY, BRANCH, FORCE, READ, WRITE, CREATE, NETWORK_SOURCE, NETWORK_PORT, SHUTDOWN
     }
 
     @SuppressWarnings("rawtypes")

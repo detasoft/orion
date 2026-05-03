@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>pro.deta.orion.net</groupId>
+        <artifactId>net</artifactId>
+        <version>${revision}</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+    <artifactId>git-transport</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>git-engine</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>bc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.sshd</groupId>
+            <artifactId>sshd-mina</artifactId>
+            <version>${sshd-mina.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.i2p.crypto</groupId>
+            <artifactId>eddsa</artifactId>
+            <version>${eddsa.version}</version>
+        </dependency>
+    </dependencies>
+</project>

@@ -23,5 +23,5 @@ pro.deta.orion.config.FileConfigurationProviderImpl.CONFIGURATION_LOCATION
 7. dynamic domain allocation (using deta.pro)
 
 Postponed
-1. Switch [GitNativeTransportService.java](git-engine/src/main/java/pro/deta/orion/git/GitNativeTransportService.java) to NIO - doesn't make sense as still a single thread needed to serve native protocol.
+1. Switch [GitNativeTransportService.java](net/git-transport/src/main/java/pro/deta/orion/transport/git/GitNativeTransportService.java) to NIO - doesn't make sense as still a single thread needed to serve native protocol.
 In the future if rest via netty be adapted - it would be useful to switch it to a new . 

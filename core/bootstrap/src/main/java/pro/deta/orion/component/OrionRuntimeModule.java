@@ -17,9 +17,11 @@ import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.config.*;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.git.*;
+import pro.deta.orion.git.GitRepositoryProviderImpl;
 import pro.deta.orion.internal.GitInternalStorage;
 import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.transport.git.GitNativeTransportService;
+import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
@@ -157,4 +159,3 @@ public class OrionRuntimeModule {
         };
     }
 }
-

@@ -24,6 +24,7 @@ public final class Permission<O> {
     public static final Permission<String> BRANCH_PUSH_FORCE = new Permission<>("BRANCH_PUSH_FORCE", String.class);
 
     public static final Permission<String> REQUEST_ID = new Permission<>("REQUEST_ID", String.class);
+    public static final Permission<String> APPLICATION_SHUTDOWN = new Permission<>("APPLICATION_SHUTDOWN", String.class);
 
     public static final Permission<SocketAddress> CLIENT_SOCKET_ADDRESS = new Permission<>("CLIENT_SOCKET_ADDRESS", SocketAddress.class);
 

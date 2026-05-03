@@ -1,4 +1,4 @@
-package pro.deta.orion.git;
+package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -8,6 +8,7 @@ import pro.deta.orion.ApplicationState;
 import pro.deta.orion.auth.*;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.config.schema.GitTransportConfig;
+import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
@@ -19,7 +20,6 @@ import pro.deta.orion.util.stream.StreamUtils;
 import java.io.*;
 import java.net.*;
 import java.util.UUID;
-import java.util.concurrent.Future;
 
 import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.PermissionChecks.permissionChecker;

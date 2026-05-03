@@ -19,10 +19,13 @@ public class ACLUtil {
                 .addKey(AccessControl.GrantKey.CREATE, "true")
                 .addKey(AccessControl.GrantKey.BRANCH, "*")
                 .addKey(AccessControl.GrantKey.FORCE, "true");
+        AccessControl.Grant applicationControl = createGrant("APPLICATION_CONTROL")
+                .addKey(AccessControl.GrantKey.SHUTDOWN, "true");
 
         AccessControl.Role rootRole = createRole("ROOT")
                 .addGrantReference(connectFromLocalhost.getId())
-                .addGrantReference(allRepository.getId());
+                .addGrantReference(allRepository.getId())
+                .addGrantReference(applicationControl.getId());
 
         AccessControl.User rootUser = createUser("root", "root@orion.pro")
                 .addCredential(AccessControl.CredentialType.ARGON2, defaultRootPasswordHash)
@@ -33,6 +36,7 @@ public class ACLUtil {
         s.getRoles().add(rootRole);
         s.getGrants().add(connectFromLocalhost);
         s.getGrants().add(allRepository);
+        s.getGrants().add(applicationControl);
         return s;
     }
 

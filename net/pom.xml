@@ -15,6 +15,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>git-transport</module>
         <module>http-core</module>
     </modules>
 </project>

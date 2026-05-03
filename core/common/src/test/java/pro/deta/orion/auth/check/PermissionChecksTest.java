@@ -44,4 +44,20 @@ public class PermissionChecksTest {
                     .isInstanceOf(OrionSecurityException.class);
         }
     }
+
+    @Test
+    public void shutdownRequiresShutdownGrant() {
+        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
+            getSc().setUserIdentity(new InternalUserImpl("regular", List.of()));
+            assertThatThrownBy(() -> permissionChecker().ALLOW_TO_SHUTDOWN.assertThat("shutdown"))
+                    .isInstanceOf(OrionSecurityException.class);
+
+            AccessControl.Grant shutdownGrant = new AccessControl.Grant("shutdown", new ArrayList<>())
+                    .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING);
+            getSc().setUserIdentity(new InternalUserImpl("operator", List.of(shutdownGrant)));
+
+            assertThatCode(() -> permissionChecker().ALLOW_TO_SHUTDOWN.assertThat("shutdown"))
+                    .doesNotThrowAnyException();
+        }
+    }
 }

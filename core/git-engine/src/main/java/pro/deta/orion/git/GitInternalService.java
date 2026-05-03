@@ -13,7 +13,6 @@ import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.data.FetchRepositorySecurityCheck;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
-import pro.deta.orion.git.ssh.SshCommandFactory;
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;

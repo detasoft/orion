@@ -1,4 +1,4 @@
-package pro.deta.orion.git;
+package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -22,9 +22,9 @@ import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
 import pro.deta.orion.crypto.ServerKeyService;
-import pro.deta.orion.git.ssh.SshCommandFactory;
 import pro.deta.orion.lifecycle.*;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
 import java.io.*;
@@ -32,11 +32,9 @@ import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import static pro.deta.orion.git.GitNativeTransportService.GIT_TRANSPORT_PRIORITY;
+import static pro.deta.orion.transport.git.GitNativeTransportService.GIT_TRANSPORT_PRIORITY;
 
 @Slf4j
 @Singleton
@@ -75,6 +73,9 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
 
     public OrionStageCallResult onStart() {
         SshTransportConfig config  = orionConfiguration.getTransports().getSsh();
+        if (!config.isEnabled()) {
+            return null;
+        }
         try {
 //            CoreModuleProperties.NIO2_READ_TIMEOUT.set(sshd.getParentPropertyResolver(), Duration.ofHours(1));
             System.setProperty(IoServiceFactoryFactory.class.getName(), Nio2ServiceFactoryFactory.class.getName());
@@ -94,7 +95,6 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
 
             sshd.setKeyPairProvider(new MappedKeyPairProvider(serverKeyService.getKeyPairs()));
 
-            List<String> authMethods = List.of("publickey", "password", "keyboard-interactive", "gssapi-with-mic");
             sshd.setPublickeyAuthenticator(new CachingPublicKeyAuthenticator(orionPasswordAuthenticator));
             sshd.setPasswordAuthenticator(orionPasswordAuthenticator);
 //                sshd.setSessionFactory(new SshServerSessionFactory(sshd));

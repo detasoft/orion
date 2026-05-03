@@ -100,6 +100,16 @@ public class PermissionChecks {
         return DENY;
     });
 
+    public final PermissionChecker<String> ALLOW_TO_SHUTDOWN = createFor(APPLICATION_SHUTDOWN, "Allow application shutdown", (userIdentity, command) -> {
+        List<AccessControl.Grant> g = userIdentity.getGrants();
+        List<AccessControl.Grant> matchedGrant = filterGrants(g, GrantMatcher.of(AccessControl.GrantKey.SHUTDOWN));
+        if (!matchedGrant.isEmpty()) {
+            log.debug("Check ALLOW_TO_SHUTDOWN passed for {} on {}", userIdentity, matchedGrant);
+            return ALLOW;
+        }
+        return DENY;
+    });
+
     public final PermissionChecker<SocketAddress> ALLOW_ONLY_LOCAL_CONNECTIONS = createFor(Permission.CLIENT_SOCKET_ADDRESS, "Allow only local connections", (userIdentity, socketAddress) -> {
         if (socketAddress instanceof InetSocketAddress) {
             if (((InetSocketAddress) socketAddress).getAddress().isLoopbackAddress())

@@ -1,19 +1,17 @@
-package pro.deta.orion.git;
+package pro.deta.orion.transport.git;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.shell.InteractiveProcessShellFactory;
-import org.apache.sshd.server.shell.ShellFactory;
 import org.eclipse.jgit.lib.Constants;
-import pro.deta.orion.git.ssh.CloseOnDestroyCommand;
+import pro.deta.orion.transport.git.ssh.CloseOnDestroyCommand;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.text.MessageFormat;
 
-import static pro.deta.orion.git.ssh.SshCommandFactory.SET_KEY;
+import static pro.deta.orion.transport.git.ssh.SshCommandFactory.SET_KEY;
 
 public class OrionShell extends InteractiveProcessShellFactory {
     @Override
@@ -47,8 +45,7 @@ public class OrionShell extends InteractiveProcessShellFactory {
             int port = localAddress.getPort();
 
 
-            final String b1 = StringUtils.rightPad("", 72, '═');
-            final String b2 = StringUtils.rightPad("", 72, '─');
+            final String b2 = "─".repeat(72);
             final String nl = "\r\n";
 
             StringBuilder msg = new StringBuilder();
@@ -77,7 +74,6 @@ public class OrionShell extends InteractiveProcessShellFactory {
         }
 
         private String getHostname() {
-            String host = null;
             return localAddress.getHostName();
         }
 

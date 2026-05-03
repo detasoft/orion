@@ -1,4 +1,4 @@
-package pro.deta.orion.git.ssh;
+package pro.deta.orion.transport.git.ssh;
 
 import lombok.Data;
 import org.apache.sshd.server.ExitCallback;

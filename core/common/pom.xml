@@ -11,9 +11,6 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <properties>
-        <sshd-mina.version>2.13.2</sshd-mina.version>
-    </properties>
     <artifactId>common</artifactId>
 
     <dependencies>
@@ -58,7 +55,7 @@
         <dependency>
             <groupId>net.i2p.crypto</groupId>
             <artifactId>eddsa</artifactId>
-            <version>0.3.0</version>
+            <version>${eddsa.version}</version>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
