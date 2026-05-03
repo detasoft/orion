@@ -18,9 +18,36 @@
             <artifactId>bootstrap</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit.ssh.apache</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>test-support</artifactId>
         </dependency>
     </dependencies>
+
+    <build>
+        <testSourceDirectory>src/integration-test/java</testSourceDirectory>
+        <testResources>
+            <testResource>
+                <directory>src/integration-test/resources</directory>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>
