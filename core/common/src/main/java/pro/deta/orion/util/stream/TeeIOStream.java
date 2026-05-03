@@ -18,9 +18,24 @@ public class TeeIOStream implements IOEStreamProvider {
     private final TeeOutputStream errorStream;
     private final StringBuilder ioStateStringBuilder;
 
-    private final SwitchingBuffer state = new SwitchingBuffer();
+    private final SwitchingBuffer state;
 
     public TeeIOStream(InputStream inputStream, OutputStream outputStream, OutputStream errorStream, StringBuilder ioStateStringBuilder) {
+        this(inputStream, outputStream, errorStream, ioStateStringBuilder, new SwitchingBuffer());
+    }
+
+    public TeeIOStream(String serializedState) {
+        this(
+                InputStream.nullInputStream(),
+                OutputStream.nullOutputStream(),
+                OutputStream.nullOutputStream(),
+                new StringBuilder(),
+                new SwitchingBuffer(parseSerializedState(serializedState))
+        );
+    }
+
+    private TeeIOStream(InputStream inputStream, OutputStream outputStream, OutputStream errorStream, StringBuilder ioStateStringBuilder, SwitchingBuffer state) {
+        this.state = state;
         this.inputStream = wrapInTee(inputStream);
         this.outputStream = wrapInTee(Direction.S, outputStream);
         this.errorStream = wrapInTee(Direction.E, errorStream);
@@ -55,6 +70,10 @@ public class TeeIOStream implements IOEStreamProvider {
 
         private SwitchingBuffer() {
             state.add(new DirectionalByteArrayOutputStream(Direction.C));
+        }
+
+        private SwitchingBuffer(List<DirectionalByteArrayOutputStream> state) {
+            this.state.addAll(state);
         }
 
         DirectionalByteArrayOutputStream getLast(Direction d) {
@@ -123,8 +142,8 @@ public class TeeIOStream implements IOEStreamProvider {
         return sb;
     }
 
-    public static List<DirectionalByteArrayOutputStream> restoreState(String state) {
-        Scanner scanner = new Scanner(state);
+    private static List<DirectionalByteArrayOutputStream> parseSerializedState(String serializedState) {
+        Scanner scanner = new Scanner(serializedState);
         scanner.useDelimiter(LINE_SEPARATOR);
         List<DirectionalByteArrayOutputStream> result = new ArrayList<>();
         while (scanner.hasNext()) {

@@ -19,7 +19,7 @@ public class AssertiveIOClient implements IoConsumer<ClientIO> {
     private final SoftAssertions softAssertions;
 
     public AssertiveIOClient(String ioState, SoftAssertions softAssertions) {
-        this(TeeIOStream.restoreState(ioState), softAssertions);
+        this(new TeeIOStream(ioState).getStates(), softAssertions);
     }
 
     @Override
