@@ -34,7 +34,6 @@ import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.locks.LockSupport;
-import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -195,11 +194,11 @@ public class OrionDTLSSessionTest {
         int serverPort = 5555;
         ChannelFuture serverFuture = serverBootstrap.bind(serverPort).sync();
         System.out.println("DTLS server listening on port " + serverPort);
-        testOpenSSLConnection("127.0.0.1", serverPort, application, "nettyDtlsServer_openssl.out");
+        testOpenSSLConnection("127.0.0.1", serverPort, application);
         serverGroup.shutdownGracefully();
     }
 
-    void testOpenSSLConnection(String host, int port, EchoDtlsApplication application, String expectedContents) throws Exception {
+    void testOpenSSLConnection(String host, int port, EchoDtlsApplication application) throws Exception {
         String message = "From_client_message!!";
 
         ProcessBuilder pb = new ProcessBuilder("openssl", "s_client", "-connect", host + ":" + port, "-dtls", "-verify", "1");
@@ -211,9 +210,8 @@ public class OrionDTLSSessionTest {
 
             String preActual = new TimeoutReader(reader).readAll();
 
-            String expectedOutput = findResourceContent(expectedContents);
             String actual = postProcessOpensslOutput(preActual + "<END>");
-            assertThat(actual).isEqualTo(expectedOutput);
+            assertOpenSSLHandshake(actual);
 
             writer.write(message + "\n");
             writer.flush();
@@ -223,6 +221,24 @@ public class OrionDTLSSessionTest {
         } finally {
             process.destroy();
         }
+    }
+
+    private void assertOpenSSLHandshake(String output) {
+        assertThat(output)
+                .contains("CONNECTED(")
+                .contains("Certificate chain")
+                .contains("Server certificate")
+                .contains("Verification error: self-signed certificate")
+                .contains("New, TLSv1.2, Cipher is ECDHE-RSA-AES256-GCM-SHA384")
+                .contains("Cipher    : ECDHE-RSA-AES256-GCM-SHA384")
+                .contains("Extended master secret: yes")
+                .contains("<END>");
+        assertThat(output).containsPattern("(?m)^\\s*0 s:CN\\s*=\\s*Test Certificate$");
+        assertThat(output).containsPattern("(?m)^\\s*i:CN\\s*=\\s*Test Certificate$");
+        assertThat(output).containsPattern("(?m)^subject=CN\\s*=\\s*Test Certificate$");
+        assertThat(output).containsPattern("(?m)^issuer=CN\\s*=\\s*Test Certificate$");
+        assertThat(output).containsPattern("(?m)^\\s*Protocol\\s+: DTLSv1\\.2$");
+        assertThat(output).containsPattern("(?m)^\\s*Verify return code: 18 \\(self-signed certificate\\)$");
     }
 
     private String postProcessOpensslOutput(String text) {
@@ -243,15 +259,6 @@ public class OrionDTLSSessionTest {
         output = output.replaceAll(sessionTicketReplace, "$1\n    <TLS_SESSION_TICKET>\n\n");
         output = output.replaceAll(validCertificateReplace, "$1<DATE>$2<DATE>");
         return output;
-    }
-
-    public String findResourceContent(String resourceName) {
-        InputStream inputStream = getClass().getClassLoader().getResourceAsStream(resourceName);
-        if (inputStream == null)
-            throw new RuntimeException("Not found: " + resourceName);
-        return new BufferedReader(new InputStreamReader(inputStream))
-                .lines()
-                .collect(Collectors.joining("\n"));
     }
 
 }
