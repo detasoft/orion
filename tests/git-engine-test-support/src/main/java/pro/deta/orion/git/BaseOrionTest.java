@@ -24,6 +24,7 @@ public class BaseOrionTest {
     @BeforeAll
     public static void configureLogger() {
         ResourceUtils.configureDefaultLogging();
+        FS.FileStoreAttributes.setBackground(true);
         SystemReader.setInstance(new TestJGitSystemReader(SystemReader.getInstance()));
     }
 
