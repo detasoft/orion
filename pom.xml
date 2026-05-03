@@ -260,4 +260,55 @@
       </plugins>
     </pluginManagement>
   </build>
+
+  <profiles>
+    <profile>
+      <id>dev</id>
+      <properties>
+        <maven.compiler.useIncrementalCompilation>true</maven.compiler.useIncrementalCompilation>
+        <maven.compiler.compilerReuseStrategy>reuseCreated</maven.compiler.compilerReuseStrategy>
+        <maven.compiler.showCompilationChanges>true</maven.compiler.showCompilationChanges>
+        <maven.compiler.skipMultiThreadWarning>true</maven.compiler.skipMultiThreadWarning>
+        <skipITs>true</skipITs>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <configuration>
+              <useIncrementalCompilation>true</useIncrementalCompilation>
+              <compilerReuseStrategy>reuseCreated</compilerReuseStrategy>
+              <showCompilationChanges>true</showCompilationChanges>
+              <skipMultiThreadWarning>true</skipMultiThreadWarning>
+            </configuration>
+          </plugin>
+          <plugin>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+              <forkCount>0</forkCount>
+              <reuseForks>true</reuseForks>
+              <redirectTestOutputToFile>true</redirectTestOutputToFile>
+              <systemPropertyVariables>
+                <orion.testDurations.enabled>false</orion.testDurations.enabled>
+                <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+              </systemPropertyVariables>
+            </configuration>
+          </plugin>
+          <plugin>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <configuration>
+              <skipITs>true</skipITs>
+              <forkCount>0</forkCount>
+              <reuseForks>true</reuseForks>
+              <redirectTestOutputToFile>true</redirectTestOutputToFile>
+              <systemPropertyVariables>
+                <orion.testDurations.enabled>false</orion.testDurations.enabled>
+                <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+              </systemPropertyVariables>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

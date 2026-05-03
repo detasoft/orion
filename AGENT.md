@@ -1,7 +1,9 @@
 # Agent Instructions
 
 - When the user asks to commit changes, for example by writing `commit` or `сделай коммит`, create the intended logical commit first, then run regular Maven tests for the whole project.
-- Do not run integration tests automatically after every commit; `mvn test` is enough for the commit workflow.
+- Use the `dev` Maven profile for routine local checks and the commit workflow, for example `mvn test -Pdev` or `mvn test -Pdev -q -pl ...`.
+- Do not run integration tests automatically after every commit; `mvn test -Pdev` is enough for the commit workflow.
+- Use `mvn verify -Pdev` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
 - The project allows running `mvn verify` from the repository root without asking for additional confirmation when it is explicitly needed.
 - The project allows running `mvn test` with any Maven parameters without asking for additional confirmation.
 - When requesting approval for Maven commands, put the Maven phase immediately after `mvn`, then pass the remaining arguments, for example `mvn test -q -pl ...`.
