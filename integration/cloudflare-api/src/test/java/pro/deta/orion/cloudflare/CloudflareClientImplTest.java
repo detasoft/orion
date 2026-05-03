@@ -12,6 +12,7 @@ import pro.deta.orion.cloudflare.model.CloudflareResponse;
 import pro.deta.orion.cloudflare.model.DnsRecord;
 import pro.deta.orion.cloudflare.model.Zone;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
@@ -129,6 +130,9 @@ class CloudflareClientImplTest {
 
         // Execute test and verify exception
         Exception exception = assertThrows(RuntimeException.class, () -> client.getZone("invalid-zone"));
-        assertTrue(exception.getMessage().contains("Failed to execute request"));
+        assertTrue(exception.getMessage().contains("Failed to execute/parse request"));
+        assertTrue(exception.getMessage().contains("Invalid request"));
+        assertInstanceOf(IOException.class, exception.getCause());
+        assertTrue(exception.getCause().getMessage().contains("400"));
     }
 }
