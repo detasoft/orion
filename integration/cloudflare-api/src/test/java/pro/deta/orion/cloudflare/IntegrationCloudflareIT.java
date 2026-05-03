@@ -9,7 +9,7 @@ import pro.deta.orion.cloudflare.model.Zone;
 import java.util.List;
 import java.util.Map;
 
-public class IntegrationCloudflareTest {
+public class IntegrationCloudflareIT {
 
     @Test
     public void integrationCloudflareTest() {
