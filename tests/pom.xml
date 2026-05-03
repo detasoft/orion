@@ -15,6 +15,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>git-engine-test-support</module>
         <module>integration-test</module>
         <module>test-support</module>
     </modules>

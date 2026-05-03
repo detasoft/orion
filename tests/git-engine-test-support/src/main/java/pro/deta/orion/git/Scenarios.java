@@ -3,13 +3,16 @@ package pro.deta.orion.git;
 import lombok.extern.slf4j.Slf4j;
 import org.assertj.core.api.SoftAssertions;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.transport.PacketLineOut;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.UploadPack;
-import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.util.stream.AssertiveIOClient;
+import pro.deta.orion.util.stream.IOEStreamProvider;
 import pro.deta.orion.util.stream.IoConsumer;
 import pro.deta.orion.util.stream.ServerIO;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -17,6 +20,7 @@ import static pro.deta.orion.util.stream.IOTestStreamUtils.testPipeScenario;
 
 @Slf4j
 public final class Scenarios {
+    private static final int TIMEOUT_SECONDS = 5;
     private static final String FIRST_COMMIT_ID = "a971b22fe44d0a59636d70248c71872250e3687e";
     private static final String FIRST_COMMIT_ID_TOKEN = "{{FIRST_COMMIT_ID}}";
     private static final String FIRST_COMMIT_PUSH_PACK_TOKEN = "{{FIRST_COMMIT_PUSH_PACK}}";
@@ -137,16 +141,44 @@ public final class Scenarios {
 
     private static IoConsumer<ServerIO> uploadPack(Repository repository) {
         return serverIO -> {
-            UploadPack uploadPack = GitUtils.uploadPack(repository, Set.of("version=2"));
-            GitUtils.upload(uploadPack, serverIO.ioEStreams());
+            UploadPack uploadPack = new UploadPack(repository);
+            uploadPack.setTimeout(TIMEOUT_SECONDS);
+            uploadPack.setExtraParameters(Set.of("version=2"));
+            upload(uploadPack, serverIO.ioEStreams());
         };
     }
 
     private static IoConsumer<ServerIO> receivePack(Repository repository) {
         return serverIO -> {
-            ReceivePack receivePack = GitUtils.receivePack(repository);
-            GitUtils.receive(receivePack, serverIO.ioEStreams());
+            ReceivePack receivePack = new ReceivePack(repository);
+            receivePack.setTimeout(TIMEOUT_SECONDS);
+            receivePack.receive(
+                    serverIO.ioEStreams().getInputStream(),
+                    serverIO.ioEStreams().getOutputStream(),
+                    serverIO.ioEStreams().getErrorStream());
         };
+    }
+
+    private static void upload(UploadPack uploadPack, IOEStreamProvider streams) throws IOException {
+        try {
+            uploadPack.uploadWithExceptionPropagation(
+                    streams.getInputStream(),
+                    streams.getOutputStream(),
+                    streams.getErrorStream());
+        } catch (Exception e) {
+            log.error("Exception on {}", uploadPack.getRepository().getDirectory(), e);
+            writeErrorIntoOS(streams.getOutputStream(), e.getMessage());
+        }
+    }
+
+    private static void writeErrorIntoOS(OutputStream os, String message) {
+        try {
+            PacketLineOut pktOut = new PacketLineOut(os);
+            pktOut.writeString("ERR " + message);
+            pktOut.end();
+        } catch (Exception e) {
+            log.error("Error while error writing.", e);
+        }
     }
 
     private static String script(String transcript) {

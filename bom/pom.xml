@@ -41,6 +41,16 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.tests</groupId>
+                <artifactId>git-engine-test-support</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.core</groupId>
+                <artifactId>git-engine-s3</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.tests</groupId>
                 <artifactId>integration-test</artifactId>
                 <version>${project.version}</version>
             </dependency>
