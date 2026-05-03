@@ -47,6 +47,24 @@ public class BasicGitInteractionTest extends BaseOrionTest {
         runScenarioInNewRepository(Scenarios::pushFirstCommitThenListAndFetch);
     }
 
+    @Test
+    @DisplayName("first pushed commit can be fetched without a standalone list step")
+    void pushFirstCommitThenFetchItWithoutStandaloneList() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenFetch);
+    }
+
+    @Test
+    @DisplayName("HEAD symref can be listed after the first push")
+    void pushedHeadSymrefCanBeListed() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenListHead);
+    }
+
+    @Test
+    @DisplayName("missing branch prefix returns no refs after the first push")
+    void missingBranchPrefixReturnsNoRefs() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenListUnknownBranch);
+    }
+
     private void runScenarioInNewRepository(BiConsumer<Repository, SoftAssertions> scenario) throws IOException {
         assertControlledJGitSystemReaderInstalled();
         Path repositoryDirectory = createTestRepositoryDirectory();

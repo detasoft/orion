@@ -61,6 +61,20 @@ public final class Scenarios {
             C:0000
             """);
 
+    private static final String LIST_HEAD_AFTER_PUSH = script("""
+            S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
+            C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A0014ref-prefix HEAD\\0A0000
+            S:0052{{FIRST_COMMIT_ID}} HEAD symref-target:refs/heads/master\\0A0000
+            C:0000
+            """);
+
+    private static final String LIST_UNKNOWN_BRANCH_AFTER_PUSH = script("""
+            S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
+            C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A0029ref-prefix refs/heads/does-not-exist\\0A0000
+            S:0000
+            C:0000
+            """);
+
     private static final String FETCH_MASTER_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A0014ref-prefix HEAD\\0A001bref-prefix refs/heads/\\0A001aref-prefix refs/tags/\\0A0000
@@ -88,6 +102,13 @@ public final class Scenarios {
                 fetchMasterAfterPush());
     }
 
+    public static void pushFirstCommitThenFetch(Repository repository, SoftAssertions assertions) {
+        runSteps(repository, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                fetchMasterAfterPush());
+    }
+
     public static void pushFirstCommitThenListAndFetch(GitCommandServer server, SoftAssertions assertions) {
         runSteps(server, assertions,
                 listEmptyRepositoryRefs(),
@@ -111,6 +132,20 @@ public final class Scenarios {
                 fetchMasterAfterPush());
     }
 
+    public static void pushFirstCommitThenListHead(Repository repository, SoftAssertions assertions) {
+        runSteps(repository, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                listHeadAfterPush());
+    }
+
+    public static void pushFirstCommitThenListUnknownBranch(Repository repository, SoftAssertions assertions) {
+        runSteps(repository, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                listUnknownBranchAfterPush());
+    }
+
     private static ProtocolStep listEmptyRepositoryRefs() {
         return uploadPackStep("list refs in empty repository", LIST_EMPTY_REPOSITORY_REFS);
     }
@@ -125,6 +160,14 @@ public final class Scenarios {
 
     private static ProtocolStep listMasterAfterPush() {
         return uploadPackStep("list master ref after push", LIST_MASTER_AFTER_PUSH);
+    }
+
+    private static ProtocolStep listHeadAfterPush() {
+        return uploadPackStep("list HEAD symref after push", LIST_HEAD_AFTER_PUSH);
+    }
+
+    private static ProtocolStep listUnknownBranchAfterPush() {
+        return uploadPackStep("list missing branch ref after push", LIST_UNKNOWN_BRANCH_AFTER_PUSH);
     }
 
     private static ProtocolStep fetchMasterAfterPush() {
