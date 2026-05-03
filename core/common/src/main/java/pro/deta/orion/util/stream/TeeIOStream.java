@@ -10,6 +10,12 @@ import java.util.*;
 
 import static pro.deta.orion.util.stream.ByteToAsciiConversion.LINE_SEPARATOR;
 
+/**
+ * Wraps a client/server/error stream triple and records the byte-level conversation.
+ *
+ * <p>The recording is not just a flat byte array: every contiguous run is tagged with the direction
+ * it came from. That makes the serialized form useful as a replay script for protocol tests.</p>
+ */
 @Getter
 @Slf4j
 public class TeeIOStream implements IOEStreamProvider {
@@ -24,6 +30,10 @@ public class TeeIOStream implements IOEStreamProvider {
         this(inputStream, outputStream, errorStream, ioStateStringBuilder, new SwitchingBuffer());
     }
 
+    /**
+     * Builds a stream object from a previously serialized interaction. The real streams are null streams
+     * because this mode is only used to expose the parsed directional state for replay/assertion helpers.
+     */
     public TeeIOStream(String serializedState) {
         this(
                 InputStream.nullInputStream(),
@@ -65,6 +75,14 @@ public class TeeIOStream implements IOEStreamProvider {
         };
     }
 
+    /**
+     * Keeps the transcript as ordered direction chunks instead of individual bytes.
+     *
+     * <p>Protocol tests usually need to know when bytes came from the client, server, or stderr. A direction
+     * change starts a new buffer; repeated writes in the same direction append to the current buffer.
+     * Writes can be triggered by different pipe participants, so the public write path is synchronized to keep
+     * chunk boundaries deterministic.</p>
+     */
     private static final class SwitchingBuffer {
         private final List<DirectionalByteArrayOutputStream> state = new ArrayList<>();
 

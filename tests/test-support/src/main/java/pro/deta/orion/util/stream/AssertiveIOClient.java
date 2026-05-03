@@ -12,6 +12,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.util.stream.StreamUtils.getByteArray;
 import static pro.deta.orion.util.stream.StreamUtils.readStreamInto;
 
+/**
+ * Replays a serialized TeeIOStream transcript from the client's point of view.
+ *
+ * <p>Client chunks are written into the outgoing stream. Server chunks are read back and compared with
+ * the recorded bytes, so a saved protocol exchange can become an executable assertion.</p>
+ */
 @RequiredArgsConstructor
 @Slf4j
 public class AssertiveIOClient implements IoConsumer<ClientIO> {

@@ -11,6 +11,13 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Runs a client and a server against connected pipe streams and captures the server-side transcript.
+ *
+ * <p>The helper is intentionally small, but the thread ownership is easy to miss: the client runs on a
+ * background thread while the caller's thread executes the server. TeeIOStream sits on the server side and
+ * records what the client sent and what the server wrote back.</p>
+ */
 @Slf4j
 public class IOTestStreamUtils {
     public static Pair<StringBuilder, List<DirectionalByteArrayOutputStream>> testPipeScenario(IoConsumer<ClientIO> client, IoConsumer<ServerIO> server) throws InterruptedException {
