@@ -6,6 +6,7 @@ import org.assertj.core.api.SoftAssertions;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import pro.deta.orion.git.s3.AbstractClient;
@@ -18,6 +19,7 @@ import java.util.function.BiConsumer;
 
 @Slf4j
 @ExtendWith(S3ServerRule.class)
+@DisplayName("Git protocol through the S3 NIO filesystem provider")
 public class S3SPIGitInteractionTest extends BaseOrionTest implements S3ServerRule.AbstractClientAware, S3ServerRule.ServerSideAware {
     static {
         System.setProperty("s3.spi.endpoint-protocol", "http");
@@ -28,20 +30,25 @@ public class S3SPIGitInteractionTest extends BaseOrionTest implements S3ServerRu
     @Setter
     private AbstractClient abstractClient;
 
-    private void runTestInRepo(Path repoPath, BiConsumer<Repository, SoftAssertions> repositoryConsumer) throws IOException {
-        log.debug("Using test repo: {}", repoPath);
-        try (Repository r = FileRepositoryBuilder.create(repoPath.toFile())) {
-            r.create(true);
-            SoftAssertions.assertSoftly(sa -> {
-                repositoryConsumer.accept(r, sa);
-            });
+    private void runScenarioInRepository(Path repositoryPath, BiConsumer<Repository, SoftAssertions> scenario) throws IOException {
+        log.debug("Using test repo: {}", repositoryPath);
+
+        try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile())) {
+            repository.create(true);
+            SoftAssertions.assertSoftly(assertions -> scenario.accept(repository, assertions));
         }
     }
 
     @Test
     @Disabled("need to properly inject s3x: into filesystem")
-    void simplePatchToReceive() throws IOException {
-        String p = "s3x://%s:%s/%s/%s".formatted(serverSide.getHost(), serverSide.getPort(), abstractClient.getBucketName(), abstractClient.getPath());
-        runTestInRepo(Paths.get(p), Scenarios.simplePatchToReceive);
+    @DisplayName("first pushed commit can be listed and fetched")
+    void pushFirstCommitThenFetchIt() throws IOException {
+        Path repositoryPath = Paths.get("s3x://%s:%s/%s/%s".formatted(
+                serverSide.getHost(),
+                serverSide.getPort(),
+                abstractClient.getBucketName(),
+                abstractClient.getPath()));
+
+        runScenarioInRepository(repositoryPath, Scenarios::pushFirstCommitThenListAndFetch);
     }
 }

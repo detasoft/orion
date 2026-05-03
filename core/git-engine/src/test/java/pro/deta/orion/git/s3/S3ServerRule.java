@@ -18,11 +18,14 @@ import java.net.URL;
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class S3ServerRule implements BeforeAllCallback, AfterAllCallback, BeforeEachCallback {
+    private static final DockerImageName MINIO_IMAGE = DockerImageName.parse("quay.io/minio/minio");
+    private static final int MINIO_API_PORT = 9000;
+
     private final String username = "orion4test";
     private final String password = "orion4test";
 
     @Container
-    private GenericContainer minio;
+    private GenericContainer<?> minio;
     private S3ClientRule clientRule;
     private final TestMode testMode;
     private final String bucketName;
@@ -32,7 +35,6 @@ public class S3ServerRule implements BeforeAllCallback, AfterAllCallback, Before
         this.testMode = TestMode.AWS;
         this.bucketName = "orion-s3test";
     }
-
 
     public @NotNull URL getMinioURL() {
         serverSide = new ServerSide(minio.getHost(), minio.getFirstMappedPort());
@@ -46,25 +48,26 @@ public class S3ServerRule implements BeforeAllCallback, AfterAllCallback, Before
 
     @Override
     public void beforeAll(ExtensionContext context) throws Exception {
-        minio = new GenericContainer(DockerImageName.parse("quay.io/minio/minio"))
+        minio = new GenericContainer<>(MINIO_IMAGE)
                 .withEnv("MINIO_ROOT_USER", username)
                 .withEnv("MINIO_ROOT_PASSWORD", password)
                 .withCommand("server /data")
                 .withReuse(true)
-                .withExposedPorts(9000);
+                .withExposedPorts(MINIO_API_PORT);
         minio.start();
+
         clientRule = new S3ClientRule(testMode, this, bucketName);
         clientRule.getClient().createBucket();
     }
 
     @Override
     public void beforeEach(ExtensionContext context) throws Exception {
-        Object o = context.getTestInstance().get();
+        Object testInstance = context.getTestInstance().get();
 
-        if (o instanceof ServerSideAware test) {
+        if (testInstance instanceof ServerSideAware test) {
             test.setServerSide(serverSide);
         }
-        if (o instanceof AbstractClientAware test) {
+        if (testInstance instanceof AbstractClientAware test) {
             test.setAbstractClient(clientRule.getClient());
         }
     }

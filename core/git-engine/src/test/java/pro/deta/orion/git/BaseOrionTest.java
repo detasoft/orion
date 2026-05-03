@@ -7,6 +7,11 @@ import org.junit.jupiter.api.TestInfo;
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.test.util.ResourceUtils;
 
+import java.io.IOException;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 public class BaseOrionTest {
     @Getter
     private TestInfo testInfo;
@@ -20,5 +25,16 @@ public class BaseOrionTest {
     @BeforeEach
     void init(TestInfo testInfo) {
         this.testInfo = testInfo;
+    }
+
+    protected Path createTestRepositoryDirectory() throws IOException {
+        String testClass = testInfo.getTestClass()
+                .map(Class::getSimpleName)
+                .orElse("GitEngineTest");
+        String testMethod = testInfo.getTestMethod()
+                .map(Method::getName)
+                .orElse("repository");
+
+        return Files.createTempDirectory("%s-%s-".formatted(testClass, testMethod));
     }
 }

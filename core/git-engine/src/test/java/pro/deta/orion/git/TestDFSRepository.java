@@ -12,29 +12,26 @@ import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.Map;
 
-public class TestDFSRepository {
-    private static final class RepositoryResolverImplementation implements
-            RepositoryResolver<DaemonClient> {
+public final class TestDFSRepository {
+    private static final int GIT_PORT = 9418;
+    private static final Map<String, InMemoryRepository> repositories = new HashMap<>();
+
+    private TestDFSRepository() {
+    }
+
+    private static final class RepositoryResolverImplementation implements RepositoryResolver<DaemonClient> {
         @Override
         public Repository open(DaemonClient client, String name) {
-            InMemoryRepository repo = repositories.get(name);
-            if (repo == null) {
-                repo = new InMemoryRepository(
-                        new DfsRepositoryDescription(name));
-                repositories.put(name, repo);
-            }
-            return repo;
+            return repositories.computeIfAbsent(name, repositoryName ->
+                    new InMemoryRepository(new DfsRepositoryDescription(repositoryName)));
         }
     }
 
-    private static Map<String, InMemoryRepository> repositories = new HashMap<String, InMemoryRepository>();
-
     public static void main(String[] args) throws IOException {
-        Daemon server = new Daemon(new InetSocketAddress(9418));
+        Daemon server = new Daemon(new InetSocketAddress(GIT_PORT));
         boolean uploadsEnabled = true;
         server.getService("git-receive-pack").setEnabled(uploadsEnabled);
         server.setRepositoryResolver(new RepositoryResolverImplementation());
         server.start();
     }
-
 }
