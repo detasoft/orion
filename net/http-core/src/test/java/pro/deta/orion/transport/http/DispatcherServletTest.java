@@ -1,91 +1,112 @@
 package pro.deta.orion.transport.http;
 
-import jakarta.servlet.Servlet;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
 
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class DispatcherServletTest {
-
-    @Mock
-    private HttpServletRequest request;
-
-    @Mock
-    private HttpServletResponse response;
-
-    @Mock
-    private OrionServlet exactMatchServlet;
-
-    @Mock
-    private OrionServlet wildcardMatchServlet;
-
     private DispatcherServlet dispatcherServlet;
+    private HttpServletResponse response;
+    private RecordingServlet exactMatchServlet;
+    private RecordingServlet wildcardMatchServlet;
 
     @BeforeEach
     void setUp() {
-        MockitoAnnotations.openMocks(this);
         dispatcherServlet = new DispatcherServlet();
+        response = stub(HttpServletResponse.class);
+        exactMatchServlet = new RecordingServlet();
+        wildcardMatchServlet = new RecordingServlet();
     }
 
     @Test
     void testExactMatch() throws ServletException, IOException {
-        // Setup
-        when(request.getPathInfo()).thenReturn("/api/users");
+        HttpServletRequest request = requestWithPath("/api/users");
         dispatcherServlet.addServlet("/api/users", exactMatchServlet);
 
-        // Execute
         dispatcherServlet.service(request, response);
 
-        // Verify
-        verify(exactMatchServlet).service(request, response);
+        assertThat(exactMatchServlet.calls).isEqualTo(1);
+        assertThat(exactMatchServlet.lastRequest).isSameAs(request);
+        assertThat(exactMatchServlet.lastResponse).isSameAs(response);
     }
 
     @Test
     void testWildcardMatch() throws ServletException, IOException {
-        // Setup
-        when(request.getPathInfo()).thenReturn("/api/users/123");
+        HttpServletRequest request = requestWithPath("/api/users/123");
         dispatcherServlet.addServlet("/api/users/*", wildcardMatchServlet);
 
-        // Execute
         dispatcherServlet.service(request, response);
 
-        // Verify
-        verify(wildcardMatchServlet).service(request, response);
+        assertThat(wildcardMatchServlet.calls).isEqualTo(1);
+        assertThat(wildcardMatchServlet.lastRequest).isSameAs(request);
+        assertThat(wildcardMatchServlet.lastResponse).isSameAs(response);
     }
 
     @Test
     void testExactMatchPrecedence() throws ServletException, IOException {
-        // Setup
-        when(request.getPathInfo()).thenReturn("/api/users");
+        HttpServletRequest request = requestWithPath("/api/users");
         dispatcherServlet.addServlet("/api/*", wildcardMatchServlet);
         dispatcherServlet.addServlet("/api/users", exactMatchServlet);
 
-        // Execute
         dispatcherServlet.service(request, response);
 
-        // Verify exact match is preferred
-        verify(exactMatchServlet).service(request, response);
-        verify(wildcardMatchServlet, never()).service(request, response);
+        assertThat(exactMatchServlet.calls).isEqualTo(1);
+        assertThat(wildcardMatchServlet.calls).isZero();
     }
 
     @Test
     void testMultipleWildcards() throws ServletException, IOException {
-        // Setup
-        when(request.getPathInfo()).thenReturn("/api/users/123/details");
+        HttpServletRequest request = requestWithPath("/api/users/123/details");
         dispatcherServlet.addServlet("/api/*/123/*", wildcardMatchServlet);
 
-        // Execute
         dispatcherServlet.service(request, response);
 
-        // Verify
-        verify(wildcardMatchServlet).service(request, response);
+        assertThat(wildcardMatchServlet.calls).isEqualTo(1);
+        assertThat(wildcardMatchServlet.lastRequest).isSameAs(request);
+        assertThat(wildcardMatchServlet.lastResponse).isSameAs(response);
+    }
+
+    private static HttpServletRequest requestWithPath(String pathInfo) {
+        return stub(HttpServletRequest.class, (proxy, method, args) -> switch (method.getName()) {
+            case "getPathInfo" -> pathInfo;
+            case "toString" -> "HttpServletRequest[pathInfo=" + pathInfo + "]";
+            case "hashCode" -> System.identityHashCode(proxy);
+            case "equals" -> proxy == args[0];
+            default -> throw new UnsupportedOperationException(method.toString());
+        });
+    }
+
+    private static <T> T stub(Class<T> type) {
+        return stub(type, (proxy, method, args) -> switch (method.getName()) {
+            case "toString" -> type.getSimpleName() + "Stub";
+            case "hashCode" -> System.identityHashCode(proxy);
+            case "equals" -> proxy == args[0];
+            default -> throw new UnsupportedOperationException(method.toString());
+        });
+    }
+
+    private static <T> T stub(Class<T> type, InvocationHandler handler) {
+        return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, handler));
+    }
+
+    private static final class RecordingServlet implements OrionServlet {
+        private int calls;
+        private HttpServletRequest lastRequest;
+        private HttpServletResponse lastResponse;
+
+        @Override
+        public void service(HttpServletRequest req, HttpServletResponse resp) {
+            calls++;
+            lastRequest = req;
+            lastResponse = resp;
+        }
     }
 }

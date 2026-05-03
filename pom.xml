@@ -25,7 +25,6 @@
     <assertj.version>3.26.3</assertj.version>
     <jetty.version>12.0.12</jetty.version>
     <jackson.version>2.17.2</jackson.version>
-    <mockito.version>5.3.1</mockito.version>
     <acme4j.version>3.5.0</acme4j.version>
     <sshd-mina.version>2.13.2</sshd-mina.version>
     <eddsa.version>0.3.0</eddsa.version>
@@ -153,16 +152,6 @@
         <groupId>org.testcontainers</groupId>
         <artifactId>junit-jupiter</artifactId>
         <version>${testcontainers.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.mockito</groupId>
-        <artifactId>mockito-core</artifactId>
-        <version>${mockito.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.mockito</groupId>
-        <artifactId>mockito-junit-jupiter</artifactId>
-        <version>${mockito.version}</version>
       </dependency>
       <dependency>
         <groupId>org.shredzone.acme4j</groupId>
