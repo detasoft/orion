@@ -39,7 +39,7 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
         this.gitStorageDir = gitStorageDir.toAbsolutePath().normalize();
         FileUtils.mkdirs(this.gitStorageDir);
         log.warn("Git storage set to {}", this.gitStorageDir);
-        GitUtils.gitConfigure(systemReader);
+        GitUtils.installJGitSystemReader(systemReader);
     }
 
     @Override

@@ -209,17 +209,17 @@ public final class Scenarios {
                     streams.getErrorStream());
         } catch (Exception e) {
             log.error("Exception on {}", uploadPack.getRepository().getDirectory(), e);
-            writeErrorIntoOS(streams.getOutputStream(), e.getMessage());
+            writeProtocolError(streams.getOutputStream(), e.getMessage());
         }
     }
 
-    private static void writeErrorIntoOS(OutputStream os, String message) {
+    private static void writeProtocolError(OutputStream outputStream, String message) {
         try {
-            PacketLineOut pktOut = new PacketLineOut(os);
-            pktOut.writeString("ERR " + message);
-            pktOut.end();
+            PacketLineOut packetLineOut = new PacketLineOut(outputStream);
+            packetLineOut.writeString("ERR " + message);
+            packetLineOut.end();
         } catch (Exception e) {
-            log.error("Error while error writing.", e);
+            log.error("Failed to write Git protocol error response", e);
         }
     }
 

@@ -123,11 +123,11 @@ public class SshCommandFactory implements CommandFactory {
                         gitInternalService.service(channelSession.toString(), streams, "1", (inputStream) -> GitInternalService.parseGitCommand(commandLine, envs));
                     }
                 } catch (OrionSecurityException e) {
-                    GitUtils.writeErrorIntoOS(outputStream, "ACCESS_DENIED");
+                    GitUtils.writeProtocolError(outputStream, "ACCESS_DENIED");
                     returnCode = 10;
                 } catch (Exception e) {
                     log.error("Exception: ", e);
-                    GitUtils.writeErrorIntoOS(outputStream, e.getMessage());
+                    GitUtils.writeProtocolError(outputStream, e.getMessage());
                     returnCode = -1;
                 } finally {
                     exitCallback.onExit(returnCode);

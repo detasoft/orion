@@ -23,11 +23,10 @@ import pro.deta.orion.util.stream.IOEStreamProvider;
 import java.io.*;
 import java.util.*;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.PermissionChecks.*;
-import static pro.deta.orion.git.util.GitUtils.writeErrorIntoOS;
+import static pro.deta.orion.git.util.GitUtils.writeProtocolError;
 
 @Slf4j
 public class GitInternalService {
@@ -48,7 +47,7 @@ public class GitInternalService {
                 Thread.currentThread().setName(MessageFormatter.format("Serving {} [{}] ({})", clientId, new Object[]{requestId, gitCommand}).getMessage());
                 serveCommand(gitCommand, streams);
             } catch (ServiceMayNotContinueException e) {
-                writeErrorIntoOS(streams.getOutputStream(), e.getMessage());
+                writeProtocolError(streams.getOutputStream(), e.getMessage());
             } catch (OrionSecurityException e) {
                 log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
             } catch (SecurityException e) {
@@ -67,9 +66,9 @@ public class GitInternalService {
         }
 
         switch (gitCommand.getCommand()) {
-            case UPLOAD -> upload(gitCommand, repository.get(), repositoryName, streams);
-            case RECEIVE -> receive(repository.get(), repositoryName, streams);
-            default -> writeErrorIntoOS(streams.getOutputStream(), "unknown command");
+            case UPLOAD -> serveUploadPackToClient(gitCommand, repository.get(), repositoryName, streams);
+            case RECEIVE -> serveReceivePackFromClient(repository.get(), repositoryName, streams);
+            default -> writeProtocolError(streams.getOutputStream(), "unknown command");
         }
     }
 
@@ -101,22 +100,24 @@ public class GitInternalService {
         };
     }
 
-    private void upload(GitCommand gitCommand, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
-        UploadPack uploadPack = GitUtils.uploadPack(repository, extraParameters(gitCommand));
+    private void serveUploadPackToClient(GitCommand gitCommand, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+        UploadPack uploadPack = GitUtils.createUploadPackToClient(repository, extraParameters(gitCommand));
         attachHooks(uploadPack, repositoryName);
-        GitUtils.upload(uploadPack, streams);
+        GitUtils.runUploadPackToClient(uploadPack, streams);
     }
 
-    private void receive(Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
-        ReceivePack receivePack = GitUtils.receivePack(repository);
+    private void serveReceivePackFromClient(Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+        ReceivePack receivePack = GitUtils.createReceivePackFromClient(repository);
         attachHooks(receivePack, repositoryName);
-        GitUtils.receive(receivePack, streams);
+        GitUtils.runReceivePackFromClient(receivePack, streams);
     }
 
     private static Set<String> extraParameters(GitCommand gitCommand) {
-        return gitCommand.getProperties().entrySet().stream()
-                .map(e -> e.getKey() + "=" + e.getValue())
-                .collect(Collectors.toSet());
+        Set<String> extraParameters = new LinkedHashSet<>();
+        for (Map.Entry<Object, Object> entry : gitCommand.getProperties().entrySet()) {
+            extraParameters.add(entry.getKey() + "=" + entry.getValue());
+        }
+        return extraParameters;
     }
 
     private void attachHooks(ReceivePack rp, String repositoryName) {
