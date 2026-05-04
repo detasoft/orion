@@ -50,8 +50,10 @@ public class GitInternalService {
                 writeProtocolError(streams.getOutputStream(), e.getMessage());
             } catch (OrionSecurityException e) {
                 log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
+                writeProtocolError(streams.getOutputStream(), "ACCESS_DENIED");
             } catch (SecurityException e) {
                 log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
+                writeProtocolError(streams.getOutputStream(), "ACCESS_DENIED");
             } catch (Exception e) {
                 log.error("Error while serving {}", gitCommand, e);
             }
@@ -59,6 +61,11 @@ public class GitInternalService {
     }
 
     private void serveCommand(GitCommand gitCommand, IOEStreamProvider streams) throws IOException, ServiceMayNotContinueException, OrionSecurityException {
+        if (gitCommand.getCommand().isUnknown()) {
+            writeProtocolError(streams.getOutputStream(), "unknown command");
+            return;
+        }
+
         String repositoryName = gitCommand.getRepositoryName();
         Optional<Repository> repositoryResult = openRepositoryFor(gitCommand, repositoryName);
         if (repositoryResult.isEmpty()) {
@@ -129,9 +136,14 @@ public class GitInternalService {
         rp.setPostReceiveHook(new PostReceiveHook() {
             @Override
             public void onPostReceive(ReceivePack rp, Collection<ReceiveCommand> commands) {
+                List<ReceiveCommand> eventCommands = rp.getAllCommands();
+                if (eventCommands.isEmpty()) {
+                    return;
+                }
+
                 eventManager.publish(() -> {
                     GitReceiveOrionEvent event = new GitReceiveOrionEvent(repositoryName, getSc().getUserIdentity().getUserId());
-                    for (ReceiveCommand sc : commands) {
+                    for (ReceiveCommand sc : eventCommands) {
                         event.addReceiveEventRef(sc.getRefName(), sc.getOldId(), sc.getNewId(), sc.getType(), sc.getResult());
                     }
                     return event;

@@ -40,6 +40,7 @@ class GitInternalServiceTest {
 
             assertThat(repositoryProvider.findCalled).isFalse();
             assertThat(repositoryProvider.findOrCreateCalled).isFalse();
+            assertThat(outputBytes(streams)).isEqualTo("0015ERR ACCESS_DENIED0000");
         }
     }
 
@@ -63,6 +64,7 @@ class GitInternalServiceTest {
 
             assertThat(repositoryProvider.findCalled).isFalse();
             assertThat(repositoryProvider.findOrCreateCalled).isFalse();
+            assertThat(outputBytes(streams)).isEqualTo("0015ERR ACCESS_DENIED0000");
         }
     }
 
@@ -83,6 +85,7 @@ class GitInternalServiceTest {
 
             assertThat(repositoryProvider.findCalled).isFalse();
             assertThat(repositoryProvider.findOrCreateCalled).isFalse();
+            assertThat(outputBytes(streams)).isEqualTo("0015ERR ACCESS_DENIED0000");
         }
     }
 
@@ -105,10 +108,83 @@ class GitInternalServiceTest {
         assertThat(output.size()).isZero();
     }
 
+    @Test
+    @DisplayName("unknown git command returns a protocol error without opening a repository")
+    void unknownGitCommandReturnsProtocolErrorWithoutOpeningRepository() {
+        TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(true);
+        GitInternalService service = new GitInternalService(repositoryProvider, null);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        IOEStreamProvider streams = StreamUtils.newInstance(
+                new ByteArrayInputStream(new byte[0]),
+                output,
+                new ByteArrayOutputStream());
+
+        service.service("test-client", streams, "request-1",
+                ignoredInput -> GitInternalService.parseGitCommand("git-upload-archive /project.git", List.of()));
+
+        assertThat(repositoryProvider.findCalled).isFalse();
+        assertThat(repositoryProvider.findOrCreateCalled).isFalse();
+        assertThat(output.toString()).isEqualTo("0017ERR unknown command0000");
+    }
+
+    @Test
+    @DisplayName("service passes nested repository locators without losing path segments")
+    void servicePassesNestedRepositoryLocatorsWithoutLosingPathSegments() {
+        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
+            AccessControl.Grant createGrant = new AccessControl.Grant("create-nested", new ArrayList<>())
+                    .addKey(AccessControl.GrantKey.REPOSITORY, "team/project")
+                    .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+            getSc().setUserIdentity(new InternalUserImpl("creator", List.of(createGrant)));
+            TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
+            GitInternalService service = new GitInternalService(repositoryProvider, null);
+            IOEStreamProvider streams = StreamUtils.newInstance(
+                    new ByteArrayInputStream(new byte[0]),
+                    new ByteArrayOutputStream(),
+                    new ByteArrayOutputStream());
+
+            service.service("test-client", streams, "request-1",
+                    ignoredInput -> GitInternalService.parseGitCommand("git-receive-pack /team/project.git", List.of()));
+
+            assertThat(repositoryProvider.existsRepositoryName).isEqualTo("team/project");
+            assertThat(repositoryProvider.findOrCreateRepositoryName).isEqualTo("team/project");
+        }
+    }
+
+    @Test
+    @DisplayName("service keeps unsafe locators inside repository validation")
+    void serviceKeepsUnsafeLocatorsInsideRepositoryValidation() {
+        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
+            AccessControl.Grant createGrant = new AccessControl.Grant("create-any", new ArrayList<>())
+                    .addKey(AccessControl.GrantKey.REPOSITORY, "*")
+                    .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+            getSc().setUserIdentity(new InternalUserImpl("creator", List.of(createGrant)));
+            TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
+            GitInternalService service = new GitInternalService(repositoryProvider, null);
+            IOEStreamProvider streams = StreamUtils.newInstance(
+                    new ByteArrayInputStream(new byte[0]),
+                    new ByteArrayOutputStream(),
+                    new ByteArrayOutputStream());
+
+            service.service("test-client", streams, "request-1",
+                    ignoredInput -> GitInternalService.parseGitCommand("git-receive-pack /../outside.git", List.of()));
+
+            assertThat(repositoryProvider.existsRepositoryName).isEqualTo("../outside");
+            assertThat(repositoryProvider.findOrCreateCalled).isFalse();
+        }
+    }
+
+    private static String outputBytes(IOEStreamProvider streams) {
+        ByteArrayOutputStream output = (ByteArrayOutputStream) streams.getOutputStream();
+        return output.toString();
+    }
+
     private static final class TrackingRepositoryProvider implements GitRepositoryProvider {
         private final boolean repositoryExists;
         private boolean findCalled;
         private boolean findOrCreateCalled;
+        private String existsRepositoryName;
+        private String findRepositoryName;
+        private String findOrCreateRepositoryName;
 
         private TrackingRepositoryProvider(boolean repositoryExists) {
             this.repositoryExists = repositoryExists;
@@ -116,19 +192,22 @@ class GitInternalServiceTest {
 
         @Override
         public boolean exists(String repositoryName) {
+            existsRepositoryName = repositoryName;
             return repositoryExists;
         }
 
         @Override
         public Result<Repository> find(String repositoryName) {
             findCalled = true;
-            throw new AssertionError("find must not be called in this test");
+            findRepositoryName = repositoryName;
+            return Result.Failure.generalFailure("find is not implemented in this test");
         }
 
         @Override
         public Result<Repository> findOrCreate(String repositoryName) {
             findOrCreateCalled = true;
-            throw new AssertionError("findOrCreate must not be called in this test");
+            findOrCreateRepositoryName = repositoryName;
+            return Result.Failure.generalFailure("findOrCreate is not implemented in this test");
         }
 
         @Override
