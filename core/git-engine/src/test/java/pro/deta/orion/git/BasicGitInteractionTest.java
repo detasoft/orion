@@ -87,6 +87,12 @@ public class BasicGitInteractionTest extends BaseOrionTest {
     }
 
     @Test
+    @DisplayName("lightweight tag can be fetched")
+    void lightweightTagCanBeFetched() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenCreateTagAndFetchTag);
+    }
+
+    @Test
     @DisplayName("master can be deleted after the first push")
     void masterCanBeDeletedAfterFirstPush() throws IOException {
         runScenarioInNewRepository(Scenarios::pushFirstCommitThenDeleteMasterAndListRefs);
@@ -129,6 +135,12 @@ public class BasicGitInteractionTest extends BaseOrionTest {
     }
 
     @Test
+    @DisplayName("annotated tag peeled commit can be fetched")
+    void annotatedTagPeeledCommitCanBeFetched() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenCreateAnnotatedTagAndFetchPeeledCommit);
+    }
+
+    @Test
     @DisplayName("annotated tag can be deleted")
     void annotatedTagCanBeDeleted() throws IOException {
         runScenarioInNewRepository(Scenarios::pushFirstCommitThenCreateAndDeleteAnnotatedTag);
@@ -144,6 +156,12 @@ public class BasicGitInteractionTest extends BaseOrionTest {
     @DisplayName("shallow fetch reports shallow boundary and sends the pack")
     void shallowFetchReportsBoundaryAndSendsPack() throws IOException {
         runScenarioInNewRepository(Scenarios::pushFirstCommitThenFetchShallow);
+    }
+
+    @Test
+    @DisplayName("shallow fetch with zero depth returns a protocol error")
+    void shallowFetchWithZeroDepthReturnsProtocolError() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenFetchWithZeroShallowDepth);
     }
 
     @Test

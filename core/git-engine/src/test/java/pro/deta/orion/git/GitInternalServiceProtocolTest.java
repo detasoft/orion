@@ -16,7 +16,11 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
 import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.util.stream.IOEStreamProvider;
+import pro.deta.orion.util.stream.StreamUtils;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -177,10 +181,103 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
                 SoftAssertions.assertSoftly(assertions ->
                         Scenarios.pushFirstCommitThenCreateSecondRootFeatureBranch(gitServer(service), repository, assertions));
 
-                getSc().setUserIdentity(gitReader("reader", "project", "refs/heads/master"));
+                getSc().setUserIdentity(gitReader("reader", "project", "master"));
                 SoftAssertions.assertSoftly(assertions ->
                         Scenarios.fetchSecondRootFeatureBranchDenied(gitServer(service), assertions));
             }
+
+            assertThat(events.eventsOf(GitUploadOrionEvent.class)).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("upload-pack allows fetching a branch inside the user's branch grant")
+    void uploadPackAllowsFetchingBranchInsideUserBranchGrant() {
+        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        try (Repository repository = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
+            RecordingEventManager events = new RecordingEventManager();
+            GitInternalService service = new GitInternalService(repositoryProvider, events);
+
+            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
+                getSc().setUserIdentity(gitUser("writer", "project"));
+                SoftAssertions.assertSoftly(assertions ->
+                        Scenarios.pushFirstCommitThenCreateSecondRootFeatureBranch(gitServer(service), repository, assertions));
+
+                getSc().setUserIdentity(gitReader("reader", "project", "master"));
+                SoftAssertions.assertSoftly(assertions ->
+                        Scenarios.fetchMasterOnly(gitServer(service), assertions));
+            }
+
+            assertUploadEvent(events, "project");
+        }
+    }
+
+    @Test
+    @DisplayName("receive-pack publishes rejected non-fast-forward commands")
+    void receivePackPublishesRejectedNonFastForwardCommands() {
+        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        try (Repository repository = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
+            RecordingEventManager events = new RecordingEventManager();
+            GitInternalService service = new GitInternalService(repositoryProvider, events);
+
+            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
+                getSc().setUserIdentity(gitUser("writer", "project"));
+
+                SoftAssertions.assertSoftly(assertions ->
+                        Scenarios.rejectNonFastForwardPushWhenConfigured(gitServer(service), repository, assertions));
+            }
+
+            List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
+            assertThat(receiveEvents).hasSize(2);
+            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", ReceiveCommand.Type.CREATE);
+            assertReceiveEventRef(
+                    receiveEvents.get(1),
+                    "project",
+                    "writer",
+                    "refs/heads/master",
+                    ReceiveCommand.Type.UPDATE_NONFASTFORWARD,
+                    ReceiveCommand.Result.REJECTED_NONFASTFORWARD);
+        }
+    }
+
+    @Test
+    @DisplayName("upload-pack for a missing repository publishes no upload event")
+    void uploadPackForMissingRepositoryPublishesNoUploadEvent() {
+        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        RecordingEventManager events = new RecordingEventManager();
+        GitInternalService service = new GitInternalService(repositoryProvider, events);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        IOEStreamProvider streams = StreamUtils.newInstance(
+                new ByteArrayInputStream(new byte[0]),
+                output,
+                new ByteArrayOutputStream());
+
+        try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
+            getSc().setUserIdentity(gitUser("reader", "missing"));
+            service.service("test-client", streams, "request-1",
+                    ignored -> GitInternalService.parseGitCommand("git-upload-pack /missing.git", List.of("version=2")));
+        }
+
+        assertThat(output.size()).isZero();
+        assertThat(events.eventsOf(GitUploadOrionEvent.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("upload-pack for an unknown object publishes no upload event")
+    void uploadPackForUnknownObjectPublishesNoUploadEvent() {
+        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        try (Repository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
+            RecordingEventManager events = new RecordingEventManager();
+            GitInternalService service = new GitInternalService(repositoryProvider, events);
+
+            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
+                getSc().setUserIdentity(gitUser("writer", "project"));
+
+                SoftAssertions.assertSoftly(assertions ->
+                        Scenarios.pushFirstCommitThenFetchUnknownObject(gitServer(service), assertions));
+            }
+
+            assertThat(events.eventsOf(GitUploadOrionEvent.class)).isEmpty();
         }
     }
 
@@ -231,6 +328,16 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     }
 
     private static void assertReceiveEventRef(GitReceiveOrionEvent event, String repositoryName, String userName, String refName, ReceiveCommand.Type type) {
+        assertReceiveEventRef(event, repositoryName, userName, refName, type, ReceiveCommand.Result.OK);
+    }
+
+    private static void assertReceiveEventRef(
+            GitReceiveOrionEvent event,
+            String repositoryName,
+            String userName,
+            String refName,
+            ReceiveCommand.Type type,
+            ReceiveCommand.Result result) {
         assertThat(event.getRepositoryName()).isEqualTo(repositoryName);
         assertThat(event.getUserName()).isEqualTo(userName);
         assertThat(event.getReceiveEventRefs())
@@ -238,7 +345,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
                 .satisfies(ref -> {
                     assertThat(ref.getRefName()).isEqualTo(refName);
                     assertThat(ref.getType()).isEqualTo(type);
-                    assertThat(ref.getResult()).isEqualTo(ReceiveCommand.Result.OK);
+                    assertThat(ref.getResult()).isEqualTo(result);
                 });
     }
 

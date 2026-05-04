@@ -239,10 +239,22 @@ public final class Scenarios {
             S:000dpackfile\\0A0011\\01PACK\\00\\00\\00\\02\\00\\00\\00\\000019\\01\\02\\9D\\08\\82;\\D8\\A8\\EA\\B5\\10\\ADj\\C7\\5C\\82<\\FD>\\D3\\1E002b\\02Total 0 (delta 0), reused 0 (delta 0)\\0A0000
             """);
 
+    private static final String FETCH_MASTER_ONLY_AFTER_PUSH = script("""
+            S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
+            C:0011command=fetch0001000dthin-pack000dofs-delta0032want {{FIRST_COMMIT_ID}}\\0A0009done\\0A0000
+            S:000dpackfile\\0A001c\\02Counting objects: 1   \\0D001f\\02Counting objects: 3, done\\0A0024\\02Finding sources:  33% (1/3)   \\0D0024\\02Finding sources:  67% (2/3)   \\0D0024\\02Finding sources: 100% (3/3)   \\0D0021\\02Finding sources: 100% (3/3)\\0A0022\\02Getting sizes:  50% (1/2)   \\0D0022\\02Getting sizes: 100% (2/2)   \\0D001f\\02Getting sizes: 100% (2/2)\\0A0011\\01{{FIRST_COMMIT_FETCH_PACK}}002b\\02Total 3 (delta 0), reused 3 (delta 0)\\0A0000
+            """);
+
     private static final String SHALLOW_FETCH_MASTER_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0011command=fetch0001000dthin-pack000dofs-delta000ddeepen 1\\0A0032want {{FIRST_COMMIT_ID}}\\0A0009done\\0A0000
             S:0011shallow-info\\0A0035shallow {{FIRST_COMMIT_ID}}\\0A0001000dpackfile\\0A001c\\02Counting objects: 1   \\0D001f\\02Counting objects: 3, done\\0A0024\\02Finding sources:  33% (1/3)   \\0D0024\\02Finding sources:  67% (2/3)   \\0D0024\\02Finding sources: 100% (3/3)   \\0D0021\\02Finding sources: 100% (3/3)\\0A0022\\02Getting sizes:  50% (1/2)   \\0D0022\\02Getting sizes: 100% (2/2)   \\0D001f\\02Getting sizes: 100% (2/2)\\0A0011\\01{{FIRST_COMMIT_FETCH_PACK}}002b\\02Total 3 (delta 0), reused 3 (delta 0)\\0A0000
+            """);
+
+    private static final String SHALLOW_FETCH_WITH_ZERO_DEPTH_AFTER_PUSH = script("""
+            S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
+            C:0011command=fetch0001000dthin-pack000dofs-delta000ddeepen 0\\0A0032want {{FIRST_COMMIT_ID}}\\0A
+            S:0018ERR Invalid depth: 00000
             """);
 
     private static final String FETCH_UNKNOWN_OBJECT_AFTER_PUSH = script("""
@@ -412,6 +424,10 @@ public final class Scenarios {
         runSteps(server, assertions, fetchSecondRootFeatureBranchDenied());
     }
 
+    public static void fetchMasterOnly(GitCommandServer server, SoftAssertions assertions) {
+        runSteps(server, assertions, fetchMasterOnlyAfterPush());
+    }
+
     public static void pushFirstCommitThenDeleteMasterAndListRefs(GitCommandServer server, SoftAssertions assertions) {
         runSteps(server, assertions,
                 listEmptyRepositoryRefs(),
@@ -513,6 +529,17 @@ public final class Scenarios {
                 listMasterAfterPush());
     }
 
+    public static void rejectNonFastForwardPushWhenConfigured(GitCommandServer server, Repository repository, SoftAssertions assertions) {
+        runSteps(server, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities());
+        insertSecondRootCommit(repository);
+        configureDenyNonFastForwards(repository, true);
+        runSteps(server, assertions,
+                rejectNonFastForwardAfterPush(),
+                listMasterAfterPush());
+    }
+
     public static void pushFeatureBranchAndTagInOneReceivePack(Repository repository, SoftAssertions assertions) {
         runSteps(repository, assertions,
                 listEmptyRepositoryRefs(),
@@ -567,11 +594,45 @@ public final class Scenarios {
                 shallowFetchMasterAfterPush());
     }
 
+    public static void pushFirstCommitThenFetchWithZeroShallowDepth(Repository repository, SoftAssertions assertions) {
+        runSteps(repository, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                shallowFetchWithZeroDepthAfterPush());
+    }
+
     public static void pushFirstCommitThenFetchUnknownObject(Repository repository, SoftAssertions assertions) {
         runSteps(repository, assertions,
                 listEmptyRepositoryRefs(),
                 pushFirstCommitWithCapabilities(),
                 fetchUnknownObjectAfterPush());
+    }
+
+    public static void pushFirstCommitThenFetchUnknownObject(GitCommandServer server, SoftAssertions assertions) {
+        runSteps(server, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                fetchUnknownObjectAfterPush());
+    }
+
+    public static void pushFirstCommitThenCreateTagAndFetchTag(Repository repository, SoftAssertions assertions) {
+        runSteps(repository, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities(),
+                createTagAfterPush(),
+                listTagsAfterTagPush(),
+                fetchMasterOnlyAfterPush());
+    }
+
+    public static void pushFirstCommitThenCreateAnnotatedTagAndFetchPeeledCommit(Repository repository, SoftAssertions assertions) {
+        runSteps(repository, assertions,
+                listEmptyRepositoryRefs(),
+                pushFirstCommitWithCapabilities());
+        insertAnnotatedTag(repository);
+        runSteps(repository, assertions,
+                createAnnotatedTagAfterPush(),
+                listTagsAfterAnnotatedTagPush(),
+                fetchMasterOnlyAfterPush());
     }
 
     private static ProtocolStep listEmptyRepositoryRefs() {
@@ -678,8 +739,16 @@ public final class Scenarios {
         return uploadPackStep("fetch master with existing have after push", FETCH_MASTER_WITH_HAVE_AFTER_PUSH);
     }
 
+    private static ProtocolStep fetchMasterOnlyAfterPush() {
+        return uploadPackStep("fetch master without listing refs after push", FETCH_MASTER_ONLY_AFTER_PUSH);
+    }
+
     private static ProtocolStep shallowFetchMasterAfterPush() {
         return uploadPackStep("shallow fetch master after push", SHALLOW_FETCH_MASTER_AFTER_PUSH);
+    }
+
+    private static ProtocolStep shallowFetchWithZeroDepthAfterPush() {
+        return uploadPackStep("shallow fetch with zero depth after push", SHALLOW_FETCH_WITH_ZERO_DEPTH_AFTER_PUSH);
     }
 
     private static ProtocolStep fetchUnknownObjectAfterPush() {
