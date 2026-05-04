@@ -93,6 +93,12 @@ public class BasicGitInteractionTest extends BaseOrionTest {
     }
 
     @Test
+    @DisplayName("master can be fast-forwarded after the first push")
+    void masterCanBeFastForwardedAfterFirstPush() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenFastForwardMasterAndListIt);
+    }
+
+    @Test
     @DisplayName("non-fast-forward update is rejected when configured")
     void nonFastForwardUpdateIsRejectedWhenConfigured() throws IOException {
         runScenarioInNewRepository(Scenarios::rejectNonFastForwardPushWhenConfigured);
@@ -108,6 +114,24 @@ public class BasicGitInteractionTest extends BaseOrionTest {
     @DisplayName("branch and tag can be created in one receive-pack")
     void branchAndTagCanBeCreatedInOneReceivePack() throws IOException {
         runScenarioInNewRepository(Scenarios::pushFeatureBranchAndTagInOneReceivePack);
+    }
+
+    @Test
+    @DisplayName("branch and tag can be created atomically in one receive-pack")
+    void branchAndTagCanBeCreatedAtomicallyInOneReceivePack() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFeatureBranchAndTagAtomicallyInOneReceivePack);
+    }
+
+    @Test
+    @DisplayName("annotated tag is listed with its peeled commit")
+    void annotatedTagIsListedWithPeeledCommit() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenCreateAnnotatedTagAndListPeeledTag);
+    }
+
+    @Test
+    @DisplayName("annotated tag can be deleted")
+    void annotatedTagCanBeDeleted() throws IOException {
+        runScenarioInNewRepository(Scenarios::pushFirstCommitThenCreateAndDeleteAnnotatedTag);
     }
 
     @Test

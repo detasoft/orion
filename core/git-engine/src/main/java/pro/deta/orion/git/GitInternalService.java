@@ -60,15 +60,17 @@ public class GitInternalService {
 
     private void serveCommand(GitCommand gitCommand, IOEStreamProvider streams) throws IOException, ServiceMayNotContinueException, OrionSecurityException {
         String repositoryName = gitCommand.getRepositoryName();
-        Optional<Repository> repository = openRepositoryFor(gitCommand, repositoryName);
-        if (repository.isEmpty()) {
+        Optional<Repository> repositoryResult = openRepositoryFor(gitCommand, repositoryName);
+        if (repositoryResult.isEmpty()) {
             return;
         }
 
-        switch (gitCommand.getCommand()) {
-            case UPLOAD -> serveUploadPackToClient(gitCommand, repository.get(), repositoryName, streams);
-            case RECEIVE -> serveReceivePackFromClient(repository.get(), repositoryName, streams);
-            default -> writeProtocolError(streams.getOutputStream(), "unknown command");
+        try (Repository repository = repositoryResult.get()) {
+            switch (gitCommand.getCommand()) {
+                case UPLOAD -> serveUploadPackToClient(gitCommand, repository, repositoryName, streams);
+                case RECEIVE -> serveReceivePackFromClient(repository, repositoryName, streams);
+                default -> writeProtocolError(streams.getOutputStream(), "unknown command");
+            }
         }
     }
 
@@ -83,6 +85,9 @@ public class GitInternalService {
             permissionChecker().ALLOW_TO_CREATE_REPO.assertThat(repositoryName);
             repositoryResult = repositoryProvider.findOrCreate(repositoryName);
         } else {
+            if (gitCommand.isRead()) {
+                permissionChecker().ALLOW_READ_ACCESS.assertThat(repositoryName);
+            }
             if (gitCommand.isWrite()) {
                 permissionChecker().ALLOW_WRITE_ACCESS.assertThat(repositoryName);
             }
@@ -151,7 +156,7 @@ public class GitInternalService {
                         permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(new FetchRepositorySecurityCheck(git, up.getRepository(), wants, repositoryName));
                     }
                 } catch (OrionSecurityException e) {
-                    throw new ServiceMayNotContinueException(e);
+                    throw new ServiceMayNotContinueException("ACCESS_DENIED", e);
                 }
             }
 
