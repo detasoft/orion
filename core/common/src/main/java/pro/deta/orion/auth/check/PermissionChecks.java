@@ -47,7 +47,7 @@ public class PermissionChecks {
         if (!allWantsWereResolved(frsc, wantedBranches)) {
             return DENY;
         }
-        return allowIf(hasAnyAllowedWantedBranch(branchGrants, wantedBranches));
+        return allowIf(allWantedBranchesAreAllowed(frsc, branchGrants, wantedBranches));
     });
 
     public final PermissionChecker<String> ALLOW_READ_ACCESS = createFor(REPOSITORY_READ, "Allow read access", (userIdentity, repository) -> {
@@ -180,7 +180,27 @@ public class PermissionChecks {
         return true;
     }
 
-    private static boolean hasAnyAllowedWantedBranch(List<AccessControl.Grant> branchGrants, Map<GitObjectId, String> wantedBranches) {
-        return !filterGrants(branchGrants, GrantMatcher.of(AccessControl.GrantKey.BRANCH, wantedBranches::containsValue)).isEmpty();
+    private static boolean allWantedBranchesAreAllowed(
+            GitFetchAccessRequest request,
+            List<AccessControl.Grant> branchGrants,
+            Map<GitObjectId, String> wantedBranches) {
+        for (GitObjectId want : request.wants()) {
+            String branchName = wantedBranches.get(want);
+            if (!isBranchAllowed(branchGrants, branchName)) {
+                log.warn("Fetch denied for {} from repository {} because branch {} is not allowed",
+                        want.value(),
+                        request.repositoryName(),
+                        branchName);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isBranchAllowed(List<AccessControl.Grant> branchGrants, String branchName) {
+        return !filterGrants(
+                branchGrants,
+                GrantMatcher.of(AccessControl.GrantKey.BRANCH, grantBranchName -> Objects.equals(grantBranchName, branchName)))
+                .isEmpty();
     }
 }

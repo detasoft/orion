@@ -120,9 +120,27 @@ public class PermissionChecksTest {
     }
 
     @Test
-    void fetchAccessCurrentlyAllowsMixedWantsWhenAnyWantedBranchMatchesGrant() {
+    void fetchAccessDeniesMixedWantsWhenAnyWantedBranchIsOutsideGrant() {
         try (SecurityContextHolder ignored = new SecurityContextHolder()) {
             getSc().setUserIdentity(new InternalUserImpl("reader", List.of(branchGrant("project", "master"))));
+
+            assertThatThrownBy(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
+                    "project",
+                    Map.of(
+                            MASTER_COMMIT, "master",
+                            FEATURE_COMMIT, "feature"),
+                    MASTER_COMMIT,
+                    FEATURE_COMMIT)))
+                    .isInstanceOf(OrionSecurityException.class);
+        }
+    }
+
+    @Test
+    void fetchAccessAllowsMixedWantsWhenEveryWantedBranchMatchesGrant() {
+        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
+            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(
+                    branchGrant("project", "master"),
+                    branchGrant("project", "feature"))));
 
             assertThatCode(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
                     "project",
