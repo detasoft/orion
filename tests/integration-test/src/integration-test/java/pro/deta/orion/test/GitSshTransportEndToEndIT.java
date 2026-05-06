@@ -122,6 +122,48 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void authorizedUserCanCreateRepositoryPushCommitAndFetchItOverSsh() throws Exception {
+        startedOrion = startOrion(tempDir.resolve("orion-root"), TRUSTED_USER_KEY);
+
+        Path sourceDirectory = tempDir.resolve("push-source");
+        Path fetchDirectory = tempDir.resolve("fetch-target");
+        String repositoryName = "fetch-project";
+        String remoteUrl = startedOrion.sshUrl(repositoryName + ".git");
+
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("ssh-home"), TRUSTED_USER_KEY);
+             Git source = initRepository(sourceDirectory);
+             Git fetchTarget = initRepository(fetchDirectory)) {
+            createCommit(source, "README.md", "created through full server e2e\n", "initial commit");
+
+            Iterable<PushResult> pushResults = source.push()
+                    .setRemote(remoteUrl)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+
+            assertThat(pushResults)
+                    .flatExtracting(PushResult::getRemoteUpdates)
+                    .extracting(RemoteRefUpdate::getStatus)
+                    .containsExactly(RemoteRefUpdate.Status.OK);
+            assertThat(startedOrion.repositoryPath(repositoryName).resolve("config")).exists();
+
+            fetchTarget.fetch()
+                    .setRemote(remoteUrl)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/remotes/origin/" + BRANCH))
+                    .call();
+
+            fetchTarget.checkout()
+                    .setCreateBranch(true)
+                    .setName(BRANCH)
+                    .setStartPoint("refs/remotes/origin/" + BRANCH)
+                    .call();
+        }
+
+        assertThat(Files.readString(fetchDirectory.resolve("README.md"))).isEqualTo("created through full server e2e\n");
+    }
+
+    @Test
     void unknownSshKeyCannotCreateRepositoryOverSsh() throws Exception {
         /*
          * This is the negative end-to-end transport scenario.
@@ -247,14 +289,19 @@ class GitSshTransportEndToEndIT {
         AccessControl accessControl = new AccessControl();
         AccessControl.User user = ACLUtil.createUser(USERNAME, "e2e@example.test")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(userPublicKey));
-        user.addGrant("ALL_REPOSITORIES")
-                .addKey(AccessControl.GrantKey.REPOSITORY, "*")
+        allowRepository(user, "project");
+        allowRepository(user, "fetch-project");
+        accessControl.getUsers().add(user);
+        return accessControl;
+    }
+
+    private static void allowRepository(AccessControl.User user, String repositoryName) {
+        user.addGrant("REPOSITORY_" + repositoryName)
+                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
                 .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "*");
-        accessControl.getUsers().add(user);
-        return accessControl;
     }
 
     private static KeyPair loadTestRsaKeyPair(String resourceName) {
