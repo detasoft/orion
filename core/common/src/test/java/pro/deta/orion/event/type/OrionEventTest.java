@@ -2,8 +2,10 @@ package pro.deta.orion.event.type;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.transport.ReceiveCommand;
+import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.common.GitRefUpdate;
+import pro.deta.orion.git.common.GitRefUpdateResult;
+import pro.deta.orion.git.common.GitRefUpdateType;
 
 import java.time.Instant;
 
@@ -39,18 +41,18 @@ class OrionEventTest {
     @DisplayName("prints git receive refs without object identity noise")
     void printsGitReceiveRefsWithoutObjectIdentityNoise() {
         GitReceiveOrionEvent event = new GitReceiveOrionEvent("project", "writer");
-        event.addReceiveEventRef(
+        event.addReceiveEventRef(new GitRefUpdate(
                 "refs/heads/main",
-                ObjectId.zeroId(),
-                ObjectId.fromString("a971b22fe44d0a59636d70248c71872250e3687e"),
-                ReceiveCommand.Type.CREATE,
-                ReceiveCommand.Result.OK);
+                GitObjectId.of("0000000000000000000000000000000000000000"),
+                GitObjectId.of("a971b22fe44d0a59636d70248c71872250e3687e"),
+                GitRefUpdateType.CREATE,
+                GitRefUpdateResult.OK));
 
         assertThat(event.toString())
                 .contains(
                         "repositoryName='project'",
                         "userName='writer'",
-                        "GitReceiveEventRef{refName='refs/heads/main'",
+                        "GitRefUpdate[refName=refs/heads/main",
                         "oldId=0000000000000000000000000000000000000000",
                         "newId=a971b22fe44d0a59636d70248c71872250e3687e",
                         "type=CREATE",

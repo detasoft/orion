@@ -3,13 +3,10 @@ package pro.deta.orion.auth.check;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.jgit.api.NameRevCommand;
-import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.errors.MissingObjectException;
-import org.eclipse.jgit.lib.ObjectId;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.*;
-import pro.deta.orion.auth.check.data.FetchRepositorySecurityCheck;
+import pro.deta.orion.git.common.GitFetchAccessRequest;
+import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.util.Pair;
 import pro.deta.orion.util.Result;
 
@@ -40,35 +37,24 @@ public class PermissionChecks {
         return Decision.DENY;
     });
 
-    public final PermissionChecker<FetchRepositorySecurityCheck> ALLOW_TO_FETCH_REPO = createFor(REPOSITORY_FETCH, "Allow fetch from repository", (userIdentity, frsc) -> {
+    public final PermissionChecker<GitFetchAccessRequest> ALLOW_TO_FETCH_REPO = createFor(REPOSITORY_FETCH, "Allow fetch from repository", (userIdentity, frsc) -> {
         List<AccessControl.Grant> grantList = userIdentity.getGrants();
 
         // if branch specified for REPO
         List<AccessControl.Grant> matchedGrant = filterGrants(grantList,
-                GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, (expressionValue) -> matchExpressionValue(expressionValue, frsc.getRepositoryName())),
+                GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, (expressionValue) -> matchExpressionValue(expressionValue, frsc.repositoryName())),
                 GrantMatcher.of(AccessControl.GrantKey.BRANCH));
 
         if (!matchedGrant.isEmpty()) { // no branch restrictions -> ALLOW
             if (!filterGrants(matchedGrant, GrantMatcher.of(AccessControl.GrantKey.BRANCH, "*"::equalsIgnoreCase)).isEmpty())
                 return ALLOW; // optimization, if BRANCH value = '*' no need to fetch it.
 
-            // looking match via name of REPOSITORY
-            NameRevCommand nameRev = frsc.getGit()
-                    .nameRev()
-                    .addPrefix("refs/heads");
-            for (ObjectId w : frsc.getWants()) {
-                try {
-                    nameRev.add(w);
-                } catch (MissingObjectException e) {
-                    log.error("Can't find commit {} in repository {}", w, frsc.getRepository().getDirectory());
+            Map<GitObjectId, String> res = frsc.refResolver().resolveBranchNames(frsc.wants());
+            for (GitObjectId want : frsc.wants()) {
+                if (!res.containsKey(want)) {
+                    log.error("Can't find commit {} in repository {}", want.value(), frsc.repositoryName());
                     return DENY;
                 }
-            }
-            Map<ObjectId, String> res;
-            try {
-                res = nameRev.call();
-            } catch (GitAPIException e) {
-                throw new RuntimeException(e);
             }
             List<AccessControl.Grant> matchedGrantForBranches = filterGrants(matchedGrant, GrantMatcher.of(AccessControl.GrantKey.BRANCH, res::containsValue));
             if (!matchedGrantForBranches.isEmpty())

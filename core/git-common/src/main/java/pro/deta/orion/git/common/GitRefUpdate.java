@@ -11,8 +11,6 @@ public record GitRefUpdate(
 
     public GitRefUpdate {
         Objects.requireNonNull(refName, "refName");
-        Objects.requireNonNull(oldId, "oldId");
-        Objects.requireNonNull(newId, "newId");
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(result, "result");
     }

@@ -2,7 +2,6 @@ package pro.deta.orion.git;
 
 import org.assertj.core.api.SoftAssertions;
 import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.transport.ReceiveCommand;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,6 +15,8 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
 import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.git.common.GitRefUpdateResult;
+import pro.deta.orion.git.common.GitRefUpdateType;
 import pro.deta.orion.util.stream.IOEStreamProvider;
 import pro.deta.orion.util.stream.StreamUtils;
 
@@ -108,8 +109,8 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
-            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", ReceiveCommand.Type.CREATE);
-            assertReceiveEventRef(receiveEvents.get(1), "project", "writer", "refs/heads/master", ReceiveCommand.Type.UPDATE);
+            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", GitRefUpdateType.CREATE);
+            assertReceiveEventRef(receiveEvents.get(1), "project", "writer", "refs/heads/master", GitRefUpdateType.UPDATE);
         }
     }
 
@@ -130,8 +131,8 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
-            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", ReceiveCommand.Type.CREATE);
-            assertReceiveEventRef(receiveEvents.get(1), "project", "writer", "refs/heads/master", ReceiveCommand.Type.DELETE);
+            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", GitRefUpdateType.CREATE);
+            assertReceiveEventRef(receiveEvents.get(1), "project", "writer", "refs/heads/master", GitRefUpdateType.DELETE);
         }
     }
 
@@ -152,18 +153,18 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
-            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", ReceiveCommand.Type.CREATE);
+            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", GitRefUpdateType.CREATE);
             assertThat(receiveEvents.get(1).getReceiveEventRefs())
                     .hasSize(2)
                     .anySatisfy(ref -> {
-                        assertThat(ref.getRefName()).isEqualTo("refs/heads/feature");
-                        assertThat(ref.getType()).isEqualTo(ReceiveCommand.Type.CREATE);
-                        assertThat(ref.getResult()).isEqualTo(ReceiveCommand.Result.OK);
+                        assertThat(ref.refName()).isEqualTo("refs/heads/feature");
+                        assertThat(ref.type()).isEqualTo(GitRefUpdateType.CREATE);
+                        assertThat(ref.result()).isEqualTo(GitRefUpdateResult.OK);
                     })
                     .anySatisfy(ref -> {
-                        assertThat(ref.getRefName()).isEqualTo("refs/tags/v1");
-                        assertThat(ref.getType()).isEqualTo(ReceiveCommand.Type.CREATE);
-                        assertThat(ref.getResult()).isEqualTo(ReceiveCommand.Result.OK);
+                        assertThat(ref.refName()).isEqualTo("refs/tags/v1");
+                        assertThat(ref.type()).isEqualTo(GitRefUpdateType.CREATE);
+                        assertThat(ref.result()).isEqualTo(GitRefUpdateResult.OK);
                     });
         }
     }
@@ -229,14 +230,14 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
-            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", ReceiveCommand.Type.CREATE);
+            assertReceiveEventRef(receiveEvents.get(0), "project", "writer", "refs/heads/master", GitRefUpdateType.CREATE);
             assertReceiveEventRef(
                     receiveEvents.get(1),
                     "project",
                     "writer",
                     "refs/heads/master",
-                    ReceiveCommand.Type.UPDATE_NONFASTFORWARD,
-                    ReceiveCommand.Result.REJECTED_NONFASTFORWARD);
+                    GitRefUpdateType.UPDATE_NON_FAST_FORWARD,
+                    GitRefUpdateResult.REJECTED_NON_FAST_FORWARD);
         }
     }
 
@@ -318,7 +319,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     private static void assertFirstCommitReceiveEvent(RecordingEventManager events, String repositoryName, String userName) {
         assertThat(events.eventsOf(GitReceiveOrionEvent.class))
                 .singleElement()
-                .satisfies(event -> assertReceiveEventRef(event, repositoryName, userName, "refs/heads/master", ReceiveCommand.Type.CREATE));
+                .satisfies(event -> assertReceiveEventRef(event, repositoryName, userName, "refs/heads/master", GitRefUpdateType.CREATE));
     }
 
     private static void assertUploadEvent(RecordingEventManager events, String repositoryName) {
@@ -327,8 +328,8 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
                 .satisfies(event -> assertThat(event.getRepositoryName()).isEqualTo(repositoryName));
     }
 
-    private static void assertReceiveEventRef(GitReceiveOrionEvent event, String repositoryName, String userName, String refName, ReceiveCommand.Type type) {
-        assertReceiveEventRef(event, repositoryName, userName, refName, type, ReceiveCommand.Result.OK);
+    private static void assertReceiveEventRef(GitReceiveOrionEvent event, String repositoryName, String userName, String refName, GitRefUpdateType type) {
+        assertReceiveEventRef(event, repositoryName, userName, refName, type, GitRefUpdateResult.OK);
     }
 
     private static void assertReceiveEventRef(
@@ -336,16 +337,16 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
             String repositoryName,
             String userName,
             String refName,
-            ReceiveCommand.Type type,
-            ReceiveCommand.Result result) {
+            GitRefUpdateType type,
+            GitRefUpdateResult result) {
         assertThat(event.getRepositoryName()).isEqualTo(repositoryName);
         assertThat(event.getUserName()).isEqualTo(userName);
         assertThat(event.getReceiveEventRefs())
                 .singleElement()
                 .satisfies(ref -> {
-                    assertThat(ref.getRefName()).isEqualTo(refName);
-                    assertThat(ref.getType()).isEqualTo(type);
-                    assertThat(ref.getResult()).isEqualTo(result);
+                    assertThat(ref.refName()).isEqualTo(refName);
+                    assertThat(ref.type()).isEqualTo(type);
+                    assertThat(ref.result()).isEqualTo(result);
                 });
     }
 

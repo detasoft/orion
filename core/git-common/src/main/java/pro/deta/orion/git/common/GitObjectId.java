@@ -10,4 +10,9 @@ public record GitObjectId(String value) {
     public static GitObjectId of(String value) {
         return new GitObjectId(value);
     }
+
+    @Override
+    public String toString() {
+        return value;
+    }
 }

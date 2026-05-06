@@ -11,6 +11,7 @@ import pro.deta.orion.config.WorkDir;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.ServerKeyService;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
+import pro.deta.orion.git.common.GitRefUpdate;
 import pro.deta.orion.event.type.VolatileUserAdded;
 import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
@@ -57,10 +58,10 @@ public class GitInternalStorage implements OrionApplicationStageEventListener {
         FileUtils.mkdirs(storageArea);
         // registers event handler to propagate changes in git to areas
         orionProvider.getEventManager().registerTypeHandler(GitReceiveOrionEvent.class, (event) -> {
-            for (GitReceiveOrionEvent.GitReceiveEventRef ref : event.getReceiveEventRefs()) {
+            for (GitRefUpdate ref : event.getReceiveEventRefs()) {
                 for(GitAccessParams area : storageAreas) {
                     if (isSameRepository(event, area)) {
-                        if (ref.getRefName().endsWith(area.getBranch())) {
+                        if (ref.refName().endsWith(area.getBranch())) {
                             area.onUpdate(event);
                             break;
                         }
