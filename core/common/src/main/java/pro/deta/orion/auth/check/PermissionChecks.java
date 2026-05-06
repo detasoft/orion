@@ -7,8 +7,6 @@ import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.*;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
 import pro.deta.orion.git.common.GitObjectId;
-import pro.deta.orion.util.Pair;
-import pro.deta.orion.util.Result;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -26,88 +24,66 @@ public class PermissionChecks {
     private static final PermissionChecks _instance = new PermissionChecks();
 
     public final PermissionChecker<String> ALLOW_TO_CREATE_REPO = createFor(REPOSITORY_CREATE, "Allow create new repositories", (userIdentity, repositoryName) -> {
-        List<AccessControl.Grant> g = userIdentity.getGrants();
-        // looking for all grants with CREATE and REPOSITORY
-        List<AccessControl.Grant> matchedGrant = filterGrants(g, GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, expressionValue -> matchExpressionValue(expressionValue, repositoryName)), GrantMatcher.of(AccessControl.GrantKey.CREATE));
-        // looking match via name of REPOSITORY
-        if (!matchedGrant.isEmpty()) {
+        boolean allowed = hasGrant(
+                userIdentity,
+                repositoryGrant(repositoryName),
+                GrantMatcher.of(AccessControl.GrantKey.CREATE));
+        if (allowed) {
             log.debug("Check ALLOW_TO_CREATE_REPO passed for {} on {}", userIdentity, repositoryName);
-            return ALLOW;
         }
-        return Decision.DENY;
+        return allowIf(allowed);
     });
 
     public final PermissionChecker<GitFetchAccessRequest> ALLOW_TO_FETCH_REPO = createFor(REPOSITORY_FETCH, "Allow fetch from repository", (userIdentity, frsc) -> {
-        List<AccessControl.Grant> grantList = userIdentity.getGrants();
-
-        // if branch specified for REPO
-        List<AccessControl.Grant> matchedGrant = filterGrants(grantList,
-                GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, (expressionValue) -> matchExpressionValue(expressionValue, frsc.repositoryName())),
-                GrantMatcher.of(AccessControl.GrantKey.BRANCH));
-
-        if (!matchedGrant.isEmpty()) { // no branch restrictions -> ALLOW
-            if (!filterGrants(matchedGrant, GrantMatcher.of(AccessControl.GrantKey.BRANCH, "*"::equalsIgnoreCase)).isEmpty())
-                return ALLOW; // optimization, if BRANCH value = '*' no need to fetch it.
-
-            Map<GitObjectId, String> res = frsc.refResolver().resolveBranchNames(frsc.wants());
-            for (GitObjectId want : frsc.wants()) {
-                if (!res.containsKey(want)) {
-                    log.error("Can't find commit {} in repository {}", want.value(), frsc.repositoryName());
-                    return DENY;
-                }
-            }
-            List<AccessControl.Grant> matchedGrantForBranches = filterGrants(matchedGrant, GrantMatcher.of(AccessControl.GrantKey.BRANCH, res::containsValue));
-            if (!matchedGrantForBranches.isEmpty())
-                return ALLOW;
-        } else
+        List<AccessControl.Grant> branchGrants = branchRestrictedRepositoryGrants(userIdentity, frsc.repositoryName());
+        if (branchGrants.isEmpty()) {
             return ALLOW;
-        return Decision.DENY;
+        }
+        if (hasWildcardBranchGrant(branchGrants)) {
+            return ALLOW;
+        }
+
+        Map<GitObjectId, String> wantedBranches = resolveWantedBranches(frsc);
+        if (!allWantsWereResolved(frsc, wantedBranches)) {
+            return DENY;
+        }
+        return allowIf(hasAnyAllowedWantedBranch(branchGrants, wantedBranches));
     });
 
     public final PermissionChecker<String> ALLOW_READ_ACCESS = createFor(REPOSITORY_READ, "Allow read access", (userIdentity, repository) -> {
-        List<AccessControl.Grant> g = userIdentity.getGrants();
-        List<AccessControl.Grant> matchedGrant = filterGrants(g, GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, (value) -> matchExpressionValue(value, repository)));
-        if (!matchedGrant.isEmpty()) {
-            log.debug("Check ALLOW_READ_ACCESS passed for {} on {}", userIdentity, matchedGrant);
-            return ALLOW;
+        boolean allowed = hasGrant(userIdentity, repositoryGrant(repository));
+        if (allowed) {
+            log.debug("Check ALLOW_READ_ACCESS passed for {} on {}", userIdentity, repository);
         }
-        return DENY;
+        return allowIf(allowed);
     });
 
     public final PermissionChecker<String> ALLOW_WRITE_ACCESS = createFor(REPOSITORY_WRITE, "Allow write access", (userIdentity, repository) -> {
-        List<AccessControl.Grant> g = userIdentity.getGrants();
-        List<AccessControl.Grant> matchedGrant = filterGrants(g,
-                GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, (value) -> matchExpressionValue(value, repository)),
+        boolean allowed = hasGrant(
+                userIdentity,
+                repositoryGrant(repository),
                 GrantMatcher.of(AccessControl.GrantKey.WRITE));
-        if (!matchedGrant.isEmpty()) {
-            log.debug("Check ALLOW_WRITE_ACCESS passed for {} on {}", userIdentity, matchedGrant);
-            return ALLOW;
+        if (allowed) {
+            log.debug("Check ALLOW_WRITE_ACCESS passed for {} on {}", userIdentity, repository);
         }
-        return DENY;
+        return allowIf(allowed);
     });
 
     public final PermissionChecker<String> ALLOW_TO_SHUTDOWN = createFor(APPLICATION_SHUTDOWN, "Allow application shutdown", (userIdentity, command) -> {
-        List<AccessControl.Grant> g = userIdentity.getGrants();
-        List<AccessControl.Grant> matchedGrant = filterGrants(g, GrantMatcher.of(AccessControl.GrantKey.SHUTDOWN));
-        if (!matchedGrant.isEmpty()) {
-            log.debug("Check ALLOW_TO_SHUTDOWN passed for {} on {}", userIdentity, matchedGrant);
-            return ALLOW;
+        boolean allowed = hasGrant(userIdentity, GrantMatcher.of(AccessControl.GrantKey.SHUTDOWN));
+        if (allowed) {
+            log.debug("Check ALLOW_TO_SHUTDOWN passed for {}", userIdentity);
         }
-        return DENY;
+        return allowIf(allowed);
     });
 
     public final PermissionChecker<SocketAddress> ALLOW_ONLY_LOCAL_CONNECTIONS = createFor(Permission.CLIENT_SOCKET_ADDRESS, "Allow only local connections", (userIdentity, socketAddress) -> {
-        if (socketAddress instanceof InetSocketAddress) {
-            if (((InetSocketAddress) socketAddress).getAddress().isLoopbackAddress())
-                return ALLOW;
-        }
-        return DENY;
+        return allowIf(socketAddress instanceof InetSocketAddress inetSocketAddress
+                && inetSocketAddress.getAddress().isLoopbackAddress());
     });
 
     public final PermissionChecker<UserIdentity> ALLOW_ANONYMOUS_ACCESS = createFor(Permission.USER_IDENTITY, "Allow anonymous access", (userIdentity, ui) -> {
-        if (userIdentity != null && !userIdentity.isAnonymous())
-            return ALLOW;
-        return DENY;
+        return allowIf(userIdentity != null && !userIdentity.isAnonymous());
     });
 
 
@@ -116,18 +92,14 @@ public class PermissionChecks {
     }
 
     public <O> void permissionCheck(PermissionChecker<O> checker) throws OrionSecurityException {
-        List<Pair<String, Decision>> results = new ArrayList<>();
-        results.add(new Pair<>(checker.getName(), checker.validate()));
+        Decision decision = checker.validate();
 
         if (log.isTraceEnabled()) {
-            String info = results.stream().collect(StringBuilder::new, (sb, p) -> sb.append(p.getSecond().name()).append(" by ").append(p.getFirst()).append("\n"), StringBuilder::append).toString();
-            log.atTrace().log("SC: {} results: {}", getSc(), info);
+            log.atTrace().log("SC: {} result: {} by {}", getSc(), decision, checker.getName());
         }
-        for (Pair<String, Decision> p : results) {
-            if (p.getSecond() == Decision.DENY) {
-                log.atWarn().log("ACCESS DENIED ({}): SC: {}", p.getFirst(), getSc());
-                throw new OrionSecurityException("Origin: disallowed for [" + getSc().formatShort() + "] by '" + p.getFirst() + "'");
-            }
+        if (decision == DENY) {
+            log.atWarn().log("ACCESS DENIED ({}): SC: {}", checker.getName(), getSc());
+            throw new OrionSecurityException("Origin: disallowed for [" + getSc().formatShort() + "] by '" + checker.getName() + "'");
         }
     }
 
@@ -165,5 +137,50 @@ public class PermissionChecks {
             getSc().with(permission, o);
             permissionCheck(this);
         }
+    }
+
+    private static Decision allowIf(boolean condition) {
+        return condition ? ALLOW : DENY;
+    }
+
+    private static GrantMatcher repositoryGrant(String repositoryName) {
+        return GrantMatcher.of(AccessControl.GrantKey.REPOSITORY, value -> matchExpressionValue(value, repositoryName));
+    }
+
+    private static boolean hasGrant(UserIdentity userIdentity, GrantMatcher... matchers) {
+        return !matchingGrants(userIdentity, matchers).isEmpty();
+    }
+
+    private static List<AccessControl.Grant> matchingGrants(UserIdentity userIdentity, GrantMatcher... matchers) {
+        return filterGrants(userIdentity.getGrants(), matchers);
+    }
+
+    private static List<AccessControl.Grant> branchRestrictedRepositoryGrants(UserIdentity userIdentity, String repositoryName) {
+        return matchingGrants(
+                userIdentity,
+                repositoryGrant(repositoryName),
+                GrantMatcher.of(AccessControl.GrantKey.BRANCH));
+    }
+
+    private static boolean hasWildcardBranchGrant(List<AccessControl.Grant> branchGrants) {
+        return !filterGrants(branchGrants, GrantMatcher.of(AccessControl.GrantKey.BRANCH, "*"::equalsIgnoreCase)).isEmpty();
+    }
+
+    private static Map<GitObjectId, String> resolveWantedBranches(GitFetchAccessRequest request) {
+        return request.refResolver().resolveBranchNames(request.wants());
+    }
+
+    private static boolean allWantsWereResolved(GitFetchAccessRequest request, Map<GitObjectId, String> wantedBranches) {
+        for (GitObjectId want : request.wants()) {
+            if (!wantedBranches.containsKey(want)) {
+                log.error("Can't find commit {} in repository {}", want.value(), request.repositoryName());
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasAnyAllowedWantedBranch(List<AccessControl.Grant> branchGrants, Map<GitObjectId, String> wantedBranches) {
+        return !filterGrants(branchGrants, GrantMatcher.of(AccessControl.GrantKey.BRANCH, wantedBranches::containsValue)).isEmpty();
     }
 }
