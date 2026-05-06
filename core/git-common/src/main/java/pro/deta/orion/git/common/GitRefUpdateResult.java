@@ -1,0 +1,13 @@
+package pro.deta.orion.git.common;
+
+public enum GitRefUpdateResult {
+    NOT_ATTEMPTED,
+    OK,
+    REJECTED_NO_CREATE,
+    REJECTED_NO_DELETE,
+    REJECTED_NON_FAST_FORWARD,
+    REJECTED_CURRENT_BRANCH,
+    REJECTED_MISSING_OBJECT,
+    REJECTED_OTHER_REASON,
+    LOCK_FAILURE
+}
