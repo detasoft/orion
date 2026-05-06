@@ -1,12 +1,6 @@
 package pro.deta.orion.internal.auth;
 
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.jgit.api.TransportCommand;
-import org.eclipse.jgit.transport.SshTransport;
-import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
-import org.eclipse.jgit.transport.sshd.SshdSessionFactory;
-import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactory;
-import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.util.KeyUtils;
 
 import java.nio.file.InvalidPathException;
@@ -82,32 +76,6 @@ public sealed interface Auth {
             case LocalSshAuthKeyPair localAuthKeyPair -> Objects.equals(localAuthKeyPair.localRepositoryName(), repositoryName);
             default -> false;
         };
-    }
-
-    static void injectIntoGitCommand(Auth auth, TransportCommand gitCommand, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
-        switch (auth) {
-            case HttpAuth httpAuth -> injectUsernameAndPassword(gitCommand, httpAuth.username(), httpAuth.password());
-            case LocalSshAuthKeyPair localSshAuthKeyPair ->
-                    injectAuthKeyPair(gitCommand, localSshAuthKeyPair.keyPair(), localSshAuthKeyPair.publicKeys(), orionClientSshdSessionFactoryProvider);
-            case LocalNoneAuth noneAuth -> {
-            }
-            case SshAuthKey sshAuthKey -> injectAuthKeyPair(gitCommand, sshAuthKey.keyPair(), List.of(), orionClientSshdSessionFactoryProvider);
-            case SshAuthKeyPair sshAuthKeyPair -> injectAuthKeyPair(gitCommand, sshAuthKeyPair.keyPair(), List.of(), orionClientSshdSessionFactoryProvider);
-        }
-    }
-
-    private static void injectUsernameAndPassword(TransportCommand tc, String username, String password) {
-        tc.setCredentialsProvider(new UsernamePasswordCredentialsProvider(username, password));
-    }
-
-    private static void injectAuthKeyPair(TransportCommand command, Optional<KeyPair> keyPair, List<PublicKey> publicKeys, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
-        if (keyPair.isPresent()) {
-            command.setTransportConfigCallback(transport -> {
-                SshTransport sshTransport = (SshTransport) transport;
-                sshTransport.setSshSessionFactory(orionClientSshdSessionFactoryProvider.create(keyPair.get(), publicKeys));
-            });
-        }
-
     }
 
     @Slf4j

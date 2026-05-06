@@ -14,6 +14,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.internal.auth.Auth;
+import pro.deta.orion.internal.jgit.JGitAuth;
 import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Result;
@@ -190,7 +191,7 @@ public class GitAccessParams {
 
     public <V extends TransportCommand<?, ?>> V injectAuthentication(Supplier<V> gitCommandSupplier) {
         V gitCommand = gitCommandSupplier.get();
-        Auth.injectIntoGitCommand(auth, gitCommand, orionClientSshdSessionFactoryProvider);
+        JGitAuth.injectIntoGitCommand(auth, gitCommand, orionClientSshdSessionFactoryProvider);
         return gitCommand;
     }
 
