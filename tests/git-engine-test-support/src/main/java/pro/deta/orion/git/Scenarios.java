@@ -78,6 +78,10 @@ public final class Scenarios {
             PACK\\00\\00\\00\\02\\00\\00\\00\\00\\02\\9D\\08\\82;\\D8\\A8\\EA\\B5\\10\\ADj\\C7\\5C\\82<\\FD>\\D3\\1E
             """.strip();
 
+    // Server advertises protocol v2 capabilities for an empty upload-pack session.
+    // Client asks for HEAD, branch refs and tag refs with peel and symref metadata.
+    // Server flushes an empty ref list because the repository has no refs yet.
+    // Client sends the closing flush packet.
     private static final String LIST_EMPTY_REPOSITORY_REFS = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A0014ref-prefix HEAD\\0A001bref-prefix refs/heads/\\0A001aref-prefix refs/tags/\\0A0000
@@ -85,83 +89,125 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises receive-pack capabilities for an unborn repository.
+    // Client creates refs/heads/master and sends the pack that contains the first commit.
+    // Server reports reference update progress, successful unpack and accepted master ref.
     private static final String PUSH_FIRST_COMMIT_WITH_RECEIVE_PACK_ADVERTISEMENT = script("""
             S:009d0000000000000000000000000000000000000000 capabilities^{}\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:00950000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/heads/master\\00 report-status side-band-64k agent=git/2.42.00000{{FIRST_COMMIT_PUSH_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0030\\01000eunpack ok\\0A0019ok refs/heads/master\\0A00000000
             """);
 
+    // Client creates refs/heads/master without first reading the receive-pack advertisement.
+    // Server accepts the pack and reports successful creation of master.
     private static final String PUSH_FIRST_COMMIT_WITHOUT_RECEIVE_PACK_ADVERTISEMENT = script("""
             C:00950000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/heads/master\\00 report-status side-band-64k agent=git/2.42.00000{{FIRST_COMMIT_PUSH_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0030\\01000eunpack ok\\0A0019ok refs/heads/master\\0A00000000
             """);
 
+    // Server advertises the existing master ref and receive-pack capabilities.
+    // Client creates refs/heads/feature at the same commit as master and sends a redundant pack.
+    // Server accepts the feature branch creation.
     private static final String CREATE_FEATURE_BRANCH_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:00970000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/heads/feature\\00 report-status side-band-64k agent=git/2.42.0\\0A0000{{FIRST_COMMIT_PUSH_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0031\\01000eunpack ok\\0A001aok refs/heads/feature\\0A00000000
             """);
 
+    // Server advertises the existing master ref and receive-pack capabilities.
+    // Client creates refs/heads/feature at a separate root commit already present in the repository.
+    // Server accepts the feature branch creation.
     private static final String CREATE_SECOND_ROOT_FEATURE_BRANCH_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:00970000000000000000000000000000000000000000 {{SECOND_ROOT_COMMIT_ID}} refs/heads/feature\\00 report-status side-band-64k agent=git/2.42.0\\0A0000{{EMPTY_RECEIVE_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0031\\01000eunpack ok\\0A001aok refs/heads/feature\\0A00000000
             """);
 
+    // Server advertises the existing master ref and receive-pack capabilities.
+    // Client creates lightweight tag refs/tags/v1 pointing at the first commit.
+    // Server accepts the tag creation.
     private static final String CREATE_TAG_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:00910000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/tags/v1\\00 report-status side-band-64k agent=git/2.42.0\\0A0000{{FIRST_COMMIT_PUSH_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A002b\\01000eunpack ok\\0A0014ok refs/tags/v1\\0A00000000
             """);
 
+    // Server advertises master as the only branch ref.
+    // Client deletes refs/heads/master by updating it to the zero object id.
+    // Server accepts the deletion of master.
     private static final String DELETE_MASTER_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:0096{{FIRST_COMMIT_ID}} 0000000000000000000000000000000000000000 refs/heads/master\\00 report-status side-band-64k agent=git/2.42.0\\0A0000
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0030\\01000eunpack ok\\0A0019ok refs/heads/master\\0A00000000
             """);
 
+    // Server advertises master at the first commit.
+    // Client fast-forwards refs/heads/master to the second commit already present in the repository.
+    // Server accepts the fast-forward update.
     private static final String FAST_FORWARD_UPDATE_MASTER_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:0096{{FIRST_COMMIT_ID}} {{FAST_FORWARD_COMMIT_ID}} refs/heads/master\\00 report-status side-band-64k agent=git/2.42.0\\0A0000{{EMPTY_RECEIVE_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0030\\01000eunpack ok\\0A0019ok refs/heads/master\\0A00000000
             """);
 
+    // Server advertises master at the first commit.
+    // Client updates master to an unrelated root commit while non-fast-forward updates are allowed.
+    // Server accepts the force-push style update.
     private static final String FORCE_PUSH_SECOND_ROOT_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:0096{{FIRST_COMMIT_ID}} {{SECOND_ROOT_COMMIT_ID}} refs/heads/master\\00 report-status side-band-64k agent=git/2.42.0\\0A0000{{EMPTY_RECEIVE_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0030\\01000eunpack ok\\0A0019ok refs/heads/master\\0A00000000
             """);
 
+    // Server advertises master at the first commit.
+    // Client tries to update master to an unrelated root commit while non-fast-forward updates are denied.
+    // Server reports a clean unpack but rejects the master ref as non-fast-forward.
     private static final String REJECT_NON_FAST_FORWARD_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:0096{{FIRST_COMMIT_ID}} {{SECOND_ROOT_COMMIT_ID}} refs/heads/master\\00 report-status side-band-64k agent=git/2.42.0\\0A0000{{EMPTY_RECEIVE_PACK}}
             S:0041\\01000eunpack ok\\0A002ang refs/heads/master non-fast forward\\0A00000000
             """);
 
+    // Server advertises master before a multi-ref receive-pack request.
+    // Client creates feature and lightweight tag v1 in one non-atomic command list.
+    // Server accepts both refs and reports progress for two reference updates.
     private static final String CREATE_FEATURE_BRANCH_AND_TAG_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:00970000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/heads/feature\\00 report-status side-band-64k agent=git/2.42.0\\0A00630000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/tags/v1\\0A0000{{FIRST_COMMIT_PUSH_PACK}}
             S:0028\\02Updating references:  50% (1/2)   \\0D0028\\02Updating references: 100% (2/2)   \\0D0025\\02Updating references: 100% (2/2)\\0A0045\\01000eunpack ok\\0A001aok refs/heads/feature\\0A0014ok refs/tags/v1\\0A00000000
             """);
 
+    // Server advertises master and the atomic capability.
+    // Client creates feature and lightweight tag v1 in one atomic command list.
+    // Server accepts both refs in the atomic update.
     private static final String CREATE_FEATURE_BRANCH_AND_TAG_ATOMIC_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:009e0000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/heads/feature\\00 report-status side-band-64k atomic agent=git/2.42.0\\0A00630000000000000000000000000000000000000000 {{FIRST_COMMIT_ID}} refs/tags/v1\\0A0000{{FIRST_COMMIT_PUSH_PACK}}
             S:0045\\01000eunpack ok\\0A001aok refs/heads/feature\\0A0014ok refs/tags/v1\\0A00000000
             """);
 
+    // Server advertises master before creating an annotated tag.
+    // Client creates refs/tags/v1-annotated pointing at the tag object already present in the repository.
+    // Server accepts the annotated tag creation.
     private static final String CREATE_ANNOTATED_TAG_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0000
             C:009b0000000000000000000000000000000000000000 {{ANNOTATED_TAG_ID}} refs/tags/v1-annotated\\00 report-status side-band-64k agent=git/2.42.0\\0A0000{{EMPTY_RECEIVE_PACK}}
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0035\\01000eunpack ok\\0A001eok refs/tags/v1-annotated\\0A00000000
             """);
 
+    // Server advertises master and the annotated tag ref.
+    // Client deletes refs/tags/v1-annotated by updating it to the zero object id.
+    // Server accepts the annotated tag deletion.
     private static final String DELETE_ANNOTATED_TAG_AFTER_PUSH = script("""
             S:009f{{FIRST_COMMIT_ID}} refs/heads/master\\00 side-band-64k delete-refs report-status quiet atomic ofs-delta agent=JGit/7.0.0.202409031743-r\\0A0044{{ANNOTATED_TAG_ID}} refs/tags/v1-annotated\\0A0000
             C:009b{{ANNOTATED_TAG_ID}} 0000000000000000000000000000000000000000 refs/tags/v1-annotated\\00 report-status side-band-64k agent=git/2.42.0\\0A0000
             S:0028\\02Updating references: 100% (1/1)   \\0D0025\\02Updating references: 100% (1/1)\\0A0035\\01000eunpack ok\\0A001eok refs/tags/v1-annotated\\0A00000000
             """);
 
+    // Server advertises protocol v2 capabilities before listing refs.
+    // Client asks for heads, the exact master branch prefix and tags.
+    // Server returns master at the first commit.
+    // Client sends the closing flush packet.
     private static final String LIST_MASTER_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001bref-prefix refs/heads/\\0A0021ref-prefix refs/heads/master\\0A001aref-prefix refs/tags/\\0A0000
@@ -169,6 +215,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing refs.
+    // Client asks for heads, the exact master branch prefix and tags.
+    // Server returns master at the fast-forward commit.
+    // Client sends the closing flush packet.
     private static final String LIST_MASTER_AFTER_FAST_FORWARD = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001bref-prefix refs/heads/\\0A0021ref-prefix refs/heads/master\\0A001aref-prefix refs/tags/\\0A0000
@@ -176,6 +226,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing refs.
+    // Client asks for heads, the exact master branch prefix and tags.
+    // Server returns master at the unrelated second-root commit after force push.
+    // Client sends the closing flush packet.
     private static final String LIST_MASTER_AFTER_FORCE_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001bref-prefix refs/heads/\\0A0021ref-prefix refs/heads/master\\0A001aref-prefix refs/tags/\\0A0000
@@ -183,6 +237,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing branch refs.
+    // Client asks for all branch refs with peel and symref metadata.
+    // Server returns feature and master, both pointing at the first commit.
+    // Client sends the closing flush packet.
     private static final String LIST_HEADS_AFTER_FEATURE_BRANCH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001bref-prefix refs/heads/\\0A0000
@@ -190,6 +248,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing branch refs.
+    // Client asks for all branch refs with peel and symref metadata.
+    // Server returns feature at the second root commit and master at the first commit.
+    // Client sends the closing flush packet.
     private static final String LIST_HEADS_AFTER_SECOND_ROOT_FEATURE_BRANCH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001bref-prefix refs/heads/\\0A0000
@@ -197,6 +259,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing HEAD.
+    // Client asks only for HEAD with peel and symref metadata.
+    // Server returns HEAD pointing at the first commit with its master symref target.
+    // Client sends the closing flush packet.
     private static final String LIST_HEAD_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A0014ref-prefix HEAD\\0A0000
@@ -204,6 +270,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing tags.
+    // Client asks for all tag refs with peel and symref metadata.
+    // Server returns lightweight tag v1 at the first commit.
+    // Client sends the closing flush packet.
     private static final String LIST_TAGS_AFTER_TAG_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001aref-prefix refs/tags/\\0A0000
@@ -211,6 +281,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing tags.
+    // Client asks for all tag refs with peel and symref metadata.
+    // Server returns annotated tag v1-annotated and its peeled first-commit target.
+    // Client sends the closing flush packet.
     private static final String LIST_TAGS_AFTER_ANNOTATED_TAG_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001aref-prefix refs/tags/\\0A0000
@@ -218,6 +292,10 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before listing a missing branch.
+    // Client asks for a branch prefix that does not exist.
+    // Server flushes an empty ref list.
+    // Client sends the closing flush packet.
     private static final String LIST_UNKNOWN_BRANCH_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A0029ref-prefix refs/heads/does-not-exist\\0A0000
@@ -225,6 +303,11 @@ public final class Scenarios {
             C:0000
             """);
 
+    // Server advertises protocol v2 capabilities before fetch negotiation.
+    // Client first asks for HEAD, branches and tags.
+    // Server returns HEAD symref metadata and master at the first commit.
+    // Client asks to fetch the first commit and finishes negotiation with done.
+    // Server sends the packfile section with progress sideband and the first-commit pack.
     private static final String FETCH_MASTER_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A0014ref-prefix HEAD\\0A001bref-prefix refs/heads/\\0A001aref-prefix refs/tags/\\0A0000
@@ -233,35 +316,54 @@ public final class Scenarios {
             S:000dpackfile\\0A001c\\02Counting objects: 1   \\0D001f\\02Counting objects: 3, done\\0A0024\\02Finding sources:  33% (1/3)   \\0D0024\\02Finding sources:  67% (2/3)   \\0D0024\\02Finding sources: 100% (3/3)   \\0D0021\\02Finding sources: 100% (3/3)\\0A0022\\02Getting sizes:  50% (1/2)   \\0D0022\\02Getting sizes: 100% (2/2)   \\0D001f\\02Getting sizes: 100% (2/2)\\0A0011\\01{{FIRST_COMMIT_FETCH_PACK}}002b\\02Total 3 (delta 0), reused 3 (delta 0)\\0A0000
             """);
 
+    // Server advertises protocol v2 capabilities before fetch negotiation.
+    // Client wants the first commit but also reports it as an existing have.
+    // Server sends an empty pack because the client already has the requested object.
     private static final String FETCH_MASTER_WITH_HAVE_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0011command=fetch0001000dthin-pack000dofs-delta0032want {{FIRST_COMMIT_ID}}\\0A0032have {{FIRST_COMMIT_ID}}\\0A0009done\\0A0000
             S:000dpackfile\\0A0011\\01PACK\\00\\00\\00\\02\\00\\00\\00\\000019\\01\\02\\9D\\08\\82;\\D8\\A8\\EA\\B5\\10\\ADj\\C7\\5C\\82<\\FD>\\D3\\1E002b\\02Total 0 (delta 0), reused 0 (delta 0)\\0A0000
             """);
 
+    // Server advertises protocol v2 capabilities before fetch negotiation.
+    // Client fetches the first commit directly without a preceding ls-refs command.
+    // Server sends the packfile section with progress sideband and the first-commit pack.
     private static final String FETCH_MASTER_ONLY_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0011command=fetch0001000dthin-pack000dofs-delta0032want {{FIRST_COMMIT_ID}}\\0A0009done\\0A0000
             S:000dpackfile\\0A001c\\02Counting objects: 1   \\0D001f\\02Counting objects: 3, done\\0A0024\\02Finding sources:  33% (1/3)   \\0D0024\\02Finding sources:  67% (2/3)   \\0D0024\\02Finding sources: 100% (3/3)   \\0D0021\\02Finding sources: 100% (3/3)\\0A0022\\02Getting sizes:  50% (1/2)   \\0D0022\\02Getting sizes: 100% (2/2)   \\0D001f\\02Getting sizes: 100% (2/2)\\0A0011\\01{{FIRST_COMMIT_FETCH_PACK}}002b\\02Total 3 (delta 0), reused 3 (delta 0)\\0A0000
             """);
 
+    // Server advertises protocol v2 capabilities including shallow fetch support.
+    // Client requests a depth-1 shallow fetch of the first commit.
+    // Server marks the first commit as the shallow boundary and sends the first-commit pack.
     private static final String SHALLOW_FETCH_MASTER_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0011command=fetch0001000dthin-pack000dofs-delta000ddeepen 1\\0A0032want {{FIRST_COMMIT_ID}}\\0A0009done\\0A0000
             S:0011shallow-info\\0A0035shallow {{FIRST_COMMIT_ID}}\\0A0001000dpackfile\\0A001c\\02Counting objects: 1   \\0D001f\\02Counting objects: 3, done\\0A0024\\02Finding sources:  33% (1/3)   \\0D0024\\02Finding sources:  67% (2/3)   \\0D0024\\02Finding sources: 100% (3/3)   \\0D0021\\02Finding sources: 100% (3/3)\\0A0022\\02Getting sizes:  50% (1/2)   \\0D0022\\02Getting sizes: 100% (2/2)   \\0D001f\\02Getting sizes: 100% (2/2)\\0A0011\\01{{FIRST_COMMIT_FETCH_PACK}}002b\\02Total 3 (delta 0), reused 3 (delta 0)\\0A0000
             """);
 
+    // Server advertises protocol v2 capabilities including shallow fetch support.
+    // Client sends an invalid shallow fetch request with deepen 0.
+    // Server rejects the request with a protocol error before pack negotiation completes.
     private static final String SHALLOW_FETCH_WITH_ZERO_DEPTH_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0011command=fetch0001000dthin-pack000dofs-delta000ddeepen 0\\0A0032want {{FIRST_COMMIT_ID}}\\0A
             S:0018ERR Invalid depth: 00000
             """);
 
+    // Server advertises protocol v2 capabilities before fetch negotiation.
+    // Client asks for an object id that is not present in the repository and closes negotiation.
     private static final String FETCH_UNKNOWN_OBJECT_AFTER_PUSH = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0011command=fetch0001000dthin-pack000dofs-delta0032want 1111111111111111111111111111111111111111\\0A0009done\\0A0000
             """);
 
+    // Server advertises protocol v2 capabilities before branch-restricted fetch.
+    // Client lists all branch refs to discover master and feature.
+    // Server returns feature at the second root commit and master at the first commit.
+    // Client tries to fetch the feature commit outside the user's branch grant.
+    // Server rejects the fetch with ACCESS_DENIED.
     private static final String FETCH_SECOND_ROOT_FEATURE_BRANCH_DENIED = script("""
             S:000eversion 2\\0A000cls-refs\\0A0012fetch=shallow\\0A0012server-option\\0A0000
             C:0014command=ls-refs\\0A00010009peel\\0A000csymrefs\\0A001bref-prefix refs/heads/\\0A0000
@@ -270,32 +372,41 @@ public final class Scenarios {
             S:0015ERR ACCESS_DENIED0000
             """);
 
+    // Server advertises classic protocol capabilities with no real refs in an empty repository.
     private static final String CLASSIC_LIST_EMPTY_REPOSITORY_REFS = script("""
             S:00c70000000000000000000000000000000000000000 capabilities^{}\\00 include-tag multi_ack_detailed multi_ack ofs-delta side-band side-band-64k thin-pack no-progress shallow agent=JGit/7.0.0.202409031743-r\\0A0000
             """);
 
+    // Server advertises classic protocol HEAD, master and capabilities after the first push.
     private static final String CLASSIC_LIST_REFS_AFTER_PUSH = script("""
             S:00da{{FIRST_COMMIT_ID}} HEAD\\00 include-tag multi_ack_detailed multi_ack ofs-delta side-band side-band-64k thin-pack no-progress shallow agent=JGit/7.0.0.202409031743-r symref=HEAD:refs/heads/master\\0A003f{{FIRST_COMMIT_ID}} refs/heads/master\\0A0000
             """);
 
+    // Server advertises classic protocol HEAD, master and capabilities after the first push.
+    // Client wants the first commit with classic fetch capabilities and sends done.
+    // Server answers NAK, then streams progress sideband and the first-commit pack.
     private static final String CLASSIC_FETCH_MASTER_AFTER_PUSH = script("""
             S:00da{{FIRST_COMMIT_ID}} HEAD\\00 include-tag multi_ack_detailed multi_ack ofs-delta side-band side-band-64k thin-pack no-progress shallow agent=JGit/7.0.0.202409031743-r symref=HEAD:refs/heads/master\\0A003f{{FIRST_COMMIT_ID}} refs/heads/master\\0A0000
             C:0067want {{FIRST_COMMIT_ID}} multi_ack_detailed side-band-64k thin-pack ofs-delta\\0A00000009done\\0A
             S:0008NAK\\0A001c\\02Counting objects: 1   \\0D001f\\02Counting objects: 3, done\\0A0024\\02Finding sources:  33% (1/3)   \\0D0024\\02Finding sources:  67% (2/3)   \\0D0024\\02Finding sources: 100% (3/3)   \\0D0021\\02Finding sources: 100% (3/3)\\0A0022\\02Getting sizes:  50% (1/2)   \\0D0022\\02Getting sizes: 100% (2/2)   \\0D001f\\02Getting sizes: 100% (2/2)\\0A0011\\01{{FIRST_COMMIT_FETCH_PACK}}002b\\02Total 3 (delta 0), reused 3 (delta 0)\\0A0000
             """);
 
+    // Server advertises classic protocol HEAD, feature, master and capabilities after feature creation.
     private static final String CLASSIC_LIST_REFS_AFTER_FEATURE_BRANCH = script("""
             S:00da{{FIRST_COMMIT_ID}} HEAD\\00 include-tag multi_ack_detailed multi_ack ofs-delta side-band side-band-64k thin-pack no-progress shallow agent=JGit/7.0.0.202409031743-r symref=HEAD:refs/heads/master\\0A0040{{FIRST_COMMIT_ID}} refs/heads/feature\\0A003f{{FIRST_COMMIT_ID}} refs/heads/master\\0A0000
             """);
 
+    // Server advertises classic protocol HEAD, master, lightweight tag and capabilities.
     private static final String CLASSIC_LIST_REFS_AFTER_TAG = script("""
             S:00da{{FIRST_COMMIT_ID}} HEAD\\00 include-tag multi_ack_detailed multi_ack ofs-delta side-band side-band-64k thin-pack no-progress shallow agent=JGit/7.0.0.202409031743-r symref=HEAD:refs/heads/master\\0A003f{{FIRST_COMMIT_ID}} refs/heads/master\\0A003a{{FIRST_COMMIT_ID}} refs/tags/v1\\0A0000
             """);
 
+    // Server advertises classic protocol HEAD, master, annotated tag, peeled tag target and capabilities.
     private static final String CLASSIC_LIST_REFS_AFTER_ANNOTATED_TAG = script("""
             S:00da{{FIRST_COMMIT_ID}} HEAD\\00 include-tag multi_ack_detailed multi_ack ofs-delta side-band side-band-64k thin-pack no-progress shallow agent=JGit/7.0.0.202409031743-r symref=HEAD:refs/heads/master\\0A003f{{FIRST_COMMIT_ID}} refs/heads/master\\0A0044{{ANNOTATED_TAG_ID}} refs/tags/v1-annotated\\0A0047{{FIRST_COMMIT_ID}} refs/tags/v1-annotated^{}\\0A0000
             """);
 
+    // Server advertises classic protocol HEAD and master at the fast-forward commit.
     private static final String CLASSIC_LIST_REFS_AFTER_FAST_FORWARD = script("""
             S:00da{{FAST_FORWARD_COMMIT_ID}} HEAD\\00 include-tag multi_ack_detailed multi_ack ofs-delta side-band side-band-64k thin-pack no-progress shallow agent=JGit/7.0.0.202409031743-r symref=HEAD:refs/heads/master\\0A003f{{FAST_FORWARD_COMMIT_ID}} refs/heads/master\\0A0000
             """);
