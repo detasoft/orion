@@ -12,6 +12,7 @@ import org.eclipse.jgit.storage.pack.PackStatistics;
 import org.eclipse.jgit.transport.*;
 import org.slf4j.helpers.MessageFormatter;
 import pro.deta.orion.GitRepositoryProvider;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
@@ -32,7 +33,6 @@ import java.io.*;
 import java.util.*;
 import java.util.function.Function;
 
-import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.PermissionChecks.*;
 import static pro.deta.orion.git.util.GitUtils.writeProtocolError;
 
@@ -47,13 +47,14 @@ public class GitInternalService {
         this.eventManager = eventManager;
     }
 
-    public void service(String clientId, IOEStreamProvider streams, String requestId, Function<InputStream, GitCommand> cmdResolved) {
+    public void service(SecurityContext securityContext, String clientId, IOEStreamProvider streams, String requestId, Function<InputStream, GitCommand> cmdResolved) {
+        Objects.requireNonNull(securityContext, "securityContext");
         OrionUtils.wrapRunnableWithThreadName(MessageFormatter.format("Serving {} []", clientId, requestId).getMessage(), () -> {
             GitCommand gitCommand = null;
             try {
                 gitCommand = cmdResolved.apply(streams.getInputStream());
                 Thread.currentThread().setName(MessageFormatter.format("Serving {} [{}] ({})", clientId, new Object[]{requestId, gitCommand}).getMessage());
-                serveCommand(gitCommand, streams);
+                serveCommand(securityContext, gitCommand, streams);
             } catch (ServiceMayNotContinueException e) {
                 writeProtocolError(streams.getOutputStream(), e.getMessage());
             } catch (OrionSecurityException e) {
@@ -68,28 +69,28 @@ public class GitInternalService {
         });
     }
 
-    private void serveCommand(GitCommand gitCommand, IOEStreamProvider streams) throws IOException, ServiceMayNotContinueException, OrionSecurityException {
+    private void serveCommand(SecurityContext securityContext, GitCommand gitCommand, IOEStreamProvider streams) throws IOException, ServiceMayNotContinueException, OrionSecurityException {
         if (gitCommand.getCommand().isUnknown()) {
             writeProtocolError(streams.getOutputStream(), "unknown command");
             return;
         }
 
         String repositoryName = gitCommand.getRepositoryName();
-        Optional<Repository> repositoryResult = openRepositoryFor(gitCommand, repositoryName);
+        Optional<Repository> repositoryResult = openRepositoryFor(securityContext, gitCommand, repositoryName);
         if (repositoryResult.isEmpty()) {
             return;
         }
 
         try (Repository repository = repositoryResult.get()) {
             switch (gitCommand.getCommand()) {
-                case UPLOAD -> serveUploadPackToClient(gitCommand, repository, repositoryName, streams);
-                case RECEIVE -> serveReceivePackFromClient(repository, repositoryName, streams);
+                case UPLOAD -> serveUploadPackToClient(securityContext, gitCommand, repository, repositoryName, streams);
+                case RECEIVE -> serveReceivePackFromClient(securityContext, repository, repositoryName, streams);
                 default -> writeProtocolError(streams.getOutputStream(), "unknown command");
             }
         }
     }
 
-    private Optional<Repository> openRepositoryFor(GitCommand gitCommand, String repositoryName) throws OrionSecurityException {
+    private Optional<Repository> openRepositoryFor(SecurityContext securityContext, GitCommand gitCommand, String repositoryName) throws OrionSecurityException {
         boolean repositoryExists = repositoryProvider.exists(repositoryName);
         if (!repositoryExists && gitCommand.isRead()) {
             return Optional.empty();
@@ -97,14 +98,14 @@ public class GitInternalService {
 
         Result<Repository> repositoryResult;
         if (gitCommand.isWrite() && !repositoryExists) {
-            permissionChecker().ALLOW_TO_CREATE_REPO.assertThat(repositoryName);
+            permissionChecker().requireRepositoryCreate(securityContext, repositoryName);
             repositoryResult = repositoryProvider.findOrCreate(repositoryName);
         } else {
             if (gitCommand.isRead()) {
-                permissionChecker().ALLOW_READ_ACCESS.assertThat(repositoryName);
+                permissionChecker().requireRepositoryRead(securityContext, repositoryName);
             }
             if (gitCommand.isWrite()) {
-                permissionChecker().ALLOW_WRITE_ACCESS.assertThat(repositoryName);
+                permissionChecker().requireRepositoryWrite(securityContext, repositoryName);
             }
             repositoryResult = repositoryProvider.find(repositoryName);
         }
@@ -120,15 +121,15 @@ public class GitInternalService {
         };
     }
 
-    private void serveUploadPackToClient(GitCommand gitCommand, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+    private void serveUploadPackToClient(SecurityContext securityContext, GitCommand gitCommand, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
         UploadPack uploadPack = GitUtils.createUploadPackToClient(repository, extraParameters(gitCommand));
-        attachHooks(uploadPack, repositoryName);
+        attachHooks(securityContext, uploadPack, repositoryName);
         GitUtils.runUploadPackToClient(uploadPack, streams);
     }
 
-    private void serveReceivePackFromClient(Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+    private void serveReceivePackFromClient(SecurityContext securityContext, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
         ReceivePack receivePack = GitUtils.createReceivePackFromClient(repository);
-        attachHooks(receivePack, repositoryName);
+        attachHooks(securityContext, receivePack, repositoryName);
         GitUtils.runReceivePackFromClient(receivePack, streams);
     }
 
@@ -140,7 +141,7 @@ public class GitInternalService {
         return extraParameters;
     }
 
-    private void attachHooks(ReceivePack rp, String repositoryName) {
+    private void attachHooks(SecurityContext securityContext, ReceivePack rp, String repositoryName) {
         rp.setPostReceiveHook(new PostReceiveHook() {
             @Override
             public void onPostReceive(ReceivePack rp, Collection<ReceiveCommand> commands) {
@@ -150,7 +151,7 @@ public class GitInternalService {
                 }
 
                 eventManager.publish(() -> {
-                    GitReceiveOrionEvent event = new GitReceiveOrionEvent(repositoryName, getSc().getUserIdentity().getUserId());
+                    GitReceiveOrionEvent event = new GitReceiveOrionEvent(repositoryName, securityContext.getUserIdentity().getUserId());
                     for (ReceiveCommand sc : eventCommands) {
                         event.addReceiveEventRef(toGitRefUpdate(sc));
                     }
@@ -160,7 +161,7 @@ public class GitInternalService {
         });
     }
 
-    private void attachHooks(UploadPack up, String repositoryName) {
+    private void attachHooks(SecurityContext securityContext, UploadPack up, String repositoryName) {
         up.setPostUploadHook(new PostUploadHook() {
             @Override
             public void onPostUpload(PackStatistics stats) {
@@ -171,9 +172,9 @@ public class GitInternalService {
             @Override
             public void onBeginNegotiateRound(UploadPack up, Collection<? extends ObjectId> wants, int cntOffered) throws ServiceMayNotContinueException {
                 try {
-                    permissionChecker().ALLOW_READ_ACCESS.assertThat(repositoryName);
+                    permissionChecker().requireRepositoryRead(securityContext, repositoryName);
                     try (Git git = new Git(up.getRepository())) {
-                        permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(new GitFetchAccessRequest(
+                        permissionChecker().requireRepositoryFetch(securityContext, new GitFetchAccessRequest(
                                 repositoryName,
                                 toGitObjectIds(wants),
                                 objectIds -> resolveBranchNames(git, objectIds)));

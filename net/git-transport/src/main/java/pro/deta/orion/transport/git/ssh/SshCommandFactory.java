@@ -7,8 +7,7 @@ import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
-import pro.deta.orion.auth.Permission;
-import pro.deta.orion.auth.SecurityContextHolder;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.util.GitUtils;
@@ -21,10 +20,9 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
-import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.PermissionChecks.permissionChecker;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
@@ -54,10 +52,9 @@ public class SshCommandFactory implements CommandFactory {
         public void start(ChannelSession channel, Environment env) throws IOException {
             orionExecutor.submit(() -> {
                 int returnCode = 0;
-                try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-                    getSc().setUserIdentity(channel.getSession().getAttribute(SSH_AUTHENTICATED_USER));
-                    getSc().with(Permission.REQUEST_ID, channel.getSession().toString());
-                    permissionChecker().ALLOW_ANONYMOUS_ACCESS.assertThat();
+                SecurityContext securityContext = securityContextFor(channel);
+                try {
+                    permissionChecker().requireAuthenticatedUser(securityContext);
 
                     if (SET_KEY.equalsIgnoreCase(commandLine)) {
                         ByteBuffer bb = ByteBuffer.allocate(256);
@@ -76,7 +73,7 @@ public class SshCommandFactory implements CommandFactory {
                             throw new RuntimeException(e);
                         }
                     } else if (SHUTDOWN.equalsIgnoreCase(commandLine)) {
-                        permissionChecker().ALLOW_TO_SHUTDOWN.assertThat(SHUTDOWN);
+                        permissionChecker().requireApplicationShutdown(securityContext);
                         orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
                     } else {
                         log.warn("SSH Transport Unknown command: {}", commandLine);
@@ -114,13 +111,17 @@ public class SshCommandFactory implements CommandFactory {
         public void start(ChannelSession channelSession, Environment environment) {
             orionExecutor.submit(() -> {
                 int returnCode = 0;
-                try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-                    getSc().setUserIdentity(channelSession.getSession().getAttribute(SSH_AUTHENTICATED_USER));
-                    getSc().with(Permission.REQUEST_ID, channelSession.getSession().toString());
-                    permissionChecker().ALLOW_ANONYMOUS_ACCESS.assertThat();
-                    List<String> envs = environment.getEnv().entrySet().stream().filter(e -> e.getKey().startsWith("GIT_")).map(e -> e.getValue()).collect(Collectors.toList());
+                SecurityContext securityContext = securityContextFor(channelSession);
+                try {
+                    permissionChecker().requireAuthenticatedUser(securityContext);
+                    List<String> envs = gitEnvironmentValues(environment);
                     try (IOEStreamProvider streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
-                        gitInternalService.service(channelSession.toString(), streams, "1", (inputStream) -> GitInternalService.parseGitCommand(commandLine, envs));
+                        gitInternalService.service(
+                                securityContext,
+                                channelSession.toString(),
+                                streams,
+                                securityContext.getRequestId(),
+                                inputStream -> GitInternalService.parseGitCommand(commandLine, envs));
                     }
                 } catch (OrionSecurityException e) {
                     GitUtils.writeProtocolError(outputStream, "ACCESS_DENIED");
@@ -134,5 +135,21 @@ public class SshCommandFactory implements CommandFactory {
                 }
             });
         }
+    }
+
+    private static SecurityContext securityContextFor(ChannelSession channelSession) {
+        return SecurityContext.createContext()
+                .withUserIdentity(channelSession.getSession().getAttribute(SSH_AUTHENTICATED_USER))
+                .withRequestId(channelSession.getSession().toString());
+    }
+
+    private static List<String> gitEnvironmentValues(Environment environment) {
+        List<String> values = new ArrayList<>();
+        for (var entry : environment.getEnv().entrySet()) {
+            if (entry.getKey().startsWith("GIT_")) {
+                values.add(entry.getValue());
+            }
+        }
+        return values;
     }
 }

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
-import pro.deta.orion.auth.SecurityContextHolder;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
@@ -30,7 +30,6 @@ import java.util.function.Supplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.git.JGitRuntimeAssertions.assertControlledJGitSystemReaderInstalled;
 import static pro.deta.orion.git.JGitRuntimeAssertions.installDefaultControlledJGitRuntime;
-import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 
 @DisplayName("Git internal service protocol")
 @ResourceLock("jgit-system-reader")
@@ -59,13 +58,10 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.pushFirstCommitThenListAndFetch(gitServer(service), assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.pushFirstCommitThenListAndFetch(gitServer(service, writer), assertions));
 
             assertThat(repositoryProvider.exists("project")).isTrue();
             assertFirstCommitReceiveEvent(events, "project", "writer");
@@ -79,13 +75,10 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
         RecordingEventManager events = new RecordingEventManager();
         GitInternalService service = new GitInternalService(repositoryProvider, events);
+        InternalUserImpl creator = gitUser("creator", "project");
 
-        try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-            getSc().setUserIdentity(gitUser("creator", "project"));
-
-            SoftAssertions.assertSoftly(assertions ->
-                    Scenarios.pushFirstCommitThenListAndFetchFromReceive(gitServer(service), assertions));
-        }
+        SoftAssertions.assertSoftly(assertions ->
+                Scenarios.pushFirstCommitThenListAndFetchFromReceive(gitServer(service, creator), assertions));
 
         assertThat(repositoryProvider.exists("project")).isTrue();
         assertThat(gitStorageDir.resolve("project/config")).exists();
@@ -99,13 +92,10 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository repository = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.pushFirstCommitThenFastForwardMasterAndListIt(gitServer(service), repository, assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.pushFirstCommitThenFastForwardMasterAndListIt(gitServer(service, writer), repository, assertions));
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
@@ -121,13 +111,10 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.pushFirstCommitThenDeleteMasterAndListRefs(gitServer(service), assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.pushFirstCommitThenDeleteMasterAndListRefs(gitServer(service, writer), assertions));
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
@@ -143,13 +130,10 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.pushFeatureBranchAndTagInOneReceivePack(gitServer(service), assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.pushFeatureBranchAndTagInOneReceivePack(gitServer(service, writer), assertions));
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
@@ -176,16 +160,13 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository repository = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
+            InternalUserImpl reader = gitReader("reader", "project", "master");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.pushFirstCommitThenCreateSecondRootFeatureBranch(gitServer(service), repository, assertions));
-
-                getSc().setUserIdentity(gitReader("reader", "project", "master"));
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.fetchSecondRootFeatureBranchDenied(gitServer(service), assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.pushFirstCommitThenCreateSecondRootFeatureBranch(gitServer(service, writer), repository, assertions));
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.fetchSecondRootFeatureBranchDenied(gitServer(service, reader), assertions));
 
             assertThat(events.eventsOf(GitUploadOrionEvent.class)).isEmpty();
         }
@@ -198,16 +179,13 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository repository = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
+            InternalUserImpl reader = gitReader("reader", "project", "master");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.pushFirstCommitThenCreateSecondRootFeatureBranch(gitServer(service), repository, assertions));
-
-                getSc().setUserIdentity(gitReader("reader", "project", "master"));
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.fetchMasterOnly(gitServer(service), assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.pushFirstCommitThenCreateSecondRootFeatureBranch(gitServer(service, writer), repository, assertions));
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.fetchMasterOnly(gitServer(service, reader), assertions));
 
             assertUploadEvent(events, "project");
         }
@@ -220,13 +198,10 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository repository = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.rejectNonFastForwardPushWhenConfigured(gitServer(service), repository, assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.rejectNonFastForwardPushWhenConfigured(gitServer(service, writer), repository, assertions));
 
             List<GitReceiveOrionEvent> receiveEvents = events.eventsOf(GitReceiveOrionEvent.class);
             assertThat(receiveEvents).hasSize(2);
@@ -253,11 +228,8 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
                 output,
                 new ByteArrayOutputStream());
 
-        try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-            getSc().setUserIdentity(gitUser("reader", "missing"));
-            service.service("test-client", streams, "request-1",
-                    ignored -> GitInternalService.parseGitCommand("git-upload-pack /missing.git", List.of("version=2")));
-        }
+        service.service(securityContext(gitUser("reader", "missing"), "request-1"), "test-client", streams, "request-1",
+                ignored -> GitInternalService.parseGitCommand("git-upload-pack /missing.git", List.of("version=2")));
 
         assertThat(output.size()).isZero();
         assertThat(events.eventsOf(GitUploadOrionEvent.class)).isEmpty();
@@ -270,13 +242,10 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         try (Repository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
+            InternalUserImpl writer = gitUser("writer", "project");
 
-            try (SecurityContextHolder ignoredSecurityContext = new SecurityContextHolder()) {
-                getSc().setUserIdentity(gitUser("writer", "project"));
-
-                SoftAssertions.assertSoftly(assertions ->
-                        Scenarios.pushFirstCommitThenFetchUnknownObject(gitServer(service), assertions));
-            }
+            SoftAssertions.assertSoftly(assertions ->
+                    Scenarios.pushFirstCommitThenFetchUnknownObject(gitServer(service, writer), assertions));
 
             assertThat(events.eventsOf(GitUploadOrionEvent.class)).isEmpty();
         }
@@ -287,13 +256,20 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         return new GitRepositoryProviderImpl(gitStorageDir);
     }
 
-    private static Scenarios.GitCommandServer gitServer(GitInternalService service) {
+    private static Scenarios.GitCommandServer gitServer(GitInternalService service, InternalUserImpl userIdentity) {
         return (commandLine, extraProperties) -> serverIO ->
                 service.service(
+                        securityContext(userIdentity, commandLine),
                         "test-client",
                         serverIO.ioEStreams(),
                         commandLine,
                         ignored -> GitInternalService.parseGitCommand(commandLine, extraProperties));
+    }
+
+    private static SecurityContext securityContext(InternalUserImpl userIdentity, String requestId) {
+        return SecurityContext.createContext()
+                .withUserIdentity(userIdentity)
+                .withRequestId(requestId);
     }
 
     private static InternalUserImpl gitUser(String userId, String repositoryName) {

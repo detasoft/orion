@@ -1,7 +1,5 @@
 package pro.deta.orion.auth.check;
 
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.*;
@@ -12,135 +10,97 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.*;
 
-import static pro.deta.orion.auth.Decision.ALLOW;
-import static pro.deta.orion.auth.Decision.DENY;
-import static pro.deta.orion.auth.Permission.*;
-import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.MatcherUtils.filterGrants;
 import static pro.deta.orion.auth.check.MatcherUtils.matchExpressionValue;
 
 @Slf4j
 public class PermissionChecks {
-    private static final PermissionChecks _instance = new PermissionChecks();
+    private static final PermissionChecks INSTANCE = new PermissionChecks();
+    private static final String REPOSITORY_CREATE_CHECK = "repository create";
+    private static final String REPOSITORY_FETCH_CHECK = "repository fetch";
+    private static final String REPOSITORY_READ_CHECK = "repository read";
+    private static final String REPOSITORY_WRITE_CHECK = "repository write";
+    private static final String APPLICATION_SHUTDOWN_CHECK = "application shutdown";
+    private static final String LOCAL_CONNECTION_CHECK = "local connection";
+    private static final String AUTHENTICATED_USER_CHECK = "authenticated user";
 
-    public final PermissionChecker<String> ALLOW_TO_CREATE_REPO = createFor(REPOSITORY_CREATE, "Allow create new repositories", (userIdentity, repositoryName) -> {
-        boolean allowed = hasGrant(
-                userIdentity,
-                repositoryGrant(repositoryName),
-                GrantMatcher.of(AccessControl.GrantKey.CREATE));
+    public void requireRepositoryCreate(SecurityContext securityContext, String repositoryName) throws OrionSecurityException {
+        UserIdentity userIdentity = securityContext.getUserIdentity();
+        boolean allowed = hasGrant(userIdentity, repositoryGrant(repositoryName), GrantMatcher.of(AccessControl.GrantKey.CREATE));
         if (allowed) {
-            log.debug("Check ALLOW_TO_CREATE_REPO passed for {} on {}", userIdentity, repositoryName);
+            log.debug("Repository create check passed for {} on {}", userIdentity, repositoryName);
         }
-        return allowIf(allowed);
-    });
+        requireAllowed(securityContext, REPOSITORY_CREATE_CHECK, allowed);
+    }
 
-    public final PermissionChecker<GitFetchAccessRequest> ALLOW_TO_FETCH_REPO = createFor(REPOSITORY_FETCH, "Allow fetch from repository", (userIdentity, frsc) -> {
-        List<AccessControl.Grant> branchGrants = branchRestrictedRepositoryGrants(userIdentity, frsc.repositoryName());
+    public void requireRepositoryFetch(SecurityContext securityContext, GitFetchAccessRequest request) throws OrionSecurityException {
+        List<AccessControl.Grant> branchGrants = branchRestrictedRepositoryGrants(securityContext.getUserIdentity(), request.repositoryName());
         if (branchGrants.isEmpty()) {
-            return ALLOW;
+            requireAllowed(securityContext, REPOSITORY_FETCH_CHECK, true);
+            return;
         }
         if (hasWildcardBranchGrant(branchGrants)) {
-            return ALLOW;
+            requireAllowed(securityContext, REPOSITORY_FETCH_CHECK, true);
+            return;
         }
 
-        Map<GitObjectId, String> wantedBranches = resolveWantedBranches(frsc);
-        if (!allWantsWereResolved(frsc, wantedBranches)) {
-            return DENY;
-        }
-        return allowIf(allWantedBranchesAreAllowed(frsc, branchGrants, wantedBranches));
-    });
+        Map<GitObjectId, String> wantedBranches = resolveWantedBranches(request);
+        boolean allowed = allWantsWereResolved(request, wantedBranches)
+                && allWantedBranchesAreAllowed(request, branchGrants, wantedBranches);
+        requireAllowed(securityContext, REPOSITORY_FETCH_CHECK, allowed);
+    }
 
-    public final PermissionChecker<String> ALLOW_READ_ACCESS = createFor(REPOSITORY_READ, "Allow read access", (userIdentity, repository) -> {
-        boolean allowed = hasGrant(userIdentity, repositoryGrant(repository));
+    public void requireRepositoryRead(SecurityContext securityContext, String repositoryName) throws OrionSecurityException {
+        UserIdentity userIdentity = securityContext.getUserIdentity();
+        boolean allowed = hasGrant(userIdentity, repositoryGrant(repositoryName));
         if (allowed) {
-            log.debug("Check ALLOW_READ_ACCESS passed for {} on {}", userIdentity, repository);
+            log.debug("Repository read check passed for {} on {}", userIdentity, repositoryName);
         }
-        return allowIf(allowed);
-    });
+        requireAllowed(securityContext, REPOSITORY_READ_CHECK, allowed);
+    }
 
-    public final PermissionChecker<String> ALLOW_WRITE_ACCESS = createFor(REPOSITORY_WRITE, "Allow write access", (userIdentity, repository) -> {
-        boolean allowed = hasGrant(
-                userIdentity,
-                repositoryGrant(repository),
-                GrantMatcher.of(AccessControl.GrantKey.WRITE));
+    public void requireRepositoryWrite(SecurityContext securityContext, String repositoryName) throws OrionSecurityException {
+        UserIdentity userIdentity = securityContext.getUserIdentity();
+        boolean allowed = hasGrant(userIdentity, repositoryGrant(repositoryName), GrantMatcher.of(AccessControl.GrantKey.WRITE));
         if (allowed) {
-            log.debug("Check ALLOW_WRITE_ACCESS passed for {} on {}", userIdentity, repository);
+            log.debug("Repository write check passed for {} on {}", userIdentity, repositoryName);
         }
-        return allowIf(allowed);
-    });
+        requireAllowed(securityContext, REPOSITORY_WRITE_CHECK, allowed);
+    }
 
-    public final PermissionChecker<String> ALLOW_TO_SHUTDOWN = createFor(APPLICATION_SHUTDOWN, "Allow application shutdown", (userIdentity, command) -> {
+    public void requireApplicationShutdown(SecurityContext securityContext) throws OrionSecurityException {
+        UserIdentity userIdentity = securityContext.getUserIdentity();
         boolean allowed = hasGrant(userIdentity, GrantMatcher.of(AccessControl.GrantKey.SHUTDOWN));
         if (allowed) {
-            log.debug("Check ALLOW_TO_SHUTDOWN passed for {}", userIdentity);
+            log.debug("Application shutdown check passed for {}", userIdentity);
         }
-        return allowIf(allowed);
-    });
+        requireAllowed(securityContext, APPLICATION_SHUTDOWN_CHECK, allowed);
+    }
 
-    public final PermissionChecker<SocketAddress> ALLOW_ONLY_LOCAL_CONNECTIONS = createFor(Permission.CLIENT_SOCKET_ADDRESS, "Allow only local connections", (userIdentity, socketAddress) -> {
-        return allowIf(socketAddress instanceof InetSocketAddress inetSocketAddress
-                && inetSocketAddress.getAddress().isLoopbackAddress());
-    });
+    public void requireLocalConnection(SecurityContext securityContext, SocketAddress socketAddress) throws OrionSecurityException {
+        boolean allowed = socketAddress instanceof InetSocketAddress inetSocketAddress
+                && inetSocketAddress.getAddress().isLoopbackAddress();
+        requireAllowed(securityContext, LOCAL_CONNECTION_CHECK, allowed);
+    }
 
-    public final PermissionChecker<UserIdentity> ALLOW_ANONYMOUS_ACCESS = createFor(Permission.USER_IDENTITY, "Allow anonymous access", (userIdentity, ui) -> {
-        return allowIf(userIdentity != null && !userIdentity.isAnonymous());
-    });
+    public void requireAuthenticatedUser(SecurityContext securityContext) throws OrionSecurityException {
+        UserIdentity userIdentity = securityContext.getUserIdentity();
+        requireAllowed(securityContext, AUTHENTICATED_USER_CHECK, userIdentity != null && !userIdentity.isAnonymous());
+    }
 
 
     public static PermissionChecks permissionChecker() {
-        return _instance;
+        return INSTANCE;
     }
 
-    public <O> void permissionCheck(PermissionChecker<O> checker) throws OrionSecurityException {
-        Decision decision = checker.validate();
-
+    private static void requireAllowed(SecurityContext securityContext, String checkName, boolean allowed) throws OrionSecurityException {
         if (log.isTraceEnabled()) {
-            log.atTrace().log("SC: {} result: {} by {}", getSc(), decision, checker.getName());
+            log.atTrace().log("SC: {} result: {} by {}", securityContext, allowed, checkName);
         }
-        if (decision == DENY) {
-            log.atWarn().log("ACCESS DENIED ({}): SC: {}", checker.getName(), getSc());
-            throw new OrionSecurityException("Origin: disallowed for [" + getSc().formatShort() + "] by '" + checker.getName() + "'");
+        if (!allowed) {
+            log.atWarn().log("ACCESS DENIED ({}): SC: {}", checkName, securityContext);
+            throw new OrionSecurityException("Origin: disallowed for [" + securityContext.formatShort() + "] by '" + checkName + "'");
         }
-    }
-
-    public <O> PermissionChecker<O> createFor(Permission<O> permission, String name, Validator<O> func) {
-        return new PermissionChecker<>(name, permission) {
-            @Override
-            public Decision validate() {
-                return func.validate(getSc().getUserIdentity(), getSc().getAttribute(permission));
-            }
-        };
-    }
-
-    @FunctionalInterface
-    public interface Validator<O> {
-        Decision validate(UserIdentity ui, O object);
-
-        default SecurityContext sc() {
-            return getSc();
-        }
-    }
-
-    @Getter
-    @RequiredArgsConstructor
-    public abstract class PermissionChecker<O> {
-        private final String name;
-        private final Permission<O> permission;
-
-        public abstract Decision validate();
-
-        public void assertThat() throws OrionSecurityException {
-            permissionCheck(this);
-        }
-
-        public void assertThat(O o) throws OrionSecurityException {
-            getSc().with(permission, o);
-            permissionCheck(this);
-        }
-    }
-
-    private static Decision allowIf(boolean condition) {
-        return condition ? ALLOW : DENY;
     }
 
     private static GrantMatcher repositoryGrant(String repositoryName) {

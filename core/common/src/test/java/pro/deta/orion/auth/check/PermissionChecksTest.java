@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
-import pro.deta.orion.auth.SecurityContextHolder;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
 import pro.deta.orion.git.common.GitObjectId;
 
@@ -15,7 +15,6 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.acl.schema.AccessControl.TRUE_STRING;
-import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.MatcherUtils.matchExpressionValue;
 import static pro.deta.orion.auth.check.PermissionChecks.permissionChecker;
 
@@ -32,125 +31,109 @@ public class PermissionChecksTest {
 
     @Test
     public void writeAccessRequiresRepositoryWriteGrant() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            AccessControl.Grant repositoryGrant = new AccessControl.Grant("repository-only", new ArrayList<>())
-                    .addKey(AccessControl.GrantKey.REPOSITORY, "project");
-            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(repositoryGrant)));
-            assertThatThrownBy(() -> permissionChecker().ALLOW_WRITE_ACCESS.assertThat("project"))
-                    .isInstanceOf(OrionSecurityException.class);
+        AccessControl.Grant repositoryGrant = new AccessControl.Grant("repository-only", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project");
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant)));
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryWrite(reader, "project"))
+                .isInstanceOf(OrionSecurityException.class);
 
-            AccessControl.Grant writeGrant = new AccessControl.Grant("write", new ArrayList<>())
-                    .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                    .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING);
-            getSc().setUserIdentity(new InternalUserImpl("writer", List.of(writeGrant)));
+        AccessControl.Grant writeGrant = new AccessControl.Grant("write", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING);
+        SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
 
-            assertThatCode(() -> permissionChecker().ALLOW_WRITE_ACCESS.assertThat("project"))
-                    .doesNotThrowAnyException();
-            assertThatThrownBy(() -> permissionChecker().ALLOW_WRITE_ACCESS.assertThat("other"))
-                    .isInstanceOf(OrionSecurityException.class);
-        }
+        assertThatCode(() -> permissionChecker().requireRepositoryWrite(writer, "project"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryWrite(writer, "other"))
+                .isInstanceOf(OrionSecurityException.class);
     }
 
     @Test
     public void shutdownRequiresShutdownGrant() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            getSc().setUserIdentity(new InternalUserImpl("regular", List.of()));
-            assertThatThrownBy(() -> permissionChecker().ALLOW_TO_SHUTDOWN.assertThat("shutdown"))
-                    .isInstanceOf(OrionSecurityException.class);
+        SecurityContext regular = securityContext(new InternalUserImpl("regular", List.of()));
+        assertThatThrownBy(() -> permissionChecker().requireApplicationShutdown(regular))
+                .isInstanceOf(OrionSecurityException.class);
 
-            AccessControl.Grant shutdownGrant = new AccessControl.Grant("shutdown", new ArrayList<>())
-                    .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING);
-            getSc().setUserIdentity(new InternalUserImpl("operator", List.of(shutdownGrant)));
+        AccessControl.Grant shutdownGrant = new AccessControl.Grant("shutdown", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING);
+        SecurityContext operator = securityContext(new InternalUserImpl("operator", List.of(shutdownGrant)));
 
-            assertThatCode(() -> permissionChecker().ALLOW_TO_SHUTDOWN.assertThat("shutdown"))
-                    .doesNotThrowAnyException();
-        }
+        assertThatCode(() -> permissionChecker().requireApplicationShutdown(operator))
+                .doesNotThrowAnyException();
     }
 
     @Test
     void fetchAccessAllowsRepositoryGrantWithoutBranchRestriction() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(repositoryGrant("project"))));
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("project"))));
 
-            assertThatCode(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
-                    "project",
-                    Map.of(MASTER_COMMIT, "master"),
-                    MASTER_COMMIT)))
-                    .doesNotThrowAnyException();
-        }
+        assertThatCode(() -> permissionChecker().requireRepositoryFetch(reader, fetchRequest(
+                "project",
+                Map.of(MASTER_COMMIT, "master"),
+                MASTER_COMMIT)))
+                .doesNotThrowAnyException();
     }
 
     @Test
     void fetchAccessAllowsWildcardBranchGrant() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(branchGrant("project", "*"))));
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(branchGrant("project", "*"))));
 
-            assertThatCode(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
-                    "project",
-                    Map.of(FEATURE_COMMIT, "feature"),
-                    FEATURE_COMMIT)))
-                    .doesNotThrowAnyException();
-        }
+        assertThatCode(() -> permissionChecker().requireRepositoryFetch(reader, fetchRequest(
+                "project",
+                Map.of(FEATURE_COMMIT, "feature"),
+                FEATURE_COMMIT)))
+                .doesNotThrowAnyException();
     }
 
     @Test
     void fetchAccessDeniesBranchOutsideGrant() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(branchGrant("project", "master"))));
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(branchGrant("project", "master"))));
 
-            assertThatThrownBy(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
-                    "project",
-                    Map.of(FEATURE_COMMIT, "feature"),
-                    FEATURE_COMMIT)))
-                    .isInstanceOf(OrionSecurityException.class);
-        }
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryFetch(reader, fetchRequest(
+                "project",
+                Map.of(FEATURE_COMMIT, "feature"),
+                FEATURE_COMMIT)))
+                .isInstanceOf(OrionSecurityException.class);
     }
 
     @Test
     void fetchAccessDeniesMissingWantedObject() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(branchGrant("project", "master"))));
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(branchGrant("project", "master"))));
 
-            assertThatThrownBy(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
-                    "project",
-                    Map.of(),
-                    MASTER_COMMIT)))
-                    .isInstanceOf(OrionSecurityException.class);
-        }
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryFetch(reader, fetchRequest(
+                "project",
+                Map.of(),
+                MASTER_COMMIT)))
+                .isInstanceOf(OrionSecurityException.class);
     }
 
     @Test
     void fetchAccessDeniesMixedWantsWhenAnyWantedBranchIsOutsideGrant() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(branchGrant("project", "master"))));
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(branchGrant("project", "master"))));
 
-            assertThatThrownBy(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
-                    "project",
-                    Map.of(
-                            MASTER_COMMIT, "master",
-                            FEATURE_COMMIT, "feature"),
-                    MASTER_COMMIT,
-                    FEATURE_COMMIT)))
-                    .isInstanceOf(OrionSecurityException.class);
-        }
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryFetch(reader, fetchRequest(
+                "project",
+                Map.of(
+                        MASTER_COMMIT, "master",
+                        FEATURE_COMMIT, "feature"),
+                MASTER_COMMIT,
+                FEATURE_COMMIT)))
+                .isInstanceOf(OrionSecurityException.class);
     }
 
     @Test
     void fetchAccessAllowsMixedWantsWhenEveryWantedBranchMatchesGrant() {
-        try (SecurityContextHolder ignored = new SecurityContextHolder()) {
-            getSc().setUserIdentity(new InternalUserImpl("reader", List.of(
-                    branchGrant("project", "master"),
-                    branchGrant("project", "feature"))));
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(
+                branchGrant("project", "master"),
+                branchGrant("project", "feature"))));
 
-            assertThatCode(() -> permissionChecker().ALLOW_TO_FETCH_REPO.assertThat(fetchRequest(
-                    "project",
-                    Map.of(
-                            MASTER_COMMIT, "master",
-                            FEATURE_COMMIT, "feature"),
-                    MASTER_COMMIT,
-                    FEATURE_COMMIT)))
-                    .doesNotThrowAnyException();
-        }
+        assertThatCode(() -> permissionChecker().requireRepositoryFetch(reader, fetchRequest(
+                "project",
+                Map.of(
+                        MASTER_COMMIT, "master",
+                        FEATURE_COMMIT, "feature"),
+                MASTER_COMMIT,
+                FEATURE_COMMIT)))
+                .doesNotThrowAnyException();
     }
 
     private static AccessControl.Grant repositoryGrant(String repositoryName) {
@@ -165,5 +148,9 @@ public class PermissionChecksTest {
 
     private static GitFetchAccessRequest fetchRequest(String repositoryName, Map<GitObjectId, String> resolvedBranches, GitObjectId... wants) {
         return new GitFetchAccessRequest(repositoryName, List.of(wants), ignored -> resolvedBranches);
+    }
+
+    private static SecurityContext securityContext(InternalUserImpl userIdentity) {
+        return SecurityContext.createContext().withUserIdentity(userIdentity);
     }
 }

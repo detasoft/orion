@@ -1,16 +1,11 @@
 package pro.deta.orion.auth;
 
 import lombok.ToString;
-import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.util.Pair;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.StringJoiner;
+import java.util.Objects;
 
-@Slf4j
 @ToString
 public class SecurityContext {
     public static final UserIdentity ANONYMOUS = new UserIdentity() {
@@ -36,44 +31,32 @@ public class SecurityContext {
     };
 
 
-    private final Map<String, Object> attributes = new HashMap<>();
+    private UserIdentity userIdentity = ANONYMOUS;
+    private String requestId;
 
     public static SecurityContext createContext() {
         return new SecurityContext();
     }
 
-    private SecurityContext() {
-        setUserIdentity(ANONYMOUS);
-    }
-
-    public <A> SecurityContext with(Permission<A> attribute, A o) {
-        return with(attribute.getName(), o);
-    }
-
-    public <A> SecurityContext with(String name, A o) {
-        if (attributes.containsKey(name))
-            log.trace("Attempt to update attribute {} value to [{}]", name, o);
-        attributes.put(name, o);
+    public SecurityContext withRequestId(String requestId) {
+        this.requestId = requestId;
         return this;
     }
 
-    @SuppressWarnings("unchecked")
-    public <A> A getAttribute(Permission<A> attribute) {
-        return (A) attributes.get(attribute.getName());
+    public String getRequestId() {
+        return requestId;
     }
 
     public String formatShort() {
-        UserIdentity ui = getUserIdentity();
-        if (ui != null)
-            return getUserIdentity().toString();
-        return "null";
+        return userIdentity.toString();
     }
 
     public UserIdentity getUserIdentity() {
-        return getAttribute(Permission.USER_IDENTITY);
+        return userIdentity;
     }
 
-    public void setUserIdentity(UserIdentity internalUser) {
-        with(Permission.USER_IDENTITY, internalUser);
+    public SecurityContext withUserIdentity(UserIdentity userIdentity) {
+        this.userIdentity = Objects.requireNonNullElse(userIdentity, ANONYMOUS);
+        return this;
     }
 }

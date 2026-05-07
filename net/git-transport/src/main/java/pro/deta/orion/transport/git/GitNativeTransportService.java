@@ -5,7 +5,7 @@ import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.output.NullOutputStream;
 import pro.deta.orion.ApplicationState;
-import pro.deta.orion.auth.*;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
@@ -21,7 +21,6 @@ import java.io.*;
 import java.net.*;
 import java.util.UUID;
 
-import static pro.deta.orion.auth.SecurityContextHolder.getSc;
 import static pro.deta.orion.auth.check.PermissionChecks.permissionChecker;
 
 @Slf4j
@@ -88,28 +87,24 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
     }
 
     private void newConnectionInternal(Socket finalSocket) {
-        try (SecurityContextHolder sch = new SecurityContextHolder()) {
-            String requestId = UUID.randomUUID().toString();
+        String requestId = UUID.randomUUID().toString();
+        SecurityContext securityContext = SecurityContext.createContext().withRequestId(requestId);
 
-            getSc().with(Permission.REQUEST_ID, requestId);
-
+        try {
+            permissionChecker().requireLocalConnection(securityContext, finalSocket.getRemoteSocketAddress());
+            log.debug("Client connected {} via {}", requestId, config);
+            finalSocket.setSoTimeout(5 * 1000);
+            try (IOEStreamProvider streams = StreamUtils.newInstance(finalSocket.getInputStream(), finalSocket.getOutputStream(), NullOutputStream.INSTANCE)) {
+                gitInternalService.service(securityContext, finalSocket.getRemoteSocketAddress().toString(), streams, requestId, GitInternalService::parse);
+            }
+        } catch (OrionSecurityException e) {
+            log.warn(e.getMessage());
+        } catch (IOException e) {
+            log.error("Error while serving client {}", requestId, e);
+        } finally {
             try {
-                permissionChecker().ALLOW_ANONYMOUS_ACCESS.assertThat();
-                permissionChecker().ALLOW_ONLY_LOCAL_CONNECTIONS.assertThat(finalSocket.getRemoteSocketAddress());
-                log.debug("Client connected {} via {}", requestId, config);
-                finalSocket.setSoTimeout(5 * 1000);
-                try (IOEStreamProvider streams = StreamUtils.newInstance(finalSocket.getInputStream(), finalSocket.getOutputStream(), NullOutputStream.INSTANCE)) {
-                    gitInternalService.service(finalSocket.getRemoteSocketAddress().toString(), streams, requestId, GitInternalService::parse);
-                }
-            } catch (OrionSecurityException e) {
-                log.warn(e.getMessage());
-            } catch (IOException e) {
-                log.error("Error while serving client {}", requestId, e);
-            } finally {
-                try {
-                    finalSocket.close();
-                } catch (IOException ignored) {
-                }
+                finalSocket.close();
+            } catch (IOException ignored) {
             }
         }
     }
