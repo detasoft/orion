@@ -8,6 +8,8 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
 import pro.deta.orion.git.common.GitObjectId;
 
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +29,60 @@ public class PermissionChecksTest {
         // '*/orion', 'orion/*', '*/*', 'pre*/some'
         Assertions.assertTrue(matchExpressionValue("orion", "orion"));
         Assertions.assertTrue(matchExpressionValue("or*on", "orion"));
+    }
+
+    @Test
+    public void readAccessRequiresRepositoryGrant() {
+        SecurityContext anonymous = SecurityContext.createContext();
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryRead(anonymous, "project"))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("repository read");
+
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("project"))));
+
+        assertThatCode(() -> permissionChecker().requireRepositoryRead(reader, "project"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryRead(reader, "other"))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("repository read");
+    }
+
+    @Test
+    public void readAccessAllowsRepositoryPatternGrant() {
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("team/*"))));
+
+        assertThatCode(() -> permissionChecker().requireRepositoryRead(reader, "team/project"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryRead(reader, "other/project"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
+    @Test
+    public void createAccessRequiresRepositoryCreateGrant() {
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("project"))));
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryCreate(reader, "project"))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("repository create");
+
+        AccessControl.Grant createGrant = repositoryGrant("project")
+                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING);
+        SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
+
+        assertThatCode(() -> permissionChecker().requireRepositoryCreate(creator, "project"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> permissionChecker().requireRepositoryCreate(creator, "other"))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("repository create");
+    }
+
+    @Test
+    public void createAccessAllowsRepositoryPatternGrant() {
+        AccessControl.Grant createGrant = repositoryGrant("team/*")
+                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING);
+        SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
+
+        assertThatCode(() -> permissionChecker().requireRepositoryCreate(creator, "team/project"))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -52,7 +108,8 @@ public class PermissionChecksTest {
     public void shutdownRequiresShutdownGrant() {
         SecurityContext regular = securityContext(new InternalUserImpl("regular", List.of()));
         assertThatThrownBy(() -> permissionChecker().requireApplicationShutdown(regular))
-                .isInstanceOf(OrionSecurityException.class);
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("application shutdown");
 
         AccessControl.Grant shutdownGrant = new AccessControl.Grant("shutdown", new ArrayList<>())
                 .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING);
@@ -60,6 +117,55 @@ public class PermissionChecksTest {
 
         assertThatCode(() -> permissionChecker().requireApplicationShutdown(operator))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void authenticatedUserCheckDeniesAnonymousContext() {
+        assertThatThrownBy(() -> permissionChecker().requireAuthenticatedUser(SecurityContext.createContext()))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("authenticated user");
+    }
+
+    @Test
+    void authenticatedUserCheckDeniesAnonymousInternalUser() {
+        SecurityContext context = securityContext(new InternalUserImpl(null, List.of()));
+
+        assertThatThrownBy(() -> permissionChecker().requireAuthenticatedUser(context))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("authenticated user");
+    }
+
+    @Test
+    void authenticatedUserCheckAllowsNamedUserWithoutGrants() {
+        SecurityContext context = securityContext(new InternalUserImpl("reader", List.of()));
+
+        assertThatCode(() -> permissionChecker().requireAuthenticatedUser(context))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void localConnectionCheckAllowsLoopbackAddresses() {
+        SecurityContext context = SecurityContext.createContext();
+
+        assertThatCode(() -> permissionChecker().requireLocalConnection(context, new InetSocketAddress("127.0.0.1", 22)))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> permissionChecker().requireLocalConnection(context, new InetSocketAddress("::1", 22)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void localConnectionCheckDeniesRemoteUnresolvedAndNonInetAddresses() {
+        SecurityContext context = SecurityContext.createContext();
+
+        assertThatThrownBy(() -> permissionChecker().requireLocalConnection(context, new InetSocketAddress("8.8.8.8", 22)))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("local connection");
+        assertThatThrownBy(() -> permissionChecker().requireLocalConnection(context, InetSocketAddress.createUnresolved("localhost", 22)))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("local connection");
+        assertThatThrownBy(() -> permissionChecker().requireLocalConnection(context, new TestSocketAddress()))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("local connection");
     }
 
     @Test
@@ -152,5 +258,8 @@ public class PermissionChecksTest {
 
     private static SecurityContext securityContext(InternalUserImpl userIdentity) {
         return SecurityContext.createContext().withUserIdentity(userIdentity);
+    }
+
+    private static final class TestSocketAddress extends SocketAddress {
     }
 }

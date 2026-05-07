@@ -79,6 +79,7 @@ public class PermissionChecks {
 
     public void requireLocalConnection(SecurityContext securityContext, SocketAddress socketAddress) throws OrionSecurityException {
         boolean allowed = socketAddress instanceof InetSocketAddress inetSocketAddress
+                && inetSocketAddress.getAddress() != null
                 && inetSocketAddress.getAddress().isLoopbackAddress();
         requireAllowed(securityContext, LOCAL_CONNECTION_CHECK, allowed);
     }
