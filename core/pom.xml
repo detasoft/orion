@@ -20,6 +20,7 @@
         <module>bootstrap</module>
         <module>common</module>
         <module>git-common</module>
+        <module>authorization</module>
         <module>git-engine</module>
         <module>git-engine-s3</module>
         <module>communication</module>

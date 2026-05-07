@@ -19,6 +19,10 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
+            <artifactId>authorization</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
             <artifactId>git-engine</artifactId>
         </dependency>
         <dependency>
