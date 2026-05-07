@@ -40,7 +40,7 @@ public class OrionConfiguration {
 
     @Data
     public static class AccessControlConfig {
-        // "https://github.com/bade7n/orion.git"
+        // "https://github.com/vladilm/orion.git"
         // "ssh://git@jump.deta.pro:deta/orion_runtime.git"
         // "local://orion.git"
         // "file://pathToDir/
