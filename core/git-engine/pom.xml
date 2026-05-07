@@ -22,14 +22,6 @@
             <artifactId>authorization</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>configuration</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>git-common</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>git-engine-test-support</artifactId>
             <scope>test</scope>

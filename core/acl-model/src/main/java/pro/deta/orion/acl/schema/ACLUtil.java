@@ -1,11 +1,7 @@
 package pro.deta.orion.acl.schema;
 
-import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.acl.schema.AccessControl;
-
 import java.util.ArrayList;
 
-@Slf4j
 public class ACLUtil {
     public static AccessControl generateDefaultAccessControl(String defaultRootPasswordHash) {
         AccessControl s = new AccessControl();

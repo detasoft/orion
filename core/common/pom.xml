@@ -29,6 +29,10 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
+            <artifactId>acl-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
             <artifactId>configuration</artifactId>
         </dependency>
         <dependency>
@@ -47,14 +51,8 @@
             <version>2.15.1</version>
         </dependency>
         <dependency>
-            <groupId>commons-lang</groupId>
-            <artifactId>commons-lang</artifactId>
-            <version>2.6</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.sshd</groupId>
-            <artifactId>sshd-mina</artifactId>
-            <version>${sshd-mina.version}</version>
+            <artifactId>sshd-common</artifactId>
         </dependency>
         <dependency>
             <groupId>net.i2p.crypto</groupId>

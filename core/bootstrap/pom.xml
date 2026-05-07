@@ -15,28 +15,12 @@
 
     <dependencies>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>git-engine</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>git-storage</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>git-transport</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>acl</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>authorization</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>configuration</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.net</groupId>

@@ -1,9 +1,8 @@
-package pro.deta.orion.acl;
+package pro.deta.orion.acl.schema;
 
 import org.jeasy.random.EasyRandom;
 import org.jeasy.random.EasyRandomParameters;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.acl.schema.CloneToUnmodifiable;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;

@@ -15,6 +15,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>acl-model</module>
         <module>acl</module>
         <module>bc</module>
         <module>bootstrap</module>

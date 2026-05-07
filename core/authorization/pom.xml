@@ -16,7 +16,7 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>configuration</artifactId>
+            <artifactId>acl-model</artifactId>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
