@@ -45,6 +45,29 @@ Do not remove the `INIT` priorities or `waitForCompletion()` calls without
 re-checking this flow. If the volatile user event is published before the ACL
 service subscribes to it, Orion can fail to read its own Git-backed ACL configuration during startup.
 
+# Target ACL Bootstrap Flow
+
+The target startup model should remove the self-transport bootstrap loop. Local deployment configuration should have
+three root sections:
+
+1. `bootstrap`: server startup settings and path to ACL.
+2. `storage`: physical repository storage and repository creation policy.
+3. `transport`: network transports.
+
+Startup order should be:
+
+1. Read local deployment configuration.
+2. Configure `storage`.
+3. Configure `bootstrap.accessControl`.
+4. Load ACL through the configured ACL storage.
+5. Start `transport` only after storage and ACL are ready.
+6. Accept external users through normal ACL checks.
+
+`transport` must not participate in ACL bootstrap. For `git+storage:` ACL, Orion opens the configured repository through
+the internal storage backend directly. Local filesystem storage normally needs no backend authorization; S3 or another
+remote backend may need backend credentials from environment variables, files or provider-specific mechanisms. Those
+backend credentials are not Orion ACL users.
+
 # Next steps
 1. [git-mirror] func to mirror github/gitlab hostings
 2. [ACL] [ssh-remote] add support for user's key provided
