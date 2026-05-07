@@ -7,7 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.config.WorkDir;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.ServerKeyService;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
@@ -17,6 +16,7 @@ import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.OrionProvider;
 
@@ -40,7 +40,11 @@ public class GitInternalStorage implements OrionApplicationStageEventListener {
     private final OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider;
 
     @Inject
-    public GitInternalStorage(@WorkDir Path workDir, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
+    public GitInternalStorage(ConfigurationContext configurationContext, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
+        this(configurationContext.getWorkDir(), config, serverKeyService, orionProvider, orionClientSshdSessionFactoryProvider);
+    }
+
+    GitInternalStorage(Path workDir, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
         this.storageArea = workDir.resolve("storage-area");
         this.serverKeyService = serverKeyService;
         this.config = config;

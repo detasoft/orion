@@ -5,7 +5,6 @@ import jakarta.inject.Singleton;
 import lombok.Getter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.config.BaseDir;
 import pro.deta.orion.util.*;
 
 import java.nio.file.Path;
@@ -29,7 +28,11 @@ public class ServerKeyService {
     private final List<KeyPair> serverKeys = new ArrayList<>();
 
     @Inject
-    public ServerKeyService(@BaseDir Path baseDir) {
+    public ServerKeyService(ConfigurationContext configurationContext) {
+        this(configurationContext.getBaseDir());
+    }
+
+    ServerKeyService(Path baseDir) {
         this.hostKeysDir = baseDir.resolve("server-keys");
         FileUtils.mkdirs(hostKeysDir);
         switch(createServerKeyIfNotExist(hostKeysDir.resolve("rsa.pem"), "RSA", 2048)) {

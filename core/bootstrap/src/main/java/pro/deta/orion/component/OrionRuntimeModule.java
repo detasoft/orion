@@ -12,7 +12,7 @@ import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.GitAccessControlStorage;
 import pro.deta.orion.acl.storage.JDBCAccessControlStorage;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
-import pro.deta.orion.config.*;
+import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.GitRepositoryProviderImpl;
@@ -22,10 +22,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
-import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-
-import java.nio.file.Path;
 
 
 @Module
@@ -88,24 +85,6 @@ public class OrionRuntimeModule {
     @IntoSet
     static OrionApplicationStageEventListener orionJGitRuntime(OrionJGitRuntime orionJGitRuntime) {
         return orionJGitRuntime;
-    }
-
-    @Provides
-    @WorkDir
-    Path workDir(ConfigurationContext configurationContext) {
-        return configurationContext.getWorkDir();
-    }
-
-    @Provides
-    @BaseDir
-    Path baseDir(ConfigurationContext configurationContext) {
-        return configurationContext.getBaseDir();
-    }
-
-    @Provides
-    @ThreadPoolSizeConfig
-    Integer executorPoolSize(OrionConfiguration orionConfiguration) {
-        return orionConfiguration.getThreadPoolSize();
     }
 
     @Provides
