@@ -7,6 +7,8 @@ import org.apache.commons.io.output.NullOutputStream;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.resource.ClientConnectionResource;
+import pro.deta.orion.auth.check.rule.ConnectionAccessRules;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.internal.OrionExecutor;
@@ -21,7 +23,7 @@ import java.io.*;
 import java.net.*;
 import java.util.UUID;
 
-import static pro.deta.orion.auth.check.PermissionChecks.permissionChecker;
+import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 @Slf4j
 @Singleton
@@ -91,7 +93,10 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
         SecurityContext securityContext = SecurityContext.createContext().withRequestId(requestId);
 
         try {
-            permissionChecker().requireLocalConnection(securityContext, finalSocket.getRemoteSocketAddress());
+            accessEnforcer().require(
+                    securityContext,
+                    ClientConnectionResource.of(finalSocket.getRemoteSocketAddress()),
+                    ConnectionAccessRules.localOnly());
             log.debug("Client connected {} via {}", requestId, config);
             finalSocket.setSoTimeout(5 * 1000);
             try (IOEStreamProvider streams = StreamUtils.newInstance(finalSocket.getInputStream(), finalSocket.getOutputStream(), NullOutputStream.INSTANCE)) {

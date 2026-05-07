@@ -6,6 +6,10 @@ import pro.deta.orion.acl.schema.AccessControl;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Describes the subject and metadata of one request. This is intentionally separate from protected resources:
+ * the context answers "who is doing this and under which request id", while resources answer "what is being accessed".
+ */
 @ToString
 public class SecurityContext {
     public static final UserIdentity ANONYMOUS = new UserIdentity() {

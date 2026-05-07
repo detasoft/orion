@@ -14,6 +14,10 @@ import org.slf4j.helpers.MessageFormatter;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.resource.GitFetchResource;
+import pro.deta.orion.auth.check.resource.RepositoryResource;
+import pro.deta.orion.auth.check.rule.GitFetchAccessRules;
+import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
@@ -33,7 +37,7 @@ import java.io.*;
 import java.util.*;
 import java.util.function.Function;
 
-import static pro.deta.orion.auth.check.PermissionChecks.*;
+import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.git.util.GitUtils.writeProtocolError;
 
 @Slf4j
@@ -96,16 +100,17 @@ public class GitInternalService {
             return Optional.empty();
         }
 
+        RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
         Result<Repository> repositoryResult;
         if (gitCommand.isWrite() && !repositoryExists) {
-            permissionChecker().requireRepositoryCreate(securityContext, repositoryName);
+            accessEnforcer().require(securityContext, repositoryResource, RepositoryAccessRules.create());
             repositoryResult = repositoryProvider.findOrCreate(repositoryName);
         } else {
             if (gitCommand.isRead()) {
-                permissionChecker().requireRepositoryRead(securityContext, repositoryName);
+                accessEnforcer().require(securityContext, repositoryResource, RepositoryAccessRules.read());
             }
             if (gitCommand.isWrite()) {
-                permissionChecker().requireRepositoryWrite(securityContext, repositoryName);
+                accessEnforcer().require(securityContext, repositoryResource, RepositoryAccessRules.write());
             }
             repositoryResult = repositoryProvider.find(repositoryName);
         }
@@ -172,12 +177,12 @@ public class GitInternalService {
             @Override
             public void onBeginNegotiateRound(UploadPack up, Collection<? extends ObjectId> wants, int cntOffered) throws ServiceMayNotContinueException {
                 try {
-                    permissionChecker().requireRepositoryRead(securityContext, repositoryName);
                     try (Git git = new Git(up.getRepository())) {
-                        permissionChecker().requireRepositoryFetch(securityContext, new GitFetchAccessRequest(
+                        GitFetchAccessRequest request = new GitFetchAccessRequest(
                                 repositoryName,
                                 toGitObjectIds(wants),
-                                objectIds -> resolveBranchNames(git, objectIds)));
+                                objectIds -> resolveBranchNames(git, objectIds));
+                        accessEnforcer().require(securityContext, GitFetchResource.of(request), GitFetchAccessRules.everyWantedObjectAllowed());
                     }
                 } catch (OrionSecurityException e) {
                     throw new ServiceMayNotContinueException("ACCESS_DENIED", e);

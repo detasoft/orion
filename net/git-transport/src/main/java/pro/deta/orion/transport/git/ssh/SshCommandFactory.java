@@ -9,6 +9,9 @@ import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
+import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
+import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.internal.OrionExecutor;
@@ -23,7 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-import static pro.deta.orion.auth.check.PermissionChecks.permissionChecker;
+import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Slf4j
@@ -54,7 +57,7 @@ public class SshCommandFactory implements CommandFactory {
                 int returnCode = 0;
                 SecurityContext securityContext = securityContextFor(channel);
                 try {
-                    permissionChecker().requireAuthenticatedUser(securityContext);
+                    accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
 
                     if (SET_KEY.equalsIgnoreCase(commandLine)) {
                         ByteBuffer bb = ByteBuffer.allocate(256);
@@ -73,7 +76,10 @@ public class SshCommandFactory implements CommandFactory {
                             throw new RuntimeException(e);
                         }
                     } else if (SHUTDOWN.equalsIgnoreCase(commandLine)) {
-                        permissionChecker().requireApplicationShutdown(securityContext);
+                        accessEnforcer().require(
+                                securityContext,
+                                ApplicationShutdownResource.applicationShutdown(),
+                                ApplicationAccessRules.shutdown());
                         orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
                     } else {
                         log.warn("SSH Transport Unknown command: {}", commandLine);
@@ -113,7 +119,7 @@ public class SshCommandFactory implements CommandFactory {
                 int returnCode = 0;
                 SecurityContext securityContext = securityContextFor(channelSession);
                 try {
-                    permissionChecker().requireAuthenticatedUser(securityContext);
+                    accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
                     List<String> envs = gitEnvironmentValues(environment);
                     try (IOEStreamProvider streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
                         gitInternalService.service(

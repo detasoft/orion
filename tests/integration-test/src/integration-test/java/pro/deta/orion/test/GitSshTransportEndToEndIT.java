@@ -327,7 +327,7 @@ class GitSshTransportEndToEndIT {
         /*
          * The test user intentionally gets broad repository permissions. The E2E test is focused on verifying
          * the full SSH transport path and repository lifecycle, not fine-grained ACL matching; narrower ACL
-         * behavior is covered by unit tests around PermissionChecks.
+         * behavior is covered by unit tests around access rules.
          */
         AccessControl accessControl = new AccessControl();
         AccessControl.User user = ACLUtil.createUser(USERNAME, "e2e@example.test")
