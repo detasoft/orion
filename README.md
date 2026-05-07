@@ -10,11 +10,19 @@ Lightweight GIT hosting solution.
 
 pro.deta.orion.config.FileConfigurationProviderImpl.CONFIGURATION_LOCATION
 
-# ACL Git Storage Bootstrap Event Flow
+# Self-Hosted ACL Git Storage Bootstrap Flow
 
-The ACL service and the Git-backed ACL storage depend on a strict startup order.
-The order is important because the Git-backed storage may publish a temporary
-user before the ACL document has been loaded from Git.
+The ACL service and the Git-backed ACL storage depend on a strict startup order. This is the self-hosted bootstrap path:
+Orion can store its ACL document in its own Git repository and read that configuration through its own local Git
+transport during startup.
+
+That creates a bootstrap loop:
+
+1. To load ACL from Git, Orion needs permission to access the Git repository.
+2. To know who has permission, Orion needs the ACL document.
+3. But the ACL document is the thing Orion is trying to read from Git.
+
+The startup flow breaks that loop with a temporary in-memory user:
 
 The scenario is:
 
@@ -26,17 +34,16 @@ The scenario is:
    `INIT_PRIORITY + 1`.
 4. It registers the ACL storage area in `GitBackedInternalStorage`.
 5. `GitBackedInternalStorage` creates a volatile local user for that storage
-   area and publishes `VolatileUserAdded`.
+   area, normally `orion_acl`, and publishes `VolatileUserAdded`.
 6. Because the ACL service handler was registered first, the volatile user is
-   added to the in-memory ACL before the `STARTING` stage loads or creates the
-   ACL document.
+   added to the in-memory ACL before the `STARTING` stage loads or creates the ACL document from Git.
 7. During `STARTING`, `GitBackedInternalStorage` starts at
    `GIT_BACKED_INTERNAL_STORAGE_PRIORITY`, and `OrionAccessControlServiceImpl`
    starts at `GIT_BACKED_INTERNAL_STORAGE_PRIORITY + 2`.
 
 Do not remove the `INIT` priorities or `waitForCompletion()` calls without
 re-checking this flow. If the volatile user event is published before the ACL
-service subscribes to it, local Git-backed ACL access can fail during startup.
+service subscribes to it, Orion can fail to read its own Git-backed ACL configuration during startup.
 
 # Next steps
 1. [git-mirror] func to mirror github/gitlab hostings
