@@ -47,7 +47,7 @@ class GitRepositoryProviderImplTest {
         assertThat(result).isInstanceOf(Result.Success.class);
         assertThat(result.valueOrFailure("repository should be created").unwrap(Repository.class)).isPresent();
         assertThat(provider.exists("team/project.git")).isTrue();
-        assertThat(gitStorageDir.resolve("team/project.git/config")).exists();
+        assertThat(provider.repositoryPathForTests("team/project.git").resolve("config")).exists();
     }
 
     @Test

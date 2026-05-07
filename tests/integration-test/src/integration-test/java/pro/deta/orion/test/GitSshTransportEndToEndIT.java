@@ -6,6 +6,7 @@ import org.eclipse.jgit.api.errors.TransportException;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RefSpec;
@@ -32,7 +33,6 @@ import pro.deta.orion.util.NetworkUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -43,7 +43,6 @@ import java.security.KeyPair;
 import java.security.PublicKey;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -88,7 +87,7 @@ class GitSshTransportEndToEndIT {
 
         try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("ssh-home"), TRUSTED_USER_KEY);
              Git source = initRepository(sourceDirectory)) {
-            assertThat(startedOrion.cachedRepository("project")).isNull();
+            assertThat(startedOrion.repositoryPath("project")).doesNotExist();
 
             ObjectId initialCommit = createCommit(source, "README.md", "hello from e2e\n", "initial commit");
 
@@ -102,7 +101,7 @@ class GitSshTransportEndToEndIT {
                     .flatExtracting(PushResult::getRemoteUpdates)
                     .extracting(RemoteRefUpdate::getStatus)
                     .containsExactly(RemoteRefUpdate.Status.OK);
-            assertCachedRepositoryContains("project", initialCommit, "README.md", "hello from e2e\n");
+            assertRepositoryContains("project", initialCommit, "README.md", "hello from e2e\n");
 
             try (Git clone = Git.cloneRepository()
                     .setURI(remoteUrl)
@@ -118,7 +117,7 @@ class GitSshTransportEndToEndIT {
                         .setTransportConfigCallback(sshCallback(ssh))
                         .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
                         .call();
-                assertCachedRepositoryContains("project", updatedCommit, "README.md", "hello after pull\n");
+                assertRepositoryContains("project", updatedCommit, "README.md", "hello after pull\n");
 
                 clone.pull()
                         .setRemote("origin")
@@ -145,7 +144,7 @@ class GitSshTransportEndToEndIT {
         try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("ssh-home"), TRUSTED_USER_KEY);
              Git source = initRepository(sourceDirectory);
              Git fetchTarget = initRepository(fetchDirectory)) {
-            assertThat(startedOrion.cachedRepository(repositoryName)).isNull();
+            assertThat(startedOrion.repositoryPath(repositoryName)).doesNotExist();
 
             ObjectId initialCommit = createCommit(source, "README.md", "created through full server e2e\n", "initial commit");
 
@@ -160,7 +159,7 @@ class GitSshTransportEndToEndIT {
                     .extracting(RemoteRefUpdate::getStatus)
                     .containsExactly(RemoteRefUpdate.Status.OK);
             assertThat(startedOrion.repositoryPath(repositoryName).resolve("config")).exists();
-            assertCachedRepositoryContains(repositoryName, initialCommit, "README.md", "created through full server e2e\n");
+            assertRepositoryContains(repositoryName, initialCommit, "README.md", "created through full server e2e\n");
 
             fetchTarget.fetch()
                     .setRemote(remoteUrl)
@@ -248,18 +247,16 @@ class GitSshTransportEndToEndIT {
         return configuration;
     }
 
-    private void assertCachedRepositoryContains(String repositoryName, ObjectId commitId, String fileName, String expectedContent) throws Exception {
-        Repository repository = startedOrion.cachedRepository(repositoryName);
-        assertThat(repository)
-                .as("server repository cache entry for %s", repositoryName)
-                .isNotNull();
-        assertThat(repository.exactRef("refs/heads/" + BRANCH).getObjectId())
-                .as("cached %s ref", repositoryName)
-                .isEqualTo(commitId);
-        assertThat(repository.getObjectDatabase().has(commitId))
-                .as("cached %s object database contains %s", repositoryName, commitId.name())
-                .isTrue();
-        assertThat(readFileFromCommit(repository, commitId, fileName)).isEqualTo(expectedContent);
+    private void assertRepositoryContains(String repositoryName, ObjectId commitId, String fileName, String expectedContent) throws Exception {
+        try (Repository repository = FileRepositoryBuilder.create(startedOrion.repositoryPath(repositoryName).toFile())) {
+            assertThat(repository.exactRef("refs/heads/" + BRANCH).getObjectId())
+                    .as("server %s ref", repositoryName)
+                    .isEqualTo(commitId);
+            assertThat(repository.getObjectDatabase().has(commitId))
+                    .as("server %s object database contains %s", repositoryName, commitId.name())
+                    .isTrue();
+            assertThat(readFileFromCommit(repository, commitId, fileName)).isEqualTo(expectedContent);
+        }
     }
 
     private static String readFileFromCommit(Repository repository, ObjectId commitId, String fileName) throws IOException {
@@ -267,7 +264,7 @@ class GitSshTransportEndToEndIT {
             var commit = revWalk.parseCommit(commitId);
             try (TreeWalk treeWalk = TreeWalk.forPath(repository, fileName, commit.getTree())) {
                 assertThat(treeWalk)
-                        .as("cached repository tree entry %s at %s", fileName, commitId.name())
+                        .as("server repository tree entry %s at %s", fileName, commitId.name())
                         .isNotNull();
                 try (var reader = repository.newObjectReader()) {
                     return new String(reader.open(treeWalk.getObjectId(0)).getBytes(), StandardCharsets.UTF_8);
@@ -440,29 +437,12 @@ class GitSshTransportEndToEndIT {
         }
 
         private Path repositoryPath(String repository) {
-            return Path.of(configuration.getBaseDir())
-                    .resolve(configuration.getGit().getStoragePath())
-                    .resolve(repository);
-        }
-
-        private Repository cachedRepository(String repository) {
-            return repositoryCache(gitRepositoryProvider).get(repository);
+            return gitRepositoryProvider.repositoryPathForTests(repository);
         }
 
         private void stop() {
             lifecycle.beginShutdown();
             lifecycle.waitForShutdown();
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Repository> repositoryCache(GitRepositoryProviderImpl gitRepositoryProvider) {
-        try {
-            Field repositoryCache = GitRepositoryProviderImpl.class.getDeclaredField("repositoryCache");
-            repositoryCache.setAccessible(true);
-            return (Map<String, Repository>) repositoryCache.get(gitRepositoryProvider);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Cannot read GitRepositoryProviderImpl repository cache", e);
         }
     }
 }

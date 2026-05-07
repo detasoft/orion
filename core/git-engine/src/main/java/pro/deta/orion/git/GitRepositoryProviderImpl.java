@@ -42,6 +42,10 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
         log.warn("Git storage set to {}", this.gitStorageDir);
     }
 
+    public Path repositoryPathForTests(String repositoryName) {
+        return resolveRepository(repositoryName).storagePath();
+    }
+
     @Override
     public boolean exists(String repositoryName) {
         try {

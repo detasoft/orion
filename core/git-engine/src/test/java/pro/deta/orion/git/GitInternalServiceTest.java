@@ -6,15 +6,24 @@ import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.git.common.GitFetchAccessRequest;
+import pro.deta.orion.git.common.GitOperationException;
+import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.stream.IOEStreamProvider;
 import pro.deta.orion.util.stream.StreamUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -193,14 +202,43 @@ class GitInternalServiceTest {
         public Result<GitRepository> find(String repositoryName) {
             findCalled = true;
             findRepositoryName = repositoryName;
-            return Result.Failure.generalFailure("find is not implemented in this test");
+            return new Result.Success<>(new NoOpGitRepository(repositoryName));
         }
 
         @Override
         public Result<GitRepository> findOrCreate(String repositoryName) {
             findOrCreateCalled = true;
             findOrCreateRepositoryName = repositoryName;
-            return Result.Failure.generalFailure("findOrCreate is not implemented in this test");
+            return new Result.Success<>(new NoOpGitRepository(repositoryName));
+        }
+    }
+
+    private record NoOpGitRepository(String name) implements GitRepository {
+        @Override
+        public String description() {
+            return name;
+        }
+
+        @Override
+        public GitRepository withFetchAccessCheck(Consumer<GitFetchAccessRequest> fetchAccessCheck) {
+            return this;
+        }
+
+        @Override
+        public void upload(GitUploadRequest request, InputStream input, OutputStream output, OutputStream error) throws IOException, GitOperationException {
+        }
+
+        @Override
+        public void receive(GitReceiveRequest request, InputStream input, OutputStream output, OutputStream error) throws IOException, GitOperationException {
+        }
+
+        @Override
+        public <T> Optional<T> unwrap(Class<T> repositoryType) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void close() {
         }
     }
 }
