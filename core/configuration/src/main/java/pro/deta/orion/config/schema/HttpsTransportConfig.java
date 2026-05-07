@@ -10,7 +10,7 @@ import lombok.ToString;
 @Data
 @NoArgsConstructor
 public class HttpsTransportConfig extends TransportConfig {
-    private SSLKeyStore ksystore = null;
+    private SSLKeyStoreConfig ksystore = null;
 
     public HttpsTransportConfig(String defaultAddress, int defaultPort) {
         super(defaultAddress, defaultPort);

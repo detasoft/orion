@@ -15,7 +15,7 @@ import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.HttpTransportConfig;
 import pro.deta.orion.config.schema.HttpsTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.config.schema.SSLKeyStore;
+import pro.deta.orion.config.schema.SSLKeyStoreConfig;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
@@ -109,8 +109,8 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
             // Create and configure SSL Context Factory
             SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
             KeyStore keyStore;
-            SSLKeyStore sslKeyStore = httpsTransportConfig.getKsystore();
-            if (sslKeyStore != null && sslKeyStore.getType() == SSLKeyStore.SSLKeyStoreType.JKS) {
+            SSLKeyStoreConfig sslKeyStore = httpsTransportConfig.getKsystore();
+            if (sslKeyStore != null && sslKeyStore.getType() == SSLKeyStoreConfig.SSLKeyStoreType.JKS) {
                 keyStore = CertUtils.readKeyWithCertsFromJKS(sslKeyStore.getPath(), sslKeyStore.getKeyStorePassword().toCharArray());
                 if (sslKeyStore.getAlias() != null)
                     sslContextFactory.setCertAlias(sslKeyStore.getAlias());
@@ -119,7 +119,7 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
                 sslContextFactory.setKeyManagerPassword(sslKeyStore.getKeyPassword());
             } else {
                 CertUtils.PrivateKeyWithCerts pkWithCert;
-                if (sslKeyStore != null && sslKeyStore.getType() == SSLKeyStore.SSLKeyStoreType.PEM) {
+                if (sslKeyStore != null && sslKeyStore.getType() == SSLKeyStoreConfig.SSLKeyStoreType.PEM) {
                     pkWithCert = CertUtils.readKeyWithCertsFromPEM(sslKeyStore.getPath(), sslKeyStore.getKeyPassword());
                 } else {
                     pkWithCert = CertUtils.generateSelfSignedCertificate();

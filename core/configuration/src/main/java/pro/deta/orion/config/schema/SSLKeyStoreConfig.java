@@ -1,13 +1,11 @@
 package pro.deta.orion.config.schema;
 
 import lombok.Data;
-import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
-import lombok.ToString;
 
 @Data
 @NoArgsConstructor
-public class SSLKeyStore {
+public class SSLKeyStoreConfig {
     private String path;
     private String keyPassword;
     private SSLKeyStoreType type = SSLKeyStoreType.PEM;
