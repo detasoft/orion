@@ -6,6 +6,7 @@ import dagger.Component;
 import jakarta.inject.Singleton;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.git.GitRepositoryProviderImpl;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 @Singleton
@@ -13,6 +14,8 @@ import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 public interface OrionComponent {
 
     OrionApplicationLifecycle orionApplicationLifecycle();
+
+    GitRepositoryProviderImpl gitRepositoryProvider();
 
     @Component.Builder
     interface Builder {
@@ -24,4 +27,3 @@ public interface OrionComponent {
         }
     }
 }
-
