@@ -13,7 +13,7 @@ public class ServerIO {
     private final OutputStream send;
     private final OutputStream error;
 
-    public IOEStreams ioEStreams() {
-        return new IOEStreams(receive, send, error);
+    public StandardStreams standardStreams() {
+        return new StandardStreams(receive, send, error);
     }
 }

@@ -13,7 +13,7 @@ import org.eclipse.jgit.transport.UploadPack;
 import pro.deta.orion.util.Pair;
 import pro.deta.orion.util.stream.AssertiveIOClient;
 import pro.deta.orion.util.stream.DirectionalByteArrayOutputStream;
-import pro.deta.orion.util.stream.IOEStreamProvider;
+import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.IoConsumer;
 import pro.deta.orion.util.stream.ServerIO;
 
@@ -961,7 +961,7 @@ public final class Scenarios {
             UploadPack uploadPack = new UploadPack(repository);
             uploadPack.setTimeout(TIMEOUT_SECONDS);
             uploadPack.setExtraParameters(Set.of("version=2"));
-            upload(uploadPack, serverIO.ioEStreams());
+            upload(uploadPack, serverIO.standardStreams());
         };
     }
 
@@ -969,7 +969,7 @@ public final class Scenarios {
         return serverIO -> {
             UploadPack uploadPack = new UploadPack(repository);
             uploadPack.setTimeout(TIMEOUT_SECONDS);
-            upload(uploadPack, serverIO.ioEStreams());
+            upload(uploadPack, serverIO.standardStreams());
         };
     }
 
@@ -978,13 +978,13 @@ public final class Scenarios {
             ReceivePack receivePack = new ReceivePack(repository);
             receivePack.setTimeout(TIMEOUT_SECONDS);
             receivePack.receive(
-                    serverIO.ioEStreams().getInputStream(),
-                    serverIO.ioEStreams().getOutputStream(),
-                    serverIO.ioEStreams().getErrorStream());
+                    serverIO.standardStreams().getInputStream(),
+                    serverIO.standardStreams().getOutputStream(),
+                    serverIO.standardStreams().getErrorStream());
         };
     }
 
-    private static void upload(UploadPack uploadPack, IOEStreamProvider streams) throws IOException {
+    private static void upload(UploadPack uploadPack, StandardStreams streams) throws IOException {
         try {
             uploadPack.uploadWithExceptionPropagation(
                     streams.getInputStream(),

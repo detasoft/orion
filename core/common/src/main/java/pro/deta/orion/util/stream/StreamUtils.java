@@ -8,11 +8,11 @@ import java.nio.ByteBuffer;
 @Slf4j
 public class StreamUtils {
 
-    public static IOEStreamProvider newInstance(InputStream inputStream, OutputStream outputStream, OutputStream errorStream) {
+    public static StandardStreams newInstance(InputStream inputStream, OutputStream outputStream, OutputStream errorStream) {
         if (log.isTraceEnabled()) {
-            return new TeeIOStream(inputStream, outputStream, errorStream, new StringBuilder());
+            return new RecordingStandardStreams(inputStream, outputStream, errorStream, new StringBuilder());
         } else
-            return new IOEStreams(inputStream, outputStream, new TeeOutputStream(errorStream, new ByteArrayOutputStream()));
+            return new StandardStreams(inputStream, outputStream, new TeeOutputStream(errorStream, new ByteArrayOutputStream()));
     }
 
     public static byte[] getByteArray(ByteBuffer bu) {

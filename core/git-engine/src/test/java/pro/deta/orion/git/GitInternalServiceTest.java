@@ -12,7 +12,7 @@ import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.util.Result;
-import pro.deta.orion.util.stream.IOEStreamProvider;
+import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
 
 import java.io.ByteArrayInputStream;
@@ -37,7 +37,7 @@ class GitInternalServiceTest {
         SecurityContext securityContext = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(true);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 new ByteArrayOutputStream(),
                 new ByteArrayOutputStream());
@@ -59,7 +59,7 @@ class GitInternalServiceTest {
         SecurityContext securityContext = securityContext(new InternalUserImpl("writer", List.of(writeOnlyGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 new ByteArrayOutputStream(),
                 new ByteArrayOutputStream());
@@ -78,7 +78,7 @@ class GitInternalServiceTest {
         SecurityContext securityContext = securityContext(new InternalUserImpl("anonymous", List.of()));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(true);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 new ByteArrayOutputStream(),
                 new ByteArrayOutputStream());
@@ -97,7 +97,7 @@ class GitInternalServiceTest {
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 output,
                 new ByteArrayOutputStream());
@@ -116,7 +116,7 @@ class GitInternalServiceTest {
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(true);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 output,
                 new ByteArrayOutputStream());
@@ -138,7 +138,7 @@ class GitInternalServiceTest {
         SecurityContext securityContext = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 new ByteArrayOutputStream(),
                 new ByteArrayOutputStream());
@@ -159,7 +159,7 @@ class GitInternalServiceTest {
         SecurityContext securityContext = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 new ByteArrayOutputStream(),
                 new ByteArrayOutputStream());
@@ -171,7 +171,7 @@ class GitInternalServiceTest {
         assertThat(repositoryProvider.findOrCreateCalled).isFalse();
     }
 
-    private static String outputBytes(IOEStreamProvider streams) {
+    private static String outputBytes(StandardStreams streams) {
         ByteArrayOutputStream output = (ByteArrayOutputStream) streams.getOutputStream();
         return output.toString();
     }

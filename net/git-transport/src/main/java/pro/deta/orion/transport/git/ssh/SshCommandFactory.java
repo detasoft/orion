@@ -123,7 +123,7 @@ public class SshCommandFactory implements CommandFactory {
                 try {
                     accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
                     List<String> envs = gitEnvironmentValues(environment);
-                    try (IOEStreamProvider streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
+                    try (StandardStreams streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
                         gitInternalService.service(
                                 securityContext,
                                 channelSession.toString(),

@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Runs a client and a server against connected pipe streams and captures the server-side transcript.
  *
  * <p>The helper is intentionally small, but the thread ownership is easy to miss: the client runs on a
- * background thread while the caller's thread executes the server. TeeIOStream sits on the server side and
+ * background thread while the caller's thread executes the server. RecordingStandardStreams sits on the server side and
  * records what the client sent and what the server wrote back.</p>
  */
 @Slf4j
@@ -39,7 +39,7 @@ public class IOTestStreamUtils {
             ByteArrayOutputStream errorStream = new ByteArrayOutputStream();
             StringBuilder sb = new StringBuilder();
             List<DirectionalByteArrayOutputStream> result;
-            try (TeeIOStream pingPongStream = new TeeIOStream(pipedInputStream, clientOutputStream, errorStream, sb)) {
+            try (RecordingStandardStreams pingPongStream = new RecordingStandardStreams(pipedInputStream, clientOutputStream, errorStream, sb)) {
                 ClientIO clientIo = new ClientIO(clientInputStream, clientOutput);
                 ServerIO serverIO = new ServerIO(pingPongStream.getInputStream(), pingPongStream.getOutputStream(), pingPongStream.getErrorStream());
                 Thread thread = new Thread(() -> {

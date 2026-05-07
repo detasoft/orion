@@ -39,7 +39,7 @@ public class PingPongStreamTest {
         };
 
         Pair<StringBuilder, List<DirectionalByteArrayOutputStream>> testResult = testPipeScenario(simpleTest1AssertiveClient, helloBackServer);
-        List<DirectionalByteArrayOutputStream> result = new TeeIOStream(testResult.getFirst().toString()).getStates();
+        List<DirectionalByteArrayOutputStream> result = new RecordingStandardStreams(testResult.getFirst().toString()).getStates();
         assertThat(result).isEqualTo(testResult.getSecond());
     }
 

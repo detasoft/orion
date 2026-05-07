@@ -21,7 +21,7 @@ import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.Result.Failure;
-import pro.deta.orion.util.stream.IOEStreamProvider;
+import pro.deta.orion.util.stream.StandardStreams;
 
 import java.io.*;
 import java.util.*;
@@ -41,7 +41,7 @@ public class GitInternalService {
         this.eventManager = eventManager;
     }
 
-    public void service(SecurityContext securityContext, String clientId, IOEStreamProvider streams, String requestId, Function<InputStream, GitCommand> cmdResolved) {
+    public void service(SecurityContext securityContext, String clientId, StandardStreams streams, String requestId, Function<InputStream, GitCommand> cmdResolved) {
         Objects.requireNonNull(securityContext, "securityContext");
         OrionUtils.wrapRunnableWithThreadName(MessageFormatter.format("Serving {} []", clientId, requestId).getMessage(), () -> {
             GitCommand gitCommand = null;
@@ -58,7 +58,7 @@ public class GitInternalService {
         });
     }
 
-    private void serveCommand(SecurityContext securityContext, GitCommand gitCommand, IOEStreamProvider streams) throws IOException, OrionSecurityException {
+    private void serveCommand(SecurityContext securityContext, GitCommand gitCommand, StandardStreams streams) throws IOException, OrionSecurityException {
         if (gitCommand.getCommand().isUnknown()) {
             writeProtocolError(streams.getOutputStream(), "unknown command");
             return;
@@ -111,7 +111,7 @@ public class GitInternalService {
         };
     }
 
-    private void serveUploadPackToClient(SecurityContext securityContext, GitCommand gitCommand, GitRepository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+    private void serveUploadPackToClient(SecurityContext securityContext, GitCommand gitCommand, GitRepository repository, String repositoryName, StandardStreams streams) throws IOException {
         GitUploadRequest request = new GitUploadRequest(
                 GitUtils.gitProtocolTimeoutSeconds(),
                 extraParameters(gitCommand),
@@ -126,7 +126,7 @@ public class GitInternalService {
         GitUtils.runUploadToClient(accessCheckedRepository, request, streams);
     }
 
-    private void serveReceivePackFromClient(SecurityContext securityContext, GitRepository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+    private void serveReceivePackFromClient(SecurityContext securityContext, GitRepository repository, String repositoryName, StandardStreams streams) throws IOException {
         GitReceiveRequest request = new GitReceiveRequest(
                 GitUtils.gitProtocolTimeoutSeconds(),
                 refUpdates -> eventManager.publish(() -> {

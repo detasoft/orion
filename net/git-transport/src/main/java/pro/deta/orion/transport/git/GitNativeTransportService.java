@@ -16,7 +16,7 @@ import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.ConfigurationContext;
-import pro.deta.orion.util.stream.IOEStreamProvider;
+import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
 
 import java.io.*;
@@ -99,7 +99,7 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
                     ConnectionAccessRules.localOnly());
             log.debug("Client connected {} via {}", requestId, config);
             finalSocket.setSoTimeout(5 * 1000);
-            try (IOEStreamProvider streams = StreamUtils.newInstance(finalSocket.getInputStream(), finalSocket.getOutputStream(), NullOutputStream.INSTANCE)) {
+            try (StandardStreams streams = StreamUtils.newInstance(finalSocket.getInputStream(), finalSocket.getOutputStream(), NullOutputStream.INSTANCE)) {
                 gitInternalService.service(securityContext, finalSocket.getRemoteSocketAddress().toString(), streams, requestId, GitInternalService::parse);
             }
         } catch (OrionSecurityException e) {

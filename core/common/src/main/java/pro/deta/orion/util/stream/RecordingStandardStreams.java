@@ -1,6 +1,5 @@
 package pro.deta.orion.util.stream;
 
-import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.*;
@@ -16,17 +15,12 @@ import static pro.deta.orion.util.stream.ByteToAsciiConversion.LINE_SEPARATOR;
  * <p>The recording is not just a flat byte array: every contiguous run is tagged with the direction
  * it came from. That makes the serialized form useful as a replay script for protocol tests.</p>
  */
-@Getter
 @Slf4j
-public class TeeIOStream implements IOEStreamProvider {
-    private final TeeInputStream inputStream;
-    private final TeeOutputStream outputStream;
-    private final TeeOutputStream errorStream;
+public class RecordingStandardStreams extends StandardStreams {
     private final StringBuilder ioStateStringBuilder;
-
     private final SwitchingBuffer state;
 
-    public TeeIOStream(InputStream inputStream, OutputStream outputStream, OutputStream errorStream, StringBuilder ioStateStringBuilder) {
+    public RecordingStandardStreams(InputStream inputStream, OutputStream outputStream, OutputStream errorStream, StringBuilder ioStateStringBuilder) {
         this(inputStream, outputStream, errorStream, ioStateStringBuilder, new SwitchingBuffer());
     }
 
@@ -34,7 +28,7 @@ public class TeeIOStream implements IOEStreamProvider {
      * Builds a stream object from a previously serialized interaction. The real streams are null streams
      * because this mode is only used to expose the parsed directional state for replay/assertion helpers.
      */
-    public TeeIOStream(String serializedState) {
+    public RecordingStandardStreams(String serializedState) {
         this(
                 InputStream.nullInputStream(),
                 OutputStream.nullOutputStream(),
@@ -44,23 +38,33 @@ public class TeeIOStream implements IOEStreamProvider {
         );
     }
 
-    private TeeIOStream(InputStream inputStream, OutputStream outputStream, OutputStream errorStream, StringBuilder ioStateStringBuilder, SwitchingBuffer state) {
-        this.state = state;
-        this.inputStream = wrapInTee(inputStream);
-        this.outputStream = wrapInTee(Direction.S, outputStream);
-        this.errorStream = wrapInTee(Direction.E, errorStream);
+    private RecordingStandardStreams(InputStream inputStream, OutputStream outputStream, OutputStream errorStream, StringBuilder ioStateStringBuilder, SwitchingBuffer state) {
+        this(wrapStreams(inputStream, outputStream, errorStream, state), ioStateStringBuilder);
+    }
+
+    private RecordingStandardStreams(WrappedStreams streams, StringBuilder ioStateStringBuilder) {
+        super(streams.inputStream(), streams.outputStream(), streams.errorStream());
         this.ioStateStringBuilder = ioStateStringBuilder;
+        this.state = streams.state();
     }
 
-    private TeeInputStream wrapInTee(InputStream inputStream) {
-        return new TeeInputStream(inputStream, wrapInDirectionalOs(Direction.C));
+    private static WrappedStreams wrapStreams(InputStream inputStream, OutputStream outputStream, OutputStream errorStream, SwitchingBuffer state) {
+        return new WrappedStreams(
+                wrapInTee(inputStream, state),
+                wrapInTee(Direction.S, outputStream, state),
+                wrapInTee(Direction.E, errorStream, state),
+                state);
     }
 
-    private TeeOutputStream wrapInTee(Direction d, OutputStream outputStream) {
-        return new TeeOutputStream(outputStream, wrapInDirectionalOs(d));
+    private static TeeInputStream wrapInTee(InputStream inputStream, SwitchingBuffer state) {
+        return new TeeInputStream(inputStream, wrapInDirectionalOs(Direction.C, state));
     }
 
-    private OutputStream wrapInDirectionalOs(Direction d) {
+    private static TeeOutputStream wrapInTee(Direction d, OutputStream outputStream, SwitchingBuffer state) {
+        return new TeeOutputStream(outputStream, wrapInDirectionalOs(d, state));
+    }
+
+    private static OutputStream wrapInDirectionalOs(Direction d, SwitchingBuffer state) {
         return new OutputStream() {
             @Override
             public void write(int b) {
@@ -73,6 +77,10 @@ public class TeeIOStream implements IOEStreamProvider {
                 log.debug(d.name() + "Stream closed");
             }
         };
+    }
+
+    private record WrappedStreams(TeeInputStream inputStream, TeeOutputStream outputStream, TeeOutputStream errorStream,
+                                  SwitchingBuffer state) {
     }
 
     /**
@@ -122,21 +130,6 @@ public class TeeIOStream implements IOEStreamProvider {
         return state.getStates();
     }
 
-    @Override
-    public InputStream getInputStream() {
-        return inputStream;
-    }
-
-    @Override
-    public OutputStream getOutputStream() {
-        return outputStream;
-    }
-
-    @Override
-    public OutputStream getErrorStream() {
-        return errorStream;
-    }
-
     public StringBuilder serializeIntoAscii(StringBuilder sb) {
         for (DirectionalByteArrayOutputStream directionalByteArrayOutputStream: state.getStates()) {
             serializeDBAOS(sb, directionalByteArrayOutputStream);
@@ -152,7 +145,7 @@ public class TeeIOStream implements IOEStreamProvider {
         sb.append(directionalByteArrayOutputStream.getDirection().name().charAt(0));
         sb.append(":");
         for (byte b: directionalByteArrayOutputStream.toByteArray()) {
-            if (ByteToAsciiConversion.isAsciiPrintable(b) && b != '\\') { // reverse slash excluded
+            if (ByteToAsciiConversion.isAsciiPrintable(b) && b != '\\') {
                 sb.append(Character.valueOf((char) b));
             } else
                 sb.append(String.format("\\%02X", b));
@@ -174,13 +167,13 @@ public class TeeIOStream implements IOEStreamProvider {
     private static DirectionalByteArrayOutputStream parseDirectionalBuffer(String line) {
         Direction direction = null;
         ByteBuffer bb = ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8));
-        ByteBuffer resultBytes = ByteBuffer.allocate(line.length() - 2); // 100% enough to store data
+        ByteBuffer resultBytes = ByteBuffer.allocate(line.length() - 2);
         HexFormat hexFormat = HexFormat.of();
-        byte[] byteEncoded = new byte[2]; // tmp buffer for parsing \AB formatted
+        byte[] byteEncoded = new byte[2];
         while (bb.position() < bb.limit()) {
             if (bb.position() == 0) {
                 direction = Direction.valueOf(new String(Character.toChars(bb.get())));
-                bb.get(); // increase position for the following ':'
+                bb.get();
             } else {
                 byte b = bb.get();
                 if ((char) b == '\\') {

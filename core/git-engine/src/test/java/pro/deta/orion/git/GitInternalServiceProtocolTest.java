@@ -18,7 +18,7 @@ import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitRefUpdateResult;
 import pro.deta.orion.git.common.GitRefUpdateType;
-import pro.deta.orion.util.stream.IOEStreamProvider;
+import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
 
 import java.io.ByteArrayInputStream;
@@ -228,7 +228,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         RecordingEventManager events = new RecordingEventManager();
         GitInternalService service = new GitInternalService(repositoryProvider, events);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        IOEStreamProvider streams = StreamUtils.newInstance(
+        StandardStreams streams = StreamUtils.newInstance(
                 new ByteArrayInputStream(new byte[0]),
                 output,
                 new ByteArrayOutputStream());
@@ -270,7 +270,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
                 service.service(
                         securityContext(userIdentity, commandLine),
                         "test-client",
-                        serverIO.ioEStreams(),
+                        serverIO.standardStreams(),
                         commandLine,
                         ignored -> GitInternalService.parseGitCommand(commandLine, extraProperties));
     }

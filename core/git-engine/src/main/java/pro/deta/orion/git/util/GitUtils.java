@@ -7,7 +7,7 @@ import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.OrionUtils;
-import pro.deta.orion.util.stream.IOEStreamProvider;
+import pro.deta.orion.util.stream.StandardStreams;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -27,7 +27,7 @@ public final class GitUtils {
                 diff.getOldPath().equals(diff.getNewPath()) ? diff.getNewPath() : diff.getOldPath() + " -> " + diff.getNewPath());
     }
 
-    public static void runUploadToClient(GitRepository repository, GitUploadRequest request, IOEStreamProvider streams) throws IOException {
+    public static void runUploadToClient(GitRepository repository, GitUploadRequest request, StandardStreams streams) throws IOException {
         try {
             repository.upload(
                     request,
@@ -40,7 +40,7 @@ public final class GitUtils {
         }
     }
 
-    public static void runReceiveFromClient(GitRepository repository, GitReceiveRequest request, IOEStreamProvider streams) throws IOException {
+    public static void runReceiveFromClient(GitRepository repository, GitReceiveRequest request, StandardStreams streams) throws IOException {
         try {
             repository.receive(
                     request,
