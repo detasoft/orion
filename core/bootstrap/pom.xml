@@ -31,6 +31,10 @@
             <artifactId>authorization</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>configuration</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>http-core</artifactId>
         </dependency>

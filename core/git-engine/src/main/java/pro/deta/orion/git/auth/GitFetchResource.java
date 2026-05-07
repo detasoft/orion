@@ -1,6 +1,7 @@
-package pro.deta.orion.auth.check.resource;
+package pro.deta.orion.git.auth;
 
 import pro.deta.orion.auth.check.NestedResource;
+import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
 
 import java.util.Objects;

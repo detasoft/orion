@@ -9,13 +9,14 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
-import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.event.type.VolatileUserAdded;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
+import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionProvider;
@@ -24,14 +25,11 @@ import pro.deta.orion.util.Result;
 import java.io.PrintStream;
 import java.security.PublicKey;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.function.UnaryOperator;
-import java.util.stream.Collectors;
 
 import static pro.deta.orion.acl.schema.AccessControl.CredentialType.OPENSSH_PUBLIC_KEY;
 import static pro.deta.orion.internal.GitInternalStorage.GIT_INTERNAL_STORAGE_PRIORITY;
@@ -40,7 +38,7 @@ import static pro.deta.orion.util.Result.Failure.generalFailure;
 @Slf4j
 @Singleton
 @RequiredArgsConstructor(onConstructor_ = @Inject)
-public class OrionAccessControlServiceImpl implements OrionAccessControlService {
+public class OrionAccessControlServiceImpl implements OrionAccessControlService, OrionApplicationStageEventListener {
     public static final int INIT_PRIORITY = 1;
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
@@ -118,14 +116,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService 
     }
 
     @Override
-    public Result<UserIdentity> authenticateUser(String userName, AccessControl.CredentialType credentialType, byte[] encodedData) {
+    public AuthenticationResult authenticateUser(String userName, AccessControl.CredentialType credentialType, byte[] encodedData) {
         Result<AccessControl.User> user = findSingleUser(userName);
         if (user instanceof Result.Success<AccessControl.User>(var u)) {
             if (performAuthentication(u, credentialType, encodedData))
                 return createUserIdentity(u);
         }
         log.warn("Attempt to authenticate as {} with public key failed.", userName);
-        return new Result.Failure<>(Result.FailureCode.AUTHENTICATION_FAILED);
+        return AuthenticationResult.failure("authentication failed");
     }
 
     private void requestToUpdate() {
@@ -136,13 +134,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService 
         }
     }
 
-    private Result<UserIdentity> createUserIdentity(AccessControl.User u) {
+    private AuthenticationResult createUserIdentity(AccessControl.User u) {
         Result<List<AccessControl.Grant>> assembledGrants = mergeGrants(u);
         return switch (assembledGrants) {
             case Result.Failure<List<AccessControl.Grant>>(var code, var message, var throwable) ->
-                    generalFailure("User " + u.getId() + " failed to auth: [" + code + "] " + message, throwable);
+                    AuthenticationResult.failure("User " + u.getId() + " failed to auth: [" + code + "] " + message, throwable);
             case Result.Success<List<AccessControl.Grant>>(var v) ->
-                    new Result.Success<>(new InternalUserImpl(u.getId(), v));
+                    AuthenticationResult.success(new InternalUserImpl(u.getId(), v));
         };
     }
 

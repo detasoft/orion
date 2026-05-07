@@ -14,10 +14,10 @@ import org.slf4j.helpers.MessageFormatter;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
-import pro.deta.orion.auth.check.resource.GitFetchResource;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
-import pro.deta.orion.auth.check.rule.GitFetchAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
+import pro.deta.orion.git.auth.GitFetchAccessRules;
+import pro.deta.orion.git.auth.GitFetchResource;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
@@ -61,10 +61,7 @@ public class GitInternalService {
                 serveCommand(securityContext, gitCommand, streams);
             } catch (ServiceMayNotContinueException e) {
                 writeProtocolError(streams.getOutputStream(), e.getMessage());
-            } catch (OrionSecurityException e) {
-                log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
-                writeProtocolError(streams.getOutputStream(), "ACCESS_DENIED");
-            } catch (SecurityException e) {
+            } catch (OrionSecurityException | SecurityException e) {
                 log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
                 writeProtocolError(streams.getOutputStream(), "ACCESS_DENIED");
             } catch (Exception e) {

@@ -1,11 +1,12 @@
-package pro.deta.orion.auth.check.rule;
+package pro.deta.orion.git.auth;
 
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.AccessRule;
 import pro.deta.orion.auth.check.resource.BranchResource;
-import pro.deta.orion.auth.check.resource.GitFetchResource;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
+import pro.deta.orion.auth.check.rule.BranchAccessRules;
+import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
 import pro.deta.orion.git.common.GitObjectId;
 
@@ -17,7 +18,17 @@ import java.util.Map;
  */
 public final class GitFetchAccessRules {
     private static final AccessRule<GitFetchResource> EVERY_WANTED_OBJECT_ALLOWED =
-            new NamedAccessRule<>("repository fetch", GitFetchAccessRules::evaluateEveryWantedObjectAllowed);
+            new AccessRule<>() {
+                @Override
+                public String name() {
+                    return "repository fetch";
+                }
+
+                @Override
+                public AccessDecision evaluate(SecurityContext securityContext, GitFetchResource resource) {
+                    return evaluateEveryWantedObjectAllowed(securityContext, resource);
+                }
+            };
 
     private GitFetchAccessRules() {
     }

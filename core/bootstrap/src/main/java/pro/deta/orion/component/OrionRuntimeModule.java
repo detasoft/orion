@@ -56,7 +56,7 @@ public class OrionRuntimeModule {
 
     @Provides
     @IntoSet
-    static OrionApplicationStageEventListener orionAccessControlServiceImpl(OrionAccessControlService orionAccessControlService) {
+    static OrionApplicationStageEventListener orionAccessControlServiceImpl(OrionAccessControlServiceImpl orionAccessControlService) {
         return orionAccessControlService;
     }
 

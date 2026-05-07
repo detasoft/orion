@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
-import pro.deta.orion.util.Pair;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -197,11 +196,4 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
         };
     }
 
-    public void addGrant(String id,Pair<GrantKey, String>... keys) {
-        grants.add(new Grant(id, new ArrayList<>() {{
-            for (Pair<AccessControl.GrantKey, String> e: keys) {
-                this.add(new GrantExpression(e.getFirst(), e.getSecond()));
-            }
-        }}));
-    }
 }

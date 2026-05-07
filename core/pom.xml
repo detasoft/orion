@@ -18,6 +18,7 @@
         <module>acl</module>
         <module>bc</module>
         <module>bootstrap</module>
+        <module>configuration</module>
         <module>common</module>
         <module>git-common</module>
         <module>authorization</module>

@@ -23,6 +23,10 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
+            <artifactId>configuration</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
             <artifactId>git-engine</artifactId>
         </dependency>
         <dependency>

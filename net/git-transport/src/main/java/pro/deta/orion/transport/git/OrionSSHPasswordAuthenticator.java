@@ -11,8 +11,7 @@ import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
 import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.auth.UserIdentity;
-import pro.deta.orion.util.Result;
+import pro.deta.orion.auth.AuthenticationResult;
 
 import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
@@ -36,15 +35,15 @@ public class OrionSSHPasswordAuthenticator implements PasswordAuthenticator, Pub
     }
 
     private boolean internalAuthenticate(String username, byte[] encodedData, AccessControl.CredentialType credentialType, ServerSession session) {
-        Result<UserIdentity> user = orionAccessControlService.authenticateUser(username, credentialType, encodedData);
+        AuthenticationResult user = orionAccessControlService.authenticateUser(username, credentialType, encodedData);
         return switch (user) {
-            case Result.Success<UserIdentity>(var u) -> {
+            case AuthenticationResult.Success(var u) -> {
                 log.trace("SSH user '{}' logged in.", username);
                 session.setAttribute(SSH_AUTHENTICATED_USER, u);
                 yield true;
             }
-            case Result.Failure<UserIdentity>(var code, var message, var throwable) -> {
-                log.trace("SSH user '{}' denied: {}/{}.", username, code, message, throwable);
+            case AuthenticationResult.Failure(var reason, var throwable) -> {
+                log.trace("SSH user '{}' denied: {}.", username, reason, throwable);
                 yield false;
             }
         };
