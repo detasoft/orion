@@ -7,6 +7,7 @@ import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
+import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
@@ -37,6 +38,7 @@ public class SshCommandFactory implements CommandFactory {
     private final GitInternalService gitInternalService;
     private final OrionExecutor orionExecutor;
     private final OrionProvider orionProvider;
+    private final OrionAccessControlService accessControlService;
 
     @Override
     public Command createCommand(ChannelSession channelSession, String commandLine) throws IOException {
@@ -70,7 +72,7 @@ public class SshCommandFactory implements CommandFactory {
                                 publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
                             }
                             String publicKey = publicKeyBuilder.toString();
-                            orionExecutor.submit(() -> orionProvider.getAccessControlService().addKeyToUser(username, publicKey));
+                            orionExecutor.submit(() -> accessControlService.addKeyToUser(username, publicKey));
                             outputStream.write(("Public: " + publicKey + " added successfully as authentication method for user " + username).getBytes(StandardCharsets.UTF_8));
                         } catch (IOException e) {
                             throw new RuntimeException(e);

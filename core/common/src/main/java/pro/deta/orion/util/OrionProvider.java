@@ -3,7 +3,6 @@ package pro.deta.orion.util;
 import jakarta.inject.Inject;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
-import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.ApplicationStateHolder;
@@ -17,7 +16,6 @@ import javax.inject.Provider;
 public class OrionProvider {
     private final ApplicationStateHolder applicationStateHolder;
     private final Provider<OrionApplicationLifecycle> orionApplicationLifecycle;
-    private final Provider<OrionAccessControlService> accessControlService;
     private final Provider<OrionEventManager> eventManager;
     private final Provider<OrionExecutor> orionExecutor;
 
@@ -27,10 +25,6 @@ public class OrionProvider {
 
     public OrionApplicationLifecycle getOrionApplicationLifecycle() {
         return orionApplicationLifecycle.get();
-    }
-
-    public OrionAccessControlService getAccessControlService() {
-        return accessControlService.get();
     }
 
     public OrionEventManager getEventManager() {
