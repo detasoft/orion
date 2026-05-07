@@ -113,12 +113,6 @@ public class OrionRuntimeModule {
         return orionAccessControlService;
     };
 
-    @Provides
-    @GitStorageDir
-    Path gitStorageDir(ConfigurationContext configurationContext) {
-        return configurationContext.getGitStoragePath();
-    }
-
 //    OrionConfiguration.ACLStorageType storageType(OrionConfiguration orionConfiguration) {
 //        return orionConfiguration.getAccessControl().getType();
 //    }
