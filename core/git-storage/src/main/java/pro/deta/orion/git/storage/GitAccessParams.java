@@ -1,4 +1,4 @@
-package pro.deta.orion.internal;
+package pro.deta.orion.git.storage;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -11,11 +11,12 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.transport.*;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
-import pro.deta.orion.internal.auth.Auth;
-import pro.deta.orion.internal.jgit.JGitAuth;
-import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactoryProvider;
+import pro.deta.orion.git.storage.auth.Auth;
+import pro.deta.orion.git.storage.jgit.JGitAuth;
+import pro.deta.orion.git.storage.jgit.OrionClientSshdSessionFactoryProvider;
+import pro.deta.orion.internal.CheckedConsumer;
+import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.Result;
 
@@ -31,7 +32,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static pro.deta.orion.acl.schema.AccessControl.TRUE_STRING;
-import static pro.deta.orion.internal.auth.Auth.getLocalAuthInstance;
+import static pro.deta.orion.git.storage.auth.Auth.getLocalAuthInstance;
 import static pro.deta.orion.util.FileUtils.wipeDirectory;
 
 @RequiredArgsConstructor

@@ -17,7 +17,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.GitRepositoryProviderImpl;
 import pro.deta.orion.git.OrionJGitRuntime;
-import pro.deta.orion.internal.GitInternalStorage;
+import pro.deta.orion.git.storage.GitBackedInternalStorage;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
@@ -71,8 +71,8 @@ public class OrionRuntimeModule {
 
     @Provides
     @IntoSet
-    static OrionApplicationStageEventListener gitInternalStorage(GitInternalStorage gitInternalStorage) {
-        return gitInternalStorage;
+    static OrionApplicationStageEventListener gitBackedInternalStorage(GitBackedInternalStorage gitBackedInternalStorage) {
+        return gitBackedInternalStorage;
     }
 
     @Provides

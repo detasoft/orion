@@ -46,6 +46,11 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.core</groupId>
+                <artifactId>git-storage</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.core</groupId>
                 <artifactId>bc</artifactId>
                 <version>${project.version}</version>
             </dependency>

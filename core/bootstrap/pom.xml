@@ -19,6 +19,10 @@
             <artifactId>git-engine</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>git-storage</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>git-transport</artifactId>
         </dependency>

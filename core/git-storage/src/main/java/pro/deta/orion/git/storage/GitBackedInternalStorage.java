@@ -1,4 +1,4 @@
-package pro.deta.orion.internal;
+package pro.deta.orion.git.storage;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -12,7 +12,7 @@ import pro.deta.orion.crypto.ServerKeyService;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.git.common.GitRefUpdate;
 import pro.deta.orion.event.type.VolatileUserAdded;
-import pro.deta.orion.internal.jgit.OrionClientSshdSessionFactoryProvider;
+import pro.deta.orion.git.storage.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
@@ -30,8 +30,8 @@ import java.util.function.Consumer;
 @Singleton
 @Getter
 @Slf4j
-public class GitInternalStorage implements OrionApplicationStageEventListener {
-    public static final int GIT_INTERNAL_STORAGE_PRIORITY = 7;
+public class GitBackedInternalStorage implements OrionApplicationStageEventListener {
+    public static final int GIT_BACKED_INTERNAL_STORAGE_PRIORITY = 7;
     private final Path storageArea;
     private final ServerKeyService serverKeyService;
     private final OrionProvider orionProvider;
@@ -40,11 +40,11 @@ public class GitInternalStorage implements OrionApplicationStageEventListener {
     private final OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider;
 
     @Inject
-    public GitInternalStorage(ConfigurationContext configurationContext, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
+    public GitBackedInternalStorage(ConfigurationContext configurationContext, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
         this(configurationContext.getWorkDir(), config, serverKeyService, orionProvider, orionClientSshdSessionFactoryProvider);
     }
 
-    GitInternalStorage(Path workDir, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
+    GitBackedInternalStorage(Path workDir, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
         this.storageArea = workDir.resolve("storage-area");
         this.serverKeyService = serverKeyService;
         this.config = config;
@@ -55,7 +55,7 @@ public class GitInternalStorage implements OrionApplicationStageEventListener {
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
         registrar.register(ApplicationState.INIT, this::onInit);
-        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_INTERNAL_STORAGE_PRIORITY).waitForCompletion(); // after GIT_TRANSPORT_PRIORITY leads to finish all transport started first
+        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_BACKED_INTERNAL_STORAGE_PRIORITY).waitForCompletion(); // after GIT_TRANSPORT_PRIORITY leads to finish all transport started first
     }
 
     private OrionStageCallResult onInit() {

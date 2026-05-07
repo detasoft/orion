@@ -1,4 +1,4 @@
-package pro.deta.orion.internal;
+package pro.deta.orion.git.storage;
 
 import lombok.RequiredArgsConstructor;
 import org.slf4j.helpers.MessageFormatter;

@@ -32,7 +32,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static pro.deta.orion.acl.schema.AccessControl.CredentialType.OPENSSH_PUBLIC_KEY;
-import static pro.deta.orion.internal.GitInternalStorage.GIT_INTERNAL_STORAGE_PRIORITY;
+import static pro.deta.orion.git.storage.GitBackedInternalStorage.GIT_BACKED_INTERNAL_STORAGE_PRIORITY;
 import static pro.deta.orion.util.Result.Failure.generalFailure;
 
 @Slf4j
@@ -50,7 +50,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
         registrar.register(ApplicationState.INIT, this::onInit).priority(INIT_PRIORITY).waitForCompletion(); // should be completed before GitAccessControlStorage - publishes user to allow in ACL
-        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_INTERNAL_STORAGE_PRIORITY + 2);
+        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_BACKED_INTERNAL_STORAGE_PRIORITY + 2);
     }
 
     public OrionStageCallResult onInit() {

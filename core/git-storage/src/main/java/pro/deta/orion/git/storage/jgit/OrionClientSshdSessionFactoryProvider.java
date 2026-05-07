@@ -1,4 +1,4 @@
-package pro.deta.orion.internal.jgit;
+package pro.deta.orion.git.storage.jgit;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;

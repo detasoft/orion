@@ -11,8 +11,8 @@ import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.RequestToAclUpdate;
-import pro.deta.orion.internal.GitAccessParams;
-import pro.deta.orion.internal.GitInternalStorage;
+import pro.deta.orion.git.storage.GitAccessParams;
+import pro.deta.orion.git.storage.GitBackedInternalStorage;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
@@ -33,7 +33,7 @@ import java.nio.file.Path;
 @ToString
 public class GitAccessControlStorage extends OrionEnableServiceSupport implements AccessControlStorage, OrionApplicationStageEventListener {
     private final XmlService xmlService = new XmlService();
-    private final GitInternalStorage gitInternalStorage;
+    private final GitBackedInternalStorage gitBackedInternalStorage;
     private final OrionExecutor orionExecutor;
     private final OrionEventManager orionEventManager;
     private final OrionConfiguration.AccessControlConfig accessControl;
@@ -41,8 +41,8 @@ public class GitAccessControlStorage extends OrionEnableServiceSupport implement
     private Path orionConfigFileName;
 
     @Inject
-    public GitAccessControlStorage(GitInternalStorage gitInternalStorage, OrionConfiguration orionConfiguration, OrionExecutor orionExecutor, OrionEventManager orionEventManager) {
-        this.gitInternalStorage = gitInternalStorage;
+    public GitAccessControlStorage(GitBackedInternalStorage gitBackedInternalStorage, OrionConfiguration orionConfiguration, OrionExecutor orionExecutor, OrionEventManager orionEventManager) {
+        this.gitBackedInternalStorage = gitBackedInternalStorage;
         this.accessControl = orionConfiguration.getAccessControl();
         this.orionExecutor = orionExecutor;
         this.orionEventManager = orionEventManager;
@@ -55,7 +55,7 @@ public class GitAccessControlStorage extends OrionEnableServiceSupport implement
 
     public OrionStageCallResult onInit() {
         OrionStageCallResult result = OrionStageCallResult.defaultWithWait(); // need to wait until event published to a eventManager
-        area = gitInternalStorage.registerArea(result,"acl", accessControl.getUrl(), accessControl.getUsername(), accessControl.getCredential(), accessControl.getBranch(), (event) -> {
+        area = gitBackedInternalStorage.registerArea(result,"acl", accessControl.getUrl(), accessControl.getUsername(), accessControl.getCredential(), accessControl.getBranch(), (event) -> {
             orionEventManager.publish(new RequestToAclUpdate(event.toString()));
         });
         orionConfigFileName = area.getLocalPath().resolve(accessControl.getSettingsFileName());

@@ -1,4 +1,4 @@
-package pro.deta.orion.internal.jgit;
+package pro.deta.orion.git.storage.jgit;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

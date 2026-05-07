@@ -1,4 +1,4 @@
-package pro.deta.orion.internal;
+package pro.deta.orion.git.storage;
 
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;

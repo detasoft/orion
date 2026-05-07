@@ -11,7 +11,7 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>acl</artifactId>
+    <artifactId>git-storage</artifactId>
 
     <dependencies>
         <dependency>
@@ -24,22 +24,20 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>authorization</artifactId>
+            <artifactId>git-common</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>git-storage</artifactId>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.fasterxml.jackson.dataformat</groupId>
-            <artifactId>jackson-dataformat-xml</artifactId>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit.ssh.apache</artifactId>
         </dependency>
-
-
         <dependency>
-            <groupId>io.github.dvgaba</groupId>
-            <artifactId>easy-random-core</artifactId>
-            <scope>test</scope>
+            <groupId>org.apache.sshd</groupId>
+            <artifactId>sshd-mina</artifactId>
+            <version>${sshd-mina.version}</version>
         </dependency>
         <dependency>
             <groupId>org.assertj</groupId>

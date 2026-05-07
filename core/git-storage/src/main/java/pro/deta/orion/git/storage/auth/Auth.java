@@ -1,4 +1,4 @@
-package pro.deta.orion.internal.auth;
+package pro.deta.orion.git.storage.auth;
 
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.util.KeyUtils;

@@ -1,9 +1,9 @@
-package pro.deta.orion.internal.jgit;
+package pro.deta.orion.git.storage.jgit;
 
 import org.eclipse.jgit.api.TransportCommand;
 import org.eclipse.jgit.transport.SshTransport;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
-import pro.deta.orion.internal.auth.Auth;
+import pro.deta.orion.git.storage.auth.Auth;
 
 import java.security.KeyPair;
 import java.security.PublicKey;

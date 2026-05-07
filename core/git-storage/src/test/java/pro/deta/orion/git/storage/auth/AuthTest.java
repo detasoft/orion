@@ -1,4 +1,4 @@
-package pro.deta.orion.internal.auth;
+package pro.deta.orion.git.storage.auth;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.util.KeyUtils;
@@ -22,7 +22,7 @@ class AuthTest {
     @Test
     void localSshAuthUsesConfiguredKeyFile() throws Exception {
         Path keyPath = Path.of(Objects.requireNonNull(
-                getClass().getResource("/pro/deta/orion/internal/auth/local-acl-rsa.pem")
+                getClass().getResource("/pro/deta/orion/git/storage/auth/local-acl-rsa.pem")
         ).toURI());
         var expectedKeyPair = KeyUtils.readKeyFromFile(keyPath).valueOrFailure("Cannot read test key");
 

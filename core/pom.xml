@@ -21,6 +21,7 @@
         <module>configuration</module>
         <module>common</module>
         <module>git-common</module>
+        <module>git-storage</module>
         <module>authorization</module>
         <module>git-engine</module>
         <module>git-engine-s3</module>
