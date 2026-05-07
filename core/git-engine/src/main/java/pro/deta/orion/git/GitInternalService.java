@@ -2,13 +2,7 @@ package pro.deta.orion.git;
 
 import jakarta.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.NameRevCommand;
-import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.errors.MissingObjectException;
-import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.storage.pack.PackStatistics;
-import org.eclipse.jgit.transport.*;
+import org.eclipse.jgit.transport.PacketLineIn;
 import org.slf4j.helpers.MessageFormatter;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.auth.SecurityContext;
@@ -20,13 +14,9 @@ import pro.deta.orion.git.auth.GitFetchResource;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
-import pro.deta.orion.git.common.GitFetchAccessRequest;
+import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
-import pro.deta.orion.git.common.GitObjectId;
-import pro.deta.orion.git.common.GitRefUpdate;
-import pro.deta.orion.git.common.GitRefUpdateResult;
-import pro.deta.orion.git.common.GitRefUpdateType;
-import pro.deta.orion.git.common.GitUploadStats;
+import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.Result;
@@ -59,8 +49,6 @@ public class GitInternalService {
                 gitCommand = cmdResolved.apply(streams.getInputStream());
                 Thread.currentThread().setName(MessageFormatter.format("Serving {} [{}] ({})", clientId, new Object[]{requestId, gitCommand}).getMessage());
                 serveCommand(securityContext, gitCommand, streams);
-            } catch (ServiceMayNotContinueException e) {
-                writeProtocolError(streams.getOutputStream(), e.getMessage());
             } catch (OrionSecurityException | SecurityException e) {
                 log.error("ACCESS_DENIED {} / {}", gitCommand, e.getMessage());
                 writeProtocolError(streams.getOutputStream(), "ACCESS_DENIED");
@@ -70,7 +58,7 @@ public class GitInternalService {
         });
     }
 
-    private void serveCommand(SecurityContext securityContext, GitCommand gitCommand, IOEStreamProvider streams) throws IOException, ServiceMayNotContinueException, OrionSecurityException {
+    private void serveCommand(SecurityContext securityContext, GitCommand gitCommand, IOEStreamProvider streams) throws IOException, OrionSecurityException {
         if (gitCommand.getCommand().isUnknown()) {
             writeProtocolError(streams.getOutputStream(), "unknown command");
             return;
@@ -124,15 +112,29 @@ public class GitInternalService {
     }
 
     private void serveUploadPackToClient(SecurityContext securityContext, GitCommand gitCommand, GitRepository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
-        UploadPack uploadPack = GitUtils.createUploadPackToClient(repository, extraParameters(gitCommand));
-        attachHooks(securityContext, uploadPack, repositoryName);
-        GitUtils.runUploadPackToClient(uploadPack, streams);
+        GitUploadRequest request = new GitUploadRequest(
+                GitUtils.gitProtocolTimeoutSeconds(),
+                extraParameters(gitCommand),
+                stats -> eventManager.publish(new GitUploadOrionEvent(repositoryName, stats)));
+        GitRepository accessCheckedRepository = repository.withFetchAccessCheck(fetchRequest -> {
+            try {
+                accessEnforcer().require(securityContext, GitFetchResource.of(fetchRequest), GitFetchAccessRules.everyWantedObjectAllowed());
+            } catch (OrionSecurityException e) {
+                throw new SecurityException("ACCESS_DENIED", e);
+            }
+        });
+        GitUtils.runUploadToClient(accessCheckedRepository, request, streams);
     }
 
     private void serveReceivePackFromClient(SecurityContext securityContext, GitRepository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
-        ReceivePack receivePack = GitUtils.createReceivePackFromClient(repository);
-        attachHooks(securityContext, receivePack, repositoryName);
-        GitUtils.runReceivePackFromClient(receivePack, streams);
+        GitReceiveRequest request = new GitReceiveRequest(
+                GitUtils.gitProtocolTimeoutSeconds(),
+                refUpdates -> eventManager.publish(() -> {
+                    GitReceiveOrionEvent event = new GitReceiveOrionEvent(repositoryName, securityContext.getUserIdentity().getUserId());
+                    refUpdates.forEach(event::addReceiveEventRef);
+                    return event;
+                }));
+        GitUtils.runReceiveFromClient(repository, request, streams);
     }
 
     private static Set<String> extraParameters(GitCommand gitCommand) {
@@ -141,137 +143,6 @@ public class GitInternalService {
             extraParameters.add(entry.getKey() + "=" + entry.getValue());
         }
         return extraParameters;
-    }
-
-    private void attachHooks(SecurityContext securityContext, ReceivePack rp, String repositoryName) {
-        rp.setPostReceiveHook(new PostReceiveHook() {
-            @Override
-            public void onPostReceive(ReceivePack rp, Collection<ReceiveCommand> commands) {
-                List<ReceiveCommand> eventCommands = rp.getAllCommands();
-                if (eventCommands.isEmpty()) {
-                    return;
-                }
-
-                eventManager.publish(() -> {
-                    GitReceiveOrionEvent event = new GitReceiveOrionEvent(repositoryName, securityContext.getUserIdentity().getUserId());
-                    for (ReceiveCommand sc : eventCommands) {
-                        event.addReceiveEventRef(toGitRefUpdate(sc));
-                    }
-                    return event;
-                });
-            }
-        });
-    }
-
-    private void attachHooks(SecurityContext securityContext, UploadPack up, String repositoryName) {
-        up.setPostUploadHook(new PostUploadHook() {
-            @Override
-            public void onPostUpload(PackStatistics stats) {
-                eventManager.publish(new GitUploadOrionEvent(repositoryName, toGitUploadStats(stats)));
-            }
-        });
-        up.setPreUploadHook(new PreUploadHook() {
-            @Override
-            public void onBeginNegotiateRound(UploadPack up, Collection<? extends ObjectId> wants, int cntOffered) throws ServiceMayNotContinueException {
-                try {
-                    try (Git git = new Git(up.getRepository())) {
-                        GitFetchAccessRequest request = new GitFetchAccessRequest(
-                                repositoryName,
-                                toGitObjectIds(wants),
-                                objectIds -> resolveBranchNames(git, objectIds));
-                        accessEnforcer().require(securityContext, GitFetchResource.of(request), GitFetchAccessRules.everyWantedObjectAllowed());
-                    }
-                } catch (OrionSecurityException e) {
-                    throw new ServiceMayNotContinueException("ACCESS_DENIED", e);
-                }
-            }
-
-            @Override
-            public void onEndNegotiateRound(UploadPack up, Collection<? extends ObjectId> wants, int cntCommon, int cntNotFound, boolean ready) throws ServiceMayNotContinueException {
-                log.trace("onEndNegotiateRound");
-            }
-
-            @Override
-            public void onSendPack(UploadPack up, Collection<? extends ObjectId> wants, Collection<? extends ObjectId> haves) throws ServiceMayNotContinueException {
-                log.trace("onSendPack " + wants + " " + haves);
-            }
-        });
-    }
-
-    private static GitRefUpdate toGitRefUpdate(ReceiveCommand command) {
-        return new GitRefUpdate(
-                command.getRefName(),
-                toGitObjectId(command.getOldId()),
-                toGitObjectId(command.getNewId()),
-                toGitRefUpdateType(command.getType()),
-                toGitRefUpdateResult(command.getResult()));
-    }
-
-    private static GitObjectId toGitObjectId(ObjectId objectId) {
-        if (objectId == null) {
-            return null;
-        }
-        return GitObjectId.of(objectId.name());
-    }
-
-    private static GitRefUpdateType toGitRefUpdateType(ReceiveCommand.Type type) {
-        return switch (type) {
-            case CREATE -> GitRefUpdateType.CREATE;
-            case UPDATE -> GitRefUpdateType.UPDATE;
-            case UPDATE_NONFASTFORWARD -> GitRefUpdateType.UPDATE_NON_FAST_FORWARD;
-            case DELETE -> GitRefUpdateType.DELETE;
-        };
-    }
-
-    private static GitRefUpdateResult toGitRefUpdateResult(ReceiveCommand.Result result) {
-        return switch (result) {
-            case NOT_ATTEMPTED -> GitRefUpdateResult.NOT_ATTEMPTED;
-            case OK -> GitRefUpdateResult.OK;
-            case REJECTED_NOCREATE -> GitRefUpdateResult.REJECTED_NO_CREATE;
-            case REJECTED_NODELETE -> GitRefUpdateResult.REJECTED_NO_DELETE;
-            case REJECTED_NONFASTFORWARD -> GitRefUpdateResult.REJECTED_NON_FAST_FORWARD;
-            case REJECTED_CURRENT_BRANCH -> GitRefUpdateResult.REJECTED_CURRENT_BRANCH;
-            case REJECTED_MISSING_OBJECT -> GitRefUpdateResult.REJECTED_MISSING_OBJECT;
-            case REJECTED_OTHER_REASON -> GitRefUpdateResult.REJECTED_OTHER_REASON;
-            case LOCK_FAILURE -> GitRefUpdateResult.LOCK_FAILURE;
-        };
-    }
-
-    private static GitUploadStats toGitUploadStats(PackStatistics stats) {
-        return new GitUploadStats(stats.getTotalObjects(), stats.getReusedObjects(), stats.getTotalBytes());
-    }
-
-    private static List<GitObjectId> toGitObjectIds(Collection<? extends ObjectId> objectIds) {
-        List<GitObjectId> result = new ArrayList<>();
-        for (ObjectId objectId : objectIds) {
-            result.add(toGitObjectId(objectId));
-        }
-        return result;
-    }
-
-    private static Map<GitObjectId, String> resolveBranchNames(Git git, Collection<GitObjectId> objectIds) {
-        NameRevCommand nameRev = git.nameRev().addPrefix("refs/heads");
-        for (GitObjectId objectId : objectIds) {
-            try {
-                nameRev.add(ObjectId.fromString(objectId.value()));
-            } catch (MissingObjectException e) {
-                log.error("Can't find commit {}", objectId.value());
-                return Collections.emptyMap();
-            }
-        }
-
-        Map<ObjectId, String> branchNames;
-        try {
-            branchNames = nameRev.call();
-        } catch (GitAPIException e) {
-            throw new RuntimeException(e);
-        }
-
-        Map<GitObjectId, String> result = new LinkedHashMap<>();
-        for (Map.Entry<ObjectId, String> entry : branchNames.entrySet()) {
-            result.put(toGitObjectId(entry.getKey()), entry.getValue());
-        }
-        return result;
     }
 
     public static GitCommand parse(InputStream inputStream) {

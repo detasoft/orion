@@ -2,18 +2,15 @@ package pro.deta.orion.git.util;
 
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.diff.DiffEntry;
-import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.PacketLineOut;
-import org.eclipse.jgit.transport.ReceivePack;
-import org.eclipse.jgit.transport.UploadPack;
+import pro.deta.orion.git.common.GitReceiveRequest;
+import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.stream.IOEStreamProvider;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.Set;
 
 @Slf4j
 public final class GitUtils {
@@ -30,36 +27,30 @@ public final class GitUtils {
                 diff.getOldPath().equals(diff.getNewPath()) ? diff.getNewPath() : diff.getOldPath() + " -> " + diff.getNewPath());
     }
 
-    public static UploadPack createUploadPackToClient(GitRepository repository, Set<String> extraParameters) {
-        UploadPack uploadPack = new UploadPack(jgitRepository(repository));
-        uploadPack.setTimeout(gitProtocolTimeoutSeconds());
-        uploadPack.setExtraParameters(extraParameters);
-        return uploadPack;
-    }
-
-    public static ReceivePack createReceivePackFromClient(GitRepository repository) {
-        ReceivePack receivePack = new ReceivePack(jgitRepository(repository));
-        receivePack.setTimeout(gitProtocolTimeoutSeconds());
-        return receivePack;
-    }
-
-    public static void runUploadPackToClient(UploadPack uploadPack, IOEStreamProvider streams) throws IOException {
+    public static void runUploadToClient(GitRepository repository, GitUploadRequest request, IOEStreamProvider streams) throws IOException {
         try {
-            uploadPack.uploadWithExceptionPropagation(
+            repository.upload(
+                    request,
                     streams.getInputStream(),
                     streams.getOutputStream(),
                     streams.getErrorStream());
         } catch (Exception e) {
-            log.error("Git upload-pack failed for {}", repositoryDescription(uploadPack.getRepository()), e);
+            log.error("Git upload failed for {}", repository.description(), e);
             writeProtocolError(streams.getOutputStream(), e.getMessage());
         }
     }
 
-    public static void runReceivePackFromClient(ReceivePack receivePack, IOEStreamProvider streams) throws IOException {
-        receivePack.receive(
-                streams.getInputStream(),
-                streams.getOutputStream(),
-                streams.getErrorStream());
+    public static void runReceiveFromClient(GitRepository repository, GitReceiveRequest request, IOEStreamProvider streams) throws IOException {
+        try {
+            repository.receive(
+                    request,
+                    streams.getInputStream(),
+                    streams.getOutputStream(),
+                    streams.getErrorStream());
+        } catch (Exception e) {
+            log.error("Git receive failed for {}", repository.description(), e);
+            writeProtocolError(streams.getOutputStream(), e.getMessage());
+        }
     }
 
     public static void writeProtocolError(OutputStream outputStream, String message) {
@@ -72,22 +63,10 @@ public final class GitUtils {
         }
     }
 
-    private static int gitProtocolTimeoutSeconds() {
+    public static int gitProtocolTimeoutSeconds() {
         return switch (OrionUtils.JVM_MODE) {
             case DEFAULT -> GIT_PROTOCOL_TIMEOUT_SECONDS;
             case JVM_DEBUG -> 0;
         };
-    }
-
-    private static Repository jgitRepository(GitRepository repository) {
-        return repository.unwrapOrThrow(Repository.class);
-    }
-
-    private static String repositoryDescription(Repository repository) {
-        File directory = repository.getDirectory();
-        if (directory != null) {
-            return directory.toString();
-        }
-        return repository.getIdentifier();
     }
 }
