@@ -1,12 +1,12 @@
 package pro.deta.orion.git;
 
-import org.eclipse.jgit.lib.Repository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.stream.IOEStreamProvider;
 import pro.deta.orion.util.stream.StreamUtils;
@@ -190,22 +190,17 @@ class GitInternalServiceTest {
         }
 
         @Override
-        public Result<Repository> find(String repositoryName) {
+        public Result<GitRepository> find(String repositoryName) {
             findCalled = true;
             findRepositoryName = repositoryName;
             return Result.Failure.generalFailure("find is not implemented in this test");
         }
 
         @Override
-        public Result<Repository> findOrCreate(String repositoryName) {
+        public Result<GitRepository> findOrCreate(String repositoryName) {
             findOrCreateCalled = true;
             findOrCreateRepositoryName = repositoryName;
             return Result.Failure.generalFailure("findOrCreate is not implemented in this test");
-        }
-
-        @Override
-        public GitRepositoryProvider.OrionGitRepositoryResolver createResolver() {
-            throw new UnsupportedOperationException();
         }
     }
 }

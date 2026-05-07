@@ -6,6 +6,7 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.PacketLineOut;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.UploadPack;
+import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.stream.IOEStreamProvider;
 
@@ -29,15 +30,15 @@ public final class GitUtils {
                 diff.getOldPath().equals(diff.getNewPath()) ? diff.getNewPath() : diff.getOldPath() + " -> " + diff.getNewPath());
     }
 
-    public static UploadPack createUploadPackToClient(Repository repository, Set<String> extraParameters) {
-        UploadPack uploadPack = new UploadPack(repository);
+    public static UploadPack createUploadPackToClient(GitRepository repository, Set<String> extraParameters) {
+        UploadPack uploadPack = new UploadPack(jgitRepository(repository));
         uploadPack.setTimeout(gitProtocolTimeoutSeconds());
         uploadPack.setExtraParameters(extraParameters);
         return uploadPack;
     }
 
-    public static ReceivePack createReceivePackFromClient(Repository repository) {
-        ReceivePack receivePack = new ReceivePack(repository);
+    public static ReceivePack createReceivePackFromClient(GitRepository repository) {
+        ReceivePack receivePack = new ReceivePack(jgitRepository(repository));
         receivePack.setTimeout(gitProtocolTimeoutSeconds());
         return receivePack;
     }
@@ -76,6 +77,10 @@ public final class GitUtils {
             case DEFAULT -> GIT_PROTOCOL_TIMEOUT_SECONDS;
             case JVM_DEBUG -> 0;
         };
+    }
+
+    private static Repository jgitRepository(GitRepository repository) {
+        return repository.unwrapOrThrow(Repository.class);
     }
 
     private static String repositoryDescription(Repository repository) {

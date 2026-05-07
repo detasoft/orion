@@ -1,35 +1,32 @@
 package pro.deta.orion.util.rle;
 
-import org.apache.commons.codec.binary.Hex;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.util.OpenSSHKey;
 
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.Base64;
+import java.util.HexFormat;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class RLETCoderTest {
+    private static final HexFormat HEX = HexFormat.of();
 
     @Test
     public void testSimpleRLE() {
         byte[] data = { 0,1,2,3 };
         encodeAndDecodeTestShort(data, "000400010203");
-        assertEquals(Hex.encodeHexString(RLETCoder.ENCODER_SHORT.encodeRLET(data, data)), "000400010203000400010203");
+        assertEquals(HEX.formatHex(RLETCoder.ENCODER_SHORT.encodeRLET(data, data)), "000400010203000400010203");
     }
 
     private void encodeAndDecodeTestShort(byte[] data, String expected) {
         byte[] result = RLETCoder.ENCODER_SHORT.encodeRLET(data);
-        assertEquals(Hex.encodeHexString(result), expected);
+        assertEquals(HEX.formatHex(result), expected);
         byte[][] original = RLETCoder.ENCODER_SHORT.decodeRLET(result);
         assertArrayEquals(data, original[0]);
     }
 
     private void encodeAndDecodeTestInt(byte[] data, String expected) {
         byte[] result = RLETCoder.ENCODER_INT.encodeRLET(data);
-        assertEquals(Hex.encodeHexString(result), expected);
+        assertEquals(HEX.formatHex(result), expected);
         byte[][] original = RLETCoder.ENCODER_INT.decodeRLET(result);
         assertArrayEquals(data, original[0]);
     }

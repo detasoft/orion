@@ -7,7 +7,6 @@ import org.eclipse.jgit.api.NameRevCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.pack.PackStatistics;
 import org.eclipse.jgit.transport.*;
 import org.slf4j.helpers.MessageFormatter;
@@ -22,6 +21,7 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.event.type.GitUploadOrionEvent;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
+import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.common.GitRefUpdate;
 import pro.deta.orion.git.common.GitRefUpdateResult;
@@ -77,12 +77,12 @@ public class GitInternalService {
         }
 
         String repositoryName = gitCommand.getRepositoryName();
-        Optional<Repository> repositoryResult = openRepositoryFor(securityContext, gitCommand, repositoryName);
+        Optional<GitRepository> repositoryResult = openRepositoryFor(securityContext, gitCommand, repositoryName);
         if (repositoryResult.isEmpty()) {
             return;
         }
 
-        try (Repository repository = repositoryResult.get()) {
+        try (GitRepository repository = repositoryResult.get()) {
             switch (gitCommand.getCommand()) {
                 case UPLOAD -> serveUploadPackToClient(securityContext, gitCommand, repository, repositoryName, streams);
                 case RECEIVE -> serveReceivePackFromClient(securityContext, repository, repositoryName, streams);
@@ -91,14 +91,14 @@ public class GitInternalService {
         }
     }
 
-    private Optional<Repository> openRepositoryFor(SecurityContext securityContext, GitCommand gitCommand, String repositoryName) throws OrionSecurityException {
+    private Optional<GitRepository> openRepositoryFor(SecurityContext securityContext, GitCommand gitCommand, String repositoryName) throws OrionSecurityException {
         boolean repositoryExists = repositoryProvider.exists(repositoryName);
         if (!repositoryExists && gitCommand.isRead()) {
             return Optional.empty();
         }
 
         RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
-        Result<Repository> repositoryResult;
+        Result<GitRepository> repositoryResult;
         if (gitCommand.isWrite() && !repositoryExists) {
             accessEnforcer().require(securityContext, repositoryResource, RepositoryAccessRules.create());
             repositoryResult = repositoryProvider.findOrCreate(repositoryName);
@@ -114,22 +114,22 @@ public class GitInternalService {
         return Optional.of(repositoryFrom(repositoryResult));
     }
 
-    private static Repository repositoryFrom(Result<Repository> result) {
+    private static GitRepository repositoryFrom(Result<GitRepository> result) {
         return switch (result) {
-            case Result.Success<Repository>(var repository) -> repository;
-            case Failure<Repository>(var code, var message, var throwable) ->
+            case Result.Success<GitRepository>(var repository) -> repository;
+            case Failure<GitRepository>(var code, var message, var throwable) ->
                     throw new IllegalStateException("Unexpected value: " + code + " / " + message, throwable);
             default -> throw new IllegalStateException("Unexpected value: " + result);
         };
     }
 
-    private void serveUploadPackToClient(SecurityContext securityContext, GitCommand gitCommand, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+    private void serveUploadPackToClient(SecurityContext securityContext, GitCommand gitCommand, GitRepository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
         UploadPack uploadPack = GitUtils.createUploadPackToClient(repository, extraParameters(gitCommand));
         attachHooks(securityContext, uploadPack, repositoryName);
         GitUtils.runUploadPackToClient(uploadPack, streams);
     }
 
-    private void serveReceivePackFromClient(SecurityContext securityContext, Repository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
+    private void serveReceivePackFromClient(SecurityContext securityContext, GitRepository repository, String repositoryName, IOEStreamProvider streams) throws IOException {
         ReceivePack receivePack = GitUtils.createReceivePackFromClient(repository);
         attachHooks(securityContext, receivePack, repositoryName);
         GitUtils.runReceivePackFromClient(receivePack, streams);

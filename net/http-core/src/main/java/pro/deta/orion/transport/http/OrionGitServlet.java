@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jgit.http.server.GitFilter;
+import org.eclipse.jgit.lib.Repository;
 import pro.deta.orion.GitRepositoryProvider;
 
 import java.io.IOException;
@@ -18,7 +19,10 @@ public class OrionGitServlet implements MapToUrlServlet {
 
     @Inject
     public OrionGitServlet(GitRepositoryProvider gitRepositoryProvider) {
-        gitFilter.setRepositoryResolver(gitRepositoryProvider.createResolver());
+        gitFilter.setRepositoryResolver((request, repositoryName) -> gitRepositoryProvider
+                .findOrCreate(repositoryName)
+                .valueOrFailure("Failed to open repository " + repositoryName)
+                .unwrapOrThrow(Repository.class));
     }
 
     @Override

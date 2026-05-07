@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
+import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.Result;
 
 import java.nio.file.Path;
@@ -41,9 +42,10 @@ class GitRepositoryProviderImplTest {
     void nestedRepositoryNamesAreAllowed() {
         GitRepositoryProviderImpl provider = newProvider();
 
-        Result<Repository> result = provider.findOrCreate("team/project.git");
+        Result<GitRepository> result = provider.findOrCreate("team/project.git");
 
         assertThat(result).isInstanceOf(Result.Success.class);
+        assertThat(result.valueOrFailure("repository should be created").unwrap(Repository.class)).isPresent();
         assertThat(provider.exists("team/project.git")).isTrue();
         assertThat(gitStorageDir.resolve("team/project.git/config")).exists();
     }

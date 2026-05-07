@@ -3,14 +3,12 @@ package pro.deta.orion.git;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
-import org.eclipse.jgit.errors.RepositoryNotFoundException;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileBasedConfig;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.transport.ServiceMayNotContinueException;
-import org.eclipse.jgit.transport.resolver.ServiceNotAuthorizedException;
-import org.eclipse.jgit.transport.resolver.ServiceNotEnabledException;
 import pro.deta.orion.GitRepositoryProvider;
+import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.git.jgit.JGitRepository;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.Result;
@@ -31,7 +29,7 @@ import static pro.deta.orion.util.Result.FailureCode.NOT_FOUND;
 public class GitRepositoryProviderImpl implements GitRepositoryProvider {
     private final Path gitStorageDir;
 
-    private final ConcurrentMap<String, Repository> repositoryCache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, GitRepository> repositoryCache = new ConcurrentHashMap<>();
 
     @Inject
     public GitRepositoryProviderImpl(ConfigurationContext configurationContext) {
@@ -55,10 +53,10 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
     }
 
     @Override
-    public Result<Repository> find(String repositoryName) {
+    public Result<GitRepository> find(String repositoryName) {
         try {
             ResolvedRepository repository = resolveRepository(repositoryName);
-            Repository r = repositoryCache.computeIfAbsent(repository.cacheKey(), (name) -> openRepository(repositoryName, repository.storagePath(), false));
+            GitRepository r = repositoryCache.computeIfAbsent(repository.cacheKey(), (name) -> openRepository(repository.cacheKey(), repository.storagePath(), false));
             if (r == null) {
                 return new Result.Failure<>(NOT_FOUND);
             }
@@ -73,10 +71,10 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
     }
 
     @Override
-    public Result<Repository> findOrCreate(String repositoryName) {
+    public Result<GitRepository> findOrCreate(String repositoryName) {
         try {
             ResolvedRepository repository = resolveRepository(repositoryName);
-            Repository r = repositoryCache.computeIfAbsent(repository.cacheKey(), (name) -> openRepository(repositoryName, repository.storagePath(), true));
+            GitRepository r = repositoryCache.computeIfAbsent(repository.cacheKey(), (name) -> openRepository(repository.cacheKey(), repository.storagePath(), true));
             if (r == null) {
                 return new Result.Failure<>(NOT_FOUND);
             }
@@ -90,17 +88,7 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
         }
     }
 
-    @Override
-    public OrionGitRepositoryResolver createResolver() {
-        return new OrionGitRepositoryResolver() {
-            @Override
-            public Repository open(Object req, String name) throws RepositoryNotFoundException, ServiceNotAuthorizedException, ServiceNotEnabledException, ServiceMayNotContinueException {
-                return findOrCreate(name).valueOrFailure("Failed to open repository " + name);
-            }
-        };
-    }
-
-    private Repository openRepository(String repositoryName, Path repositoryStoragePath, boolean createIfNotExist) {
+    private GitRepository openRepository(String repositoryName, Path repositoryStoragePath, boolean createIfNotExist) {
         try {
             File storagePathFile = repositoryStoragePath.toFile();
             if (!storagePathFile.exists()) {
@@ -114,7 +102,7 @@ public class GitRepositoryProviderImpl implements GitRepositoryProvider {
                     return null;
                 initialRepositoryCreation(r);
             }
-            return r;
+            return new JGitRepository(repositoryName, r);
         } catch (Exception e) {
             log.warn("Error while opening repository {}", repositoryName, e);
             return null;
