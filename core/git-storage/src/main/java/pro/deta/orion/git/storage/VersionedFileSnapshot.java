@@ -6,8 +6,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-public record GitFileSnapshot(Map<String, byte[]> files, Optional<String> version) {
-    public GitFileSnapshot {
+public record VersionedFileSnapshot(Map<String, byte[]> files, Optional<String> version) {
+    public VersionedFileSnapshot {
         Objects.requireNonNull(files, "files");
         Map<String, byte[]> copy = new LinkedHashMap<>();
         for (Map.Entry<String, byte[]> entry : files.entrySet()) {

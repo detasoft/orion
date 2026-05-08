@@ -15,23 +15,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-public class LocalGitFileStorage {
+public class LocalGitVersionedStorage implements VersionedStorage {
     private final String repositoryName;
     private final Path repositoryPath;
+    private final String branch;
+    private final boolean createIfMissing;
 
-    public LocalGitFileStorage(Path repositoryPath) {
+    public LocalGitVersionedStorage(Path repositoryPath, String branch) {
+        this(repositoryPath, branch, true);
+    }
+
+    public LocalGitVersionedStorage(Path repositoryPath, String branch, boolean createIfMissing) {
         this.repositoryName = repositoryName(repositoryPath);
         this.repositoryPath = Objects.requireNonNull(repositoryPath, "repositoryPath").toAbsolutePath().normalize();
+        this.branch = Objects.requireNonNull(branch, "branch");
+        this.createIfMissing = createIfMissing;
     }
 
-    public Result<GitFileSnapshot> load(String branch, String path) {
-        return load(branch, List.of(path));
-    }
-
-    public Result<GitFileSnapshot> load(String branch, List<String> paths) {
+    @Override
+    public Result<VersionedFileSnapshot> load(List<String> paths) {
         try (GitRepository repository = JGitRepository.open(repositoryName, repositoryPath, false)) {
             GitRepositoryFileSnapshot snapshot = repository.loadFiles(branch, paths);
-            return new Result.Success<>(new GitFileSnapshot(snapshot.files(), snapshot.version()));
+            return new Result.Success<>(new VersionedFileSnapshot(snapshot.files(), snapshot.version()));
         } catch (GitRepositoryFileNotFoundException e) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         } catch (IOException | GitOperationException | IllegalArgumentException e) {
@@ -39,9 +44,11 @@ public class LocalGitFileStorage {
         }
     }
 
-    public void save(String branch, Map<String, byte[]> files, String message, UserEmail author) {
-        try (GitRepository repository = JGitRepository.open(repositoryName, repositoryPath, true)) {
-            repository.saveFiles(branch, files, message, gitAuthor(author));
+    @Override
+    public void save(Map<String, byte[]> files, VersionedSaveRequest request) {
+        Objects.requireNonNull(request, "request");
+        try (GitRepository repository = JGitRepository.open(repositoryName, repositoryPath, createIfMissing)) {
+            repository.saveFiles(branch, files, request.message(), gitAuthor(request.author()));
         } catch (IOException | GitOperationException e) {
             throw new RuntimeException("Cannot save files to local git repository " + repositoryPath, e);
         }

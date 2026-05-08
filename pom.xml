@@ -284,7 +284,6 @@
         <maven.compiler.compilerReuseStrategy>reuseCreated</maven.compiler.compilerReuseStrategy>
         <maven.compiler.showCompilationChanges>true</maven.compiler.showCompilationChanges>
         <maven.compiler.skipMultiThreadWarning>true</maven.compiler.skipMultiThreadWarning>
-        <skipITs>true</skipITs>
       </properties>
       <build>
         <plugins>
@@ -312,7 +311,6 @@
           <plugin>
             <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
-              <skipITs>true</skipITs>
               <forkCount>0</forkCount>
               <reuseForks>true</reuseForks>
               <redirectTestOutputToFile>true</redirectTestOutputToFile>
