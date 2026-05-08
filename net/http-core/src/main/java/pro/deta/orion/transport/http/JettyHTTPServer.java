@@ -49,9 +49,9 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.HTTP_TRANSPORT_START, this::onStart)
+        task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.HTTP_TRANSPORT_START, this::onStart)
                 .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.HTTP_TRANSPORT_STOP, this::onStop)
+        task(registrar, ApplicationState.STOPPING, OrionLifecycleTasks.HTTP_TRANSPORT_STOP, this::onStop)
                 .after(OrionLifecycleTasks.TRANSPORTS_STOP);
     }
 

@@ -10,6 +10,7 @@ import java.util.concurrent.Callable;
 public record LifecycleTaskDefinition(
         ApplicationState phase,
         LifecycleTaskId id,
+        String serviceName,
         Callable<OrionStageCallResult> call,
         List<LifecycleTaskId> after,
         int waitForCompletionSecs
@@ -17,6 +18,7 @@ public record LifecycleTaskDefinition(
     public LifecycleTaskDefinition {
         Objects.requireNonNull(phase, "phase");
         Objects.requireNonNull(id, "id");
+        serviceName = serviceName == null ? "" : serviceName;
         Objects.requireNonNull(call, "call");
         after = List.copyOf(Objects.requireNonNull(after, "after"));
     }

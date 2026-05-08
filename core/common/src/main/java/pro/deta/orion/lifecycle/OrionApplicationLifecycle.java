@@ -160,7 +160,11 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
                     builder.append(state).append(":\n");
                     headerAdded = true;
                 }
-                builder.append("  - ").append(definition.id());
+                builder.append("  - ");
+                if (!definition.serviceName().isBlank()) {
+                    builder.append(definition.serviceName()).append(": ");
+                }
+                builder.append(definition.id());
                 if (!definition.after().isEmpty()) {
                     builder.append(" after ").append(joinTaskIds(definition.after()));
                 }

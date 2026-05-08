@@ -21,6 +21,7 @@ class LifecycleTaskRegistrationTest {
 
         registration.after(OrionLifecycleTasks.REPOSITORY_STORAGE);
 
+        assertThat(registration.definition().serviceName()).isEmpty();
         assertThat(registration.definition().after()).containsExactly(OrionLifecycleTasks.REPOSITORY_STORAGE);
     }
 
@@ -45,5 +46,31 @@ class LifecycleTaskRegistrationTest {
         assertThat(definition.phase()).isEqualTo(ApplicationState.STARTING);
         assertThat(definition.id()).isEqualTo(OrionLifecycleTasks.ACL_LOAD);
         assertThat(definition.after()).containsExactly(OrionLifecycleTasks.REPOSITORY_STORAGE);
+    }
+
+    @Test
+    void listenerTaskHelperUsesClassNameAsServiceName() {
+        List<LifecycleTaskRegistration> registrations = new ArrayList<>();
+        ApplicationStateListenerRegistrar registrar = new ApplicationStateListenerRegistrar() {
+            @Override
+            public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
+                registrations.add(registration);
+                return registration;
+            }
+        };
+
+        new TestLifecycleService().registerToStage(registrar);
+
+        assertThat(registrations).hasSize(1);
+        LifecycleTaskDefinition definition = registrations.getFirst().definition();
+        assertThat(definition.id()).isEqualTo(OrionLifecycleTasks.ACL_LOAD);
+        assertThat(definition.serviceName()).isEqualTo("TestLifecycleService");
+    }
+
+    private static final class TestLifecycleService implements OrionApplicationStageEventListener {
+        @Override
+        public void registerToStage(ApplicationStateListenerRegistrar registrar) {
+            task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY);
+        }
     }
 }

@@ -5,7 +5,6 @@ import dagger.Provides;
 import dagger.multibindings.IntoSet;
 
 import jakarta.inject.Singleton;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -18,8 +17,6 @@ import pro.deta.orion.git.GitRepositoryProviderImpl;
 import pro.deta.orion.git.OrionJGitRuntime;
 import pro.deta.orion.git.storage.GitBackedInternalStorage;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
@@ -54,21 +51,8 @@ public class OrionRuntimeModule {
 
     @Provides
     @IntoSet
-    static OrionApplicationStageEventListener transportsStartBarrier() {
-        return registrar -> registrar.task(
-                        ApplicationState.STARTING,
-                        OrionLifecycleTasks.TRANSPORTS_START,
-                        () -> OrionStageCallResult.EMPTY)
-                .after(OrionLifecycleTasks.ACL_LOAD);
-    }
-
-    @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener transportsStopBarrier() {
-        return registrar -> registrar.task(
-                        ApplicationState.STOPPING,
-                        OrionLifecycleTasks.TRANSPORTS_STOP,
-                        () -> OrionStageCallResult.EMPTY);
+    static OrionApplicationStageEventListener transportLifecycleBarrier() {
+        return new TransportLifecycleBarrier();
     }
 
     @Provides

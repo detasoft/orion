@@ -77,6 +77,7 @@ public final class LifecycleTaskPlanner {
             normalizedDefinitions.put(entry.getKey(), new LifecycleTaskDefinition(
                     definition.phase(),
                     definition.id(),
+                    definition.serviceName(),
                     definition.call(),
                     new ArrayList<>(dependencies.get(definition.id())),
                     definition.waitForCompletionSecs()));

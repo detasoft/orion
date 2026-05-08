@@ -86,6 +86,7 @@ class LifecycleTaskPlannerTest {
         return new LifecycleTaskDefinition(
                 ApplicationState.STARTING,
                 id,
+                "",
                 () -> OrionStageCallResult.EMPTY,
                 after,
                 0);

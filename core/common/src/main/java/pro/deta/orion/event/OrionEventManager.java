@@ -46,10 +46,10 @@ public class OrionEventManager implements OrionApplicationStageEventListener {
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, this::onInit)
+        task(registrar, ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, this::onInit)
                 .after(OrionLifecycleTasks.JGIT_RUNTIME)
                 .waitForCompletionSecs(2);
-        registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.EVENT_MANAGER_STOP, this::onStop)
+        task(registrar, ApplicationState.STOPPING, OrionLifecycleTasks.EVENT_MANAGER_STOP, this::onStop)
                 .after(OrionLifecycleTasks.HTTP_TRANSPORT_STOP)
                 .after(OrionLifecycleTasks.GIT_TRANSPORT_STOP)
                 .after(OrionLifecycleTasks.SSH_TRANSPORT_STOP);

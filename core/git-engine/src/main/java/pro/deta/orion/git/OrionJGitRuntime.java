@@ -31,7 +31,7 @@ public class OrionJGitRuntime implements OrionApplicationStageEventListener {
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install);
+        task(registrar, ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install);
     }
 
     public OrionStageCallResult install() {

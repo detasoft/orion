@@ -13,7 +13,15 @@ public interface ApplicationStateListenerRegistrar {
             ApplicationState phase,
             LifecycleTaskId id,
             Callable<OrionStageCallResult> call) {
-        LifecycleTaskRegistration registration = new LifecycleTaskRegistration(phase, id, call);
+        return task(phase, id, null, call);
+    }
+
+    default LifecycleTaskRegistration task(
+            ApplicationState phase,
+            LifecycleTaskId id,
+            String serviceName,
+            Callable<OrionStageCallResult> call) {
+        LifecycleTaskRegistration registration = new LifecycleTaskRegistration(phase, id, serviceName, call);
         register(registration);
         return registration;
     }

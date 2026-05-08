@@ -11,6 +11,7 @@ import java.util.concurrent.Callable;
 public final class LifecycleTaskRegistration {
     private final ApplicationState phase;
     private final LifecycleTaskId id;
+    private final String serviceName;
     private final Callable<OrionStageCallResult> call;
     private final List<LifecycleTaskId> after = new ArrayList<>();
     private int waitForCompletionSecs;
@@ -19,8 +20,17 @@ public final class LifecycleTaskRegistration {
             ApplicationState phase,
             LifecycleTaskId id,
             Callable<OrionStageCallResult> call) {
+        this(phase, id, null, call);
+    }
+
+    public LifecycleTaskRegistration(
+            ApplicationState phase,
+            LifecycleTaskId id,
+            String serviceName,
+            Callable<OrionStageCallResult> call) {
         this.phase = Objects.requireNonNull(phase, "phase");
         this.id = Objects.requireNonNull(id, "id");
+        this.serviceName = serviceName == null ? "" : serviceName;
         this.call = Objects.requireNonNull(call, "call");
     }
 
@@ -38,6 +48,7 @@ public final class LifecycleTaskRegistration {
         return new LifecycleTaskDefinition(
                 phase,
                 id,
+                serviceName,
                 call,
                 after,
                 waitForCompletionSecs);

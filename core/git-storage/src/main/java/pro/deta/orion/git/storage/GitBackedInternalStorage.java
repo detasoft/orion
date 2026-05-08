@@ -51,9 +51,9 @@ public class GitBackedInternalStorage implements OrionApplicationStageEventListe
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.GIT_BACKED_INTERNAL_STORAGE_INIT, this::onInit)
+        task(registrar, ApplicationState.INIT, OrionLifecycleTasks.GIT_BACKED_INTERNAL_STORAGE_INIT, this::onInit)
                 .after(OrionLifecycleTasks.ACL_INIT);
-        registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.REPOSITORY_STORAGE, this::onStart);
+        task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.REPOSITORY_STORAGE, this::onStart);
     }
 
     private OrionStageCallResult onInit() {

@@ -115,13 +115,7 @@ class OrionApplicationLifecycleTest {
 
     @Test
     void describeServiceMapShowsRegisteredTasksBeforePlanning() {
-        OrionApplicationStageEventListener tasks = registrar -> {
-            registrar.task(ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, () -> OrionStageCallResult.EMPTY);
-            registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
-                    .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-                    .waitForCompletionSecs(3);
-        };
-
+        OrionApplicationStageEventListener tasks = new ServiceMapLifecycleService();
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of(tasks))) {
             String serviceMap = context.lifecycle().describeServiceMap();
             log.warn("Lifecycle service map test output:\n{}", serviceMap);
@@ -129,9 +123,9 @@ class OrionApplicationLifecycleTest {
             assertThat(serviceMap).contains(
                     "Lifecycle service map:",
                     "INIT:",
-                    "  - EVENT_MANAGER",
+                    "  - ServiceMapLifecycleService: EVENT_MANAGER",
                     "STARTING:",
-                    "  - ACL_LOAD after REPOSITORY_STORAGE wait 3s");
+                    "  - ServiceMapLifecycleService: ACL_LOAD after REPOSITORY_STORAGE wait 3s");
         }
     }
 
@@ -186,6 +180,16 @@ class OrionApplicationLifecycleTest {
 
     private static LifecycleTaskId taskId(String value) {
         return new LifecycleTaskId(value);
+    }
+
+    private static final class ServiceMapLifecycleService implements OrionApplicationStageEventListener {
+        @Override
+        public void registerToStage(ApplicationStateListenerRegistrar registrar) {
+            task(registrar, ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, () -> OrionStageCallResult.EMPTY);
+            task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
+                    .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
+                    .waitForCompletionSecs(3);
+        }
     }
 
     private ApplicationState runLifecycle(Set<OrionApplicationStageEventListener> listeners) {

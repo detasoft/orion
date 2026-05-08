@@ -99,6 +99,16 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
+    void runtimeServiceMapShowsTransportBarrierOwner() {
+        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
+
+        String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
+
+        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
+        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP"));
+    }
+
+    @Test
     void localGitAreaAclUsesVersionedStorageWithoutGitAccessArea() {
         OrionConfiguration configuration = configurationWithGitAcl("local:team/project");
         GitRepositoryProviderImpl repositoryProvider = new GitRepositoryProviderImpl(new ConfigurationContext(configuration));
