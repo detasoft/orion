@@ -120,6 +120,9 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
 
     public ApplicationState runApplication() {
         onInitStage();
+        if (applicationStateHolder.getState() != STARTING) {
+            return applicationStateHolder.getState();
+        }
         onStartStage();
         return applicationStateHolder.getState();
     }
