@@ -42,7 +42,7 @@ public class OrionExecutor extends ScheduledThreadPoolExecutor implements OrionA
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        task(registrar, ApplicationState.STOPPING, OrionLifecycleTasks.EXECUTOR_STOP, this::onStop)
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.EXECUTOR_STOP, this::onStop)
                 .after(OrionLifecycleTasks.EVENT_MANAGER_STOP);
     }
 

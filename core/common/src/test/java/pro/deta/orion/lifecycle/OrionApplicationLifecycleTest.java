@@ -185,8 +185,8 @@ class OrionApplicationLifecycleTest {
     private static final class ServiceMapLifecycleService implements OrionApplicationStageEventListener {
         @Override
         public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-            task(registrar, ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, () -> OrionStageCallResult.EMPTY);
-            task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
+            registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, () -> OrionStageCallResult.EMPTY);
+            registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
                     .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
                     .waitForCompletionSecs(3);
         }

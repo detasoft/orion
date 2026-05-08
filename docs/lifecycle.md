@@ -56,15 +56,15 @@ EXECUTOR_STOP after EVENT_MANAGER_STOP
 Use a stable task id from `OrionLifecycleTasks`, or add a new one when introducing a new service.
 
 ```java
-task(registrar, ApplicationState.STARTING, MY_SERVICE_START, this::onStart)
+registrar.task(this, ApplicationState.STARTING, MY_SERVICE_START, this::onStart)
         .after(OrionLifecycleTasks.ACL_LOAD);
 ```
 
 Use `after(...)` when the task needs another task to complete first. Each task declares its own prerequisites; if
 `TRANSPORTS_START` must run after `ACL_LOAD`, that edge belongs on `TRANSPORTS_START`.
-The `task(...)` helper on `OrionApplicationStageEventListener` records the listener class name as the service name for
-debug service-map output. Shared barrier tasks should still have a small listener class when they are part of the
-runtime graph, so the service map shows who owns the barrier.
+The `ApplicationStateListenerRegistrar.task(owner, ...)` overload records the owner object's class name as the
+service name for debug service-map output. Shared barrier tasks should still have a small listener class when they are
+part of the runtime graph, so the service map shows who owns the barrier.
 
 Tasks in the same execution group start together. The next group starts only after every task callable in the current
 group has completed successfully, so dependency edges are the only ordering barrier. If a task returns

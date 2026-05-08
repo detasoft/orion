@@ -43,9 +43,9 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, this::onStart)
+        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, this::onStart)
                 .after(OrionLifecycleTasks.TRANSPORTS_START);
-        task(registrar, ApplicationState.STOPPING, OrionLifecycleTasks.GIT_TRANSPORT_STOP, this::onStop)
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.GIT_TRANSPORT_STOP, this::onStop)
                 .after(OrionLifecycleTasks.TRANSPORTS_STOP);
     }
 

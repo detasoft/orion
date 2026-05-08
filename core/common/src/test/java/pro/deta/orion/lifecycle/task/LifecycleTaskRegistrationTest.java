@@ -49,7 +49,7 @@ class LifecycleTaskRegistrationTest {
     }
 
     @Test
-    void listenerTaskHelperUsesClassNameAsServiceName() {
+    void registrarTaskUsesOwnerClassNameAsServiceName() {
         List<LifecycleTaskRegistration> registrations = new ArrayList<>();
         ApplicationStateListenerRegistrar registrar = new ApplicationStateListenerRegistrar() {
             @Override
@@ -70,7 +70,7 @@ class LifecycleTaskRegistrationTest {
     private static final class TestLifecycleService implements OrionApplicationStageEventListener {
         @Override
         public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-            task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY);
+            registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY);
         }
     }
 }

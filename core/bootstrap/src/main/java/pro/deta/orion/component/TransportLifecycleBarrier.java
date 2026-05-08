@@ -9,8 +9,8 @@ import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 public final class TransportLifecycleBarrier implements OrionApplicationStageEventListener {
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        task(registrar, ApplicationState.STARTING, OrionLifecycleTasks.TRANSPORTS_START, () -> OrionStageCallResult.EMPTY)
+        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.TRANSPORTS_START, () -> OrionStageCallResult.EMPTY)
                 .after(OrionLifecycleTasks.ACL_LOAD);
-        task(registrar, ApplicationState.STOPPING, OrionLifecycleTasks.TRANSPORTS_STOP, () -> OrionStageCallResult.EMPTY);
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.TRANSPORTS_STOP, () -> OrionStageCallResult.EMPTY);
     }
 }
