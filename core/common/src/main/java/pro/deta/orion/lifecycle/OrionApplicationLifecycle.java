@@ -5,6 +5,8 @@ import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.lifecycle.flow.LifecycleFlow;
+import pro.deta.orion.lifecycle.flow.LifecycleStep;
 import pro.deta.orion.lifecycle.listener.RegisteredListener;
 import pro.deta.orion.lifecycle.listener.RegisteredListenerResult;
 import pro.deta.orion.util.LogInitializer;
@@ -119,42 +121,27 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     }
 
     public ApplicationState runApplication() {
-        onInitStage();
-        if (applicationStateHolder.getState() != STARTING) {
-            return applicationStateHolder.getState();
+        return runFlow(LifecycleFlow.STARTUP);
+    }
+
+    private ApplicationState runFlow(LifecycleFlow flow) {
+        for (LifecycleStep step : flow.steps()) {
+            if (step.runListeners() && !onStage(step.from())) {
+                applicationStateHolder.moveStateFrom(step.from(), step.failure());
+                return applicationStateHolder.getState();
+            }
+            applicationStateHolder.moveStateFrom(step.from(), step.success());
         }
-        onStartStage();
         return applicationStateHolder.getState();
-    }
-
-    private void onInitStage() {
-        switchStage(INIT, STARTING, FAILED);
-    }
-
-    /**
-     *
-     * @param from the state which runs the listeners are
-     * @param to the state will be switched to
-     * @param failed
-     */
-    private void switchStage(ApplicationState from, ApplicationState to, ApplicationState failed) {
-        boolean completed = onStage(from);
-        ApplicationState targetState = completed ? to : FAILED;
-        applicationStateHolder.moveStateFrom(from, targetState);
-    }
-
-    private void onStartStage() {
-        switchStage(STARTING, ApplicationState.UP, FAILED);
-    }
-
-    private void onStopStage() {
-        switchStage(STOPPING, ApplicationState.OFF, FAILED);
     }
 
     private void doShutdown() {
         log.info("System shutdown process initiated.");
-        applicationStateHolder.moveStateFrom(BEGIN_SHUTDOWN, STOPPING);
-        onStopStage();
+        runFlow(LifecycleFlow.SHUTDOWN);
+    }
+
+    public String describeFlows() {
+        return LifecycleFlow.STARTUP.describe() + "\n" + LifecycleFlow.SHUTDOWN.describe();
     }
 
 //    private void waitForBeginShutdown() {
@@ -173,8 +160,6 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
 
     public void beginShutdown() {
         doInLock(() -> {
-            applicationStateHolder.moveStateFrom(UP, BEGIN_SHUTDOWN);
-            lockCondition.signalAll();
             orionProvider.getOrionExecutor().submit(this::doShutdown);
         });
     }

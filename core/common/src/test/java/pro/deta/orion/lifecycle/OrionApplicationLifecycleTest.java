@@ -79,6 +79,30 @@ class OrionApplicationLifecycleTest {
     }
 
     @Test
+    void exposesStartupAndShutdownFlowDescriptions() {
+        try (TestLifecycleContext context = new TestLifecycleContext(Set.of())) {
+            assertThat(context.lifecycle().describeFlows()).contains(
+                    "STARTUP:",
+                    "INIT -> STARTING",
+                    "STARTING -> UP",
+                    "SHUTDOWN:",
+                    "UP -> BEGIN_SHUTDOWN",
+                    "STOPPING -> OFF");
+        }
+    }
+
+    @Test
+    void beginShutdownUsesShutdownFlow() {
+        try (TestLifecycleContext context = new TestLifecycleContext(Set.of())) {
+            context.lifecycle().runApplication();
+            context.lifecycle().beginShutdown();
+            context.lifecycle().waitForShutdown();
+
+            assertThat(context.stateHolder().getState()).isEqualTo(ApplicationState.OFF);
+        }
+    }
+
+    @Test
     void waitsForBlockingInitListenerBeforeStartingNextInitListener() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
         List<Consumer<String>> initSubscribers = new CopyOnWriteArrayList<>();
