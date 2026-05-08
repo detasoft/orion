@@ -4,7 +4,11 @@ Lightweight GIT hosting solution.
 
 # Starting the server
 
-`java pro.deta.orion.App`
+`mvn -pl core/bootstrap -am -Prun-server process-classes`
+
+or
+
+`make run-server`
 
 # Configuration
 
