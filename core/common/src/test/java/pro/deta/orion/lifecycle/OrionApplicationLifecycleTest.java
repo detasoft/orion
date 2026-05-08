@@ -1,5 +1,6 @@
 package pro.deta.orion.lifecycle;
 
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.event.OrionEventManager;
@@ -20,6 +21,7 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@Slf4j
 class OrionApplicationLifecycleTest {
     @Test
     void startupRunsInitThenStartingAndEndsUp() {
@@ -122,7 +124,7 @@ class OrionApplicationLifecycleTest {
 
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of(tasks))) {
             String serviceMap = context.lifecycle().describeServiceMap();
-            System.out.println(serviceMap);
+            log.warn("Lifecycle service map test output:\n{}", serviceMap);
 
             assertThat(serviceMap).contains(
                     "Lifecycle service map:",
