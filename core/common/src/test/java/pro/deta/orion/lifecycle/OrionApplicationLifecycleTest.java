@@ -112,6 +112,28 @@ class OrionApplicationLifecycleTest {
     }
 
     @Test
+    void describeServiceMapShowsRegisteredTasksBeforePlanning() {
+        OrionApplicationStageEventListener tasks = registrar -> {
+            registrar.task(ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, () -> OrionStageCallResult.EMPTY);
+            registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
+                    .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
+                    .waitForCompletionSecs(3);
+        };
+
+        try (TestLifecycleContext context = new TestLifecycleContext(Set.of(tasks))) {
+            String serviceMap = context.lifecycle().describeServiceMap();
+            System.out.println(serviceMap);
+
+            assertThat(serviceMap).contains(
+                    "Lifecycle service map:",
+                    "INIT:",
+                    "  - EVENT_MANAGER",
+                    "STARTING:",
+                    "  - ACL_LOAD after REPOSITORY_STORAGE wait 3s");
+        }
+    }
+
+    @Test
     void beginShutdownUsesShutdownFlow() {
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of())) {
             context.lifecycle().runApplication();

@@ -17,8 +17,8 @@ class LifecycleTaskPlannerTest {
     @Test
     void ordersTasksByDependencies() {
         LifecycleTaskDefinition storage = task(REPOSITORY_STORAGE);
-        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(REPOSITORY_STORAGE), List.of());
-        LifecycleTaskDefinition transports = task(TRANSPORTS_START, List.of(ACL_LOAD), List.of());
+        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(REPOSITORY_STORAGE));
+        LifecycleTaskDefinition transports = task(TRANSPORTS_START, List.of(ACL_LOAD));
 
         LifecycleTaskPlan plan = LifecycleTaskPlanner.plan(
                 ApplicationState.STARTING,
@@ -43,7 +43,7 @@ class LifecycleTaskPlannerTest {
 
         assertThatThrownBy(() -> LifecycleTaskPlanner.plan(
                 ApplicationState.STARTING,
-                List.of(task(ACL_LOAD, List.of(unknown), List.of()))))
+                List.of(task(ACL_LOAD, List.of(unknown)))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("UNKNOWN")
                 .hasMessageContaining("ACL_LOAD");
@@ -54,29 +54,17 @@ class LifecycleTaskPlannerTest {
         assertThatThrownBy(() -> LifecycleTaskPlanner.plan(
                 ApplicationState.STARTING,
                 List.of(
-                        task(ACL_LOAD, List.of(TRANSPORTS_START), List.of()),
-                        task(TRANSPORTS_START, List.of(ACL_LOAD), List.of()))))
+                        task(ACL_LOAD, List.of(TRANSPORTS_START)),
+                        task(TRANSPORTS_START, List.of(ACL_LOAD)))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("cycle")
                 .hasMessageContaining("ACL_LOAD");
     }
 
     @Test
-    void beforeDependencyIsEquivalentToTargetAfterCurrentTask() {
-        LifecycleTaskDefinition storage = task(REPOSITORY_STORAGE, List.of(), List.of(ACL_LOAD));
-        LifecycleTaskDefinition acl = task(ACL_LOAD);
-
-        LifecycleTaskPlan plan = LifecycleTaskPlanner.plan(
-                ApplicationState.STARTING,
-                List.of(acl, storage));
-
-        assertThat(taskIds(plan)).containsExactly(REPOSITORY_STORAGE, ACL_LOAD);
-    }
-
-    @Test
     void planDescriptionIsReadable() {
         LifecycleTaskDefinition storage = task(REPOSITORY_STORAGE);
-        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(REPOSITORY_STORAGE), List.of());
+        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(REPOSITORY_STORAGE));
 
         LifecycleTaskPlan plan = LifecycleTaskPlanner.plan(
                 ApplicationState.STARTING,
@@ -89,19 +77,17 @@ class LifecycleTaskPlannerTest {
     }
 
     private static LifecycleTaskDefinition task(LifecycleTaskId id) {
-        return task(id, List.of(), List.of());
+        return task(id, List.of());
     }
 
     private static LifecycleTaskDefinition task(
             LifecycleTaskId id,
-            List<LifecycleTaskId> after,
-            List<LifecycleTaskId> before) {
+            List<LifecycleTaskId> after) {
         return new LifecycleTaskDefinition(
                 ApplicationState.STARTING,
                 id,
                 () -> OrionStageCallResult.EMPTY,
                 after,
-                before,
                 0);
     }
 

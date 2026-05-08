@@ -13,7 +13,6 @@ public final class LifecycleTaskRegistration {
     private final LifecycleTaskId id;
     private final Callable<OrionStageCallResult> call;
     private final List<LifecycleTaskId> after = new ArrayList<>();
-    private final List<LifecycleTaskId> before = new ArrayList<>();
     private int waitForCompletionSecs;
 
     public LifecycleTaskRegistration(
@@ -30,11 +29,6 @@ public final class LifecycleTaskRegistration {
         return this;
     }
 
-    public LifecycleTaskRegistration before(LifecycleTaskId dependent) {
-        before.add(Objects.requireNonNull(dependent, "dependent"));
-        return this;
-    }
-
     public LifecycleTaskRegistration waitForCompletionSecs(int seconds) {
         waitForCompletionSecs = seconds;
         return this;
@@ -46,7 +40,6 @@ public final class LifecycleTaskRegistration {
                 id,
                 call,
                 after,
-                before,
                 waitForCompletionSecs);
     }
 }

@@ -12,7 +12,6 @@ public record LifecycleTaskDefinition(
         LifecycleTaskId id,
         Callable<OrionStageCallResult> call,
         List<LifecycleTaskId> after,
-        List<LifecycleTaskId> before,
         int waitForCompletionSecs
 ) {
     public LifecycleTaskDefinition {
@@ -20,6 +19,5 @@ public record LifecycleTaskDefinition(
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(call, "call");
         after = List.copyOf(Objects.requireNonNull(after, "after"));
-        before = List.copyOf(Objects.requireNonNull(before, "before"));
     }
 }

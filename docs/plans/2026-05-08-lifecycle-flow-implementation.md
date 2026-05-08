@@ -615,11 +615,9 @@ void taskRegistrationCapturesDependencies() {
             OrionLifecycleTasks.ACL_LOAD,
             () -> OrionStageCallResult.EMPTY);
 
-    registration.after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-            .before(OrionLifecycleTasks.TRANSPORTS_START);
+    registration.after(OrionLifecycleTasks.REPOSITORY_STORAGE);
 
     assertThat(registration.definition().after()).containsExactly(OrionLifecycleTasks.REPOSITORY_STORAGE);
-    assertThat(registration.definition().before()).containsExactly(OrionLifecycleTasks.TRANSPORTS_START);
 }
 ```
 
@@ -628,8 +626,7 @@ Add registrar API test through a fake listener:
 ```java
 OrionApplicationStageEventListener acl = registrar ->
         registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
-                .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-                .before(OrionLifecycleTasks.TRANSPORTS_START);
+                .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
 ```
 
 **Step 2: Run tests and verify failure**
@@ -652,7 +649,6 @@ public record LifecycleTaskDefinition(
         LifecycleTaskId id,
         Callable<OrionStageCallResult> call,
         List<LifecycleTaskId> after,
-        List<LifecycleTaskId> before,
         int waitForCompletionSecs
 ) {
 }
@@ -666,11 +662,9 @@ public final class LifecycleTaskRegistration {
     private final LifecycleTaskId id;
     private final Callable<OrionStageCallResult> call;
     private final List<LifecycleTaskId> after = new ArrayList<>();
-    private final List<LifecycleTaskId> before = new ArrayList<>();
     private int waitForCompletionSecs;
 
     public LifecycleTaskRegistration after(LifecycleTaskId dependency) { ... }
-    public LifecycleTaskRegistration before(LifecycleTaskId dependent) { ... }
     public LifecycleTaskRegistration waitForCompletionSecs(int seconds) { ... }
     public LifecycleTaskDefinition definition() { ... }
 }
@@ -750,7 +744,7 @@ Add validation tests:
 - duplicate task id in one phase fails;
 - dependency on unknown task id fails;
 - dependency cycle fails;
-- `before(X)` is equivalent to `X.after(current)`.
+- dependent tasks declare their prerequisites with `after(...)`.
 
 **Step 2: Run tests and verify failure**
 
@@ -781,7 +775,6 @@ Planner rules:
 
 - only definitions for the requested phase are considered;
 - duplicate ids fail fast;
-- `before` edges are converted into `after` edges on the target;
 - missing dependency ids fail fast;
 - cycles fail with a message that includes at least one task id in the cycle;
 - tasks with no dependencies can share the same execution group.
@@ -1058,8 +1051,7 @@ In `OrionAccessControlServiceImpl`:
 
 ```java
 registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::onStart)
-        .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-        .before(OrionLifecycleTasks.TRANSPORTS_START);
+        .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
 ```
 
 This task also fixes the currently confusing transport-before-ACL ordering.
@@ -1292,10 +1284,11 @@ public String describeLifecycle() {
 Add logging at startup:
 
 ```java
-log.info("Lifecycle plan:\n{}", describeLifecycle());
+log.debug("Lifecycle service map before initialization:\n{}", describeServiceMap());
+log.debug("Lifecycle plan:\n{}", describeLifecycle());
 ```
 
-Keep log level `info` only if output is concise. Otherwise use `debug`.
+Keep lifecycle dumps at `debug` because they are diagnostic startup output.
 
 **Step 4: Run tests and commit**
 
@@ -1328,7 +1321,7 @@ Document:
 - the phase flow table;
 - what each phase means;
 - how to register a new lifecycle task;
-- how `after(...)` and `before(...)` define execution barriers;
+- how `after(...)` defines execution barriers;
 - how `OrionStageCallResult` waits for background futures;
 - why integer priorities are deprecated.
 
@@ -1336,8 +1329,7 @@ Include example:
 
 ```java
 registrar.task(ApplicationState.STARTING, MY_SERVICE_START, this::onStart)
-        .after(OrionLifecycleTasks.ACL_LOAD)
-        .before(OrionLifecycleTasks.TRANSPORTS_START);
+        .after(OrionLifecycleTasks.ACL_LOAD);
 ```
 
 **Step 2: Link from README**

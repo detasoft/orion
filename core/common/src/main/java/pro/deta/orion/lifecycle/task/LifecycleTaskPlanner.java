@@ -54,10 +54,6 @@ public final class LifecycleTaskPlanner {
                 requireKnownDependency(definitionsById, dependency, definition.id());
                 dependencies.get(definition.id()).add(dependency);
             }
-            for (LifecycleTaskId dependent : definition.before()) {
-                requireKnownDependency(definitionsById, dependent, definition.id());
-                dependencies.get(dependent).add(definition.id());
-            }
         }
         return dependencies;
     }
@@ -83,7 +79,6 @@ public final class LifecycleTaskPlanner {
                     definition.id(),
                     definition.call(),
                     new ArrayList<>(dependencies.get(definition.id())),
-                    definition.before(),
                     definition.waitForCompletionSecs()));
         }
         return normalizedDefinitions;

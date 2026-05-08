@@ -57,12 +57,11 @@ Use a stable task id from `OrionLifecycleTasks`, or add a new one when introduci
 
 ```java
 registrar.task(ApplicationState.STARTING, MY_SERVICE_START, this::onStart)
-        .after(OrionLifecycleTasks.ACL_LOAD)
-        .before(OrionLifecycleTasks.TRANSPORTS_START);
+        .after(OrionLifecycleTasks.ACL_LOAD);
 ```
 
-Use `after(...)` when the task needs another task to complete first. Use `before(...)` when the task must be a
-dependency of another task but declaring that edge at the current task is clearer.
+Use `after(...)` when the task needs another task to complete first. Each task declares its own prerequisites; if
+`TRANSPORTS_START` must run after `ACL_LOAD`, that edge belongs on `TRANSPORTS_START`.
 
 Tasks in the same execution group start together. The next group starts only after every task callable in the current
 group has completed successfully, so dependency edges are the only ordering barrier. If a task returns

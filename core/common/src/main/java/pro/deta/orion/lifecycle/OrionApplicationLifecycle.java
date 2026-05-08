@@ -12,6 +12,7 @@ import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
 import pro.deta.orion.lifecycle.task.LifecycleTaskPlan;
 import pro.deta.orion.lifecycle.task.LifecycleTaskPlanner;
 import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
+import pro.deta.orion.lifecycle.task.LifecycleTaskId;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;
@@ -145,8 +146,38 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
         return builder.toString();
     }
 
+    public String describeServiceMap() {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Lifecycle service map:\n");
+        List<LifecycleTaskDefinition> definitions = lifecycleTaskDefinitions();
+        for (ApplicationState state : ApplicationState.values()) {
+            boolean headerAdded = false;
+            for (LifecycleTaskDefinition definition : definitions) {
+                if (definition.phase() != state) {
+                    continue;
+                }
+                if (!headerAdded) {
+                    builder.append(state).append(":\n");
+                    headerAdded = true;
+                }
+                builder.append("  - ").append(definition.id());
+                if (!definition.after().isEmpty()) {
+                    builder.append(" after ").append(joinTaskIds(definition.after()));
+                }
+                if (definition.waitForCompletionSecs() > 0) {
+                    builder.append(" wait ").append(definition.waitForCompletionSecs()).append("s");
+                }
+                builder.append('\n');
+            }
+        }
+        return builder.toString();
+    }
+
     public ApplicationState runApplication() {
-        log.debug("Lifecycle plan:\n{}", describeLifecycle());
+        if (log.isDebugEnabled()) {
+            log.debug("Lifecycle service map before initialization:\n{}", describeServiceMap());
+            log.debug("Lifecycle plan:\n{}", describeLifecycle());
+        }
         return runFlow(LifecycleFlow.STARTUP);
     }
 
@@ -183,6 +214,17 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
 
     public String describeFlows() {
         return LifecycleFlow.STARTUP.describe() + "\n" + LifecycleFlow.SHUTDOWN.describe();
+    }
+
+    private static String joinTaskIds(List<LifecycleTaskId> taskIds) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < taskIds.size(); i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(taskIds.get(i));
+        }
+        return builder.toString();
     }
 
     public void beginShutdown() {

@@ -61,8 +61,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         registrar.task(ApplicationState.INIT, OrionLifecycleTasks.ACL_INIT, this::onInit)
                 .after(OrionLifecycleTasks.EVENT_MANAGER);
         registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::onStart)
-                .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-                .before(OrionLifecycleTasks.TRANSPORTS_START);
+                .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
     }
 
     public OrionStageCallResult onInit() {
