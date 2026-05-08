@@ -9,6 +9,7 @@ import pro.deta.orion.lifecycle.flow.LifecycleFlow;
 import pro.deta.orion.lifecycle.flow.LifecycleStep;
 import pro.deta.orion.lifecycle.listener.RegisteredListener;
 import pro.deta.orion.lifecycle.listener.RegisteredListenerResult;
+import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
 import pro.deta.orion.util.LogInitializer;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;
@@ -30,6 +31,7 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     private final Condition lockCondition = lock.newCondition();
 
     private final List<RegisteredListener> applicationStageEventListeners = new CopyOnWriteArrayList<>();
+    private final List<LifecycleTaskRegistration> lifecycleTaskRegistrations = new CopyOnWriteArrayList<>();
     private final OrionProvider orionProvider;
 
     @Inject
@@ -47,6 +49,12 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     public RegisteredListener register(RegisteredListener registeredListener) {
         applicationStageEventListeners.add(registeredListener);
         return registeredListener;
+    }
+
+    @Override
+    public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
+        lifecycleTaskRegistrations.add(registration);
+        return registration;
     }
 
     private boolean onStage(ApplicationState state) {
