@@ -11,8 +11,12 @@ import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.auth.AccessControlCredentialUpdate;
+import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
+import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.PlainRootTokenAccess;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
@@ -50,6 +54,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
+    private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     @Override
@@ -94,11 +99,23 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private void printAndClearPlainTextPasswordMessage(PrintStream out, char[] secureChars) {
         out.println();
         out.print("---ROOT PASSWORD: ");
+        plainRootToken.set(secureChars.clone());
         for (int i = 0; i < secureChars.length; i++) {
             out.print(secureChars[i]);
             secureChars[i] = 0;
         }
         out.println();
+    }
+
+    public char[] plainRootToken(PlainRootTokenAccess access) {
+        if (access == null) {
+            throw new SecurityException("Plain root token access is required");
+        }
+        char[] token = plainRootToken.get();
+        if (token == null) {
+            throw new IllegalStateException("Plain root token is available only after default ACL creation");
+        }
+        return token.clone();
     }
 
     /**
@@ -114,6 +131,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     @Override
     public void addKeyToUser(String username, String publicKey) {
         new UnderWriteLock().addKeyToUser(username, publicKey);
+    }
+
+    @Override
+    public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
+        new UnderWriteLock().createOrUpdateUser(userUpdate);
     }
 
     @Override
@@ -193,7 +215,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case MD5 -> false;
             case PLAIN -> false;
             case SHA3_256 -> false;
-            case ARGON2 -> {
+            case ARGON2, BEARER_TOKEN -> {
                 yield orionPasswordHashingService.comparePassword(expected, provided);
             }
         };
@@ -234,6 +256,26 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
 
     private class UnderWriteLock {
+        private void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
+            validateUserUpdate(userUpdate);
+            holdWriteLock(() -> {
+                AccessControl ac = accessControl.get().modify();
+                ac.getUsers().removeIf(user -> user.getId() != null && user.getId().equalsIgnoreCase(userUpdate.id()));
+
+                AccessControl.User user = ACLUtil.createUser(userUpdate.id(), userUpdate.email());
+                for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
+                    user.addCredential(credential.type(), credential.value());
+                }
+                for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
+                    addRepositoryGrant(user, repositoryGrant);
+                }
+
+                ac.getUsers().add(user);
+                saveAccessControl(ac, "createOrUpdateUser() " + userUpdate.id(), new UserEmail(userUpdate.id(), userUpdate.email()));
+                return ac;
+            });
+        }
+
         private void addKeyToUser(String username, String publicKey) {
             holdWriteLock(() -> {
                 AccessControl ac = accessControl.get().modify();
@@ -259,6 +301,54 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 throw new IllegalStateException("No users found.");
             } else {
                 return users.get(0);
+            }
+        }
+
+        private void addRepositoryGrant(AccessControl.User user, AccessControlRepositoryGrantUpdate repositoryGrant) {
+            AccessControl.Grant grant = user.addGrant(repositoryGrantId(user.getId(), repositoryGrant.repository()))
+                    .addKey(AccessControl.GrantKey.REPOSITORY, repositoryGrant.repository())
+                    .addKey(AccessControl.GrantKey.BRANCH, repositoryGrant.branch());
+            if (repositoryGrant.read()) {
+                grant.addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING);
+            }
+            if (repositoryGrant.write()) {
+                grant.addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING);
+            }
+            if (repositoryGrant.create()) {
+                grant.addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+            }
+            if (repositoryGrant.force()) {
+                grant.addKey(AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING);
+            }
+        }
+
+        private String repositoryGrantId(String userId, String repository) {
+            return "REPOSITORY_" + safeGrantIdPart(userId) + "_" + safeGrantIdPart(repository);
+        }
+
+        private String safeGrantIdPart(String value) {
+            return value.replaceAll("[^A-Za-z0-9_.-]", "_");
+        }
+
+        private void validateUserUpdate(AccessControlUserUpdate userUpdate) {
+            if (userUpdate == null) {
+                throw new IllegalArgumentException("User update is required");
+            }
+            if (userUpdate.id() == null || userUpdate.id().isBlank()) {
+                throw new IllegalArgumentException("User id is required");
+            }
+            for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
+                if (credential.type() == null) {
+                    throw new IllegalArgumentException("Credential type is required");
+                }
+                if (credential.value() == null || credential.value().isBlank()) {
+                    throw new IllegalArgumentException("Credential value is required");
+                }
+            }
+            for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
+                if (repositoryGrant.repository() == null || repositoryGrant.repository().isBlank()) {
+                    throw new IllegalArgumentException("Repository name is required");
+                }
             }
         }
     }

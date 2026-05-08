@@ -8,9 +8,10 @@ import jakarta.inject.Singleton;
 public class OrionHttpModule {
     @Provides
     @Singleton
-    static DispatcherServlet dispatcherServlet(OrionGitServlet orionGitServlet) {
+    static DispatcherServlet dispatcherServlet(OrionGitServlet orionGitServlet, OrionAdminServlet orionAdminServlet) {
         DispatcherServlet dispatcherServlet = new DispatcherServlet();
         dispatcherServlet.register(orionGitServlet);
+        dispatcherServlet.register(orionAdminServlet);
         return dispatcherServlet;
     }
 

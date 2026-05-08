@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.TransportException;
@@ -19,9 +20,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
+import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.schema.OrionConfiguration;
@@ -33,6 +36,7 @@ import pro.deta.orion.util.NetworkUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +47,7 @@ import java.security.KeyPair;
 import java.security.PublicKey;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -52,6 +57,7 @@ class GitSshTransportEndToEndIT {
     private static final String USERNAME = "e2e";
     private static final KeyPair TRUSTED_USER_KEY = loadTestRsaKeyPair("e2e/trusted-user-rsa.pem");
     private static final KeyPair UNKNOWN_USER_KEY = loadTestRsaKeyPair("e2e/unknown-user-rsa.pem");
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @TempDir
     Path tempDir;
@@ -200,6 +206,62 @@ class GitSshTransportEndToEndIT {
         assertThat(startedOrion.repositoryPath("denied")).doesNotExist();
     }
 
+    @Test
+    void managedUserCanPushAndCloneRepositoryAfterServerRestart() throws Exception {
+        /*
+         * This scenario starts from a clean local runtime configuration rather than pre-seeding ACL fixtures:
+         * the server creates the default local ACL repository, a client generates its own SSH key, and the admin
+         * HTTP API grants that key repository access. The pushed Git data must survive a server restart with the
+         * same local configuration.
+         */
+        Path orionRoot = tempDir.resolve("orion-root");
+        Path cloneDirectory = tempDir.resolve("managed-clone");
+        String repositoryName = "managed-project";
+        KeyPair clientKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Client SSH key should be generated");
+
+        startedOrion = startFreshOrion(orionRoot);
+        String rootToken = String.valueOf(startedOrion.plainRootToken());
+        createManagedUser(startedOrion, rootToken, clientKey, repositoryName);
+        createManagedRepository(startedOrion, rootToken, repositoryName);
+
+        String remoteUrl = startedOrion.sshUrl(repositoryName + ".git");
+        ObjectId pushedCommit;
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("ssh-home"), clientKey);
+             Git clone = Git.cloneRepository()
+                     .setURI(remoteUrl)
+                     .setDirectory(cloneDirectory.toFile())
+                     .setTransportConfigCallback(sshCallback(ssh))
+                     .call()) {
+            pushedCommit = createCommit(clone, "state.txt", "survived restart\n", "persist state");
+            Iterable<PushResult> pushResults = clone.push()
+                    .setRemote(remoteUrl)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+
+            assertThat(pushResults)
+                    .flatExtracting(PushResult::getRemoteUpdates)
+                    .extracting(RemoteRefUpdate::getStatus)
+                    .containsExactly(RemoteRefUpdate.Status.OK);
+        }
+        assertRepositoryContains(repositoryName, pushedCommit, "state.txt", "survived restart\n");
+
+        startedOrion.stop();
+        startedOrion = null;
+        startedOrion = startExistingOrion(orionRoot);
+
+        FileUtils.wipeDirectory(cloneDirectory);
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("ssh-home-after-restart"), clientKey);
+             Git ignored = Git.cloneRepository()
+                     .setURI(startedOrion.sshUrl(repositoryName + ".git"))
+                     .setDirectory(cloneDirectory.toFile())
+                     .setBranch(BRANCH)
+                     .setTransportConfigCallback(sshCallback(ssh))
+                     .call()) {
+            assertThat(Files.readString(cloneDirectory.resolve("state.txt"))).isEqualTo("survived restart\n");
+        }
+    }
+
     private StartedOrion startOrion(Path orionRoot, KeyPair userKey) throws Exception {
         /*
          * The application normally creates fresh server host keys and a default root user on first startup.
@@ -209,8 +271,20 @@ class GitSshTransportEndToEndIT {
         FileUtils.wipeDirectory(orionRoot);
         seedServerKeys(orionRoot);
         seedAclRepository(orionRoot, userKey);
-        OrionConfiguration configuration = e2eConfiguration(orionRoot);
+        return startOrion(e2eConfiguration(orionRoot));
+    }
 
+    private StartedOrion startFreshOrion(Path orionRoot) throws Exception {
+        FileUtils.wipeDirectory(orionRoot);
+        seedServerKeys(orionRoot);
+        return startExistingOrion(orionRoot);
+    }
+
+    private StartedOrion startExistingOrion(Path orionRoot) throws Exception {
+        return startOrion(e2eConfiguration(orionRoot));
+    }
+
+    private StartedOrion startOrion(OrionConfiguration configuration) {
         OrionComponent component = DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .build();
@@ -218,7 +292,47 @@ class GitSshTransportEndToEndIT {
         assertThat(lifecycle.runApplication()).isEqualTo(ApplicationState.UP);
         lifecycle.waitForStarting();
 
-        return new StartedOrion(configuration, lifecycle, component.gitRepositoryProvider());
+        return new StartedOrion(configuration, lifecycle, component.gitRepositoryProvider(), component.orionAccessControlService());
+    }
+
+    private static void createManagedUser(StartedOrion orion, String rootToken, KeyPair clientKey, String repositoryName) throws Exception {
+        String payload = OBJECT_MAPPER.writeValueAsString(Map.of(
+                "id", USERNAME,
+                "email", "e2e@example.test",
+                "publicKey", KeyUtils.publicKeyToString(clientKey.getPublic()),
+                "repositories", List.of(Map.of(
+                        "repository", repositoryName,
+                        "read", true,
+                        "write", true,
+                        "create", true,
+                        "branch", "*"))));
+        postAdmin(orion, rootToken, "/api/admin/users", payload);
+    }
+
+    private static void createManagedRepository(StartedOrion orion, String rootToken, String repositoryName) throws Exception {
+        postAdmin(orion, rootToken, "/api/admin/repositories",
+                OBJECT_MAPPER.writeValueAsString(Map.of("name", repositoryName)));
+    }
+
+    private static void postAdmin(StartedOrion orion, String rootToken, String path, String payload) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl(path).openConnection();
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization", bearerAuth(rootToken));
+        connection.setRequestProperty("Content-Type", "application/json");
+        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
+        connection.setFixedLengthStreamingMode(body.length);
+        try (var output = connection.getOutputStream()) {
+            output.write(body);
+        }
+
+        assertThat(connection.getResponseCode())
+                .as("admin POST %s", path)
+                .isEqualTo(HttpURLConnection.HTTP_CREATED);
+    }
+
+    private static String bearerAuth(String token) {
+        return "Bearer " + token;
     }
 
     private static OrionConfiguration e2eConfiguration(Path orionRoot) throws Exception {
@@ -425,7 +539,8 @@ class GitSshTransportEndToEndIT {
     }
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
-                                GitRepositoryProviderImpl gitRepositoryProvider) {
+                                GitRepositoryProviderImpl gitRepositoryProvider,
+                                OrionAccessControlServiceImpl accessControlService) {
         private String sshUrl(String repository) {
             return "ssh://%s@%s:%d/%s".formatted(
                     USERNAME,
@@ -436,6 +551,18 @@ class GitSshTransportEndToEndIT {
 
         private Path repositoryPath(String repository) {
             return gitRepositoryProvider.repositoryPathForTests(repository);
+        }
+
+        private URL httpUrl(String path) throws IOException {
+            return new URL(
+                    "http",
+                    configuration.getTransports().getHttp().getAddress(),
+                    configuration.getTransports().getHttp().getPort(),
+                    path);
+        }
+
+        private char[] plainRootToken() {
+            return accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
         }
 
         private void stop() {

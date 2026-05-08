@@ -1,0 +1,176 @@
+package pro.deta.orion.transport.http;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import pro.deta.orion.GitRepositoryProvider;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.auth.AccessControlCredentialUpdate;
+import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
+import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
+import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
+import pro.deta.orion.auth.check.rule.SubjectAccessRules;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static jakarta.servlet.http.HttpServletResponse.SC_CREATED;
+import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
+import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
+import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
+import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
+
+@Singleton
+public class OrionAdminServlet implements MapToUrlServlet {
+    private static final String USERS_PATH = "/api/admin/users";
+    private static final String REPOSITORIES_PATH = "/api/admin/repositories";
+    private static final String BEARER_PREFIX = "Bearer ";
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final OrionAccessControlService accessControlService;
+    private final GitRepositoryProvider gitRepositoryProvider;
+
+    @Inject
+    public OrionAdminServlet(OrionAccessControlService accessControlService, GitRepositoryProvider gitRepositoryProvider) {
+        this.accessControlService = accessControlService;
+        this.gitRepositoryProvider = gitRepositoryProvider;
+    }
+
+    @Override
+    public String servletPath() {
+        return "/api/admin/*";
+    }
+
+    @Override
+    public void service(HttpServletRequest req, HttpServletResponse resp) throws IOException, ServletException {
+        SecurityContext securityContext = securityContextFor(req);
+        try {
+            accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
+            accessEnforcer().require(securityContext, ApplicationAdminResource.applicationAdmin(), ApplicationAccessRules.admin());
+        } catch (OrionSecurityException e) {
+            resp.sendError(SC_FORBIDDEN);
+            return;
+        }
+
+        if (!"POST".equalsIgnoreCase(req.getMethod())) {
+            resp.setStatus(SC_METHOD_NOT_ALLOWED);
+            resp.setHeader("Allow", "POST");
+            return;
+        }
+
+        try {
+            String pathInfo = req.getPathInfo();
+            if (pathInfo == null) {
+                resp.sendError(SC_NOT_FOUND);
+                return;
+            }
+            switch (pathInfo) {
+                case USERS_PATH -> createOrUpdateUser(req, resp);
+                case REPOSITORIES_PATH -> createRepository(req, resp);
+                default -> resp.sendError(SC_NOT_FOUND);
+            }
+        } catch (JsonProcessingException e) {
+            resp.sendError(SC_BAD_REQUEST, "Invalid JSON request");
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            resp.sendError(SC_BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    private void createOrUpdateUser(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        AdminUserRequest request = objectMapper.readValue(req.getInputStream(), AdminUserRequest.class);
+        accessControlService.createOrUpdateUser(request.toUserUpdate());
+        writeOk(resp);
+    }
+
+    private void createRepository(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        AdminRepositoryRequest request = objectMapper.readValue(req.getInputStream(), AdminRepositoryRequest.class);
+        if (request.name() == null || request.name().isBlank()) {
+            throw new IllegalArgumentException("Repository name is required");
+        }
+        gitRepositoryProvider.findOrCreate(request.name()).valueOrFailure("Cannot create repository " + request.name());
+        writeOk(resp);
+    }
+
+    private void writeOk(HttpServletResponse resp) throws IOException {
+        resp.setStatus(SC_CREATED);
+        resp.setContentType("application/json");
+        resp.getWriter().write("{\"status\":\"ok\"}");
+    }
+
+    private SecurityContext securityContextFor(HttpServletRequest req) {
+        SecurityContext securityContext = SecurityContext.createContext().withRequestId(req.toString());
+        String bearerToken = bearerTokenFrom(req);
+        if (bearerToken == null) {
+            return securityContext;
+        }
+
+        AuthenticationResult authentication = accessControlService.authenticateUser(
+                "root",
+                AccessControl.CredentialType.BEARER_TOKEN,
+                bearerToken.getBytes(StandardCharsets.UTF_8));
+        if (authentication instanceof AuthenticationResult.Success(var userIdentity)) {
+            securityContext.withUserIdentity(userIdentity);
+        }
+        return securityContext;
+    }
+
+    private String bearerTokenFrom(HttpServletRequest req) {
+        String authorization = req.getHeader("Authorization");
+        if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
+            return null;
+        }
+        String token = authorization.substring(BEARER_PREFIX.length());
+        if (token.isBlank()) {
+            return null;
+        }
+        return token;
+    }
+
+    public record AdminUserRequest(
+            String id,
+            String email,
+            String publicKey,
+            List<RepositoryGrantRequest> repositories) {
+        private AccessControlUserUpdate toUserUpdate() {
+            List<AccessControlCredentialUpdate> credentials = new ArrayList<>();
+            if (publicKey != null && !publicKey.isBlank()) {
+                credentials.add(new AccessControlCredentialUpdate(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, publicKey));
+            }
+
+            List<AccessControlRepositoryGrantUpdate> grants = new ArrayList<>();
+            if (repositories != null) {
+                for (RepositoryGrantRequest repository : repositories) {
+                    grants.add(repository.toGrantUpdate());
+                }
+            }
+            return new AccessControlUserUpdate(id, email, credentials, grants);
+        }
+    }
+
+    public record RepositoryGrantRequest(
+            String repository,
+            boolean read,
+            boolean write,
+            boolean create,
+            boolean force,
+            String branch) {
+        private AccessControlRepositoryGrantUpdate toGrantUpdate() {
+            return new AccessControlRepositoryGrantUpdate(repository, read, write, create, force, branch);
+        }
+    }
+
+    public record AdminRepositoryRequest(String name) {
+    }
+}

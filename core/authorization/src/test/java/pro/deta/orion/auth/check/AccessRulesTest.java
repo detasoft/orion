@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
 import pro.deta.orion.auth.check.resource.BranchResource;
 import pro.deta.orion.auth.check.resource.ClientConnectionResource;
@@ -124,6 +125,21 @@ public class AccessRulesTest {
     }
 
     @Test
+    public void adminRequiresAdminGrant() {
+        SecurityContext regular = securityContext(new InternalUserImpl("regular", List.of()));
+        assertThatThrownBy(() -> requireApplicationAdmin(regular))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("application admin");
+
+        AccessControl.Grant adminGrant = new AccessControl.Grant("admin", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.ADMIN, TRUE_STRING);
+        SecurityContext admin = securityContext(new InternalUserImpl("admin", List.of(adminGrant)));
+
+        assertThatCode(() -> requireApplicationAdmin(admin))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void authenticatedUserCheckDeniesAnonymousContext() {
         assertThatThrownBy(() -> requireAuthenticatedUser(SecurityContext.createContext()))
                 .isInstanceOf(OrionSecurityException.class)
@@ -184,6 +200,9 @@ public class AccessRulesTest {
                 .isInstanceOf(RootResource.class)
                 .isNotInstanceOf(NestedResource.class);
         assertThat(ApplicationShutdownResource.applicationShutdown())
+                .isInstanceOf(RootResource.class)
+                .isNotInstanceOf(NestedResource.class);
+        assertThat(ApplicationAdminResource.applicationAdmin())
                 .isInstanceOf(RootResource.class)
                 .isNotInstanceOf(NestedResource.class);
         assertThat(ClientConnectionResource.of(new TestSocketAddress()))
@@ -257,6 +276,10 @@ public class AccessRulesTest {
 
     private static void requireApplicationShutdown(SecurityContext securityContext) throws OrionSecurityException {
         accessEnforcer().require(securityContext, ApplicationShutdownResource.applicationShutdown(), ApplicationAccessRules.shutdown());
+    }
+
+    private static void requireApplicationAdmin(SecurityContext securityContext) throws OrionSecurityException {
+        accessEnforcer().require(securityContext, ApplicationAdminResource.applicationAdmin(), ApplicationAccessRules.admin());
     }
 
     private static void requireAuthenticatedUser(SecurityContext securityContext) throws OrionSecurityException {

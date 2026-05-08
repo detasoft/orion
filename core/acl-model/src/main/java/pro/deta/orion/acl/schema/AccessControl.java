@@ -178,11 +178,11 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
 
 
     public enum CredentialType {
-        SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2;
+        SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2, BEARER_TOKEN;
     }
 
     public enum GrantKey {
-        REPOSITORY, BRANCH, FORCE, READ, WRITE, CREATE, NETWORK_SOURCE, NETWORK_PORT, SHUTDOWN
+        REPOSITORY, BRANCH, FORCE, READ, WRITE, CREATE, NETWORK_SOURCE, NETWORK_PORT, SHUTDOWN, ADMIN
     }
 
     @SuppressWarnings("rawtypes")
