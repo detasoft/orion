@@ -86,7 +86,7 @@ class JGitRuntimeBoundaryTest {
     private static Path repositoryRoot() {
         Path current = Path.of("").toAbsolutePath();
         while (current != null) {
-            if (Files.exists(current.resolve("AGENT.md")) && Files.exists(current.resolve("pom.xml"))) {
+            if (Files.exists(current.resolve(".root")) && Files.exists(current.resolve("pom.xml"))) {
                 return current;
             }
             current = current.getParent();
