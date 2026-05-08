@@ -3,6 +3,8 @@ package pro.deta.orion.git.common;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -20,6 +22,14 @@ public interface GitRepository extends AutoCloseable {
     void upload(GitUploadRequest request, InputStream input, OutputStream output, OutputStream error) throws IOException, GitOperationException;
 
     void receive(GitReceiveRequest request, InputStream input, OutputStream output, OutputStream error) throws IOException, GitOperationException;
+
+    default GitRepositoryFileSnapshot loadFiles(String branch, List<String> paths) throws IOException, GitOperationException {
+        throw new GitOperationException("Repository " + name() + " does not support file loading");
+    }
+
+    default void saveFiles(String branch, Map<String, byte[]> files, String message, GitCommitAuthor author) throws IOException, GitOperationException {
+        throw new GitOperationException("Repository " + name() + " does not support file saving");
+    }
 
     <T> Optional<T> unwrap(Class<T> repositoryType);
 

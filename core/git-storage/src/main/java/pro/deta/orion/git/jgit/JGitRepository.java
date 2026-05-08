@@ -4,10 +4,22 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.NameRevCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.dircache.DirCache;
+import org.eclipse.jgit.dircache.DirCacheBuilder;
+import org.eclipse.jgit.dircache.DirCacheEntry;
 import org.eclipse.jgit.errors.MissingObjectException;
+import org.eclipse.jgit.lib.CommitBuilder;
 import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectInserter;
+import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.lib.FileMode;
+import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.storage.pack.PackStatistics;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.PostReceiveHook;
 import org.eclipse.jgit.transport.PostUploadHook;
 import org.eclipse.jgit.transport.PreUploadHook;
@@ -15,11 +27,14 @@ import org.eclipse.jgit.transport.ReceiveCommand;
 import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.ServiceMayNotContinueException;
 import org.eclipse.jgit.transport.UploadPack;
+import pro.deta.orion.git.common.GitCommitAuthor;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.common.GitOperationException;
 import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.git.common.GitRepositoryFileNotFoundException;
+import pro.deta.orion.git.common.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.common.GitRefUpdate;
 import pro.deta.orion.git.common.GitRefUpdateResult;
 import pro.deta.orion.git.common.GitRefUpdateType;
@@ -30,6 +45,9 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -38,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 
 /**
@@ -53,6 +72,16 @@ public final class JGitRepository implements GitRepository {
     public JGitRepository(String name, Repository repository) {
         this(name, repository, ignored -> {
         });
+    }
+
+    public static JGitRepository open(String name, Path repositoryPath, boolean createIfMissing) throws IOException, GitRepositoryFileNotFoundException {
+        Repository repository = openRepository(repositoryPath, createIfMissing);
+        try {
+            return new JGitRepository(name, repository);
+        } catch (RuntimeException e) {
+            repository.close();
+            throw e;
+        }
     }
 
     private JGitRepository(String name, Repository repository, Consumer<GitFetchAccessRequest> fetchAccessCheck) {
@@ -127,11 +156,66 @@ public final class JGitRepository implements GitRepository {
             public void onPostReceive(ReceivePack rp, Collection<ReceiveCommand> commands) {
                 List<ReceiveCommand> eventCommands = rp.getAllCommands();
                 if (!eventCommands.isEmpty()) {
-                    request.afterReceive().accept(eventCommands.stream().map(JGitRepository::toGitRefUpdate).toList());
+                    List<GitRefUpdate> updates = new ArrayList<>();
+                    for (ReceiveCommand command : eventCommands) {
+                        updates.add(toGitRefUpdate(command));
+                    }
+                    request.afterReceive().accept(updates);
                 }
             }
         });
         receivePack.receive(input, output, error);
+    }
+
+    @Override
+    public GitRepositoryFileSnapshot loadFiles(String branch, List<String> paths) throws IOException, GitOperationException {
+        Objects.requireNonNull(paths, "paths");
+        try (RevWalk revWalk = new RevWalk(repository)) {
+            ObjectId branchId = resolveBranch(repository, branch);
+            if (branchId == null) {
+                throw new GitRepositoryFileNotFoundException("Branch not found: " + branch);
+            }
+
+            RevCommit commit = revWalk.parseCommit(branchId);
+            Map<String, byte[]> files = new LinkedHashMap<>();
+            for (String path : paths) {
+                String gitPath = gitPath(path);
+                try (TreeWalk treeWalk = TreeWalk.forPath(repository, gitPath, commit.getTree())) {
+                    if (treeWalk == null) {
+                        throw new GitRepositoryFileNotFoundException("File not found: " + gitPath);
+                    }
+                    files.put(gitPath, repository.open(treeWalk.getObjectId(0)).getBytes());
+                }
+            }
+            return new GitRepositoryFileSnapshot(files, Optional.of(commit.name()));
+        }
+    }
+
+    @Override
+    public void saveFiles(String branch, Map<String, byte[]> files, String message, GitCommitAuthor author) throws IOException {
+        Objects.requireNonNull(files, "files");
+        String branchRefName = branchRefName(branch);
+        try (RevWalk revWalk = new RevWalk(repository);
+             ObjectInserter inserter = repository.newObjectInserter()) {
+            ObjectId oldBranchId = resolveBranch(repository, branch);
+            RevCommit parent = oldBranchId == null ? null : revWalk.parseCommit(oldBranchId);
+
+            TreeMap<String, TreeEntry> treeEntries = new TreeMap<>();
+            if (parent != null) {
+                readTreeEntries(repository, parent, treeEntries);
+            }
+
+            for (Map.Entry<String, byte[]> entry : files.entrySet()) {
+                String path = gitPath(entry.getKey());
+                ObjectId blobId = inserter.insert(org.eclipse.jgit.lib.Constants.OBJ_BLOB, entry.getValue());
+                treeEntries.put(path, new TreeEntry(FileMode.REGULAR_FILE, blobId));
+            }
+
+            ObjectId treeId = writeTree(treeEntries, inserter);
+            ObjectId commitId = writeCommit(inserter, treeId, parent, message, author);
+            inserter.flush();
+            updateBranch(repository, branchRefName, oldBranchId, commitId);
+        }
     }
 
     @Override
@@ -236,5 +320,123 @@ public final class JGitRepository implements GitRepository {
             result.put(toGitObjectId(entry.getKey()), entry.getValue());
         }
         return result;
+    }
+
+    private static Repository openRepository(Path repositoryPath, boolean createIfMissing) throws IOException, GitRepositoryFileNotFoundException {
+        Path normalizedRepositoryPath = Objects.requireNonNull(repositoryPath, "repositoryPath").toAbsolutePath().normalize();
+        FileRepositoryBuilder builder = new FileRepositoryBuilder();
+        Path worktreeGitDir = normalizedRepositoryPath.resolve(".git");
+        Repository repository;
+        if (Files.isDirectory(worktreeGitDir)) {
+            repository = builder.setGitDir(worktreeGitDir.toFile()).build();
+        } else {
+            repository = builder.setBare().setGitDir(normalizedRepositoryPath.toFile()).build();
+        }
+        if (!repository.getObjectDatabase().exists()) {
+            if (!createIfMissing) {
+                repository.close();
+                throw new GitRepositoryFileNotFoundException("Repository not found: " + normalizedRepositoryPath);
+            }
+            repository.create(repository.isBare());
+        }
+        return repository;
+    }
+
+    private static ObjectId resolveBranch(Repository repository, String branch) throws IOException {
+        ObjectId objectId = repository.resolve(branchRefName(branch));
+        if (objectId == null && !branch.startsWith(org.eclipse.jgit.lib.Constants.R_REFS)) {
+            objectId = repository.resolve(branch);
+        }
+        return objectId;
+    }
+
+    private static String branchRefName(String branch) {
+        Objects.requireNonNull(branch, "branch");
+        if (branch.startsWith(org.eclipse.jgit.lib.Constants.R_REFS)) {
+            return branch;
+        }
+        return org.eclipse.jgit.lib.Constants.R_HEADS + branch;
+    }
+
+    private static void readTreeEntries(Repository repository, RevCommit commit, TreeMap<String, TreeEntry> entries) throws IOException {
+        try (TreeWalk treeWalk = new TreeWalk(repository)) {
+            treeWalk.addTree(commit.getTree());
+            treeWalk.setRecursive(true);
+            while (treeWalk.next()) {
+                entries.put(treeWalk.getPathString(), new TreeEntry(treeWalk.getFileMode(0), treeWalk.getObjectId(0)));
+            }
+        }
+    }
+
+    private static ObjectId writeTree(TreeMap<String, TreeEntry> entries, ObjectInserter inserter) throws IOException {
+        DirCache dirCache = DirCache.newInCore();
+        DirCacheBuilder builder = dirCache.builder();
+        for (Map.Entry<String, TreeEntry> entry : entries.entrySet()) {
+            DirCacheEntry cacheEntry = new DirCacheEntry(entry.getKey());
+            cacheEntry.setFileMode(entry.getValue().fileMode());
+            cacheEntry.setObjectId(entry.getValue().objectId());
+            builder.add(cacheEntry);
+        }
+        builder.finish();
+        return dirCache.writeTree(inserter);
+    }
+
+    private static ObjectId writeCommit(ObjectInserter inserter, ObjectId treeId, RevCommit parent, String message, GitCommitAuthor author) throws IOException {
+        CommitBuilder commitBuilder = new CommitBuilder();
+        commitBuilder.setTreeId(treeId);
+        if (parent != null) {
+            commitBuilder.setParentId(parent);
+        }
+        PersonIdent authorIdentity = personIdent(author);
+        commitBuilder.setAuthor(authorIdentity);
+        commitBuilder.setCommitter(authorIdentity);
+        commitBuilder.setEncoding(StandardCharsets.UTF_8);
+        commitBuilder.setMessage(commitMessage(message));
+        return inserter.insert(commitBuilder);
+    }
+
+    private static void updateBranch(Repository repository, String branchRefName, ObjectId oldBranchId, ObjectId commitId) throws IOException {
+        RefUpdate update = repository.updateRef(branchRefName);
+        update.setNewObjectId(commitId);
+        update.setExpectedOldObjectId(oldBranchId == null ? ObjectId.zeroId() : oldBranchId);
+        RefUpdate.Result result = update.update();
+        switch (result) {
+            case NEW, FAST_FORWARD, FORCED, NO_CHANGE -> {
+            }
+            default -> throw new IOException("Cannot update branch " + branchRefName + ": " + result);
+        }
+    }
+
+    private static PersonIdent personIdent(GitCommitAuthor author) {
+        author = Objects.requireNonNullElse(author, GitCommitAuthor.EMPTY);
+        return new PersonIdent(author.name(), author.email());
+    }
+
+    private static String commitMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return "update files";
+        }
+        return message;
+    }
+
+    private static String gitPath(String path) {
+        Objects.requireNonNull(path, "path");
+        Path rawPath = Path.of(path);
+        if (rawPath.isAbsolute()) {
+            throw new IllegalArgumentException("Git file path must be relative: " + path);
+        }
+        for (Path segment : rawPath) {
+            if ("..".equals(segment.toString())) {
+                throw new IllegalArgumentException("Git file path escapes repository: " + path);
+            }
+        }
+        Path normalizedPath = rawPath.normalize();
+        if (normalizedPath.toString().isBlank()) {
+            throw new IllegalArgumentException("Git file path must not be empty");
+        }
+        return normalizedPath.toString().replace(File.separatorChar, '/');
+    }
+
+    private record TreeEntry(FileMode fileMode, ObjectId objectId) {
     }
 }
