@@ -84,7 +84,6 @@ public final class LifecycleTaskPlanner {
                     definition.call(),
                     new ArrayList<>(dependencies.get(definition.id())),
                     definition.before(),
-                    definition.runMode(),
                     definition.waitForCompletionSecs()));
         }
         return normalizedDefinitions;

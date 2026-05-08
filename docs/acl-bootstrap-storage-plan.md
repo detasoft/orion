@@ -15,7 +15,7 @@ ACL must not be required in order to locate or read ACL. After ACL is loaded, no
 external users and transports.
 
 This plan removes ACL loading from the current self-hosted bootstrap loop based on `VolatileUserAdded`, the temporary
-`orion_acl` user and event ordering between ACL and Git storage startup. The legacy volatile-user event can remain for
+`orion_acl` user and event ordering between ACL and Git storage startup. The storage-area volatile-user event can remain for
 other storage-area startup paths, but ACL bootstrap must not depend on it.
 
 ## 1. Keep Deployment Configuration Local
@@ -226,7 +226,7 @@ After ACL is loaded through bootstrap storage:
 
 - remove `volatileAccessControl` from `OrionAccessControlServiceImpl`;
 - stop subscribing to `VolatileUserAdded` from `OrionAccessControlServiceImpl`;
-- keep `VolatileUserAdded`, `assignUserGrants(...)` and legacy `GitBackedInternalStorage` event publishing for existing
+- keep `VolatileUserAdded`, `assignUserGrants(...)` and `GitBackedInternalStorage` event publishing for existing
   non-bootstrap storage-area behavior;
 - update README to describe the new startup model.
 

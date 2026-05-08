@@ -38,6 +38,20 @@ public record LifecycleFlow(String name, List<LifecycleStep> steps) {
         if (steps.isEmpty()) {
             throw new IllegalArgumentException("Lifecycle flow must contain at least one step");
         }
+        validateContinuousFlow(name, steps);
+    }
+
+    private static void validateContinuousFlow(String name, List<LifecycleStep> steps) {
+        for (int i = 1; i < steps.size(); i++) {
+            LifecycleStep previous = steps.get(i - 1);
+            LifecycleStep current = steps.get(i);
+            if (previous.success() != current.from()) {
+                throw new IllegalArgumentException(
+                        "Lifecycle flow " + name + " is not continuous: step " + i
+                                + " starts from " + current.from()
+                                + " but previous step succeeds to " + previous.success());
+            }
+        }
     }
 
     public String describe() {

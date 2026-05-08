@@ -6,6 +6,8 @@ import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.LifecycleTaskId;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.OrionProvider;
 
 import java.util.ArrayList;
@@ -23,15 +25,15 @@ class OrionApplicationLifecycleTest {
     void startupRunsInitThenStartingAndEndsUp() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
         OrionApplicationStageEventListener init = registrar ->
-                registrar.register(ApplicationState.INIT, () -> {
+                registrar.task(ApplicationState.INIT, taskId("TEST_INIT"), () -> {
                     events.add("init");
                     return OrionStageCallResult.EMPTY;
-                }).priority(1).waitForCompletion();
+                });
         OrionApplicationStageEventListener starting = registrar ->
-                registrar.register(ApplicationState.STARTING, () -> {
+                registrar.task(ApplicationState.STARTING, taskId("TEST_STARTING"), () -> {
                     events.add("starting");
                     return OrionStageCallResult.EMPTY;
-                }).priority(1).waitForCompletion();
+                });
 
         ApplicationState result = runLifecycle(Set.of(init, starting));
 
@@ -43,15 +45,15 @@ class OrionApplicationLifecycleTest {
     void failingInitMovesApplicationToFailedAndDoesNotRunStarting() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
         OrionApplicationStageEventListener init = registrar ->
-                registrar.register(ApplicationState.INIT, () -> {
+                registrar.task(ApplicationState.INIT, taskId("TEST_FAILING_INIT"), () -> {
                     events.add("init");
                     throw new IllegalStateException("boom");
-                }).priority(1).waitForCompletion();
+                });
         OrionApplicationStageEventListener starting = registrar ->
-                registrar.register(ApplicationState.STARTING, () -> {
+                registrar.task(ApplicationState.STARTING, taskId("TEST_STARTING"), () -> {
                     events.add("starting");
                     return OrionStageCallResult.EMPTY;
-                }).priority(1).waitForCompletion();
+                });
 
         ApplicationState result = runLifecycle(Set.of(init, starting));
 
@@ -63,10 +65,10 @@ class OrionApplicationLifecycleTest {
     void shutdownRunsStoppingAndEndsOff() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
         OrionApplicationStageEventListener stopping = registrar ->
-                registrar.register(ApplicationState.STOPPING, () -> {
+                registrar.task(ApplicationState.STOPPING, taskId("TEST_STOPPING"), () -> {
                     events.add("stopping");
                     return OrionStageCallResult.EMPTY;
-                }).priority(1).waitForCompletion();
+                });
 
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of(stopping))) {
             context.lifecycle().runApplication();
@@ -92,6 +94,24 @@ class OrionApplicationLifecycleTest {
     }
 
     @Test
+    void describeLifecycleShowsFlowsAndTaskPlans() {
+        OrionApplicationStageEventListener startingTasks = registrar -> {
+            registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.REPOSITORY_STORAGE, () -> OrionStageCallResult.EMPTY);
+            registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
+                    .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
+        };
+
+        try (TestLifecycleContext context = new TestLifecycleContext(Set.of(startingTasks))) {
+            assertThat(context.lifecycle().describeLifecycle()).contains(
+                    "STARTUP:",
+                    "INIT -> STARTING",
+                    "STARTING:",
+                    "REPOSITORY_STORAGE",
+                    "ACL_LOAD after REPOSITORY_STORAGE");
+        }
+    }
+
+    @Test
     void beginShutdownUsesShutdownFlow() {
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of())) {
             context.lifecycle().runApplication();
@@ -103,28 +123,30 @@ class OrionApplicationLifecycleTest {
     }
 
     @Test
-    void waitsForBlockingInitListenerBeforeStartingNextInitListener() {
+    void waitsForDependentInitTaskBeforeStartingNextInitTask() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
         List<Consumer<String>> initSubscribers = new CopyOnWriteArrayList<>();
+        LifecycleTaskId aclHandler = taskId("TEST_ACL_HANDLER");
+        LifecycleTaskId gitStorage = taskId("TEST_GIT_STORAGE");
 
         OrionApplicationStageEventListener aclService = registrar ->
-                registrar.register(ApplicationState.INIT, () -> {
+                registrar.task(ApplicationState.INIT, aclHandler, () -> {
                     delayLongEnoughToExposeMissingWait();
                     initSubscribers.add(value -> events.add("acl-handler-received"));
                     events.add("acl-handler-registered");
                     return OrionStageCallResult.EMPTY;
-                }).priority(1).waitForCompletion();
+                });
 
-        OrionApplicationStageEventListener gitStorage = registrar ->
-                registrar.register(ApplicationState.INIT, () -> {
+        OrionApplicationStageEventListener gitStorageEvent = registrar ->
+                registrar.task(ApplicationState.INIT, gitStorage, () -> {
                     events.add("git-storage-event-published");
                     for (Consumer<String> subscriber : initSubscribers) {
                         subscriber.accept("acl-ready");
                     }
                     return OrionStageCallResult.EMPTY;
-                }).priority(2);
+                }).after(aclHandler);
 
-        try (TestLifecycleContext context = new TestLifecycleContext(Set.of(aclService, gitStorage))) {
+        try (TestLifecycleContext context = new TestLifecycleContext(Set.of(aclService, gitStorageEvent))) {
             assertThat(context.lifecycle().runApplication()).isEqualTo(ApplicationState.UP);
         }
 
@@ -136,6 +158,10 @@ class OrionApplicationLifecycleTest {
 
     private static void delayLongEnoughToExposeMissingWait() throws InterruptedException {
         Thread.sleep(100);
+    }
+
+    private static LifecycleTaskId taskId(String value) {
+        return new LifecycleTaskId(value);
     }
 
     private ApplicationState runLifecycle(Set<OrionApplicationStageEventListener> listeners) {

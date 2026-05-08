@@ -20,7 +20,7 @@ The ACL startup path does not use Orion network transports to read ACL. For repo
 `local:orion`, Orion opens the repository storage directly and reads the configured ACL files from the requested
 branch. For an independent local Git directory, use a `file://` ACL URL. There is no temporary Orion user for ACL
 bootstrap.
-`VolatileUserAdded` can still exist for legacy storage-area startup, but ACL loading does not consume it.
+`VolatileUserAdded` can still exist for storage-area synchronization, but ACL loading does not consume it.
 
 The target deployment configuration should have
 three root sections:
@@ -42,6 +42,11 @@ Startup order should be:
 the internal storage backend directly. Local filesystem storage normally needs no backend authorization; S3 or another
 remote backend may need backend credentials from environment variables, files or provider-specific mechanisms. Those
 backend credentials are not Orion ACL users.
+
+# Lifecycle
+
+Startup and shutdown order is defined by explicit lifecycle flows and named task dependencies.
+See [docs/lifecycle.md](docs/lifecycle.md).
 
 # Next steps
 1. [git-mirror] func to mirror github/gitlab hostings

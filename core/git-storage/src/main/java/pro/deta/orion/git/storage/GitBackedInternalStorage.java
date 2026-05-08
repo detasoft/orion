@@ -15,6 +15,7 @@ import pro.deta.orion.git.storage.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.OrionProvider;
@@ -30,7 +31,6 @@ import java.util.function.Consumer;
 @Getter
 @Slf4j
 public class GitBackedInternalStorage implements OrionApplicationStageEventListener {
-    public static final int GIT_BACKED_INTERNAL_STORAGE_PRIORITY = 7;
     private final Path storageArea;
     private final OrionProvider orionProvider;
     private final OrionConfiguration config;
@@ -51,8 +51,9 @@ public class GitBackedInternalStorage implements OrionApplicationStageEventListe
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.INIT, this::onInit);
-        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_BACKED_INTERNAL_STORAGE_PRIORITY).waitForCompletion(); // after GIT_TRANSPORT_PRIORITY leads to finish all transport started first
+        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.GIT_BACKED_INTERNAL_STORAGE_INIT, this::onInit)
+                .after(OrionLifecycleTasks.ACL_INIT);
+        registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.REPOSITORY_STORAGE, this::onStart);
     }
 
     private OrionStageCallResult onInit() {

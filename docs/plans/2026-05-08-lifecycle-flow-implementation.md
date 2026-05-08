@@ -4,7 +4,7 @@
 
 **Goal:** Make `OrionApplicationLifecycle` explicit, readable, and easy to modify by moving phase order and in-phase task order into first-class definitions.
 
-**Architecture:** Keep `ApplicationState` as the public state enum for now, but introduce a `LifecycleFlow` table as the only source of truth for phase transitions. Then introduce named lifecycle tasks with explicit dependencies so startup/shutdown order is described as a graph instead of scattered integer priorities. Migrate existing listeners incrementally through a compatibility adapter, then remove or deprecate the ambiguous priority API.
+**Architecture:** Keep `ApplicationState` as the public state enum for now, but introduce a `LifecycleFlow` table as the only source of truth for phase transitions. Then introduce named lifecycle tasks with explicit dependencies so startup/shutdown order is described as a graph instead of scattered integer priorities. All lifecycle listeners should register named tasks through `ApplicationStateListenerRegistrar.task(...)`.
 
 **Tech Stack:** Java 21, Maven, JUnit 5, AssertJ, existing `OrionExecutor` and lifecycle package.
 
@@ -12,16 +12,16 @@
 
 ## Design Summary
 
-The current lifecycle has two hidden order systems:
+The lifecycle used to have two hidden order systems:
 
 - phase order is hard-coded in private methods such as `onInitStage()`, `onStartStage()`, and `doShutdown()`;
-- listener order is encoded as integer priorities plus a non-obvious `waitForCompletion()` barrier.
+- listener order was encoded as integer priorities plus a non-obvious `waitForCompletion()` barrier.
 
 The target model separates those concerns:
 
 - `LifecycleFlow` says which application phase follows which phase;
 - `LifecycleTaskPlan` says which named tasks run inside a phase and what they depend on;
-- `LifecycleRunMode` says whether a task blocks dependent tasks or starts background work.
+- dependency edges are the only barrier between task execution groups.
 
 The first milestone should make this obvious:
 
@@ -44,7 +44,7 @@ The second milestone should make task order obvious:
 
 ```text
 INIT:
-  JGIT_RUNTIME -> EVENT_MANAGER -> ACL_INIT -> LEGACY_GIT_ACL_STORAGE_INIT
+  JGIT_RUNTIME -> EVENT_MANAGER -> ACL_INIT -> GIT_BACKED_INTERNAL_STORAGE_INIT
 
 STARTING:
   REPOSITORY_STORAGE -> ACL_LOAD -> TRANSPORTS
@@ -74,15 +74,15 @@ Add tests that prove the current public behavior before refactoring:
 void startupRunsInitThenStartingAndEndsUp() {
     List<String> events = Collections.synchronizedList(new ArrayList<>());
     OrionApplicationStageEventListener init = registrar ->
-            registrar.register(ApplicationState.INIT, () -> {
+            registrar.task(ApplicationState.INIT, new LifecycleTaskId("TEST_INIT"), () -> {
                 events.add("init");
                 return OrionStageCallResult.EMPTY;
-            }).priority(1).waitForCompletion();
+            });
     OrionApplicationStageEventListener starting = registrar ->
-            registrar.register(ApplicationState.STARTING, () -> {
+            registrar.task(ApplicationState.STARTING, new LifecycleTaskId("TEST_STARTING"), () -> {
                 events.add("starting");
                 return OrionStageCallResult.EMPTY;
-            }).priority(1).waitForCompletion();
+            });
 
     ApplicationState result = runLifecycle(Set.of(init, starting));
 
@@ -98,15 +98,15 @@ Add failure characterization:
 void failingInitMovesApplicationToFailedAndDoesNotRunStarting() {
     List<String> events = Collections.synchronizedList(new ArrayList<>());
     OrionApplicationStageEventListener init = registrar ->
-            registrar.register(ApplicationState.INIT, () -> {
+            registrar.task(ApplicationState.INIT, new LifecycleTaskId("TEST_INIT"), () -> {
                 events.add("init");
                 throw new IllegalStateException("boom");
-            }).priority(1).waitForCompletion();
+            });
     OrionApplicationStageEventListener starting = registrar ->
-            registrar.register(ApplicationState.STARTING, () -> {
+            registrar.task(ApplicationState.STARTING, new LifecycleTaskId("TEST_STARTING"), () -> {
                 events.add("starting");
                 return OrionStageCallResult.EMPTY;
-            }).priority(1).waitForCompletion();
+            });
 
     ApplicationState result = runLifecycle(Set.of(init, starting));
 
@@ -122,10 +122,10 @@ Add shutdown characterization:
 void shutdownRunsStoppingAndEndsOff() {
     List<String> events = Collections.synchronizedList(new ArrayList<>());
     OrionApplicationStageEventListener stopping = registrar ->
-            registrar.register(ApplicationState.STOPPING, () -> {
+            registrar.task(ApplicationState.STOPPING, new LifecycleTaskId("TEST_STOPPING"), () -> {
                 events.add("stopping");
                 return OrionStageCallResult.EMPTY;
-            }).priority(1).waitForCompletion();
+            });
 
     try (TestLifecycleContext context = new TestLifecycleContext(Set.of(stopping))) {
         context.lifecycle().runApplication();
@@ -494,7 +494,6 @@ git commit -m "refactor: execute lifecycle from explicit flow"
 
 - Create: `core/common/src/main/java/pro/deta/orion/lifecycle/task/LifecycleTaskId.java`
 - Create: `core/common/src/main/java/pro/deta/orion/lifecycle/task/OrionLifecycleTasks.java`
-- Create: `core/common/src/main/java/pro/deta/orion/lifecycle/task/LifecycleRunMode.java`
 - Create: `core/common/src/test/java/pro/deta/orion/lifecycle/task/LifecycleTaskIdTest.java`
 
 **Step 1: Write failing task id tests**
@@ -560,7 +559,8 @@ public final class OrionLifecycleTasks {
     public static final LifecycleTaskId JGIT_RUNTIME = new LifecycleTaskId("JGIT_RUNTIME");
     public static final LifecycleTaskId EVENT_MANAGER = new LifecycleTaskId("EVENT_MANAGER");
     public static final LifecycleTaskId ACL_INIT = new LifecycleTaskId("ACL_INIT");
-    public static final LifecycleTaskId LEGACY_GIT_ACL_STORAGE_INIT = new LifecycleTaskId("LEGACY_GIT_ACL_STORAGE_INIT");
+    public static final LifecycleTaskId GIT_BACKED_INTERNAL_STORAGE_INIT =
+            new LifecycleTaskId("GIT_BACKED_INTERNAL_STORAGE_INIT");
     public static final LifecycleTaskId REPOSITORY_STORAGE = new LifecycleTaskId("REPOSITORY_STORAGE");
     public static final LifecycleTaskId ACL_LOAD = new LifecycleTaskId("ACL_LOAD");
     public static final LifecycleTaskId TRANSPORTS_START = new LifecycleTaskId("TRANSPORTS_START");
@@ -573,17 +573,6 @@ public final class OrionLifecycleTasks {
 
     private OrionLifecycleTasks() {
     }
-}
-```
-
-Create:
-
-```java
-package pro.deta.orion.lifecycle.task;
-
-public enum LifecycleRunMode {
-    BLOCKING,
-    NON_BLOCKING
 }
 ```
 
@@ -620,19 +609,17 @@ Create tests:
 
 ```java
 @Test
-void taskRegistrationCapturesDependenciesAndRunMode() {
+void taskRegistrationCapturesDependencies() {
     LifecycleTaskRegistration registration = new LifecycleTaskRegistration(
             ApplicationState.STARTING,
             OrionLifecycleTasks.ACL_LOAD,
             () -> OrionStageCallResult.EMPTY);
 
     registration.after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-            .before(OrionLifecycleTasks.TRANSPORTS_START)
-            .runMode(LifecycleRunMode.BLOCKING);
+            .before(OrionLifecycleTasks.TRANSPORTS_START);
 
     assertThat(registration.definition().after()).containsExactly(OrionLifecycleTasks.REPOSITORY_STORAGE);
     assertThat(registration.definition().before()).containsExactly(OrionLifecycleTasks.TRANSPORTS_START);
-    assertThat(registration.definition().runMode()).isEqualTo(LifecycleRunMode.BLOCKING);
 }
 ```
 
@@ -642,8 +629,7 @@ Add registrar API test through a fake listener:
 OrionApplicationStageEventListener acl = registrar ->
         registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
                 .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-                .before(OrionLifecycleTasks.TRANSPORTS_START)
-                .runMode(LifecycleRunMode.BLOCKING);
+                .before(OrionLifecycleTasks.TRANSPORTS_START);
 ```
 
 **Step 2: Run tests and verify failure**
@@ -667,7 +653,6 @@ public record LifecycleTaskDefinition(
         Callable<OrionStageCallResult> call,
         List<LifecycleTaskId> after,
         List<LifecycleTaskId> before,
-        LifecycleRunMode runMode,
         int waitForCompletionSecs
 ) {
 }
@@ -682,12 +667,10 @@ public final class LifecycleTaskRegistration {
     private final Callable<OrionStageCallResult> call;
     private final List<LifecycleTaskId> after = new ArrayList<>();
     private final List<LifecycleTaskId> before = new ArrayList<>();
-    private LifecycleRunMode runMode = LifecycleRunMode.NON_BLOCKING;
     private int waitForCompletionSecs;
 
     public LifecycleTaskRegistration after(LifecycleTaskId dependency) { ... }
     public LifecycleTaskRegistration before(LifecycleTaskId dependent) { ... }
-    public LifecycleTaskRegistration runMode(LifecycleRunMode runMode) { ... }
     public LifecycleTaskRegistration waitForCompletionSecs(int seconds) { ... }
     public LifecycleTaskDefinition definition() { ... }
 }
@@ -831,12 +814,11 @@ git add core/common/src/main/java/pro/deta/orion/lifecycle/task/LifecycleTaskPla
 git commit -m "feat: validate lifecycle task dependencies"
 ```
 
-## Task 7: Execute New Lifecycle Tasks With Legacy Compatibility
+## Task 7: Execute New Lifecycle Tasks
 
 **Files:**
 
 - Modify: `core/common/src/main/java/pro/deta/orion/lifecycle/OrionApplicationLifecycle.java`
-- Modify: `core/common/src/main/java/pro/deta/orion/lifecycle/listener/RegisteredListener.java`
 - Modify: `core/common/src/test/java/pro/deta/orion/lifecycle/OrionApplicationLifecycleTest.java`
 - Create: `core/common/src/test/java/pro/deta/orion/lifecycle/task/LifecycleTaskExecutionTest.java`
 
@@ -852,15 +834,15 @@ void explicitTasksRunInDependencyOrder() {
         registrar.task(ApplicationState.STARTING, REPOSITORY_STORAGE, () -> {
             events.add("storage");
             return OrionStageCallResult.EMPTY;
-        }).runMode(LifecycleRunMode.BLOCKING);
+        });
         registrar.task(ApplicationState.STARTING, ACL_LOAD, () -> {
             events.add("acl");
             return OrionStageCallResult.EMPTY;
-        }).after(REPOSITORY_STORAGE).runMode(LifecycleRunMode.BLOCKING);
+        }).after(REPOSITORY_STORAGE);
         registrar.task(ApplicationState.STARTING, TRANSPORTS_START, () -> {
             events.add("transports");
             return OrionStageCallResult.EMPTY;
-        }).after(ACL_LOAD).runMode(LifecycleRunMode.BLOCKING);
+        }).after(ACL_LOAD);
     };
 
     runLifecycle(Set.of(listener));
@@ -869,12 +851,12 @@ void explicitTasksRunInDependencyOrder() {
 }
 ```
 
-Add compatibility test:
+Add failure propagation test:
 
 ```java
 @Test
-void oldPriorityListenersStillRun() {
-    // Register old style listeners and assert existing characterization behavior still passes.
+void failingExplicitTaskMovesApplicationToFailed() {
+    // Register a failing named task and assert STARTING fails without running dependent tasks.
 }
 ```
 
@@ -892,26 +874,19 @@ Expected: FAIL because lifecycle still ignores explicit task registrations.
 
 In `onStage(ApplicationState state)`, change behavior:
 
-- collect explicit task registrations for `state`;
-- if any exist, build `LifecycleTaskPlan` and execute it;
-- also execute legacy listeners for the same state through an adapter until all components migrate;
-- preserve current old listener behavior if no explicit tasks exist.
-
-Initial adapter rule:
-
-- explicit tasks run according to dependencies;
-- legacy listeners run after explicit tasks by priority;
-- this is temporary and must be removed after migration.
+- collect task registrations for `state`;
+- build `LifecycleTaskPlan` and execute it when tasks exist;
+- return success when the phase has no registered tasks.
 
 **Step 4: Implement task execution**
 
 For each execution group:
 
 - submit all tasks in the group to `OrionExecutor`;
-- wait for all `BLOCKING` task futures before moving to the next group;
-- for `NON_BLOCKING`, wait for the listener callable to return, but do not treat returned background futures as dependency blockers unless the returned `OrionStageCallResult` says it needs waiting.
+- wait for every task callable before moving to the next group;
+- if a task returns `OrionStageCallResult` with futures to wait for, wait for those futures before moving to the next group.
 
-Keep existing `RegisteredListenerResult` for old listeners.
+Keep task execution results local to `OrionApplicationLifecycle`.
 
 **Step 5: Run tests and commit**
 
@@ -926,7 +901,7 @@ Expected: PASS.
 Commit:
 
 ```bash
-git add core/common/src/main/java/pro/deta/orion/lifecycle/OrionApplicationLifecycle.java core/common/src/main/java/pro/deta/orion/lifecycle/listener/RegisteredListener.java core/common/src/test/java/pro/deta/orion/lifecycle/OrionApplicationLifecycleTest.java core/common/src/test/java/pro/deta/orion/lifecycle/task/LifecycleTaskExecutionTest.java
+git add core/common/src/main/java/pro/deta/orion/lifecycle/OrionApplicationLifecycle.java core/common/src/test/java/pro/deta/orion/lifecycle/OrionApplicationLifecycleTest.java core/common/src/test/java/pro/deta/orion/lifecycle/task/LifecycleTaskExecutionTest.java
 git commit -m "feat: execute explicit lifecycle tasks"
 ```
 
@@ -968,14 +943,13 @@ Expected: FAIL until components migrate.
 Change:
 
 ```java
-registrar.register(ApplicationState.INIT, this::install).priority(-100);
+registrar.task(ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install);
 ```
 
 to:
 
 ```java
-registrar.task(ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install)
-        .runMode(LifecycleRunMode.BLOCKING);
+registrar.task(ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install);
 ```
 
 **Step 4: Migrate event manager**
@@ -985,7 +959,6 @@ Register:
 ```java
 registrar.task(ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, this::onInit)
         .after(OrionLifecycleTasks.JGIT_RUNTIME)
-        .runMode(LifecycleRunMode.BLOCKING)
         .waitForCompletionSecs(2);
 ```
 
@@ -995,18 +968,16 @@ Register:
 
 ```java
 registrar.task(ApplicationState.INIT, OrionLifecycleTasks.ACL_INIT, this::onInit)
-        .after(OrionLifecycleTasks.EVENT_MANAGER)
-        .runMode(LifecycleRunMode.BLOCKING);
+        .after(OrionLifecycleTasks.EVENT_MANAGER);
 ```
 
-**Step 6: Migrate legacy Git ACL storage init**
+**Step 6: Migrate internal Git-backed storage init**
 
 Register:
 
 ```java
-registrar.task(ApplicationState.INIT, OrionLifecycleTasks.LEGACY_GIT_ACL_STORAGE_INIT, this::onInit)
-        .after(OrionLifecycleTasks.ACL_INIT)
-        .runMode(LifecycleRunMode.BLOCKING);
+registrar.task(ApplicationState.INIT, OrionLifecycleTasks.GIT_BACKED_INTERNAL_STORAGE_INIT, this::onInit)
+        .after(OrionLifecycleTasks.ACL_INIT);
 ```
 
 Keep the `isEnabled()` guard inside `GitAccessControlStorage.registerToStage`.
@@ -1078,8 +1049,7 @@ Expected: FAIL until registrations migrate.
 In `GitBackedInternalStorage`:
 
 ```java
-registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.REPOSITORY_STORAGE, this::onStart)
-        .runMode(LifecycleRunMode.BLOCKING);
+registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.REPOSITORY_STORAGE, this::onStart);
 ```
 
 **Step 4: Migrate ACL load**
@@ -1089,8 +1059,7 @@ In `OrionAccessControlServiceImpl`:
 ```java
 registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::onStart)
         .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
-        .before(OrionLifecycleTasks.TRANSPORTS_START)
-        .runMode(LifecycleRunMode.BLOCKING);
+        .before(OrionLifecycleTasks.TRANSPORTS_START);
 ```
 
 This task also fixes the currently confusing transport-before-ACL ordering.
@@ -1101,8 +1070,7 @@ If useful, add a no-op task owned by lifecycle or a small static helper:
 
 ```java
 registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.TRANSPORTS_START, () -> OrionStageCallResult.EMPTY)
-        .after(OrionLifecycleTasks.ACL_LOAD)
-        .runMode(LifecycleRunMode.BLOCKING);
+        .after(OrionLifecycleTasks.ACL_LOAD);
 ```
 
 If adding no-op task inside the lifecycle core feels too magical, make each transport depend directly on `ACL_LOAD`.
@@ -1113,8 +1081,7 @@ In `JettyHTTPServer`:
 
 ```java
 registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.HTTP_TRANSPORT_START, this::onStart)
-        .after(OrionLifecycleTasks.TRANSPORTS_START)
-        .runMode(LifecycleRunMode.BLOCKING);
+        .after(OrionLifecycleTasks.TRANSPORTS_START);
 ```
 
 **Step 7: Migrate Git native and SSH transports**
@@ -1125,11 +1092,8 @@ Use:
 .after(OrionLifecycleTasks.TRANSPORTS_START)
 ```
 
-Set run mode:
-
-- `GitNativeTransportService.onStart()` can remain `NON_BLOCKING` if it submits listener work and returns;
-- `GitSshTransportService.onStart()` should be `BLOCKING` enough to start the server before stage completes;
-- document this in a test or comment only if non-obvious.
+Each transport start task should complete only after its server socket is ready or after startup has failed.
+Document this in a test or comment only if non-obvious.
 
 **Step 8: Run tests and commit**
 
@@ -1205,8 +1169,7 @@ Executor should stop last:
 
 ```java
 registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.EXECUTOR_STOP, this::onStop)
-        .after(OrionLifecycleTasks.EVENT_MANAGER_STOP)
-        .runMode(LifecycleRunMode.BLOCKING);
+        .after(OrionLifecycleTasks.EVENT_MANAGER_STOP);
 ```
 
 **Step 5: Run tests and commit**
@@ -1226,13 +1189,11 @@ git add net/http-core/src/main/java/pro/deta/orion/transport/http/JettyHTTPServe
 git commit -m "refactor: migrate shutdown lifecycle tasks"
 ```
 
-## Task 11: Deprecate Priority-Based Registration
+## Task 11: Remove Priority-Based Registration
 
 **Files:**
 
 - Modify: `core/common/src/main/java/pro/deta/orion/lifecycle/ApplicationStateListenerRegistrar.java`
-- Modify: `core/common/src/main/java/pro/deta/orion/lifecycle/listener/RegisteredListener.java`
-- Modify: `core/common/src/main/java/pro/deta/orion/lifecycle/listener/RegisteredListenerResult.java`
 - Modify: `core/common/src/test/java/pro/deta/orion/lifecycle/OrionApplicationLifecycleTest.java`
 
 **Step 1: Search for old API usage**
@@ -1243,25 +1204,19 @@ Run:
 rg -n "register\\(ApplicationState|\\.priority\\(|\\.waitForCompletion" core net integration tests -g '*.java'
 ```
 
-Expected: only tests and compatibility code still use old API after Tasks 8-10.
+Expected: no runtime code uses the old priority API after Tasks 8-10.
 
-**Step 2: Add deprecation**
+**Step 2: Remove old registration surface**
 
-Mark old APIs as deprecated:
-
-```java
-@Deprecated(forRemoval = true)
-default RegisteredListener register(ApplicationState state, Callable<OrionStageCallResult> call) { ... }
-```
+Remove the old `register` overload and priority-based listener execution path. Keep only:
 
 ```java
-@Deprecated(forRemoval = true)
-public RegisteredListener priority(int priority) { ... }
+LifecycleTaskRegistration register(LifecycleTaskRegistration registration);
 ```
 
-**Step 3: Add compatibility test**
+**Step 3: Update tests**
 
-Keep one test proving old API still works for now. This makes deprecation safe without breaking any un-migrated internal or external code.
+Remove compatibility tests for priority-based listeners and keep coverage on named task execution.
 
 **Step 4: Run tests and commit**
 
@@ -1276,8 +1231,8 @@ Expected: PASS.
 Commit:
 
 ```bash
-git add core/common/src/main/java/pro/deta/orion/lifecycle/ApplicationStateListenerRegistrar.java core/common/src/main/java/pro/deta/orion/lifecycle/listener/RegisteredListener.java core/common/src/main/java/pro/deta/orion/lifecycle/listener/RegisteredListenerResult.java core/common/src/test/java/pro/deta/orion/lifecycle/OrionApplicationLifecycleTest.java
-git commit -m "refactor: deprecate priority lifecycle registration"
+git add core/common/src/main/java/pro/deta/orion/lifecycle/ApplicationStateListenerRegistrar.java core/common/src/main/java/pro/deta/orion/lifecycle/OrionApplicationLifecycle.java core/common/src/test/java/pro/deta/orion/lifecycle/OrionApplicationLifecycleTest.java
+git commit -m "refactor: remove priority lifecycle registration"
 ```
 
 ## Task 12: Add Lifecycle Diagnostics
@@ -1373,8 +1328,8 @@ Document:
 - the phase flow table;
 - what each phase means;
 - how to register a new lifecycle task;
-- how `after(...)`, `before(...)`, and `LifecycleRunMode` work;
-- when to use `BLOCKING` vs `NON_BLOCKING`;
+- how `after(...)` and `before(...)` define execution barriers;
+- how `OrionStageCallResult` waits for background futures;
 - why integer priorities are deprecated.
 
 Include example:
@@ -1382,8 +1337,7 @@ Include example:
 ```java
 registrar.task(ApplicationState.STARTING, MY_SERVICE_START, this::onStart)
         .after(OrionLifecycleTasks.ACL_LOAD)
-        .before(OrionLifecycleTasks.TRANSPORTS_START)
-        .runMode(LifecycleRunMode.BLOCKING);
+        .before(OrionLifecycleTasks.TRANSPORTS_START);
 ```
 
 **Step 2: Link from README**

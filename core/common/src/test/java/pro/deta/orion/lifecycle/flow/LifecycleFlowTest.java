@@ -3,7 +3,10 @@ package pro.deta.orion.lifecycle.flow;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.ApplicationState;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 class LifecycleFlowTest {
@@ -34,5 +37,20 @@ class LifecycleFlowTest {
                 "STARTING -> UP",
                 "INIT -> FAILED on failure",
                 "STARTING -> FAILED on failure");
+    }
+
+    @Test
+    void flowMustBeContinuous() {
+        assertThatThrownBy(() -> new LifecycleFlow("BROKEN", List.of(
+                LifecycleStep.from(ApplicationState.INIT)
+                        .to(ApplicationState.STARTING)
+                        .build(),
+                LifecycleStep.from(ApplicationState.STOPPING)
+                        .to(ApplicationState.OFF)
+                        .build())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("BROKEN")
+                .hasMessageContaining("STARTING")
+                .hasMessageContaining("STOPPING");
     }
 }

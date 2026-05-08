@@ -7,6 +7,7 @@ import pro.deta.orion.ApplicationState;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 
 import java.util.Objects;
 
@@ -30,7 +31,7 @@ public class OrionJGitRuntime implements OrionApplicationStageEventListener {
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.INIT, this::install).priority(-100);
+        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install);
     }
 
     public OrionStageCallResult install() {

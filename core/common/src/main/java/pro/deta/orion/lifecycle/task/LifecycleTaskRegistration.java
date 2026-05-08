@@ -14,7 +14,6 @@ public final class LifecycleTaskRegistration {
     private final Callable<OrionStageCallResult> call;
     private final List<LifecycleTaskId> after = new ArrayList<>();
     private final List<LifecycleTaskId> before = new ArrayList<>();
-    private LifecycleRunMode runMode = LifecycleRunMode.NON_BLOCKING;
     private int waitForCompletionSecs;
 
     public LifecycleTaskRegistration(
@@ -36,11 +35,6 @@ public final class LifecycleTaskRegistration {
         return this;
     }
 
-    public LifecycleTaskRegistration runMode(LifecycleRunMode runMode) {
-        this.runMode = Objects.requireNonNull(runMode, "runMode");
-        return this;
-    }
-
     public LifecycleTaskRegistration waitForCompletionSecs(int seconds) {
         waitForCompletionSecs = seconds;
         return this;
@@ -53,7 +47,6 @@ public final class LifecycleTaskRegistration {
                 call,
                 after,
                 before,
-                runMode,
                 waitForCompletionSecs);
     }
 }

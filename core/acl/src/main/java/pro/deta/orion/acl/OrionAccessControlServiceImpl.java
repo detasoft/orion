@@ -23,6 +23,7 @@ import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
@@ -41,14 +42,12 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static pro.deta.orion.acl.schema.AccessControl.CredentialType.OPENSSH_PUBLIC_KEY;
-import static pro.deta.orion.git.storage.GitBackedInternalStorage.GIT_BACKED_INTERNAL_STORAGE_PRIORITY;
 import static pro.deta.orion.util.Result.Failure.generalFailure;
 
 @Slf4j
 @Singleton
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class OrionAccessControlServiceImpl implements OrionAccessControlService, OrionApplicationStageEventListener {
-    public static final int INIT_PRIORITY = 1;
     private final XmlService xmlService = new XmlService();
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
@@ -59,8 +58,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.INIT, this::onInit).priority(INIT_PRIORITY).waitForCompletion();
-        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_BACKED_INTERNAL_STORAGE_PRIORITY + 2);
+        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.ACL_INIT, this::onInit)
+                .after(OrionLifecycleTasks.EVENT_MANAGER);
+        registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::onStart)
+                .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
+                .before(OrionLifecycleTasks.TRANSPORTS_START);
     }
 
     public OrionStageCallResult onInit() {

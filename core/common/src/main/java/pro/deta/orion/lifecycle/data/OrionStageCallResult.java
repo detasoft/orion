@@ -6,10 +6,9 @@ import pro.deta.orion.internal.OrionExecutor;
 import java.util.ArrayList;
 import java.util.List;
 
-import static pro.deta.orion.lifecycle.listener.RegisteredListenerResult.DEFAULT_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC;
-
 @Data
 public class OrionStageCallResult {
+    public static final int DEFAULT_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC = 5;
     public static final OrionStageCallResult EMPTY = new OrionStageCallResult(0);
 
     private final List<OrionStageCallResultFuture> futuresToWait = new ArrayList<>();

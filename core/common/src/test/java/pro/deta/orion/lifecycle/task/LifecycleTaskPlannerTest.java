@@ -9,7 +9,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.lifecycle.task.LifecycleRunMode.NON_BLOCKING;
 import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.ACL_LOAD;
 import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.REPOSITORY_STORAGE;
 import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.TRANSPORTS_START;
@@ -103,7 +102,6 @@ class LifecycleTaskPlannerTest {
                 () -> OrionStageCallResult.EMPTY,
                 after,
                 before,
-                NON_BLOCKING,
                 0);
     }
 

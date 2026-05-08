@@ -8,8 +8,9 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.listener.RegisteredListener;
+import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
 import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
@@ -43,16 +44,18 @@ class OrionJGitRuntimeTest {
     }
 
     @Test
-    @DisplayName("registers the JGit install hook at the beginning of init")
-    void registersJGitInstallHookAtTheBeginningOfInit() {
+    @DisplayName("registers the JGit install hook as an explicit init task")
+    void registersJGitInstallHookAsExplicitInitTask() {
+        installDefaultControlledJGitRuntime();
         RecordingRegistrar registrar = new RecordingRegistrar();
         OrionJGitRuntime runtime = new OrionJGitRuntime(new ControlledOrionJGitSystemReader(new OrionConfiguration.JGitConfig()));
 
         runtime.registerToStage(registrar);
 
-        assertThat(registrar.listener).isNotNull();
-        assertThat(registrar.listener.getState()).isEqualTo(ApplicationState.INIT);
-        assertThat(registrar.listener.getPriority()).isEqualTo(-100);
+        assertThat(registrar.registration).isNotNull();
+        LifecycleTaskDefinition definition = registrar.registration.definition();
+        assertThat(definition.phase()).isEqualTo(ApplicationState.INIT);
+        assertThat(definition.id()).isEqualTo(OrionLifecycleTasks.JGIT_RUNTIME);
     }
 
     @Test
@@ -64,16 +67,11 @@ class OrionJGitRuntimeTest {
     }
 
     private static final class RecordingRegistrar implements ApplicationStateListenerRegistrar {
-        private RegisteredListener listener;
-
-        @Override
-        public RegisteredListener register(RegisteredListener listener) {
-            this.listener = listener;
-            return listener;
-        }
+        private LifecycleTaskRegistration registration;
 
         @Override
         public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
+            this.registration = registration;
             return registration;
         }
     }

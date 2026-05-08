@@ -9,6 +9,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.OrionUtils;
 
 import java.lang.reflect.Field;
@@ -41,7 +42,8 @@ public class OrionExecutor extends ScheduledThreadPoolExecutor implements OrionA
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.STOPPING, this::onStop).priority(99); // last one to
+        registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.EXECUTOR_STOP, this::onStop)
+                .after(OrionLifecycleTasks.EVENT_MANAGER_STOP);
     }
 
     public OrionStageCallResult onStop() {

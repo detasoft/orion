@@ -12,6 +12,7 @@ import pro.deta.orion.event.disruptor.OrionDisruptor;
 import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.lifecycle.*;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,8 +46,13 @@ public class OrionEventManager implements OrionApplicationStageEventListener {
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.INIT, this::onInit).priority(-1).waitForCompletionSecs(2);
-        registrar.register(ApplicationState.STOPPING, this::onStop).priority(90);
+        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, this::onInit)
+                .after(OrionLifecycleTasks.JGIT_RUNTIME)
+                .waitForCompletionSecs(2);
+        registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.EVENT_MANAGER_STOP, this::onStop)
+                .after(OrionLifecycleTasks.HTTP_TRANSPORT_STOP)
+                .after(OrionLifecycleTasks.GIT_TRANSPORT_STOP)
+                .after(OrionLifecycleTasks.SSH_TRANSPORT_STOP);
     }
 
     public OrionStageCallResult onInit() {

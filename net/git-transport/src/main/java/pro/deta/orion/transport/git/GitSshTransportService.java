@@ -24,6 +24,7 @@ import pro.deta.orion.config.schema.SshTransportConfig;
 import pro.deta.orion.crypto.ServerKeyService;
 import pro.deta.orion.lifecycle.*;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
@@ -33,8 +34,6 @@ import java.net.InetSocketAddress;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
-
-import static pro.deta.orion.transport.git.GitNativeTransportService.GIT_TRANSPORT_PRIORITY;
 
 @Slf4j
 @Singleton
@@ -52,9 +51,11 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.INIT, this::onInit);
-        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_TRANSPORT_PRIORITY);
-        registrar.register(ApplicationState.STOPPING, this::onStop);
+        registrar.task(ApplicationState.INIT, OrionLifecycleTasks.SSH_TRANSPORT_INIT, this::onInit);
+        registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.SSH_TRANSPORT_START, this::onStart)
+                .after(OrionLifecycleTasks.TRANSPORTS_START);
+        registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.SSH_TRANSPORT_STOP, this::onStop)
+                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
     }
 
 

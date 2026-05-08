@@ -13,7 +13,6 @@ public record LifecycleTaskDefinition(
         Callable<OrionStageCallResult> call,
         List<LifecycleTaskId> after,
         List<LifecycleTaskId> before,
-        LifecycleRunMode runMode,
         int waitForCompletionSecs
 ) {
     public LifecycleTaskDefinition {
@@ -22,6 +21,5 @@ public record LifecycleTaskDefinition(
         Objects.requireNonNull(call, "call");
         after = List.copyOf(Objects.requireNonNull(after, "after"));
         before = List.copyOf(Objects.requireNonNull(before, "before"));
-        Objects.requireNonNull(runMode, "runMode");
     }
 }

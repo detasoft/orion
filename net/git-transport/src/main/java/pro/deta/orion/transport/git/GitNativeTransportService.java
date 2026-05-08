@@ -15,6 +15,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
@@ -28,7 +29,6 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 @Slf4j
 @Singleton
 public class GitNativeTransportService implements OrionApplicationStageEventListener {
-    public static final int GIT_TRANSPORT_PRIORITY = 5;
     private final GitTransportConfig config;
     private final GitInternalService gitInternalService;
     private final OrionExecutor orionExecutor;
@@ -43,8 +43,10 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_TRANSPORT_PRIORITY);
-        registrar.register(ApplicationState.STOPPING, this::onStop);
+        registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, this::onStart)
+                .after(OrionLifecycleTasks.TRANSPORTS_START);
+        registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.GIT_TRANSPORT_STOP, this::onStop)
+                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
     }
 
 

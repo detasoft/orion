@@ -37,7 +37,7 @@ class LocalGitVersionedStorageTest {
 
     @Test
     void savingCreatesBareRepositoryWhenCreationIsEnabled() throws Exception {
-        Path repositoryPath = tempDir.resolve("legacy storage path").resolve("project.git");
+        Path repositoryPath = tempDir.resolve("nested storage path").resolve("project.git");
         LocalGitVersionedStorage storage = new LocalGitVersionedStorage(repositoryPath, BRANCH);
 
         storage.save(Map.of("acl/orion.xml", bytes("acl")), SAVE_REQUEST);

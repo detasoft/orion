@@ -5,7 +5,6 @@ import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.data.OrionStageCallResultFuture;
-import pro.deta.orion.lifecycle.listener.RegisteredListener;
 import pro.deta.orion.util.OrionUtils;
 
 import java.util.Arrays;
@@ -16,7 +15,6 @@ public final class AsyncThrowable extends Throwable {
             OrionApplicationLifecycle.class.getName(),
             Thread.class.getName(),
             ApplicationStateListenerRegistrar.class.getName(),
-            RegisteredListener.class.getName(),
             OrionStageCallResultFuture.class.getName(),
             OrionStageCallResult.class.getName(),
             OrionUtils.class.getName(),

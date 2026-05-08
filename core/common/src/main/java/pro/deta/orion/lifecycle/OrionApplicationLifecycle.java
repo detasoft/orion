@@ -5,12 +5,14 @@ import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.flow.LifecycleFlow;
 import pro.deta.orion.lifecycle.flow.LifecycleStep;
-import pro.deta.orion.lifecycle.listener.RegisteredListener;
-import pro.deta.orion.lifecycle.listener.RegisteredListenerResult;
+import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
+import pro.deta.orion.lifecycle.task.LifecycleTaskPlan;
+import pro.deta.orion.lifecycle.task.LifecycleTaskPlanner;
 import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
-import pro.deta.orion.util.LogInitializer;
+import pro.deta.orion.util.Result;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;
 
@@ -25,12 +27,13 @@ import static pro.deta.orion.ApplicationState.*;
 @Singleton
 public class OrionApplicationLifecycle  implements ApplicationStateListenerRegistrar {
     public final static ApplicationBootstrap BOOTSTRAP = new ApplicationBootstrap();
+    private static final int DEFAULT_TASK_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC =
+            OrionStageCallResult.DEFAULT_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC;
 
     private final ApplicationStateHolder applicationStateHolder;
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition lockCondition = lock.newCondition();
 
-    private final List<RegisteredListener> applicationStageEventListeners = new CopyOnWriteArrayList<>();
     private final List<LifecycleTaskRegistration> lifecycleTaskRegistrations = new CopyOnWriteArrayList<>();
     private final OrionProvider orionProvider;
 
@@ -46,12 +49,6 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     }
 
     @Override
-    public RegisteredListener register(RegisteredListener registeredListener) {
-        applicationStageEventListeners.add(registeredListener);
-        return registeredListener;
-    }
-
-    @Override
     public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
         lifecycleTaskRegistrations.add(registration);
         return registration;
@@ -59,76 +56,97 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
 
     private boolean onStage(ApplicationState state) {
         log.warn("[{}] stage initiated...", state);
-        List<RegisteredListenerResult> resultList = getSortedOrionStageListeners(state);
-        log.trace("[{}] stage listeners found:\n{}", state, format(resultList));
-        for (int i = 0; i < resultList.size(); i++) {
-            RegisteredListenerResult result = resultList.get(i);
-            // we need to wait for all previous listeners to complete before submitting
-            if (result.neededToWait()) {
-                listenersCompleted(resultList, i);
-            }
-            result.execute(orionProvider.getOrionExecutor());
-
-            if (result.neededToWait()) {
-                result.waitListener();
-            }
-        }
-
-        for (RegisteredListenerResult result : resultList) {
-            result.waitListener();
-        }
-        log.trace("[{}] main listeners completed...", state);
-        for (RegisteredListenerResult result : resultList) {
-            result.waitFeaturesIfNeeded();
-        }
-
-        boolean isSuccess = isSuccess(resultList);
-        log.trace("[{}] stage completed\n{}", state, formatStatus(resultList));
+        boolean isSuccess = runExplicitTasks(state);
         log.warn("[{}] stage completed: {}.", state, isSuccess ? "success" : "failure");
         return isSuccess;
     }
 
-    private boolean isSuccess(List<RegisteredListenerResult> resultList) {
-        for (RegisteredListenerResult result : resultList) {
-            if (!result.isSuccess())
+    private boolean runExplicitTasks(ApplicationState state) {
+        List<LifecycleTaskDefinition> definitions = lifecycleTaskDefinitions();
+        if (definitions.stream().noneMatch(definition -> definition.phase() == state)) {
+            return true;
+        }
+
+        LifecycleTaskPlan plan;
+        try {
+            plan = LifecycleTaskPlanner.plan(state, definitions);
+        } catch (RuntimeException e) {
+            log.error("[{}] lifecycle task plan failed.", state, e);
+            return false;
+        }
+
+        log.trace("[{}] lifecycle task plan:\n{}", state, plan.describe());
+        for (LifecycleTaskPlan.ExecutionGroup group : plan.executionGroups()) {
+            List<LifecycleTaskResult> results = executeTaskGroup(group);
+            for (LifecycleTaskResult result : results) {
+                result.waitTask();
+            }
+            for (LifecycleTaskResult result : results) {
+                result.waitFeaturesIfNeeded();
+            }
+            if (!taskGroupSucceeded(results)) {
+                log.trace("[{}] lifecycle task group failed: {}", state, group);
                 return false;
+            }
         }
         return true;
     }
 
-    public StringBuilder formatStatus(List<RegisteredListenerResult> resultList) {
-        StringBuilder stringBuilder = new StringBuilder();
-        for (RegisteredListenerResult result : resultList) {
-            result.formatStatus(stringBuilder);
+    private List<LifecycleTaskResult> executeTaskGroup(LifecycleTaskPlan.ExecutionGroup group) {
+        List<LifecycleTaskResult> results = new ArrayList<>();
+        for (LifecycleTaskDefinition task : group.tasks()) {
+            Future<OrionStageCallResult> future = orionProvider.getOrionExecutor().submit(() -> {
+                try {
+                    return task.call().call();
+                } catch (Exception e) {
+                    log.error("Exception while calling lifecycle task {}.", task.id(), e);
+                    throw new RuntimeException(e);
+                }
+            });
+            results.add(new LifecycleTaskResult(task, future));
         }
-        return stringBuilder;
+        return results;
     }
 
-
-    private void listenersCompleted(List<RegisteredListenerResult> resultList, int i) {
-        for (int j = 0; j < i; j++) {
-            RegisteredListenerResult res = resultList.get(j);
-            res.waitListener();
+    private boolean taskGroupSucceeded(List<LifecycleTaskResult> results) {
+        for (LifecycleTaskResult result : results) {
+            if (!result.isSuccess()) {
+                return false;
+            }
         }
+        return true;
     }
 
-    private String format(List<RegisteredListenerResult> listeners) {
+    private List<LifecycleTaskDefinition> lifecycleTaskDefinitions() {
+        List<LifecycleTaskDefinition> definitions = new ArrayList<>();
+        for (LifecycleTaskRegistration registration : lifecycleTaskRegistrations) {
+            definitions.add(registration.definition());
+        }
+        return definitions;
+    }
+
+    public String describeTaskPlan(ApplicationState state) {
+        List<LifecycleTaskDefinition> definitions = lifecycleTaskDefinitions();
+        if (definitions.stream().noneMatch(definition -> definition.phase() == state)) {
+            return "";
+        }
+        return LifecycleTaskPlanner.plan(state, definitions).describe();
+    }
+
+    public String describeLifecycle() {
         StringBuilder builder = new StringBuilder();
-        for(RegisteredListenerResult l : listeners) {
-            l.format(builder);
+        builder.append(describeFlows()).append('\n');
+        for (ApplicationState state : ApplicationState.values()) {
+            String taskPlan = describeTaskPlan(state);
+            if (!taskPlan.isBlank()) {
+                builder.append(taskPlan).append('\n');
+            }
         }
         return builder.toString();
     }
 
-    private List<RegisteredListenerResult> getSortedOrionStageListeners(ApplicationState state) {
-        return applicationStageEventListeners.stream()
-                .filter( it -> it.getState() == state)
-                .sorted(RegisteredListener.COMPARATOR)
-                .map(RegisteredListenerResult::new)
-                .toList();
-    }
-
     public ApplicationState runApplication() {
+        log.debug("Lifecycle plan:\n{}", describeLifecycle());
         return runFlow(LifecycleFlow.STARTUP);
     }
 
@@ -205,6 +223,43 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
         doInLock(() -> {
             waitAppForState(OFF);
         });
+    }
+
+    private static final class LifecycleTaskResult {
+        private final LifecycleTaskDefinition task;
+        private final Future<OrionStageCallResult> future;
+        private Result<OrionStageCallResult> result;
+
+        private LifecycleTaskResult(LifecycleTaskDefinition task, Future<OrionStageCallResult> future) {
+            this.task = task;
+            this.future = future;
+        }
+
+        private void waitTask() {
+            result = OrionUtils.waitForCompletion(future, waitForCompletionSecs());
+            result.valueOrWarning("[{}] running lifecycle task {} block: {}",
+                    task.phase(), task.id(), waitForCompletionSecs());
+        }
+
+        private void waitFeaturesIfNeeded() {
+            result.onSuccess(value -> {
+                if (value != null && value.neededToWait()) {
+                    value.getFuturesToWait().forEach(waitFuture ->
+                            OrionUtils.waitForCompletion(waitFuture.getFuture(), value.getWaitForCompletionSecs()));
+                }
+            });
+        }
+
+        private boolean isSuccess() {
+            return result != null && !result.isFailure();
+        }
+
+        private int waitForCompletionSecs() {
+            if (task.waitForCompletionSecs() > 0) {
+                return task.waitForCompletionSecs();
+            }
+            return DEFAULT_TASK_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC;
+        }
     }
 
 }

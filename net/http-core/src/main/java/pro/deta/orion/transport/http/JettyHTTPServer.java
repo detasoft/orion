@@ -19,6 +19,7 @@ import pro.deta.orion.config.schema.SSLKeyStoreConfig;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.CertUtils;
 import pro.deta.orion.util.OrionUtils;
 
@@ -48,8 +49,10 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.STARTING, this::onStart);
-        registrar.register(ApplicationState.STOPPING, this::onStop);
+        registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.HTTP_TRANSPORT_START, this::onStart)
+                .after(OrionLifecycleTasks.TRANSPORTS_START);
+        registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.HTTP_TRANSPORT_STOP, this::onStop)
+                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
     }
 
     public OrionStageCallResult onStart() {

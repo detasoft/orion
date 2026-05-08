@@ -4,6 +4,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
@@ -57,7 +58,48 @@ class OrionRuntimeModuleTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
-    void localGitAreaAclUsesVersionedStorageWithoutLegacyGitAccessArea() {
+    void runtimeInitPlanOrdersJGitEventsAclAndStorageInit() {
+        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
+
+        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
+
+        assertTrue(plan.contains("JGIT_RUNTIME"));
+        assertTrue(plan.contains("SSH_TRANSPORT_INIT"));
+        assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
+        assertTrue(plan.contains("ACL_INIT after EVENT_MANAGER"));
+        assertTrue(plan.contains("GIT_BACKED_INTERNAL_STORAGE_INIT after ACL_INIT"));
+    }
+
+    @Test
+    void runtimeStartingPlanOrdersStorageAclBeforeTransports() {
+        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
+
+        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
+
+        assertTrue(plan.contains("REPOSITORY_STORAGE"));
+        assertTrue(plan.contains("ACL_LOAD after REPOSITORY_STORAGE"));
+        assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
+        assertTrue(plan.contains("HTTP_TRANSPORT_START after TRANSPORTS_START"));
+        assertTrue(plan.contains("GIT_TRANSPORT_START after TRANSPORTS_START"));
+        assertTrue(plan.contains("SSH_TRANSPORT_START after TRANSPORTS_START"));
+    }
+
+    @Test
+    void runtimeStoppingPlanOrdersTransportsEventsAndExecutor() {
+        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
+
+        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
+
+        assertTrue(plan.contains("TRANSPORTS_STOP"));
+        assertTrue(plan.contains("HTTP_TRANSPORT_STOP after TRANSPORTS_STOP"));
+        assertTrue(plan.contains("GIT_TRANSPORT_STOP after TRANSPORTS_STOP"));
+        assertTrue(plan.contains("SSH_TRANSPORT_STOP after TRANSPORTS_STOP"));
+        assertTrue(plan.contains("EVENT_MANAGER_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
+        assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
+    }
+
+    @Test
+    void localGitAreaAclUsesVersionedStorageWithoutGitAccessArea() {
         OrionConfiguration configuration = configurationWithGitAcl("local:team/project");
         GitRepositoryProviderImpl repositoryProvider = new GitRepositoryProviderImpl(new ConfigurationContext(configuration));
 
@@ -243,6 +285,23 @@ class OrionRuntimeModuleTest {
         configuration.getAccessControl().setBranch(BRANCH);
         configuration.getAccessControl().setSettingsFileName(ACL_FILE);
         return configuration;
+    }
+
+    private OrionConfiguration defaultRuntimeConfiguration() {
+        OrionConfiguration configuration = new OrionConfiguration();
+        configuration.setBaseDir(tempDir.toString());
+        configuration.getGit().setStoragePath("repos");
+        configuration.getTransports().getGit().setEnabled(false);
+        configuration.getTransports().getSsh().setEnabled(false);
+        configuration.getTransports().getHttp().setEnabled(false);
+        configuration.getTransports().getHttps().setEnabled(false);
+        return configuration;
+    }
+
+    private OrionComponent runtimeComponent(OrionConfiguration configuration) {
+        return DaggerOrionComponent.builder()
+                .configurationProvider(() -> configuration)
+                .build();
     }
 
     private static final class RecordingGitRepositoryProvider extends GitRepositoryProviderImpl {
