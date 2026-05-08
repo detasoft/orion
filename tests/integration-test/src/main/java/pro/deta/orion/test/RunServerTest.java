@@ -59,7 +59,7 @@ public class RunServerTest {
         try {
             OrionConfiguration oc = new OrionConfiguration();
             oc.setBaseDir(orionRoot.toString());
-            oc.getAccessControl().setUrl("local+ssh://orion");
+            oc.getAccessControl().setUrl("local:orion");
             oc.getTransports().getGit().setPort(NetworkUtils.findAvailablePort());
             oc.getTransports().getSsh().setPort(NetworkUtils.findAvailablePort());
             oc.getTransports().getHttp().setPort(NetworkUtils.findAvailablePort());

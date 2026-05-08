@@ -49,12 +49,15 @@ public class GitAccessControlStorage extends OrionEnableServiceSupport implement
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
+        if (!isEnabled()) {
+            return;
+        }
         registrar.register(ApplicationState.INIT, this::onInit).priority(OrionAccessControlServiceImpl.INIT_PRIORITY+1);
     }
 
     public OrionStageCallResult onInit() {
-        OrionStageCallResult result = OrionStageCallResult.defaultWithWait(); // need to wait until event published to a eventManager
-        area = gitBackedInternalStorage.registerArea(result,"acl", accessControl.getUrl(), accessControl.getUsername(), accessControl.getCredential(), accessControl.getBranch(), (event) -> {
+        OrionStageCallResult result = OrionStageCallResult.defaultWithWait();
+        area = gitBackedInternalStorage.registerArea(result, "acl", accessControl.getUrl(), accessControl.getUsername(), accessControl.getCredential(), accessControl.getBranch(), (event) -> {
             orionEventManager.publish(new RequestToAclUpdate(event.toString()));
         });
         orionConfigFileName = area.getLocalPath().resolve(accessControl.getSettingsFileName());

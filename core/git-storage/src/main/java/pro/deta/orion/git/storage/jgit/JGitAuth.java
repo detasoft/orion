@@ -20,8 +20,6 @@ public final class JGitAuth {
             OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
         switch (auth) {
             case Auth.HttpAuth httpAuth -> injectUsernameAndPassword(gitCommand, httpAuth.username(), httpAuth.password());
-            case Auth.LocalSshAuthKeyPair localSshAuthKeyPair ->
-                    injectAuthKeyPair(gitCommand, localSshAuthKeyPair.keyPair(), localSshAuthKeyPair.publicKeys(), orionClientSshdSessionFactoryProvider);
             case Auth.LocalNoneAuth noneAuth -> {
             }
             case Auth.SshAuthKey sshAuthKey -> injectAuthKeyPair(gitCommand, sshAuthKey.keyPair(), List.of(), orionClientSshdSessionFactoryProvider);

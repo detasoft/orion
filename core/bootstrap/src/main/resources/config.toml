@@ -4,7 +4,7 @@ baseDir = "target/orion_root"
 storagePath = "repos"
 
 [accessControl]
-url = "local+ssh://orion"
+url = "local:orion"
 
 [transports]
 defaultAddress = "localhost"
@@ -21,4 +21,3 @@ port = 8443
 
 [transports.ssh]
 port = 8022
-

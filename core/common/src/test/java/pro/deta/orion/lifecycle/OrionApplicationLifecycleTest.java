@@ -22,12 +22,12 @@ class OrionApplicationLifecycleTest {
     @Test
     void waitsForBlockingInitListenerBeforeStartingNextInitListener() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
-        List<Consumer<String>> volatileUserSubscribers = new CopyOnWriteArrayList<>();
+        List<Consumer<String>> initSubscribers = new CopyOnWriteArrayList<>();
 
         OrionApplicationStageEventListener aclService = registrar ->
                 registrar.register(ApplicationState.INIT, () -> {
                     delayLongEnoughToExposeMissingWait();
-                    volatileUserSubscribers.add(user -> events.add("acl-handler-received"));
+                    initSubscribers.add(value -> events.add("acl-handler-received"));
                     events.add("acl-handler-registered");
                     return OrionStageCallResult.EMPTY;
                 }).priority(1).waitForCompletion();
@@ -35,8 +35,8 @@ class OrionApplicationLifecycleTest {
         OrionApplicationStageEventListener gitStorage = registrar ->
                 registrar.register(ApplicationState.INIT, () -> {
                     events.add("git-storage-event-published");
-                    for (Consumer<String> subscriber : volatileUserSubscribers) {
-                        subscriber.accept("orion_acl");
+                    for (Consumer<String> subscriber : initSubscribers) {
+                        subscriber.accept("acl-ready");
                     }
                     return OrionStageCallResult.EMPTY;
                 }).priority(2);

@@ -42,15 +42,15 @@ public class OrionConfiguration {
     public static class AccessControlConfig {
         // "https://github.com/vladilm/orion.git"
         // "ssh://git@jump.deta.pro:deta/orion_runtime.git"
-        // "local://orion.git"
-        // "file://pathToDir/
+        // "local:orion"
+        // "file://pathToGitDir/"
         private ACLStorageType type = ACLStorageType.GIT;
-        private String url = "local+ssh://orion";
+        private String url = "local:orion";
         private String username;
         // could be password, or path to keyfile depends on the url / ignored for local access
         private String credential;
 
-        // local access via ssh or git (no auth) protocol
+        // ACL file name inside configured storage
         private String settingsFileName = "orion.xml";
         private String branch = "master";
     }

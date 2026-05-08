@@ -14,8 +14,9 @@ The server is a Git server, but it still needs a small deployment-level bootstra
 ACL must not be required in order to locate or read ACL. After ACL is loaded, normal runtime authorization applies to
 external users and transports.
 
-This plan removes the current self-hosted bootstrap loop based on `VolatileUserAdded`, the temporary `orion_acl` user and
-event ordering between ACL and Git storage startup.
+This plan removes ACL loading from the current self-hosted bootstrap loop based on `VolatileUserAdded`, the temporary
+`orion_acl` user and event ordering between ACL and Git storage startup. The legacy volatile-user event can remain for
+other storage-area startup paths, but ACL bootstrap must not depend on it.
 
 ## 1. Keep Deployment Configuration Local
 
@@ -38,7 +39,7 @@ bootstrap:
   workDir: work
   threadPoolSize: 10
   accessControl:
-    location: git+storage:orion
+    location: local:orion
     branch: master
     paths:
       - acl/orion.xml
@@ -107,18 +108,18 @@ bootstrap:
 ```yaml
 bootstrap:
   accessControl:
-    location: git+storage:orion
+    location: local:orion
     branch: master
     paths:
       - acl.xml
 ```
 
-`git+storage:orion` means "open repository `orion` through the already configured repository storage backend". The
+`local:orion` means "open repository `orion` through the already configured repository storage backend". The
 repository storage backend itself is configured in bootstrap configuration.
 
 ## 4. Repository Storage Bootstrap
 
-Repository storage must be configured and created before ACL can load a `git+storage:` ACL.
+Repository storage must be configured and created before ACL can load a `local:` ACL.
 
 Examples:
 
@@ -194,7 +195,7 @@ Initial implementations:
   - does not go through Orion's own transports.
 
 - `GitOverRepositoryStorageAccessControlStorage`
-  - supports `git+storage:repositoryName`;
+  - supports `local:repositoryName`;
   - opens a Git repository through the bootstrap-configured repository storage backend;
   - local backend needs no authorization;
   - S3 backend may need backend credentials declared in the repository storage config;
@@ -219,15 +220,14 @@ public interface RepositoryStorage {
 For Git-over-storage, `StoredRepository` must allow reading and writing configured files on a branch. The implementation
 can use JGit now and later be replaced by S3/native Git storage without changing ACL bootstrap.
 
-## 9. Remove The Volatile Bootstrap Path
+## 9. Remove The Volatile Bootstrap Path From ACL Loading
 
 After ACL is loaded through bootstrap storage:
 
-- delete `VolatileUserAdded`;
 - remove `volatileAccessControl` from `OrionAccessControlServiceImpl`;
-- remove `assignUserGrants(...)` from `GitAccessParams`;
-- remove volatile user creation and event publishing from `GitBackedInternalStorage`;
-- remove `VolatileUserAdded` from `OrionEvent permits`;
+- stop subscribing to `VolatileUserAdded` from `OrionAccessControlServiceImpl`;
+- keep `VolatileUserAdded`, `assignUserGrants(...)` and legacy `GitBackedInternalStorage` event publishing for existing
+  non-bootstrap storage-area behavior;
 - update README to describe the new startup model.
 
 ## 10. Simplify Lifecycle

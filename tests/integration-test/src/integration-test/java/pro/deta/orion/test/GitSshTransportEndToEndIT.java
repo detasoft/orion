@@ -226,9 +226,7 @@ class GitSshTransportEndToEndIT {
         configuration.setBaseDir(orionRoot.toString());
         configuration.setThreadPoolSize(8);
 
-        configuration.getAccessControl().setUrl("local+ssh://orion");
-        configuration.getAccessControl().setUsername("orion_acl");
-        configuration.getAccessControl().setCredential(Path.of(testResourceUrl("e2e/local-acl-rsa.pem").toURI()).toString());
+        configuration.getAccessControl().setUrl("local:orion");
 
         configuration.getTransports().getGit().setEnabled(false);
         configuration.getTransports().getGit().setAddress("localhost");
@@ -286,7 +284,7 @@ class GitSshTransportEndToEndIT {
 
     private static void seedAclRepository(Path orionRoot, KeyPair userKey) throws Exception {
         /*
-         * GitAccessControlStorage reads ACL from a normal Orion repository named "orion".
+         * ACL storage reads ACL from a normal Orion repository named "orion".
          * This helper creates that bare repository, writes orion.xml in a temporary worktree, commits it,
          * and pushes master into the bare repo. Orion then loads the ACL through the same storage path it
          * uses in production startup.

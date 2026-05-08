@@ -2,7 +2,7 @@ baseDir: target/orion_root
 git:
   storagePath: repos
 accessControl:
-  url: local+ssh://orion
+  url: local:orion
 transports:
   defaultAddress: localhost
   git:
@@ -14,4 +14,3 @@ transports:
     port: 8443
   ssh:
     port: 8022
-

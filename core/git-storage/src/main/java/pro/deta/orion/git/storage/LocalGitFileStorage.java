@@ -41,7 +41,7 @@ public class LocalGitFileStorage {
 
     public Result<GitFileSnapshot> load(String branch, String path) {
         String gitPath = gitPath(path);
-        try (Repository repository = openRepository(); RevWalk revWalk = new RevWalk(repository)) {
+        try (Repository repository = openRepository(false); RevWalk revWalk = new RevWalk(repository)) {
             ObjectId branchId = resolveBranch(repository, branch);
             if (branchId == null) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
@@ -57,6 +57,8 @@ public class LocalGitFileStorage {
                         Map.of(gitPath, content),
                         Optional.of(commit.name())));
             }
+        } catch (MissingRepositoryException e) {
+            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         } catch (IOException e) {
             return new Result.Failure<>(Result.FailureCode.GENERAL, e.getMessage(), e);
         }
@@ -64,7 +66,7 @@ public class LocalGitFileStorage {
 
     public void save(String branch, Map<String, byte[]> files, String message, UserEmail author) {
         String branchRefName = branchRefName(branch);
-        try (Repository repository = openRepository();
+        try (Repository repository = openRepository(true);
              RevWalk revWalk = new RevWalk(repository);
              ObjectInserter inserter = repository.newObjectInserter()) {
             ObjectId oldBranchId = resolveBranch(repository, branch);
@@ -90,13 +92,26 @@ public class LocalGitFileStorage {
         }
     }
 
-    private Repository openRepository() throws IOException {
+    private Repository openRepository(boolean createIfMissing) throws IOException {
         FileRepositoryBuilder builder = new FileRepositoryBuilder();
         Path worktreeGitDir = repositoryPath.resolve(".git");
+        Repository repository;
         if (Files.isDirectory(worktreeGitDir)) {
-            return builder.setGitDir(worktreeGitDir.toFile()).build();
+            repository = builder.setGitDir(worktreeGitDir.toFile()).build();
+        } else {
+            repository = builder.setBare().setGitDir(repositoryPath.toFile()).build();
         }
-        return builder.setBare().setGitDir(repositoryPath.toFile()).build();
+        if (!repository.getObjectDatabase().exists()) {
+            if (!createIfMissing) {
+                repository.close();
+                throw new MissingRepositoryException();
+            }
+            repository.create(repository.isBare());
+        }
+        return repository;
+    }
+
+    private static final class MissingRepositoryException extends IOException {
     }
 
     private static ObjectId resolveBranch(Repository repository, String branch) throws IOException {

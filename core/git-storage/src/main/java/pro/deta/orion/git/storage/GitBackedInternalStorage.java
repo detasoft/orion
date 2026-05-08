@@ -8,7 +8,6 @@ import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.crypto.ServerKeyService;
 import pro.deta.orion.event.type.GitReceiveOrionEvent;
 import pro.deta.orion.git.common.GitRefUpdate;
 import pro.deta.orion.event.type.VolatileUserAdded;
@@ -33,20 +32,18 @@ import java.util.function.Consumer;
 public class GitBackedInternalStorage implements OrionApplicationStageEventListener {
     public static final int GIT_BACKED_INTERNAL_STORAGE_PRIORITY = 7;
     private final Path storageArea;
-    private final ServerKeyService serverKeyService;
     private final OrionProvider orionProvider;
     private final OrionConfiguration config;
     private final List<GitAccessParams> storageAreas = new ArrayList<>();
     private final OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider;
 
     @Inject
-    public GitBackedInternalStorage(ConfigurationContext configurationContext, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
-        this(configurationContext.getWorkDir(), config, serverKeyService, orionProvider, orionClientSshdSessionFactoryProvider);
+    public GitBackedInternalStorage(ConfigurationContext configurationContext, OrionConfiguration config, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
+        this(configurationContext.getWorkDir(), config, orionProvider, orionClientSshdSessionFactoryProvider);
     }
 
-    GitBackedInternalStorage(Path workDir, OrionConfiguration config, ServerKeyService serverKeyService, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
+    GitBackedInternalStorage(Path workDir, OrionConfiguration config, OrionProvider orionProvider, OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider) {
         this.storageArea = workDir.resolve("storage-area");
-        this.serverKeyService = serverKeyService;
         this.config = config;
         this.orionProvider = orionProvider;
         this.orionClientSshdSessionFactoryProvider = orionClientSshdSessionFactoryProvider;
@@ -85,7 +82,6 @@ public class GitBackedInternalStorage implements OrionApplicationStageEventListe
         Path checkoutPath = storageArea.resolve(name);
         FileUtils.mkdirs(checkoutPath);
         GitAccessParams area = new GitAccessParams(checkoutPath,
-                serverKeyService.getPublicKeys(),
                 config.getTransports(),
                 uri,
                 getValueOrDefault(username, "orion_acl"),

@@ -15,7 +15,6 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.event.type.RequestToAclUpdate;
-import pro.deta.orion.event.type.VolatileUserAdded;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
@@ -51,20 +50,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
-    private final AtomicReference<AccessControl> volatileAccessControl = new AtomicReference<>(new AccessControl());
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.register(ApplicationState.INIT, this::onInit).priority(INIT_PRIORITY).waitForCompletion(); // should be completed before GitAccessControlStorage - publishes user to allow in ACL
+        registrar.register(ApplicationState.INIT, this::onInit).priority(INIT_PRIORITY).waitForCompletion();
         registrar.register(ApplicationState.STARTING, this::onStart).priority(GIT_BACKED_INTERNAL_STORAGE_PRIORITY + 2);
     }
 
     public OrionStageCallResult onInit() {
-        orionProvider.getEventManager().registerTypeHandler(VolatileUserAdded.class, (event) -> {
-            log.debug("Volatile UserAdded event received: {}", event);
-            volatileAccessControl.get().getUsers().add(event.getUserToAdd());
-        });
         orionProvider.getEventManager().registerTypeHandler(RequestToAclUpdate.class, (event) -> {
             log.debug("Request to update ACL received: {}", event);
             requestToUpdate();
@@ -217,7 +211,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void consumeUsersById(String userId, Consumer<AccessControl.User> userConsumer) {
         consumeUsersInAccessControl(userId, userConsumer, accessControl.get());
-        consumeUsersInAccessControl(userId, userConsumer, volatileAccessControl.get());
     }
 
     private static void consumeUsersInAccessControl(String userId, Consumer<AccessControl.User> userConsumer, AccessControl acl) {

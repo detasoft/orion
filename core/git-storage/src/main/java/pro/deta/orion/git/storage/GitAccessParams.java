@@ -23,7 +23,6 @@ import pro.deta.orion.util.Result;
 import java.net.URI;
 import java.nio.file.Path;
 import java.security.KeyPair;
-import java.security.PublicKey;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -33,7 +32,6 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static pro.deta.orion.acl.schema.AccessControl.TRUE_STRING;
-import static pro.deta.orion.git.storage.auth.Auth.getLocalAuthInstance;
 import static pro.deta.orion.util.FileUtils.wipeDirectory;
 
 @RequiredArgsConstructor
@@ -47,14 +45,13 @@ public class GitAccessParams {
     private final Path checkoutDir;
     private final URI uri;
     private final Auth auth;
-    private final List<PublicKey> trustedKeys;
     private final String branch;
     private Consumer<GitReceiveOrionEvent> eventConsumer;
     private final AtomicReference<Integer> localPortAtomicReference = new AtomicReference<>();
     private final AtomicReference<AreaState> areaStateAtomicReference = new AtomicReference<>(AreaState.OFF);
     private final OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider;
 
-    public GitAccessParams(Path checkoutDir, List<PublicKey> trustedKeys, OrionConfiguration.AppTransport appTransport,
+    public GitAccessParams(Path checkoutDir, OrionConfiguration.AppTransport appTransport,
                            URI initialUri,
                            String username,
                            String credential,
@@ -63,18 +60,14 @@ public class GitAccessParams {
                            OrionClientSshdSessionFactoryProvider orionClientSshdSessionFactoryProvider
                            ) {
         this.checkoutDir = checkoutDir.normalize().toAbsolutePath();
-        this.trustedKeys = trustedKeys;
         this.branch = branchName;
         this.eventConsumer = eventConsumer;
         this.orionClientSshdSessionFactoryProvider = orionClientSshdSessionFactoryProvider;
         switch (initialUri.getScheme()) {
-            case "local+ssh" -> {
-                uri = GitAccessScheme.SSH.format(username, appTransport.getSsh(), initialUri.getHost());
-                auth = getLocalAuthInstance(username, trustedKeys, initialUri.getHost(), credential);
-            }
             case "local" -> {
-                uri = GitAccessScheme.GIT.format(null, appTransport.getGit(), initialUri.getHost());
-                auth = new Auth.LocalNoneAuth(initialUri.getHost());
+                String repositoryName = localRepositoryName(initialUri);
+                uri = GitAccessScheme.GIT.format(null, appTransport.getGit(), repositoryName);
+                auth = new Auth.LocalNoneAuth(repositoryName);
             }
             case "ssh" -> {
                 uri = initialUri;
@@ -128,13 +121,32 @@ public class GitAccessParams {
             case Auth.SshAuthKeyPair(String username, Optional<KeyPair> keyPair) -> {
                 user.addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(keyPair.get().getPublic()));
             }
-            case Auth.LocalSshAuthKeyPair localSshAuthKeyPair -> {
-                grant.addKey(AccessControl.GrantKey.REPOSITORY, localSshAuthKeyPair.localRepositoryName());
-                user.addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(localSshAuthKeyPair.keyPair().get().getPublic()));
-                return true;
-            }
         }
         return false;
+    }
+
+    private static String localRepositoryName(URI uri) {
+        StringBuilder repositoryName = new StringBuilder();
+        if (uri.getHost() != null && !uri.getHost().isBlank()) {
+            repositoryName.append(uri.getHost());
+        }
+        if (uri.getPath() != null && !uri.getPath().isBlank()) {
+            if (!repositoryName.isEmpty()) {
+                repositoryName.append("/");
+            }
+            repositoryName.append(stripLeadingSlashes(uri.getPath()));
+        }
+        if (repositoryName.isEmpty() && uri.getSchemeSpecificPart() != null) {
+            repositoryName.append(stripLeadingSlashes(uri.getSchemeSpecificPart()));
+        }
+        return Path.of(repositoryName.toString()).normalize().toString();
+    }
+
+    private static String stripLeadingSlashes(String value) {
+        while (value.startsWith("/")) {
+            value = value.substring(1);
+        }
+        return value;
     }
 
 
