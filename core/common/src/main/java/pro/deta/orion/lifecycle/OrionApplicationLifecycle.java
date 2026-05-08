@@ -32,8 +32,8 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
             OrionStageCallResult.DEFAULT_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC;
 
     private final ApplicationStateHolder applicationStateHolder;
-    private final ReentrantLock lock = new ReentrantLock();
-    private final Condition lockCondition = lock.newCondition();
+    private final ReentrantLock stateLock = new ReentrantLock();
+    private final Condition stateChanged = stateLock.newCondition();
 
     private final List<LifecycleTaskRegistration> lifecycleTaskRegistrations = new CopyOnWriteArrayList<>();
     private final OrionProvider orionProvider;
@@ -205,9 +205,9 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     }
 
     private void moveState(ApplicationState from, ApplicationState to) {
-        doInLock(() -> {
+        withStateLock(() -> {
             applicationStateHolder.moveStateFrom(from, to);
-            lockCondition.signalAll();
+            stateChanged.signalAll();
         });
     }
 
@@ -232,43 +232,42 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     }
 
     public void beginShutdown() {
-        doInLock(() -> {
-            orionProvider.getOrionExecutor().submit(this::doShutdown);
-        });
+        orionProvider.getOrionExecutor().submit(this::doShutdown);
     }
 
-    private void doInLock(Runnable r) {
+    private void withStateLock(Runnable r) {
         try {
-            lock.lock();
+            stateLock.lock();
             r.run();
         } finally {
-            lock.unlock();
+            stateLock.unlock();
         }
     }
 
     public void waitForStarting() {
-        doInLock(() -> {
-            waitAppForState(UP);
-            OrionUtils.waitForCondition(() -> orionProvider.getEventManager().getUnprocessedLength() == 0);
-        });
+        waitAppForState(UP);
+        OrionUtils.waitForCondition(() -> orionProvider.getEventManager().getUnprocessedLength() == 0);
     }
 
     private void waitAppForState(ApplicationState state) {
-        while (applicationStateHolder.getState() != state) {
-            log.debug("Waiting for desired state {} but current one is {}", state, applicationStateHolder.getState());
-            try {
-                lockCondition.awaitNanos(1000_000);
-            } catch (InterruptedException e) {
-                log.debug("Interrupted while waiting for begin shutdown", e);
+        stateLock.lock();
+        try {
+            while (applicationStateHolder.getState() != state) {
+                log.debug("Waiting for desired state {} but current one is {}", state, applicationStateHolder.getState());
+                try {
+                    stateChanged.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting for application state " + state, e);
+                }
             }
+        } finally {
+            stateLock.unlock();
         }
-        lockCondition.signalAll();
     }
 
     public void waitForShutdown() {
-        doInLock(() -> {
-            waitAppForState(OFF);
-        });
+        waitAppForState(OFF);
     }
 
     private static final class LifecycleTaskResult {
