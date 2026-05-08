@@ -24,6 +24,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.PublicKey;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -233,9 +234,16 @@ public class GitAccessParams {
 
 
     public void commitFile(String message, UserEmail author, Path fileName) {
-        Path relativeToRoot = getCheckoutDir().relativize(fileName);
+        commitFiles(message, author, List.of(fileName));
+    }
+
+    public void commitFiles(String message, UserEmail author, Collection<Path> fileNames) {
+        List<Path> relativeToRoot = new java.util.ArrayList<>();
+        for (Path fileName : fileNames) {
+            relativeToRoot.add(getCheckoutDir().relativize(fileName));
+        }
         callInGit((git) -> {
-            addAndCommit(git, message, author, relativeToRoot);
+            addAndCommit(git, message, author, relativeToRoot.toArray(Path[]::new));
         });
     }
 

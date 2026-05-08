@@ -8,6 +8,8 @@ import pro.deta.orion.ApplicationState;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.acl.storage.AccessControlSaveRequest;
+import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -22,10 +24,14 @@ import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -40,6 +46,7 @@ import static pro.deta.orion.util.Result.Failure.generalFailure;
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class OrionAccessControlServiceImpl implements OrionAccessControlService, OrionApplicationStageEventListener {
     public static final int INIT_PRIORITY = 1;
+    private final XmlService xmlService = new XmlService();
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
@@ -69,14 +76,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         OrionStageCallResult orionStageCallResult = OrionStageCallResult.defaultWithWait();
         rwLock.writeLock().lock();
         try {
-            Result<AccessControl> accessControl = accessControlStorage.loadAccessControl();
-            accessControl.onFailure(f -> {
+            Result<AccessControl> loadedAccessControl = loadAccessControl();
+            loadedAccessControl.onFailure(f -> {
                 orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
                     char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
                     String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);
                     printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
                     AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash);
-                    accessControlStorage.saveAccessControl(ac, "default scheme applied", UserEmail.EMPTY);
+                    saveAccessControl(ac, "default scheme applied", UserEmail.EMPTY);
                     updateAccessControl(ac);
                 });
             }).onSuccess(this::updateAccessControl);
@@ -128,7 +135,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void requestToUpdate() {
         try {
-            accessControlStorage.loadAccessControl().onSuccess(this::updateAccessControl);
+            loadAccessControl().onSuccess(this::updateAccessControl);
         } catch (Throwable t) {
             throw t;
         }
@@ -246,7 +253,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 } else if (keyParts.length == 2) {
                     postfix = " " + keyParts[0];
                 }
-                accessControlStorage.saveAccessControl(ac, "addKeyToUser() to " + username + postfix, new UserEmail(username, user.getEmail()));
+                saveAccessControl(ac, "addKeyToUser() to " + username + postfix, new UserEmail(username, user.getEmail()));
                 return ac;
             });
         }
@@ -260,6 +267,46 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             } else {
                 return users.get(0);
             }
+        }
+    }
+
+    private Result<AccessControl> loadAccessControl() {
+        return switch (accessControlStorage.load()) {
+            case Result.Success<AccessControlSnapshot>(var snapshot) -> accessControlFrom(snapshot);
+            case Result.Failure<AccessControlSnapshot> failure -> new Result.Failure<>(failure);
+        };
+    }
+
+    private Result<AccessControl> accessControlFrom(AccessControlSnapshot snapshot) {
+        if (snapshot.files().isEmpty()) {
+            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+        }
+
+        AccessControl result = new AccessControl();
+        for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
+            try (ByteArrayInputStream input = new ByteArrayInputStream(entry.getValue())) {
+                mergeAccessControl(result, xmlService.deserialize(input));
+            } catch (IOException e) {
+                return new Result.Failure<>(Result.FailureCode.GENERAL, "Cannot parse ACL file " + entry.getKey(), e);
+            }
+        }
+        return new Result.Success<>(result);
+    }
+
+    private static void mergeAccessControl(AccessControl target, AccessControl source) {
+        target.getUsers().addAll(source.getUsers());
+        target.getRoles().addAll(source.getRoles());
+        target.getGrants().addAll(source.getGrants());
+    }
+
+    private void saveAccessControl(AccessControl accessControl, String message, UserEmail author) {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            xmlService.serialize(accessControl, output);
+            accessControlStorage.save(
+                    AccessControlSnapshot.singleFile(accessControlStorage.primaryPath(), output.toByteArray()),
+                    new AccessControlSaveRequest(message, author));
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot serialize ACL", e);
         }
     }
 }
