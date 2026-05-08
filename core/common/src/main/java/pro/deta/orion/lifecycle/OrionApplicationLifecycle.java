@@ -134,13 +134,28 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
 
     private ApplicationState runFlow(LifecycleFlow flow) {
         for (LifecycleStep step : flow.steps()) {
-            if (step.runListeners() && !onStage(step.from())) {
-                applicationStateHolder.moveStateFrom(step.from(), step.failure());
-                return applicationStateHolder.getState();
+            ApplicationState currentState = applicationStateHolder.getState();
+            if (currentState != step.from()) {
+                log.debug("Lifecycle flow '{}' stopped before {} because current state is {}", flow.name(), step, currentState);
+                return currentState;
             }
-            applicationStateHolder.moveStateFrom(step.from(), step.success());
+            followStep(flow, step);
         }
         return applicationStateHolder.getState();
+    }
+
+    private void followStep(LifecycleFlow flow, LifecycleStep step) {
+        boolean completed = !step.runListeners() || onStage(step.from());
+        ApplicationState targetState = completed ? step.success() : step.failure();
+        log.debug("Lifecycle flow '{}' moves {} -> {}", flow.name(), step.from(), targetState);
+        moveState(step.from(), targetState);
+    }
+
+    private void moveState(ApplicationState from, ApplicationState to) {
+        doInLock(() -> {
+            applicationStateHolder.moveStateFrom(from, to);
+            lockCondition.signalAll();
+        });
     }
 
     private void doShutdown() {
@@ -151,20 +166,6 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     public String describeFlows() {
         return LifecycleFlow.STARTUP.describe() + "\n" + LifecycleFlow.SHUTDOWN.describe();
     }
-
-//    private void waitForBeginShutdown() {
-//        doInLock(() -> {
-//            while (applicationStateHolder.isActive()) {
-//                try {
-//                    lockCondition.awaitNanos(1000_000);
-//                } catch (InterruptedException e) {
-//                    log.debug("Interrupted while waiting for begin shutdown", e);
-//                }
-//            }
-//            lockCondition.signalAll();
-//
-//        });
-//    }
 
     public void beginShutdown() {
         doInLock(() -> {
