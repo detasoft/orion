@@ -22,20 +22,20 @@ branch. For an independent local Git directory, use a `file://` ACL URL. There i
 bootstrap.
 `VolatileUserAdded` can still exist for storage-area synchronization, but ACL loading does not consume it.
 
-The target deployment configuration should have
-three root sections:
+The target deployment configuration should have three root sections, but their startup roles are different:
 
 1. `bootstrap`: server startup settings and path to ACL.
-2. `storage`: physical repository storage and repository creation policy.
-3. `transport`: network transports.
+2. `storage`: physical repository storage and repository creation policy; its provider must be available before ACL
+   loads because ACL can be stored in a repository.
+3. `transport`: network transports; they start only after ACL has loaded.
 
 Startup order should be:
 
 1. Read local deployment configuration.
-2. Configure `storage`.
+2. Configure `storage` and make the selected storage provider available.
 3. Configure `bootstrap.accessControl`.
-4. Load ACL through the configured ACL storage.
-5. Start `transport` only after storage and ACL are ready.
+4. Load ACL through the configured ACL storage, possibly opening a repository through `storage`.
+5. Start `transport` only after ACL is loaded.
 6. Accept external users through normal ACL checks.
 
 `transport` must not participate in ACL bootstrap. For `local:` ACL, Orion opens the configured repository through

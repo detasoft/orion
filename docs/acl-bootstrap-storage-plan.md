@@ -25,11 +25,16 @@ Deployment configuration is local or environment-provided and trusted by deploym
 It has three top-level sections:
 
 - `bootstrap`: startup settings and ACL location;
-- `storage`: physical repository storage and repository creation policy;
-- `transport`: network transports, started only after storage and ACL are ready.
+- `storage`: physical repository storage and repository creation policy; its provider is available before ACL loads
+  because ACL can be stored in a repository;
+- `transport`: network transports, started only after ACL is loaded.
 
 ACL storage contains only access-control state: users, roles, grants and credentials. Runtime server configuration is not
 loaded from the ACL repository and is not stored in Git by this plan.
+
+For the current local backend, this means constructing the repository provider and ensuring the storage root exists;
+repository contents are opened lazily while ACL loads. Backends that need explicit startup should complete that work
+behind the `REPOSITORY_STORAGE` lifecycle task, before `ACL_LOAD`.
 
 Target local configuration shape:
 

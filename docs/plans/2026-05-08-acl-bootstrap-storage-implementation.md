@@ -4,7 +4,7 @@
 
 **Goal:** Finish the ACL bootstrap storage migration so ACL is loaded from deployment-configured storage without using Orion network transports or volatile bootstrap users.
 
-**Architecture:** Make the new `bootstrap`, `storage`, and `transport` configuration shape primary, while keeping narrow compatibility fallbacks until the migration is complete. Resolve ACL storage by URI scheme, route `local:` through an internal repository storage API, and start transports only after repository storage and ACL are ready. Keep `GitBackedInternalStorage` and `VolatileUserAdded` for non-bootstrap storage-area paths only.
+**Architecture:** Make the new `bootstrap`, `storage`, and `transport` configuration shape primary, while keeping narrow compatibility fallbacks until the migration is complete. Resolve ACL storage by URI scheme, route `local:` through an internal repository storage API whose provider is available before ACL loads, and start transports only after ACL is loaded. Keep `GitBackedInternalStorage` and `VolatileUserAdded` for non-bootstrap storage-area paths only.
 
 **Tech Stack:** Java 21, Maven, Dagger, Jackson YAML, TOML, JGit, JUnit 5, AssertJ.
 
