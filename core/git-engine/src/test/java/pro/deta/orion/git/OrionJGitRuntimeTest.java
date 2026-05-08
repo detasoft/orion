@@ -9,6 +9,7 @@ import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.listener.RegisteredListener;
+import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
@@ -69,6 +70,11 @@ class OrionJGitRuntimeTest {
         public RegisteredListener register(RegisteredListener listener) {
             this.listener = listener;
             return listener;
+        }
+
+        @Override
+        public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
+            return registration;
         }
     }
 }
