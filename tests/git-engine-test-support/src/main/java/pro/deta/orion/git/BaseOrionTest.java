@@ -19,7 +19,7 @@ public class BaseOrionTest {
     @BeforeAll
     public static void configureLogger() {
         ResourceUtils.configureDefaultLogging();
-        FS.FileStoreAttributes.setBackground(true);
+        FS.FileStoreAttributes.setBackground(false);
     }
 
     @BeforeEach
