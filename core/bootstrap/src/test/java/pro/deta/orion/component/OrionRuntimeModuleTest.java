@@ -263,7 +263,7 @@ class OrionRuntimeModuleTest {
         PrintStream originalOut = System.out;
         try {
             System.setOut(new PrintStream(OutputStream.nullOutputStream()));
-            OrionStageCallResult result = service.onStart();
+            OrionStageCallResult result = service.aclLoad();
             waitForStageTasks(result);
         } finally {
             System.setOut(originalOut);

@@ -25,6 +25,7 @@ import pro.deta.orion.lifecycle.ApplicationStateHolder;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionProvider;
+import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -109,6 +110,33 @@ class AccessControlStorageTest {
         assertDefaultAccessControl(snapshot);
         assertRootAuthenticates(service);
         assertPlainRootTokenAvailableToTests(service);
+    }
+
+    @Test
+    void accessControlServiceDoesNotCreateInitialAclForStorageErrors() {
+        AccessControlStorage storage = new AccessControlStorage() {
+            @Override
+            public Result<AccessControlSnapshot> load() {
+                return new Result.Failure<>(
+                        Result.FailureCode.GENERAL,
+                        "storage unavailable",
+                        new IllegalStateException("storage unavailable"));
+            }
+
+            @Override
+            public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
+                throw new AssertionError("Storage errors must not create default ACL");
+            }
+
+            @Override
+            public String primaryPath() {
+                return ACL_FILE;
+            }
+        };
+
+        assertThatThrownBy(() -> startAccessControlService(storage))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Configuration repository not initialized");
     }
 
     @Test
@@ -352,7 +380,7 @@ class AccessControlStorageTest {
             PrintStream originalOut = System.out;
             try {
                 System.setOut(new PrintStream(OutputStream.nullOutputStream()));
-                OrionStageCallResult result = service.onStart();
+                OrionStageCallResult result = service.aclLoad();
                 waitForStageTasks(result);
             } finally {
                 System.setOut(originalOut);

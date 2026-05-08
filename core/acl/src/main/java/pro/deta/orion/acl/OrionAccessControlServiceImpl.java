@@ -60,7 +60,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
         registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.ACL_INIT, this::onInit)
                 .after(OrionLifecycleTasks.EVENT_MANAGER);
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::onStart)
+        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::aclLoad)
                 .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
     }
 
@@ -72,20 +72,25 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return OrionStageCallResult.EMPTY;
     }
 
-    public OrionStageCallResult onStart() {
+    public OrionStageCallResult aclLoad() {
         OrionStageCallResult orionStageCallResult = OrionStageCallResult.defaultWithWait();
         rwLock.writeLock().lock();
         try {
             Result<AccessControl> loadedAccessControl = loadAccessControl();
             loadedAccessControl.onFailure(f -> {
-                orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
-                    char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
-                    String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);
-                    printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
-                    AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash);
-                    saveAccessControl(ac, "default scheme applied", UserEmail.EMPTY);
-                    updateAccessControl(ac);
-                });
+                if (f.code() == Result.FailureCode.NOT_FOUND) {
+                    orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
+                        char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
+                        String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);
+                        printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
+                        AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash);
+                        saveAccessControl(ac, "default scheme applied", UserEmail.EMPTY);
+                        updateAccessControl(ac);
+                    });
+                } else {
+                    log.error("Error while preparing configuration repository.", f.throwable());
+                    throw new IllegalStateException("Configuration repository not initialized.", f.throwable());
+                }
             }).onSuccess(this::updateAccessControl);
 
         } catch (Exception e) {
