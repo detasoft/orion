@@ -389,10 +389,10 @@ class GitSshTransportEndToEndIT {
 
     private static void seedServerKeys(Path orionRoot) throws IOException {
         /*
-         * ServerKeyService generates host keys when baseDir/server-keys is empty. The E2E test uses a fresh baseDir
+         * SshHostKeyService generates host keys when baseDir/ssh-host-keys is empty. The E2E test uses a fresh baseDir
          * for every scenario, so pregenerated test-only keys avoid paying RSA/ECDSA generation cost on every boot.
          */
-        Path serverKeysDirectory = orionRoot.resolve("server-keys");
+        Path serverKeysDirectory = orionRoot.resolve("ssh-host-keys");
         Files.createDirectories(serverKeysDirectory);
         copyTestResource("e2e/server-rsa.pem", serverKeysDirectory.resolve("rsa.pem"));
         copyTestResource("e2e/server-ecdsa.pem", serverKeysDirectory.resolve("ecdsa.pem"));

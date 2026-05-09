@@ -21,7 +21,7 @@ import pro.deta.orion.ApplicationState;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
-import pro.deta.orion.crypto.ServerKeyService;
+import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.*;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
@@ -46,7 +46,7 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
     private final SshServer sshd = SshServer.setUpDefaultServer();
 
     private final SshCommandFactory commandFactory;
-    private final Provider<ServerKeyService> serverKeyService;
+    private final Provider<SshHostKeyService> sshHostKeyService;
     private final OrionSSHPasswordAuthenticator orionPasswordAuthenticator;
 
 
@@ -94,7 +94,7 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
             sshd.setPort(addr.getPort());
             sshd.setHost(addr.getHostName());
 
-            sshd.setKeyPairProvider(new MappedKeyPairProvider(serverKeyService.get().getKeyPairs()));
+            sshd.setKeyPairProvider(new MappedKeyPairProvider(sshHostKeyService.get().getKeyPairs()));
 
             sshd.setPublickeyAuthenticator(new CachingPublicKeyAuthenticator(orionPasswordAuthenticator));
             sshd.setPasswordAuthenticator(orionPasswordAuthenticator);

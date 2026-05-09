@@ -154,7 +154,8 @@ class OrionRuntimeModuleTest {
 
         component.orionApplicationLifecycle().describeLifecycle();
 
-        assertFalse(tempDir.resolve("server-keys").toFile().exists());
+        assertFalse(tempDir.resolve("server-identity").toFile().exists());
+        assertFalse(tempDir.resolve("ssh-host-keys").toFile().exists());
     }
 
     @Test

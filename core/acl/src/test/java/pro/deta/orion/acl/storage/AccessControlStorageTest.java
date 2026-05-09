@@ -21,7 +21,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.crypto.PublicKeysProvider;
-import pro.deta.orion.crypto.ServerKeyService;
+import pro.deta.orion.crypto.ServerIdentityKeyService;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.OrionExecutor;
@@ -236,14 +236,14 @@ class AccessControlStorageTest {
         Path aclDirectory = tempDir.resolve("server-key-root-acl");
         OrionConfiguration configuration = testConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.resolve("server-key-root-base").toString());
-        ServerKeyService serverKeyService = new ServerKeyService(new ConfigurationContext(configuration));
+        ServerIdentityKeyService serverIdentityKeyService = new ServerIdentityKeyService(new ConfigurationContext(configuration));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
-        OrionAccessControlServiceImpl service = startAccessControlService(storage, configuration, serverKeyService);
+        OrionAccessControlServiceImpl service = startAccessControlService(storage, configuration, serverIdentityKeyService);
         AccessControl savedAccessControl = accessControlFrom(storage.load()
                 .valueOrFailure("ACL should be saved with internal server keys"));
         AccessControl.User rootUser = savedAccessControl.getUsers().getFirst();
 
-        for (PublicKey internalServerKey : serverKeyService.getPublicKeys()) {
+        for (PublicKey internalServerKey : serverIdentityKeyService.getPublicKeys()) {
             assertThat(hasPublicKeyCredential(rootUser, internalServerKey)).isTrue();
 
             AuthenticationResult rootResult = service.authenticateUser(
@@ -261,7 +261,7 @@ class AccessControlStorageTest {
                 unrelatedKey.getPublic().getEncoded())).isInstanceOf(AuthenticationResult.Failure.class);
         assertThat(service.authenticateUser(
                 "client",
-                serverKeyService.getKeyPair().getPublic().getEncoded())).isInstanceOf(AuthenticationResult.Failure.class);
+                serverIdentityKeyService.getPublicKeys().getFirst().getEncoded())).isInstanceOf(AuthenticationResult.Failure.class);
     }
 
     @Test
@@ -271,15 +271,15 @@ class AccessControlStorageTest {
         Files.write(aclDirectory.resolve(ACL_FILE), aclBytesWithPasswordUser("root"));
         OrionConfiguration configuration = testConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.resolve("existing-server-key-root-base").toString());
-        ServerKeyService serverKeyService = new ServerKeyService(new ConfigurationContext(configuration));
+        ServerIdentityKeyService serverIdentityKeyService = new ServerIdentityKeyService(new ConfigurationContext(configuration));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
 
-        OrionAccessControlServiceImpl service = startAccessControlService(storage, configuration, serverKeyService);
+        OrionAccessControlServiceImpl service = startAccessControlService(storage, configuration, serverIdentityKeyService);
 
         AccessControl savedAccessControl = accessControlFrom(storage.load()
                 .valueOrFailure("Existing ACL should be updated with internal server keys"));
         AccessControl.User rootUser = savedAccessControl.getUsers().getFirst();
-        for (PublicKey internalServerKey : serverKeyService.getPublicKeys()) {
+        for (PublicKey internalServerKey : serverIdentityKeyService.getPublicKeys()) {
             assertThat(hasPublicKeyCredential(rootUser, internalServerKey)).isTrue();
             assertThat(service.authenticateUser(
                     "root",

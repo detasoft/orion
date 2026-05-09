@@ -14,7 +14,8 @@ import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.PublicKeysProvider;
-import pro.deta.orion.crypto.ServerKeyService;
+import pro.deta.orion.crypto.ServerIdentityKeyService;
+import pro.deta.orion.crypto.ServerKeySigner;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.OrionJGitRuntime;
 import pro.deta.orion.internal.OrionExecutor;
@@ -101,11 +102,22 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    PublicKeysProvider publicKeysProvider(Provider<ServerKeyService> serverKeyService) {
+    PublicKeysProvider publicKeysProvider(Provider<ServerIdentityKeyService> serverIdentityKeyService) {
         return new PublicKeysProvider() {
             @Override
             public Collection<PublicKey> getPublicKeys() {
-                return serverKeyService.get().getPublicKeys();
+                return serverIdentityKeyService.get().getPublicKeys();
+            }
+        };
+    }
+
+    @Provides
+    @Singleton
+    ServerKeySigner serverKeySigner(Provider<ServerIdentityKeyService> serverIdentityKeyService) {
+        return new ServerKeySigner() {
+            @Override
+            public SigningKey rsaSha256SigningKey() {
+                return serverIdentityKeyService.get().rsaSha256SigningKey();
             }
         };
     }
