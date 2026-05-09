@@ -41,18 +41,18 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
     private final HttpTransportConfig httpTransportConfig;
     private final HttpsTransportConfig httpsTransportConfig;
     private final DispatcherServlet dispatcherServlet;
-    private final OrionAdminAuthorizationFilter adminAuthorizationFilter;
+    private final OrionAuthorizationFilter authorizationFilter;
     private final AtomicReference<Server> jettyServer = new AtomicReference<>();
 
     @Inject
     public JettyHTTPServer(
             OrionConfiguration orionConfiguration,
             DispatcherServlet dispatcherServlet,
-            OrionAdminAuthorizationFilter adminAuthorizationFilter) {
+            OrionAuthorizationFilter authorizationFilter) {
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
         this.httpsTransportConfig = orionConfiguration.getTransport().getHttps();
         this.dispatcherServlet = dispatcherServlet;
-        this.adminAuthorizationFilter = adminAuthorizationFilter;
+        this.authorizationFilter = authorizationFilter;
     }
 
     public JettyHTTPServer(OrionConfiguration orionConfiguration, DispatcherServlet dispatcherServlet) {
@@ -92,10 +92,10 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
 
 
             addServletMapStartFrom(context, dispatcherServlet);
-            if (adminAuthorizationFilter != null) {
+            if (authorizationFilter != null) {
                 context.addFilter(
-                        new FilterHolder(adminAuthorizationFilter),
-                        adminAuthorizationFilter.filterPath(),
+                        new FilterHolder(authorizationFilter),
+                        authorizationFilter.filterPath(),
                         EnumSet.of(DispatcherType.REQUEST));
             }
             server.setHandler(context);

@@ -19,50 +19,64 @@ import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 @Singleton
-public class OrionAdminAuthorizationFilter implements Filter {
-    public static final String SECURITY_CONTEXT_ATTRIBUTE = OrionAdminAuthorizationFilter.class.getName() + ".securityContext";
+public class OrionAuthorizationFilter implements Filter {
+    public static final String SECURITY_CONTEXT_ATTRIBUTE = OrionAuthorizationFilter.class.getName() + ".securityContext";
     private static final String ADMIN_PATH = "/api/admin";
     private static final String TOKEN_PATH = "/api/admin/token";
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final List<String> PUBLIC_PATHS = List.of(
+            TOKEN_PATH,
+            "/.well-known/acme-challenge/*");
 
     private final OrionAccessControlService accessControlService;
 
     @Inject
-    public OrionAdminAuthorizationFilter(OrionAccessControlService accessControlService) {
+    public OrionAuthorizationFilter(OrionAccessControlService accessControlService) {
         this.accessControlService = accessControlService;
     }
 
     public String filterPath() {
-        return ADMIN_PATH + "/*";
+        return "/*";
     }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
         if (request instanceof HttpServletRequest httpRequest && response instanceof HttpServletResponse httpResponse) {
-            if (!requiresAuthorization(httpRequest)) {
-                chain.doFilter(request, response);
-                return;
-            }
-
             SecurityContext securityContext = securityContextFor(httpRequest);
+            httpRequest.setAttribute(SECURITY_CONTEXT_ATTRIBUTE, securityContext);
+
             try {
-                accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
-                accessEnforcer().require(securityContext, ApplicationAdminResource.applicationAdmin(), ApplicationAccessRules.admin());
+                if (!isPublic(httpRequest)) {
+                    accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
+                }
+                if (requiresAdminAuthorization(httpRequest)) {
+                    accessEnforcer().require(securityContext, ApplicationAdminResource.applicationAdmin(), ApplicationAccessRules.admin());
+                }
             } catch (OrionSecurityException e) {
                 httpResponse.sendError(SC_FORBIDDEN);
                 return;
             }
-            httpRequest.setAttribute(SECURITY_CONTEXT_ATTRIBUTE, securityContext);
         }
         chain.doFilter(request, response);
     }
 
-    private boolean requiresAuthorization(HttpServletRequest request) {
+    private boolean isPublic(HttpServletRequest request) {
+        String path = requestPath(request);
+        for (String publicPath : PUBLIC_PATHS) {
+            if (WildcardMatcher.matches(publicPath, path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean requiresAdminAuthorization(HttpServletRequest request) {
         String path = requestPath(request);
         return path != null
                 && (ADMIN_PATH.equals(path) || path.startsWith(ADMIN_PATH + "/"))

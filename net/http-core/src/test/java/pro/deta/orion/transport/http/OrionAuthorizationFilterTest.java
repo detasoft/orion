@@ -29,7 +29,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class OrionAdminAuthorizationFilterTest {
+class OrionAuthorizationFilterTest {
     private static final String ACCESS_TOKEN = "access-token";
     private static final String BASIC_USER = "root";
     private static final String BASIC_PASSWORD = "root-password";
@@ -37,7 +37,7 @@ class OrionAdminAuthorizationFilterTest {
     @Test
     void allowsAdminRequestWithBearerTokenAndAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAdminAuthorizationFilter filter = new OrionAdminAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", bearerAuth(ACCESS_TOKEN), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -47,14 +47,14 @@ class OrionAdminAuthorizationFilterTest {
         assertThat(chain.invoked).isTrue();
         assertThat(response.status).isZero();
         assertThat(accessControlService.lastToken).isEqualTo(ACCESS_TOKEN);
-        SecurityContext securityContext = (SecurityContext) request.attributes.get(OrionAdminAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        SecurityContext securityContext = (SecurityContext) request.attributes.get(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
         assertThat(securityContext.getUserIdentity().getUserId()).isEqualTo("token-user");
     }
 
     @Test
-    void skipsTokenEndpoint() throws Exception {
+    void allowsTokenEndpointWithoutAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAdminAuthorizationFilter filter = new OrionAdminAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/token", basicAuth(BASIC_USER, BASIC_PASSWORD), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -64,12 +64,65 @@ class OrionAdminAuthorizationFilterTest {
         assertThat(chain.invoked).isTrue();
         assertThat(response.status).isZero();
         assertThat(accessControlService.lastToken).isNull();
+        SecurityContext securityContext = (SecurityContext) request.attributes.get(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        assertThat(securityContext.getUserIdentity().isAnonymous()).isTrue();
+    }
+
+    @Test
+    void addsSecurityContextForNonAdminRequestWithBearerToken() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        RequestRecorder request = new RequestRecorder("GET", "/repositories/project/info/refs", bearerAuth(ACCESS_TOKEN), "");
+        ResponseRecorder response = new ResponseRecorder();
+        FilterChainRecorder chain = new FilterChainRecorder();
+
+        filter.doFilter(request.proxy(), response.proxy(), chain);
+
+        assertThat(chain.invoked).isTrue();
+        assertThat(response.status).isZero();
+        assertThat(accessControlService.lastToken).isEqualTo(ACCESS_TOKEN);
+        SecurityContext securityContext = (SecurityContext) request.attributes.get(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        assertThat(securityContext.getUserIdentity().getUserId()).isEqualTo("token-user");
+    }
+
+    @Test
+    void rejectsNonPublicRequestWithoutBearerToken() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        RequestRecorder request = new RequestRecorder("GET", "/repositories/project/info/refs", null, "");
+        ResponseRecorder response = new ResponseRecorder();
+        FilterChainRecorder chain = new FilterChainRecorder();
+
+        filter.doFilter(request.proxy(), response.proxy(), chain);
+
+        assertThat(chain.invoked).isFalse();
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(accessControlService.lastToken).isNull();
+        SecurityContext securityContext = (SecurityContext) request.attributes.get(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        assertThat(securityContext.getUserIdentity().isAnonymous()).isTrue();
+    }
+
+    @Test
+    void allowsPublicChallengeRequestWithoutBearerToken() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
+        RequestRecorder request = new RequestRecorder("GET", "/.well-known/acme-challenge/token", null, "");
+        ResponseRecorder response = new ResponseRecorder();
+        FilterChainRecorder chain = new FilterChainRecorder();
+
+        filter.doFilter(request.proxy(), response.proxy(), chain);
+
+        assertThat(chain.invoked).isTrue();
+        assertThat(response.status).isZero();
+        assertThat(accessControlService.lastToken).isNull();
+        SecurityContext securityContext = (SecurityContext) request.attributes.get(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        assertThat(securityContext.getUserIdentity().isAnonymous()).isTrue();
     }
 
     @Test
     void rejectsAdminRequestWithoutBearerToken() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAdminAuthorizationFilter filter = new OrionAdminAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", null, "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -84,7 +137,7 @@ class OrionAdminAuthorizationFilterTest {
     @Test
     void rejectsAdminRequestWithInvalidBearerToken() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAdminAuthorizationFilter filter = new OrionAdminAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", bearerAuth("wrong"), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -99,7 +152,7 @@ class OrionAdminAuthorizationFilterTest {
     @Test
     void rejectsBasicCredentialsOnAdminResources() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        OrionAdminAuthorizationFilter filter = new OrionAdminAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", basicAuth(BASIC_USER, BASIC_PASSWORD), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
@@ -115,7 +168,7 @@ class OrionAdminAuthorizationFilterTest {
     void rejectsAdminRequestWithoutAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         accessControlService.adminGrant = false;
-        OrionAdminAuthorizationFilter filter = new OrionAdminAuthorizationFilter(accessControlService);
+        OrionAuthorizationFilter filter = new OrionAuthorizationFilter(accessControlService);
         RequestRecorder request = new RequestRecorder("POST", "/api/admin/users", bearerAuth(ACCESS_TOKEN), "");
         ResponseRecorder response = new ResponseRecorder();
         FilterChainRecorder chain = new FilterChainRecorder();
