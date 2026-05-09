@@ -1,6 +1,10 @@
 package pro.deta.orion.test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.sshd.client.SshClient;
+import org.apache.sshd.client.channel.ClientChannel;
+import org.apache.sshd.client.channel.ClientChannelEvent;
+import org.apache.sshd.client.session.ClientSession;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.TransportException;
@@ -37,6 +41,7 @@ import pro.deta.orion.util.NetworkUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
@@ -48,8 +53,10 @@ import java.security.KeyPair;
 import java.security.PublicKey;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -265,6 +272,21 @@ class GitSshTransportEndToEndIT {
         }
     }
 
+    @Test
+    void rootCanIssueBearerTokenOverSshWithServerIdentityKey() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
+                .valueOrFailure("Server identity key should be available after startup");
+
+        String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
+
+        assertThat(token).isNotBlank();
+        assertThat(startedOrion.accessControlService().authenticateToken(token.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+    }
+
     private StartedOrion startOrion(Path orionRoot, KeyPair userKey) throws Exception {
         /*
          * The application normally creates fresh server host keys and a default root user on first startup.
@@ -362,6 +384,37 @@ class GitSshTransportEndToEndIT {
 
     private static String basicAuth(String username, String password) {
         return "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String issueTokenOverSsh(StartedOrion orion, KeyPair keyPair, long expiresInSeconds) throws Exception {
+        SshClient client = SshClient.setUpDefaultClient();
+        client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
+        client.start();
+        try (ClientSession session = client.connect(
+                        "root",
+                        orion.configuration().getTransport().getSsh().getAddress(),
+                        orion.configuration().getTransport().getSsh().getPort())
+                .verify(10, TimeUnit.SECONDS)
+                .getSession()) {
+            session.addPublicKeyIdentity(keyPair);
+            session.auth().verify(10, TimeUnit.SECONDS);
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            ByteArrayOutputStream error = new ByteArrayOutputStream();
+            try (ClientChannel channel = session.createExecChannel("issue-token " + expiresInSeconds)) {
+                channel.setOut(output);
+                channel.setErr(error);
+                channel.open().verify(10, TimeUnit.SECONDS);
+                channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(10));
+
+                assertThat(channel.getExitStatus())
+                        .as("issue-token stderr: %s", new String(error.toByteArray(), StandardCharsets.UTF_8))
+                        .isEqualTo(0);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
+        } finally {
+            client.stop();
+        }
     }
 
     private static OrionConfiguration e2eConfiguration(Path orionRoot) throws Exception {

@@ -17,6 +17,7 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
@@ -194,17 +195,27 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return switch (authenticateUser(userName, credential)) {
             case AuthenticationResult.Failure(var reason, var throwable) ->
                     TokenIssueResult.failure(reason, throwable);
-            case AuthenticationResult.Success(var userIdentity) -> {
-                try {
-                    JwtAccessTokenService.IssuedToken token = jwtAccessTokenService.issue(
-                            userIdentity.getUserId(),
-                            expiresInSeconds);
-                    yield TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
-                } catch (RuntimeException e) {
-                    yield TokenIssueResult.failure("token issue failed", e);
-                }
-            }
+            case AuthenticationResult.Success(var userIdentity) -> issueTokenFor(userIdentity, expiresInSeconds);
         };
+    }
+
+    @Override
+    public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
+        if (userIdentity == null || userIdentity.isAnonymous() || userIdentity.getUserId() == null || userIdentity.getUserId().isBlank()) {
+            return TokenIssueResult.failure("authenticated user is required");
+        }
+        Result<AccessControl.User> user = findSingleUser(userIdentity.getUserId());
+        if (user instanceof Result.Failure<AccessControl.User>(var code, var message, var throwable)) {
+            return TokenIssueResult.failure("user is not available for token issue", throwable);
+        }
+        try {
+            JwtAccessTokenService.IssuedToken token = jwtAccessTokenService.issue(
+                    userIdentity.getUserId(),
+                    expiresInSeconds);
+            return TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
+        } catch (RuntimeException e) {
+            return TokenIssueResult.failure("token issue failed", e);
+        }
     }
 
     private void requestToUpdate() {

@@ -267,6 +267,32 @@ class AccessControlStorageTest {
     }
 
     @Test
+    void authenticatedRootCanIssueBearerTokenWithInternalServerKey() throws Exception {
+        Path aclDirectory = tempDir.resolve("server-key-authenticated-token-acl");
+        OrionConfiguration configuration = testConfiguration();
+        configuration.getBootstrap().setBaseDir(tempDir.resolve("server-key-authenticated-token-base").toString());
+        ServerIdentityKeyService serverIdentityKeyService = new ServerIdentityKeyService(new ConfigurationContext(configuration));
+        OrionAccessControlServiceImpl service = startAccessControlService(
+                new LocalAccessControlStorage(localConfig(aclDirectory)),
+                configuration,
+                serverIdentityKeyService);
+
+        AuthenticationResult authenticationResult = service.authenticateUser(
+                "root",
+                serverIdentityKeyService.getPublicKeys().getFirst().getEncoded());
+
+        assertThat(authenticationResult).isInstanceOf(AuthenticationResult.Success.class);
+        AuthenticationResult.Success authentication = (AuthenticationResult.Success) authenticationResult;
+        TokenIssueResult issueResult = service.issueTokenFor(authentication.userIdentity(), 600);
+
+        assertThat(issueResult).isInstanceOf(TokenIssueResult.Success.class);
+        TokenIssueResult.Success issuedToken = (TokenIssueResult.Success) issueResult;
+        assertThat(issuedToken.token()).isNotBlank();
+        assertThat(service.authenticateToken(issuedToken.token().getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(AuthenticationResult.Success.class);
+    }
+
+    @Test
     void defaultRootCanIssueAndAuthenticateBearerToken() throws Exception {
         Path aclDirectory = tempDir.resolve("server-key-token-acl");
         OrionConfiguration configuration = testConfiguration();

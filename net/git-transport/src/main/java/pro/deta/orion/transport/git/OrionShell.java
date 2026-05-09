@@ -12,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.text.MessageFormat;
 
 import static pro.deta.orion.transport.git.ssh.SshCommandFactory.SET_KEY;
+import static pro.deta.orion.transport.git.ssh.SshCommandFactory.ISSUE_TOKEN;
 
 public class OrionShell extends InteractiveProcessShellFactory {
     @Override
@@ -65,6 +66,15 @@ public class OrionShell extends InteractiveProcessShellFactory {
             msg.append(nl);
 
             msg.append(String.format("   cat ~/.ssh/id_rsa.pub | ssh -l %s -p %d %s " + SET_KEY, username, port, hostname));
+            msg.append(nl);
+
+            msg.append(b2);
+            msg.append(nl);
+
+            msg.append(" You may issue a bearer token with the following syntax:");
+            msg.append(nl);
+
+            msg.append(String.format("   ssh -i /path/to/server-identity/signing-rsa.pem -l root -p %d %s " + ISSUE_TOKEN + " 3600", port, hostname));
             msg.append(nl);
 
             msg.append(b2);

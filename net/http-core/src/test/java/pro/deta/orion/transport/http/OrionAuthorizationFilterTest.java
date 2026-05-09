@@ -15,6 +15,7 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.UserIdentity;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -227,6 +228,11 @@ class OrionAuthorizationFilterTest {
 
         @Override
         public TokenIssueResult authenticateUserAndIssueToken(String userName, byte[] credential, long expiresInSeconds) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
             throw new UnsupportedOperationException();
         }
     }

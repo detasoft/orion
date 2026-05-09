@@ -11,6 +11,7 @@ import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.Result;
 
@@ -193,6 +194,11 @@ class OrionAdminServletTest {
                 return TokenIssueResult.failure("authentication failed");
             }
             return TokenIssueResult.success(ISSUED_TOKEN, TOKEN_EXPIRES_AT);
+        }
+
+        @Override
+        public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
+            throw new UnsupportedOperationException();
         }
     }
 

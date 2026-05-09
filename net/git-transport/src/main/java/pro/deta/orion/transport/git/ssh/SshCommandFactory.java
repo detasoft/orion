@@ -9,6 +9,7 @@ import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
@@ -35,6 +36,8 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 public class SshCommandFactory implements CommandFactory {
     public static final String SET_KEY = "set-key";
     public static final String SHUTDOWN = "shutdown";
+    public static final String ISSUE_TOKEN = "issue-token";
+    public static final String TOKEN = "token";
     private final GitInternalService gitInternalService;
     private final OrionExecutor orionExecutor;
     private final OrionProvider orionProvider;
@@ -61,7 +64,10 @@ public class SshCommandFactory implements CommandFactory {
                 try {
                     accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
 
-                    if (SET_KEY.equalsIgnoreCase(commandLine)) {
+                    List<String> arguments = commandArguments(commandLine);
+                    String command = arguments.getFirst();
+
+                    if (SET_KEY.equalsIgnoreCase(command)) {
                         ByteBuffer bb = ByteBuffer.allocate(256);
                         try {
                             String username = channel.getSession().getUsername();
@@ -77,12 +83,14 @@ public class SshCommandFactory implements CommandFactory {
                         } catch (IOException e) {
                             throw new RuntimeException(e);
                         }
-                    } else if (SHUTDOWN.equalsIgnoreCase(commandLine)) {
+                    } else if (SHUTDOWN.equalsIgnoreCase(command)) {
                         accessEnforcer().require(
                                 securityContext,
                                 ApplicationShutdownResource.applicationShutdown(),
                                 ApplicationAccessRules.shutdown());
                         orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
+                    } else if (ISSUE_TOKEN.equalsIgnoreCase(command) || TOKEN.equalsIgnoreCase(command)) {
+                        issueToken(securityContext, arguments);
                     } else {
                         log.warn("SSH Transport Unknown command: {}", commandLine);
                         outputStream.write("Unknown command".getBytes(StandardCharsets.UTF_8));
@@ -104,9 +112,42 @@ public class SshCommandFactory implements CommandFactory {
 
         private void writePlainError(String message) {
             try {
-                outputStream.write(message.getBytes(StandardCharsets.UTF_8));
+                errorStream.write(message.getBytes(StandardCharsets.UTF_8));
             } catch (IOException e) {
                 log.warn("SSH Transport command failed to write response: {}", commandLine, e);
+            }
+        }
+
+        private List<String> commandArguments(String commandLine) {
+            String normalizedCommandLine = commandLine == null ? "" : commandLine.trim();
+            if (normalizedCommandLine.isEmpty()) {
+                return List.of("");
+            }
+            return List.of(normalizedCommandLine.split("\\s+"));
+        }
+
+        private void issueToken(SecurityContext securityContext, List<String> arguments) throws IOException {
+            if (arguments.size() != 2) {
+                throw new IllegalArgumentException("Usage: " + ISSUE_TOKEN + " <expires-in-seconds>");
+            }
+            long expiresInSeconds;
+            try {
+                expiresInSeconds = Long.parseLong(arguments.get(1));
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Token expiration must be a number of seconds", e);
+            }
+            if (expiresInSeconds <= 0) {
+                throw new IllegalArgumentException("Token expiration must be positive");
+            }
+
+            TokenIssueResult token = accessControlService.issueTokenFor(
+                    securityContext.getUserIdentity(),
+                    expiresInSeconds);
+            switch (token) {
+                case TokenIssueResult.Success(var value, var ignoredExpiresAtEpochSecond) ->
+                        outputStream.write((value + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
+                case TokenIssueResult.Failure(var reason, var throwable) ->
+                        throw new IllegalStateException(reason, throwable);
             }
         }
     }
