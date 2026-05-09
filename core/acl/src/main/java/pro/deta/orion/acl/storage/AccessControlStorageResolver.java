@@ -13,57 +13,33 @@ import java.nio.file.Path;
 public class AccessControlStorageResolver {
     private final OrionConfiguration configuration;
     private final GitRepositoryProvider gitRepositoryProvider;
-    private final JDBCAccessControlStorage jdbcAccessControlStorage;
-    private final LocalAccessControlStorage localAccessControlStorage;
 
     public AccessControlStorage resolve() {
-        return resolve(configuration.getAccessControl().getType(), configuration.getAccessControl());
+        return resolve(configuration.getBootstrap().getAccessControl());
     }
 
-    AccessControlStorage resolve(OrionConfiguration.ACLStorageType type, OrionConfiguration.AccessControlConfig accessControlConfig) {
-        return switch (type) {
-            case GIT -> gitStorage(accessControlConfig);
-            case JDBC -> {
-                jdbcAccessControlStorage.setEnabled(true);
-                yield jdbcAccessControlStorage;
-            }
-            case LOCAL -> {
-                localAccessControlStorage.setEnabled(true);
-                yield localAccessControlStorage;
-            }
-        };
-    }
-
-    private AccessControlStorage gitStorage(OrionConfiguration.AccessControlConfig accessControlConfig) {
-        if (isIndependentLocalGitStorage(accessControlConfig.getUrl())) {
-            return new LocalGitAccessControlStorage(accessControlConfig);
+    AccessControlStorage resolve(OrionConfiguration.BootstrapAccessControlConfig accessControlConfig) {
+        String location = accessControlConfig.getLocation();
+        URI uri = URI.create(location);
+        String scheme = uri.getScheme();
+        if (scheme == null || "file".equalsIgnoreCase(scheme)) {
+            return new LocalAccessControlStorage(accessControlConfig);
         }
-        if (isInternalLocalGitStorage(accessControlConfig.getUrl())) {
+        if ("local".equalsIgnoreCase(scheme)) {
             return new VersionedAccessControlStorage(
                     new GitRepositoryProviderVersionedStorage(
                             gitRepositoryProvider,
-                            localRepositoryName(accessControlConfig.getUrl()),
+                            localRepositoryName(location),
                             accessControlConfig.getBranch()),
-                    accessControlConfig.getSettingsFileName());
+                    accessControlConfig.getPaths());
         }
-        throw new IllegalArgumentException("Unsupported Git ACL location: " + accessControlConfig.getUrl());
-    }
-
-    public static boolean isIndependentLocalGitStorage(String location) {
-        String scheme = URI.create(location).getScheme();
-        return scheme == null || "file".equalsIgnoreCase(scheme);
+        throw new IllegalArgumentException("Unsupported ACL location: " + location);
     }
 
     public static boolean isInternalLocalGitStorage(String location) {
         URI uri = URI.create(location);
         String scheme = uri.getScheme();
-        if (scheme == null) {
-            return false;
-        }
-        return switch (scheme) {
-            case "local" -> true;
-            default -> false;
-        };
+        return "local".equalsIgnoreCase(scheme);
     }
 
     public static String localRepositoryName(String location) {

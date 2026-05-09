@@ -1,0 +1,88 @@
+package pro.deta.orion.config;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.config.schema.OrionConfiguration;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+class OrionConfigurationBootstrapShapeTest {
+    @TempDir
+    private Path tempDir;
+
+    @Test
+    void parsesBootstrapStorageAndTransportShape() throws Exception {
+        Path configFile = tempDir.resolve("orion.yml");
+        Files.writeString(configFile, """
+                bootstrap:
+                  baseDir: /tmp/orion
+                  workDir: work
+                  threadPoolSize: 7
+                  jgit:
+                    hostname: orion-test
+                  accessControl:
+                    location: local:orion
+                    branch: master
+                    paths:
+                      - acl/orion.xml
+                    createDefaultIfMissing: false
+                    auth:
+                      username: acl
+                storage:
+                  location: file:/tmp/orion/repositories/
+                  createOnPush: false
+                transport:
+                  defaultAddress: localhost
+                  git:
+                    enabled: false
+                    port: 9418
+                  ssh:
+                    enabled: false
+                    port: 8022
+                  http:
+                    enabled: false
+                    port: 8000
+                  https:
+                    enabled: false
+                    port: 8443
+                """);
+
+        OrionConfiguration configuration = new FileConfigurationProviderImpl()
+                .configurationLookup(configFile.toString());
+
+        assertEquals("/tmp/orion", configuration.getBootstrap().getBaseDir());
+        assertEquals("work", configuration.getBootstrap().getWorkDir());
+        assertEquals(7, configuration.getBootstrap().getThreadPoolSize());
+        assertEquals("orion-test", configuration.getBootstrap().getJgit().getHostname());
+        assertEquals("local:orion", configuration.getBootstrap().getAccessControl().getLocation());
+        assertEquals("acl/orion.xml", configuration.getBootstrap().getAccessControl().primaryPath());
+        assertFalse(configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
+        assertEquals("acl", configuration.getBootstrap().getAccessControl().getAuth().get("username"));
+        assertEquals("file:/tmp/orion/repositories/", configuration.getStorage().getLocation());
+        assertFalse(configuration.getStorage().isCreateOnPush());
+        assertEquals(8000, configuration.getTransport().getHttp().getPort());
+        assertFalse(configuration.getTransport().getHttp().isEnabled());
+    }
+
+    @Test
+    void oldTopLevelShapeIsRejected() throws Exception {
+        Path configFile = tempDir.resolve("old.yml");
+        Files.writeString(configFile, """
+                baseDir: /tmp/orion
+                git:
+                  storagePath: repos
+                accessControl:
+                  url: local:orion
+                transports:
+                  defaultAddress: localhost
+                """);
+
+        assertThrows(RuntimeException.class, () -> new FileConfigurationProviderImpl()
+                .configurationLookup(configFile.toString()));
+    }
+}

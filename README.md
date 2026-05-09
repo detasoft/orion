@@ -12,14 +12,45 @@ or
 
 # Configuration
 
-pro.deta.orion.config.FileConfigurationProviderImpl.CONFIGURATION_LOCATION
+Orion reads local configuration from `config.toml`, `config.yml`, `/etc/orion/orion.yml`, then bundled classpath
+defaults. The active configuration shape has three top-level sections:
+
+```yaml
+bootstrap:
+  baseDir: /var/lib/orion
+  workDir: work
+  threadPoolSize: 10
+  accessControl:
+    location: local:orion
+    branch: master
+    paths:
+      - orion.xml
+    createDefaultIfMissing: true
+storage:
+  location: file:/var/lib/orion/repos
+  createOnPush: true
+transport:
+  defaultAddress: localhost
+  git:
+    enabled: false
+    port: 9418
+  ssh:
+    enabled: true
+    port: 8022
+  http:
+    enabled: true
+    port: 8000
+  https:
+    enabled: false
+    port: 8443
+```
 
 # ACL Bootstrap Flow
 
 The ACL startup path does not use Orion network transports to read ACL. For repository-backed ACL locations such as
 `local:orion`, Orion opens the repository storage directly and reads the configured ACL files from the requested
-branch. For an independent local Git directory, use a `file://` ACL URL. There is no temporary Orion user for ACL
-bootstrap.
+branch. For local filesystem ACL files, use a `file:` location pointing at the ACL directory. There is no temporary
+Orion user for ACL bootstrap.
 `VolatileUserAdded` can still exist for storage-area synchronization, but ACL loading does not consume it.
 
 The target deployment configuration should have three root sections, but their startup roles are different:

@@ -13,9 +13,7 @@ import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
-import pro.deta.orion.acl.storage.JDBCAccessControlStorage;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
-import pro.deta.orion.acl.storage.LocalGitAccessControlStorage;
 import pro.deta.orion.acl.storage.VersionedAccessControlStorage;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
@@ -38,6 +36,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -121,17 +120,18 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    void independentGitDirectoryAclStartsFromFileRepository() throws Exception {
-        Path independentRepository = tempDir.resolve("independent-acl.git");
-        seedBareRepository(independentRepository, "independent-user");
-        OrionConfiguration configuration = configurationWithGitAcl(independentRepository.toUri().toString());
+    void fileAclStartsFromLocalDirectory() throws Exception {
+        Path aclDirectory = tempDir.resolve("acl-directory");
+        Files.createDirectories(aclDirectory);
+        Files.write(aclDirectory.resolve(ACL_FILE), aclBytes("file-user"));
+        OrionConfiguration configuration = configurationWithGitAcl(aclDirectory.toUri().toString());
         GitRepositoryProviderImpl repositoryProvider = new GitRepositoryProviderImpl(new ConfigurationContext(configuration));
         AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
 
         OrionAccessControlServiceImpl service = startAccessControlService(storage);
 
-        assertInstanceOf(LocalGitAccessControlStorage.class, storage);
-        assertUserAuthenticates(service, "independent-user");
+        assertInstanceOf(LocalAccessControlStorage.class, storage);
+        assertUserAuthenticates(service, "file-user");
     }
 
     @Test
@@ -180,8 +180,6 @@ class OrionRuntimeModuleTest {
             assertTrue(AccessControlStorageResolver.isInternalLocalGitStorage(entry.getKey()));
             assertEquals(entry.getValue(), AccessControlStorageResolver.localRepositoryName(entry.getKey()));
         }
-        assertTrue(AccessControlStorageResolver.isIndependentLocalGitStorage(tempDir.resolve("plain-acl.git").toString()));
-        assertTrue(AccessControlStorageResolver.isIndependentLocalGitStorage(tempDir.resolve("file-acl.git").toUri().toString()));
         assertFalse(AccessControlStorageResolver.isInternalLocalGitStorage("ssh://git@example.test/acl.git"));
     }
 
@@ -194,17 +192,12 @@ class OrionRuntimeModuleTest {
                 IllegalArgumentException.class,
                 () -> runtimeAccessControlStorage(configuration, repositoryProvider));
 
-        assertEquals("Unsupported Git ACL location: ssh://git@example.test/acl.git", error.getMessage());
+        assertEquals("Unsupported ACL location: ssh://git@example.test/acl.git", error.getMessage());
     }
 
     private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration,
                                                              GitRepositoryProviderImpl repositoryProvider) {
-        return new AccessControlStorageResolver(
-                configuration,
-                repositoryProvider,
-                new JDBCAccessControlStorage(configuration.getAccessControl()),
-                new LocalAccessControlStorage(configuration.getAccessControl()))
-                .resolve();
+        return new AccessControlStorageResolver(configuration, repositoryProvider).resolve();
     }
 
     private void seedBareRepository(Path bareRepository, String userId) throws Exception {
@@ -258,7 +251,8 @@ class OrionRuntimeModuleTest {
             OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                     storage,
                     new FixedPasswordHashingService(),
-                    provider);
+                    provider,
+                    new OrionConfiguration());
             startWithoutRootPasswordOutput(service);
             return service;
         }
@@ -293,23 +287,22 @@ class OrionRuntimeModuleTest {
 
     private OrionConfiguration configurationWithGitAcl(String location) {
         OrionConfiguration configuration = new OrionConfiguration();
-        configuration.setBaseDir(tempDir.toString());
-        configuration.getGit().setStoragePath("repos");
-        configuration.getAccessControl().setType(OrionConfiguration.ACLStorageType.GIT);
-        configuration.getAccessControl().setUrl(location);
-        configuration.getAccessControl().setBranch(BRANCH);
-        configuration.getAccessControl().setSettingsFileName(ACL_FILE);
+        configuration.getBootstrap().setBaseDir(tempDir.toString());
+        configuration.getStorage().setLocation(tempDir.resolve("repos").toUri().toString());
+        configuration.getBootstrap().getAccessControl().setLocation(location);
+        configuration.getBootstrap().getAccessControl().setBranch(BRANCH);
+        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
         return configuration;
     }
 
     private OrionConfiguration defaultRuntimeConfiguration() {
         OrionConfiguration configuration = new OrionConfiguration();
-        configuration.setBaseDir(tempDir.toString());
-        configuration.getGit().setStoragePath("repos");
-        configuration.getTransports().getGit().setEnabled(false);
-        configuration.getTransports().getSsh().setEnabled(false);
-        configuration.getTransports().getHttp().setEnabled(false);
-        configuration.getTransports().getHttps().setEnabled(false);
+        configuration.getBootstrap().setBaseDir(tempDir.toString());
+        configuration.getStorage().setLocation(tempDir.resolve("repos").toUri().toString());
+        configuration.getTransport().getGit().setEnabled(false);
+        configuration.getTransport().getSsh().setEnabled(false);
+        configuration.getTransport().getHttp().setEnabled(false);
+        configuration.getTransport().getHttps().setEnabled(false);
         return configuration;
     }
 

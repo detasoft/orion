@@ -8,8 +8,8 @@ import java.net.URI;
 import java.nio.file.Path;
 
 public class LocalGitAccessControlStorage extends VersionedAccessControlStorage {
-    public LocalGitAccessControlStorage(OrionConfiguration.AccessControlConfig config) {
-        this(new LocalGitVersionedStorage(repositoryPathFrom(config), config.getBranch()), config.getSettingsFileName());
+    public LocalGitAccessControlStorage(OrionConfiguration.BootstrapAccessControlConfig config) {
+        this(new LocalGitVersionedStorage(repositoryPathFrom(config), config.getBranch()), config.getPaths());
     }
 
     public LocalGitAccessControlStorage(Path repositoryPath, String branch, String primaryPath) {
@@ -20,11 +20,15 @@ public class LocalGitAccessControlStorage extends VersionedAccessControlStorage 
         super(versionedStorage, primaryPath);
     }
 
-    private static Path repositoryPathFrom(OrionConfiguration.AccessControlConfig config) {
-        URI uri = URI.create(config.getUrl());
+    public LocalGitAccessControlStorage(VersionedStorage versionedStorage, java.util.List<String> paths) {
+        super(versionedStorage, paths);
+    }
+
+    private static Path repositoryPathFrom(OrionConfiguration.BootstrapAccessControlConfig config) {
+        URI uri = URI.create(config.getLocation());
         if ("file".equalsIgnoreCase(uri.getScheme())) {
             return Path.of(uri);
         }
-        return Path.of(config.getUrl());
+        return Path.of(config.getLocation());
     }
 }

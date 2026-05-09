@@ -1,9 +1,17 @@
-baseDir: target/orion_root
-git:
-  storagePath: repos
-accessControl:
-  url: local:orion
-transports:
+bootstrap:
+  baseDir: target/orion_root
+  workDir: work
+  threadPoolSize: 10
+  accessControl:
+    location: local:orion
+    branch: master
+    paths:
+      - orion.xml
+    createDefaultIfMissing: true
+storage:
+  location: file:target/orion_root/repos
+  createOnPush: true
+transport:
   defaultAddress: localhost
   git:
     port: 9418

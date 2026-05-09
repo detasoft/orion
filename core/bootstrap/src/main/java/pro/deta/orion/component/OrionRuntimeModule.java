@@ -97,11 +97,6 @@ public class OrionRuntimeModule {
     }
 
     @Provides
-    OrionConfiguration.AccessControlConfig accessControlConfig(OrionConfiguration orionConfiguration) {
-        return orionConfiguration.getAccessControl();
-    }
-
-    @Provides
     static AccessControlStorage accessControlStorage(AccessControlStorageResolver accessControlStorageResolver) {
         return accessControlStorageResolver.resolve();
     }

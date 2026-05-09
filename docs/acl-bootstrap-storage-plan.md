@@ -261,3 +261,21 @@ Minimum tests:
 - ACL reload works after ACL file changes;
 - server starts with ACL repository while transports are disabled;
 - transport E2E stays separate and no longer participates in ACL bootstrap.
+
+## Implementation Status
+
+Implemented:
+
+- primary deployment configuration sections: `bootstrap`, `storage`, and `transport`;
+- previous top-level Git, ACL, transport and bootstrap scalar configuration fields were removed;
+- `bootstrap.accessControl.location`, `branch`, `paths`, and `createDefaultIfMissing`;
+- local filesystem ACL through `file:` or a no-scheme path;
+- Git-over-local-repository-storage ACL through `local:repositoryName`;
+- multiple configured ACL paths are loaded and saved by the implemented ACL storages;
+- ACL startup order before transports through named lifecycle task dependencies.
+
+Not implemented yet:
+
+- remote Git ACL bootstrap storage such as `git+ssh:`;
+- non-file repository storage backends behind `storage.location`;
+- multi-backend repository storage API separate from the current Git repository provider.

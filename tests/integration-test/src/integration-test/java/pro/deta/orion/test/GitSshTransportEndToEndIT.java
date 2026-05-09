@@ -337,25 +337,26 @@ class GitSshTransportEndToEndIT {
 
     private static OrionConfiguration e2eConfiguration(Path orionRoot) throws Exception {
         OrionConfiguration configuration = new OrionConfiguration();
-        configuration.setBaseDir(orionRoot.toString());
-        configuration.setThreadPoolSize(8);
+        configuration.getBootstrap().setBaseDir(orionRoot.toString());
+        configuration.getBootstrap().setThreadPoolSize(8);
+        configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
 
-        configuration.getAccessControl().setUrl("local:orion");
+        configuration.getBootstrap().getAccessControl().setLocation("local:orion");
 
-        configuration.getTransports().getGit().setEnabled(false);
-        configuration.getTransports().getGit().setAddress("localhost");
-        configuration.getTransports().getGit().setPort(NetworkUtils.findAvailablePort());
+        configuration.getTransport().getGit().setEnabled(false);
+        configuration.getTransport().getGit().setAddress("localhost");
+        configuration.getTransport().getGit().setPort(NetworkUtils.findAvailablePort());
 
-        configuration.getTransports().getSsh().setEnabled(true);
-        configuration.getTransports().getSsh().setAddress("localhost");
-        configuration.getTransports().getSsh().setPort(NetworkUtils.findAvailablePort());
+        configuration.getTransport().getSsh().setEnabled(true);
+        configuration.getTransport().getSsh().setAddress("localhost");
+        configuration.getTransport().getSsh().setPort(NetworkUtils.findAvailablePort());
 
-        configuration.getTransports().getHttp().setAddress("localhost");
-        configuration.getTransports().getHttp().setPort(NetworkUtils.findAvailablePort());
+        configuration.getTransport().getHttp().setAddress("localhost");
+        configuration.getTransport().getHttp().setPort(NetworkUtils.findAvailablePort());
 
-        configuration.getTransports().getHttps().setEnabled(false);
-        configuration.getTransports().getHttps().setAddress("localhost");
-        configuration.getTransports().getHttps().setPort(NetworkUtils.findAvailablePort());
+        configuration.getTransport().getHttps().setEnabled(false);
+        configuration.getTransport().getHttps().setAddress("localhost");
+        configuration.getTransport().getHttps().setPort(NetworkUtils.findAvailablePort());
         return configuration;
     }
 
@@ -544,8 +545,8 @@ class GitSshTransportEndToEndIT {
         private String sshUrl(String repository) {
             return "ssh://%s@%s:%d/%s".formatted(
                     USERNAME,
-                    configuration.getTransports().getSsh().getAddress(),
-                    configuration.getTransports().getSsh().getPort(),
+                    configuration.getTransport().getSsh().getAddress(),
+                    configuration.getTransport().getSsh().getPort(),
                     repository);
         }
 
@@ -556,8 +557,8 @@ class GitSshTransportEndToEndIT {
         private URL httpUrl(String path) throws IOException {
             return new URL(
                     "http",
-                    configuration.getTransports().getHttp().getAddress(),
-                    configuration.getTransports().getHttp().getPort(),
+                    configuration.getTransport().getHttp().getAddress(),
+                    configuration.getTransport().getHttp().getPort(),
                     path);
         }
 

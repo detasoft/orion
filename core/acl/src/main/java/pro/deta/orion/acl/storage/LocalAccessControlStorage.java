@@ -10,21 +10,28 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Map;
 
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class LocalAccessControlStorage extends OrionEnableServiceSupport implements AccessControlStorage {
-    private final OrionConfiguration.AccessControlConfig config;
+    private final OrionConfiguration.BootstrapAccessControlConfig config;
 
     @Override
     public Result<AccessControlSnapshot> load() {
-        Path file = aclFile();
-        if (!Files.exists(file)) {
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
-        }
+        Map<String, byte[]> files = new java.util.LinkedHashMap<>();
         try {
-            return new Result.Success<>(AccessControlSnapshot.singleFile(config.getSettingsFileName(), Files.readAllBytes(file)));
+            for (String configuredPath : config.getPaths()) {
+                Path file = aclPath(configuredPath);
+                if (!Files.exists(file)) {
+                    return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+                }
+                files.put(configuredPath, Files.readAllBytes(file));
+            }
+            return new Result.Success<>(new AccessControlSnapshot(files, java.util.Optional.empty()));
         } catch (IOException e) {
+            return new Result.Failure<>(Result.FailureCode.GENERAL, e.getMessage(), e);
+        } catch (IllegalArgumentException e) {
             return new Result.Failure<>(Result.FailureCode.GENERAL, e.getMessage(), e);
         }
     }
@@ -33,10 +40,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     public void save(AccessControlSnapshot snapshot, AccessControlSaveRequest request) {
         try {
             for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
-                Path file = aclDirectory().resolve(entry.getKey()).normalize();
-                if (!file.startsWith(aclDirectory())) {
-                    throw new IllegalArgumentException("ACL file escapes local ACL directory: " + entry.getKey());
-                }
+                Path file = aclPath(entry.getKey());
                 if (file.getParent() != null) {
                     Files.createDirectories(file.getParent());
                 }
@@ -49,20 +53,31 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
 
     @Override
     public String primaryPath() {
-        return config.getSettingsFileName();
+        return config.primaryPath();
     }
 
-    private Path aclFile() {
-        return aclDirectory().resolve(primaryPath());
+    private Path aclPath(String configuredPath) {
+        Path aclDirectory = aclDirectory();
+        Path file = aclDirectory.resolve(configuredPath).normalize();
+        if (!file.startsWith(aclDirectory)) {
+            throw new IllegalArgumentException("ACL file escapes local ACL directory: " + configuredPath);
+        }
+        return file;
     }
 
     private Path aclDirectory() {
-        URI uri = URI.create(config.getUrl());
+        URI uri = URI.create(config.getLocation());
         Path path;
         if ("file".equalsIgnoreCase(uri.getScheme())) {
-            path = Path.of(uri);
+            if (uri.getPath() != null && !uri.getPath().isBlank()) {
+                path = Paths.get(uri.getPath());
+            } else {
+                path = Paths.get(uri.getSchemeSpecificPart());
+            }
+        } else if (uri.getScheme() == null) {
+            path = Path.of(config.getLocation());
         } else {
-            path = Path.of(config.getUrl());
+            throw new IllegalArgumentException("Unsupported local ACL location: " + config.getLocation());
         }
         return path.toAbsolutePath().normalize();
     }

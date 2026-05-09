@@ -23,7 +23,7 @@ public class OrionExecutor extends ScheduledThreadPoolExecutor implements OrionA
 
     @Inject
     public OrionExecutor(OrionConfiguration orionConfiguration, OrionThreadFactory orionThreadFactory) {
-        this(orionConfiguration.getThreadPoolSize(), orionThreadFactory);
+        this(orionConfiguration.getBootstrap().getThreadPoolSize(), orionThreadFactory);
     }
 
     public OrionExecutor(int threadPoolSize, OrionThreadFactory orionThreadFactory) {

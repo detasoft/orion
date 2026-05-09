@@ -4,11 +4,18 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.FileConfigurationProviderImpl;
 import pro.deta.orion.config.schema.OrionConfiguration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 public class ConfigurationRuntimeTest {
     @Test
     public void testConfigurationLookup() {
         FileConfigurationProviderImpl fcp = new FileConfigurationProviderImpl();
         OrionConfiguration oc = fcp.configurationLookup("classpath://config.toml");
-        System.out.println(oc.toString());
+
+        assertEquals("target/orion_root", oc.getBootstrap().getBaseDir());
+        assertEquals("local:orion", oc.getBootstrap().getAccessControl().getLocation());
+        assertEquals("orion.xml", oc.getBootstrap().getAccessControl().primaryPath());
+        assertEquals("file:target/orion_root/repos", oc.getStorage().getLocation());
+        assertEquals(8000, oc.getTransport().getHttp().getPort());
     }
 }

@@ -4,7 +4,7 @@
 
 **Goal:** Finish the ACL bootstrap storage migration so ACL is loaded from deployment-configured storage without using Orion network transports or volatile bootstrap users.
 
-**Architecture:** Make the new `bootstrap`, `storage`, and `transport` configuration shape primary, while keeping narrow compatibility fallbacks until the migration is complete. Resolve ACL storage by URI scheme, route `local:` through an internal repository storage API whose provider is available before ACL loads, and start transports only after ACL is loaded. Keep `GitBackedInternalStorage` and `VolatileUserAdded` for non-bootstrap storage-area paths only.
+**Architecture:** Make the new `bootstrap`, `storage`, and `transport` configuration shape the only supported runtime shape. Resolve ACL storage by URI scheme, route `local:` through an internal repository storage API whose provider is available before ACL loads, and start transports only after ACL is loaded. Keep `GitBackedInternalStorage` and `VolatileUserAdded` for non-bootstrap storage-area paths only.
 
 **Tech Stack:** Java 21, Maven, Dagger, Jackson YAML, TOML, JGit, JUnit 5, AssertJ.
 
@@ -21,10 +21,10 @@ Already implemented:
 - `OrionAccessControlServiceImpl` no longer subscribes to `VolatileUserAdded`.
 - README describes the target bootstrap flow at a high level.
 
-Main gaps:
+Main gaps at the start of the plan:
 
-- Runtime configuration still uses old `accessControl.type/url`, `git.storagePath`, and `transports`.
-- URI scheme does not fully drive ACL storage selection because `ACLStorageType` is still active.
+- Runtime configuration still used the previous top-level Git, ACL and transport fields.
+- URI scheme did not fully drive ACL storage selection because the previous ACL storage type field was still active.
 - There is no `RepositoryStorage` API.
 - Remote Git ACL bootstrap storage is not implemented as an independent backend.
 - Multiple ACL files are supported by the snapshot DTO and merge code, but existing storages only load one configured path.
@@ -90,7 +90,7 @@ assertThat(configuration.getStorage().getLocation()).isEqualTo("file:/tmp/orion/
 assertThat(configuration.getTransport().getHttp().isEnabled()).isFalse();
 ```
 
-Also add a compatibility test for the current `config.yml` shape. The expected result is that old config still maps to effective bootstrap/storage/transport values.
+Also add a rejection test for the previous top-level shape. The expected result is that configuration containing the removed fields is not accepted.
 
 **Step 2: Run tests and verify failure**
 
@@ -140,48 +140,23 @@ public static class StorageConfig {
 }
 ```
 
-Keep the old fields for compatibility:
-
-```java
-@Deprecated
-private InternalGitServer git = new InternalGitServer();
-@Deprecated
-private AccessControlConfig accessControl = new AccessControlConfig();
-@Deprecated
-private AppTransport transports;
-```
-
-Add effective getters instead of immediately rewriting all call sites:
-
-```java
-public BootstrapConfig effectiveBootstrap() { ... }
-public BootstrapAccessControlConfig effectiveAccessControlBootstrap() { ... }
-public StorageConfig effectiveStorage() { ... }
-public AppTransport effectiveTransport() { ... }
-```
-
-Compatibility mapping rules:
-
-- old `baseDir`, `workDir`, `threadPoolSize` populate `bootstrap`;
-- old `accessControl.url`, `branch`, `settingsFileName` populate `bootstrap.accessControl.location`, `branch`, first `paths` entry;
-- old `git.storagePath` becomes `storage.location` via `ConfigurationContext.resolve(...)`;
-- old `transports` becomes `transport`.
+Remove the previous top-level Git, ACL, transport and bootstrap scalar fields from `OrionConfiguration`. Do not keep deprecated compatibility fields or effective getter fallbacks.
 
 **Step 4: Update configuration consumers**
 
-Update `ConfigurationContext` to read `effectiveBootstrap()` and `effectiveStorage()`:
+Update `ConfigurationContext` to read `getBootstrap()` and `getStorage()`:
 
 ```java
 public Path getWorkDir() {
-    return resolve(configuration.effectiveBootstrap().getWorkDir());
+    return resolve(configuration.getBootstrap().getWorkDir());
 }
 
 public Path getGitStoragePath() {
-    return resolveStorageLocation(configuration.effectiveStorage().getLocation());
+    return resolveStorageLocation(configuration.getStorage().getLocation());
 }
 ```
 
-Support `file:` URIs and old relative paths.
+Support `file:` URIs and plain relative paths.
 
 **Step 5: Update bundled config**
 
@@ -380,7 +355,7 @@ assertInstanceOf(GitOverRepositoryStorageAccessControlStorage.class, resolve("lo
 assertInstanceOf(RemoteGitAccessControlStorage.class, resolve("git+ssh://git@example.test/orion-acl.git"));
 ```
 
-Also assert that the resolver does not inspect `ACLStorageType`.
+Also assert that the resolver does not inspect the removed ACL storage type field.
 
 **Step 2: Run tests and verify failure**
 
@@ -400,18 +375,18 @@ Rules:
 - `local:` -> Git-over-repository-storage ACL storage;
 - `git+ssh:` -> remote Git ACL storage;
 - `git+https:` -> remote Git ACL storage if HTTPS auth is implemented in Task 8;
-- no-scheme path -> local filesystem ACL only for compatibility;
+- no-scheme path -> local filesystem ACL;
 - unsupported scheme -> fail fast with a clear exception.
 
 **Step 4: Update Dagger wiring**
 
-Replace the `AccessControlStorage` provider that switches on `ACLStorageType` with one that calls the resolver using:
+Replace the `AccessControlStorage` provider that switches on the previous ACL storage type with one that calls the resolver using:
 
-- `orionConfiguration.effectiveAccessControlBootstrap()`;
+- `orionConfiguration.getBootstrap().getAccessControl()`;
 - configured `RepositoryStorage`;
 - providers for storage implementations.
 
-Keep `GitAccessControlStorage` available as a stage listener only for old config fallback until Task 10 removes the bootstrap use.
+Do not keep bootstrap fallback wiring for the previous top-level ACL configuration.
 
 **Step 5: Run tests and commit**
 
@@ -467,7 +442,7 @@ Expected: FAIL for multi-file loading.
 
 **Step 3: Implement storage**
 
-Create `LocalFileAccessControlStorage` using the new bootstrap ACL settings. Keep `LocalAccessControlStorage` as a deprecated compatibility wrapper that delegates to `LocalFileAccessControlStorage`.
+Use `LocalAccessControlStorage` as the local filesystem ACL implementation backed by the new bootstrap ACL settings.
 
 Implementation rules:
 
@@ -533,9 +508,9 @@ Expected: FAIL because `local:` still uses direct repository path wiring.
 - call `StoredRepository.saveFiles(branch, snapshot.files(), request.message(), request.author())`;
 - expose `primaryPath()` as the first configured path.
 
-**Step 4: Keep LocalGitAccessControlStorage compatibility only**
+**Step 4: Keep LocalGitAccessControlStorage out of local: bootstrap routing**
 
-Use `LocalGitAccessControlStorage` for independent file-backed Git repositories if still needed. Do not use it for `local:`.
+Use `LocalGitAccessControlStorage` for independent file-backed Git repositories if still needed by direct tests or future wiring. Do not use it for `local:`.
 
 **Step 5: Run tests and commit**
 
@@ -876,17 +851,17 @@ Append a short "Implementation status" section to `docs/acl-bootstrap-storage-pl
 
 - implemented backends;
 - unsupported backends;
-- compatibility notes for old config.
+- a note that the previous top-level config fields were removed.
 
 **Step 3: Check docs**
 
 Run:
 
 ```bash
-rg -n "accessControl\\.type|accessControl\\.url|transports|git\\.storagePath|VolatileUserAdded.*ACL" README.md docs core/bootstrap/src/main/resources
+rg -n "accessControl\\.type|accessControl\\.url|git\\.storagePath|VolatileUserAdded.*ACL" README.md docs core/bootstrap/src/main/resources
 ```
 
-Expected: only old-config compatibility notes remain.
+Expected: no active documentation for the removed top-level config fields remains.
 
 **Step 4: Commit**
 

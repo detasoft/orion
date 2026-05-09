@@ -8,7 +8,7 @@ import pro.deta.orion.util.Result;
 
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class JDBCAccessControlStorage extends OrionEnableServiceSupport implements AccessControlStorage {
-    private final OrionConfiguration.AccessControlConfig config;
+    private final OrionConfiguration.BootstrapAccessControlConfig config;
 
     @Override
     public Result<AccessControlSnapshot> load() {
@@ -22,6 +22,6 @@ public class JDBCAccessControlStorage extends OrionEnableServiceSupport implemen
 
     @Override
     public String primaryPath() {
-        return config.getSettingsFileName();
+        return config.primaryPath();
     }
 }

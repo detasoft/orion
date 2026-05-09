@@ -60,7 +60,7 @@ public class ACMECertificateChallengeTest {
         httpsTransportConfig.setEnabled(false);
         transports.setHttps(httpsTransportConfig);
 
-        orionConfiguration.setTransports(transports);
+        orionConfiguration.setTransport(transports);
 
         DispatcherServlet dispatcherServlet = new DispatcherServlet();
         JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, dispatcherServlet);
@@ -148,7 +148,7 @@ public class ACMECertificateChallengeTest {
         OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
         transports.setHttp(new HttpTransportConfig("localhost", NetworkUtils.findAvailablePort()));
         transports.setHttps(new HttpsTransportConfig("localhost", NetworkUtils.findAvailablePort()));
-        orionConfiguration.setTransports(transports);
+        orionConfiguration.setTransport(transports);
 
         DispatcherServlet dispatcherServlet = new DispatcherServlet();
         JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, dispatcherServlet);

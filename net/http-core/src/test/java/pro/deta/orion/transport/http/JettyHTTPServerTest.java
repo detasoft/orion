@@ -27,7 +27,7 @@ class JettyHTTPServerTest {
         OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
         transports.setHttp(new HttpTransportConfig("localhost", httpPort));
         transports.setHttps(new HttpsTransportConfig("localhost", httpsPort));
-        orionConfiguration.setTransports(transports);
+        orionConfiguration.setTransport(transports);
 
         // Create and start server
         DispatcherServlet dispatcherServlet = new DispatcherServlet();

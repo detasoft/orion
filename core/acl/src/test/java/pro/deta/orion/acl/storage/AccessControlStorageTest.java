@@ -143,6 +143,19 @@ class AccessControlStorageTest {
     }
 
     @Test
+    void accessControlServiceDoesNotCreateInitialAclWhenDisabled() {
+        Path aclDirectory = tempDir.resolve("default-disabled-acl");
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+        OrionConfiguration configuration = new OrionConfiguration();
+        configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
+
+        assertThatThrownBy(() -> startAccessControlService(storage, configuration))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Configuration repository not initialized");
+        assertThat(aclDirectory.resolve(ACL_FILE)).doesNotExist();
+    }
+
+    @Test
     void localGitStorageLoadsAclFromRepository() throws Exception {
         SeededRepository seededRepository = seedBareRepository("git-user");
         LocalGitAccessControlStorage storage = new LocalGitAccessControlStorage(localGitConfig(seededRepository.repositoryPath()));
@@ -218,7 +231,8 @@ class AccessControlStorageTest {
                 OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                         storage,
                         new FixedPasswordHashingService(),
-                        provider);
+                        provider,
+                        new OrionConfiguration());
                 waitForStageTasks(service.aclLoad());
                 assertUserAuthenticates(service, "initial-user");
 
@@ -310,20 +324,18 @@ class AccessControlStorageTest {
                 .doesNotContainKeys(AccessControl.GrantKey.WRITE, AccessControl.GrantKey.CREATE);
     }
 
-    private OrionConfiguration.AccessControlConfig localConfig(Path directory) {
-        OrionConfiguration.AccessControlConfig config = new OrionConfiguration.AccessControlConfig();
-        config.setType(OrionConfiguration.ACLStorageType.LOCAL);
-        config.setUrl(directory.toUri().toString());
-        config.setSettingsFileName(ACL_FILE);
+    private OrionConfiguration.BootstrapAccessControlConfig localConfig(Path directory) {
+        OrionConfiguration.BootstrapAccessControlConfig config = new OrionConfiguration.BootstrapAccessControlConfig();
+        config.setLocation(directory.toUri().toString());
+        config.setPaths(List.of(ACL_FILE));
         return config;
     }
 
-    private OrionConfiguration.AccessControlConfig localGitConfig(Path repositoryPath) {
-        OrionConfiguration.AccessControlConfig config = new OrionConfiguration.AccessControlConfig();
-        config.setType(OrionConfiguration.ACLStorageType.GIT);
-        config.setUrl(repositoryPath.toUri().toString());
+    private OrionConfiguration.BootstrapAccessControlConfig localGitConfig(Path repositoryPath) {
+        OrionConfiguration.BootstrapAccessControlConfig config = new OrionConfiguration.BootstrapAccessControlConfig();
+        config.setLocation(repositoryPath.toUri().toString());
         config.setBranch(BRANCH);
-        config.setSettingsFileName(ACL_FILE);
+        config.setPaths(List.of(ACL_FILE));
         return config;
     }
 
@@ -415,6 +427,12 @@ class AccessControlStorageTest {
     }
 
     private OrionAccessControlServiceImpl startAccessControlService(AccessControlStorage storage) throws Exception {
+        return startAccessControlService(storage, new OrionConfiguration());
+    }
+
+    private OrionAccessControlServiceImpl startAccessControlService(
+            AccessControlStorage storage,
+            OrionConfiguration configuration) throws Exception {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
             OrionProvider provider = new OrionProvider(
                     new ApplicationStateHolder(),
@@ -424,7 +442,8 @@ class AccessControlStorageTest {
             OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                     storage,
                     new FixedPasswordHashingService(),
-                    provider);
+                    provider,
+                    configuration);
             startWithoutRootPasswordOutput(service);
             return service;
         }

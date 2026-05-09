@@ -17,6 +17,7 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
+import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
@@ -52,6 +53,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
+    private final OrionConfiguration configuration;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
@@ -73,6 +75,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             Result<AccessControl> loadedAccessControl = loadAccessControl();
             loadedAccessControl.onFailure(f -> {
                 if (f.code() == Result.FailureCode.NOT_FOUND) {
+                    if (!configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing()) {
+                        throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
+                    }
                     orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
                         char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
                         String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);

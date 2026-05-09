@@ -73,7 +73,7 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
     }
 
     public OrionStageCallResult onStart() {
-        SshTransportConfig config  = orionConfiguration.getTransports().getSsh();
+        SshTransportConfig config  = orionConfiguration.getTransport().getSsh();
         if (!config.isEnabled()) {
             return null;
         }

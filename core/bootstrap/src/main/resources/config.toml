@@ -1,23 +1,30 @@
+[bootstrap]
 baseDir = "target/orion_root"
+workDir = "work"
+threadPoolSize = 10
 
-[git]
-storagePath = "repos"
+[bootstrap.accessControl]
+location = "local:orion"
+branch = "master"
+paths = ["orion.xml"]
+createDefaultIfMissing = true
 
-[accessControl]
-url = "local:orion"
+[storage]
+location = "file:target/orion_root/repos"
+createOnPush = true
 
-[transports]
+[transport]
 defaultAddress = "localhost"
 
-[transports.git]
+[transport.git]
 port = 9418
 enabled = false
 
-[transports.http]
+[transport.http]
 port = 8000
 
-[transports.https]
+[transport.https]
 port = 8443
 
-[transports.ssh]
+[transport.ssh]
 port = 8022

@@ -138,21 +138,22 @@ class OrionStartupIT {
     private static OrionConfiguration serverConfiguration(Path orionRoot) throws IOException {
         Set<Integer> ports = new LinkedHashSet<>();
         OrionConfiguration configuration = new OrionConfiguration();
-        configuration.setBaseDir(orionRoot.toString());
-        configuration.getAccessControl().setUrl("local:orion");
+        configuration.getBootstrap().setBaseDir(orionRoot.toString());
+        configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
+        configuration.getBootstrap().getAccessControl().setLocation("local:orion");
 
-        configuration.getTransports().getGit().setAddress("localhost");
-        configuration.getTransports().getGit().setPort(freePort(ports));
+        configuration.getTransport().getGit().setAddress("localhost");
+        configuration.getTransport().getGit().setPort(freePort(ports));
 
-        configuration.getTransports().getSsh().setAddress("localhost");
-        configuration.getTransports().getSsh().setPort(freePort(ports));
+        configuration.getTransport().getSsh().setAddress("localhost");
+        configuration.getTransport().getSsh().setPort(freePort(ports));
 
-        configuration.getTransports().getHttp().setAddress("localhost");
-        configuration.getTransports().getHttp().setPort(freePort(ports));
+        configuration.getTransport().getHttp().setAddress("localhost");
+        configuration.getTransport().getHttp().setPort(freePort(ports));
 
-        configuration.getTransports().getHttps().setEnabled(false);
-        configuration.getTransports().getHttps().setAddress("localhost");
-        configuration.getTransports().getHttps().setPort(freePort(ports));
+        configuration.getTransport().getHttps().setEnabled(false);
+        configuration.getTransport().getHttps().setAddress("localhost");
+        configuration.getTransport().getHttps().setPort(freePort(ports));
         return configuration;
     }
 

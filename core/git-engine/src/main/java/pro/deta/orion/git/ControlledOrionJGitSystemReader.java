@@ -49,7 +49,7 @@ public final class ControlledOrionJGitSystemReader extends SystemReader {
 
     @Inject
     public ControlledOrionJGitSystemReader(OrionConfiguration configuration) {
-        this(configuration.getGit().getJgit());
+        this(configuration.getBootstrap().getJgit());
     }
 
     public ControlledOrionJGitSystemReader(OrionConfiguration.JGitConfig config) {

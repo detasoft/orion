@@ -4,24 +4,49 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
 import javax.inject.Singleton;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RequiredArgsConstructor
 @Data
 @Singleton
 public class OrionConfiguration {
-    private InternalGitServer git = new InternalGitServer();
-    private AccessControlConfig accessControl = new AccessControlConfig();
-    private AppTransport transports = new AppTransport();
-    private String baseDir = "orion";
-    private String workDir = "work";
-    private int threadPoolSize = 10;
+    private BootstrapConfig bootstrap = new BootstrapConfig();
+    private StorageConfig storage = new StorageConfig();
+    private AppTransport transport = new AppTransport();
 
     @Data
-    public static class InternalGitServer {
-        private String storagePath = "repos";
+    public static class BootstrapConfig {
+        private String baseDir = "orion";
+        private String workDir = "work";
+        private int threadPoolSize = 10;
         private JGitConfig jgit = new JGitConfig();
+        private BootstrapAccessControlConfig accessControl = new BootstrapAccessControlConfig();
+    }
+
+    @Data
+    public static class BootstrapAccessControlConfig {
+        private String location = "local:orion";
+        private String branch = "master";
+        private List<String> paths = new ArrayList<>(List.of("orion.xml"));
+        private boolean createDefaultIfMissing = true;
+        private Map<String, String> auth = new LinkedHashMap<>();
+
+        public String primaryPath() {
+            if (paths == null || paths.isEmpty()) {
+                throw new IllegalStateException("At least one ACL path must be configured");
+            }
+            return paths.getFirst();
+        }
+    }
+
+    @Data
+    public static class StorageConfig {
+        private String location = "file:orion/repos";
+        private boolean createOnPush = true;
+        private Map<String, String> auth = new LinkedHashMap<>();
     }
 
     @Data
@@ -36,27 +61,6 @@ public class OrionConfiguration {
         private Map<String, String> systemConfig = new LinkedHashMap<>();
         private Map<String, String> userConfig = new LinkedHashMap<>();
         private Map<String, String> jgitConfig = new LinkedHashMap<>();
-    }
-
-    @Data
-    public static class AccessControlConfig {
-        // "https://github.com/vladilm/orion.git"
-        // "ssh://git@jump.deta.pro:deta/orion_runtime.git"
-        // "local:orion"
-        // "file://pathToGitDir/"
-        private ACLStorageType type = ACLStorageType.GIT;
-        private String url = "local:orion";
-        private String username;
-        // could be password, or path to keyfile depends on the url / ignored for local access
-        private String credential;
-
-        // ACL file name inside configured storage
-        private String settingsFileName = "orion.xml";
-        private String branch = "master";
-    }
-
-    public enum ACLStorageType {
-        GIT, JDBC, LOCAL
     }
 
     @Data

@@ -36,7 +36,7 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
 
     @Inject
     public GitNativeTransportService(ConfigurationContext configurationContext, GitInternalService gitInternalService, OrionExecutor orionExecutor) {
-        this.config = configurationContext.getConfiguration().getTransports().getGit();
+        this.config = configurationContext.getConfiguration().getTransport().getGit();
         this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;
     }

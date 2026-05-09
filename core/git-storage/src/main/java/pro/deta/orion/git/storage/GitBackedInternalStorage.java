@@ -83,7 +83,7 @@ public class GitBackedInternalStorage implements OrionApplicationStageEventListe
         Path checkoutPath = storageArea.resolve(name);
         FileUtils.mkdirs(checkoutPath);
         GitAccessParams area = new GitAccessParams(checkoutPath,
-                config.getTransports(),
+                config.getTransport(),
                 uri,
                 getValueOrDefault(username, "orion_acl"),
                 credential,

@@ -42,8 +42,8 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
 
     @Inject
     public JettyHTTPServer(OrionConfiguration orionConfiguration, DispatcherServlet dispatcherServlet) {
-        this.httpTransportConfig = orionConfiguration.getTransports().getHttp();
-        this.httpsTransportConfig = orionConfiguration.getTransports().getHttps();
+        this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
+        this.httpsTransportConfig = orionConfiguration.getTransport().getHttps();
         this.dispatcherServlet = dispatcherServlet;
     }
 

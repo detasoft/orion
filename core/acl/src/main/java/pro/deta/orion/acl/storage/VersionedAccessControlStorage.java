@@ -10,16 +10,23 @@ import java.util.Objects;
 
 public class VersionedAccessControlStorage implements AccessControlStorage {
     private final VersionedStorage versionedStorage;
-    private final String primaryPath;
+    private final List<String> paths;
+
+    public VersionedAccessControlStorage(VersionedStorage versionedStorage, List<String> paths) {
+        this.versionedStorage = Objects.requireNonNull(versionedStorage, "versionedStorage");
+        this.paths = List.copyOf(Objects.requireNonNull(paths, "paths"));
+        if (this.paths.isEmpty()) {
+            throw new IllegalArgumentException("At least one ACL path must be configured");
+        }
+    }
 
     public VersionedAccessControlStorage(VersionedStorage versionedStorage, String primaryPath) {
-        this.versionedStorage = Objects.requireNonNull(versionedStorage, "versionedStorage");
-        this.primaryPath = Objects.requireNonNull(primaryPath, "primaryPath");
+        this(versionedStorage, List.of(Objects.requireNonNull(primaryPath, "primaryPath")));
     }
 
     @Override
     public Result<AccessControlSnapshot> load() {
-        return switch (versionedStorage.load(List.of(primaryPath))) {
+        return switch (versionedStorage.load(paths)) {
             case Result.Success<VersionedFileSnapshot>(var snapshot) -> new Result.Success<>(
                     new AccessControlSnapshot(snapshot.files(), snapshot.version()));
             case Result.Failure<VersionedFileSnapshot> failure -> new Result.Failure<>(failure);
@@ -33,6 +40,6 @@ public class VersionedAccessControlStorage implements AccessControlStorage {
 
     @Override
     public String primaryPath() {
-        return primaryPath;
+        return paths.getFirst();
     }
 }
