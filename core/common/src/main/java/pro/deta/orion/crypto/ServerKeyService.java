@@ -2,7 +2,6 @@ package pro.deta.orion.crypto;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import lombok.Getter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.util.*;
@@ -12,9 +11,7 @@ import java.security.KeyPair;
 import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import static pro.deta.orion.util.KeyUtils.*;
 
@@ -23,9 +20,7 @@ import static pro.deta.orion.util.KeyUtils.*;
 @ToString
 public class ServerKeyService implements PublicKeysProvider {
     private final Path hostKeysDir;
-    @Getter
-    private final KeyPair keyPair;
-    private final List<KeyPair> serverKeys = new ArrayList<>();
+    private final LazySupplier<List<KeyPair>> serverKeys;
 
     @Inject
     public ServerKeyService(ConfigurationContext configurationContext) {
@@ -34,6 +29,11 @@ public class ServerKeyService implements PublicKeysProvider {
 
     ServerKeyService(Path baseDir) {
         this.hostKeysDir = baseDir.resolve("server-keys");
+        this.serverKeys = new LazySupplier<>(this::loadServerKeys);
+    }
+
+    private List<KeyPair> loadServerKeys() {
+        List<KeyPair> loadedKeys = new ArrayList<>();
         FileUtils.mkdirs(hostKeysDir);
         switch(createServerKeyIfNotExist(hostKeysDir.resolve("rsa.pem"), "RSA", 2048)) {
             case Result.Failure<KeyPair>(var code, var message, var throwable) -> {
@@ -42,16 +42,12 @@ public class ServerKeyService implements PublicKeysProvider {
             }
             case Result.Success<KeyPair>(var k) -> {
                 log.warn("Loaded main server public key: {}", k.getPublic());
-                keyPair = k;
-                addKey(k);
+                loadedKeys.add(k);
             }
         }
-        createServerKeyIfNotExist(hostKeysDir.resolve("ecdsa.pem"), "ECDSA", 256).onSuccess(this::addKey);
+        createServerKeyIfNotExist(hostKeysDir.resolve("ecdsa.pem"), "ECDSA", 256).onSuccess(loadedKeys::add);
 //        createServerKeyIfNotExist(hostKeysDir.resolve("eddsa.pem"), "EdDSA", 0).onSuccess(this::addKey);
-    }
-
-    private void addKey(KeyPair key) {
-        serverKeys.add(key);
+        return List.copyOf(loadedKeys);
     }
 
     private Result<KeyPair> createServerKeyIfNotExist(Path keyFile, String algorithm, int keySize) {
@@ -66,12 +62,20 @@ public class ServerKeyService implements PublicKeysProvider {
         };
     }
 
-    public Collection<KeyPair> getKeyPairs() {
-        return Collections.unmodifiableList(serverKeys);
+    public KeyPair getKeyPair() {
+        return getKeyPairs().getFirst();
+    }
+
+    public List<KeyPair> getKeyPairs() {
+        return serverKeys.value();
     }
 
     @Override
     public List<PublicKey> getPublicKeys() {
-        return this.serverKeys.stream().map(it -> it.getPublic()).collect(Collectors.toList());
+        List<PublicKey> publicKeys = new ArrayList<>();
+        for (KeyPair keyPair : getKeyPairs()) {
+            publicKeys.add(keyPair.getPublic());
+        }
+        return publicKeys;
     }
 }

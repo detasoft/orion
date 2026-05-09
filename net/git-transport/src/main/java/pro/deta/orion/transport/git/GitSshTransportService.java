@@ -28,6 +28,7 @@ import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
+import javax.inject.Provider;
 import java.io.*;
 import java.net.BindException;
 import java.net.InetSocketAddress;
@@ -45,7 +46,7 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
     private final SshServer sshd = SshServer.setUpDefaultServer();
 
     private final SshCommandFactory commandFactory;
-    private final ServerKeyService serverKeyService;
+    private final Provider<ServerKeyService> serverKeyService;
     private final OrionSSHPasswordAuthenticator orionPasswordAuthenticator;
 
 
@@ -94,7 +95,7 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
             sshd.setPort(addr.getPort());
             sshd.setHost(addr.getHostName());
 
-            sshd.setKeyPairProvider(new MappedKeyPairProvider(serverKeyService.getKeyPairs()));
+            sshd.setKeyPairProvider(new MappedKeyPairProvider(serverKeyService.get().getKeyPairs()));
 
             sshd.setPublickeyAuthenticator(new CachingPublicKeyAuthenticator(orionPasswordAuthenticator));
             sshd.setPasswordAuthenticator(orionPasswordAuthenticator);
