@@ -316,7 +316,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case OPENSSH_PUBLIC_KEY -> {
                 yield publicKeysAreEqual(c.getValue(), provided);
             }
-            case SHA1 -> {
+            case SHA1, STATIC_BEARER_TOKEN -> {
                 yield orionPasswordHashingService.comparePassword(SHA1, c.getValue(), provided);
             }
             case MD5 -> false;
@@ -324,9 +324,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case SHA3_256 -> false;
             case ARGON2 -> {
                 yield orionPasswordHashingService.comparePassword(ARGON2, c.getValue(), provided);
-            }
-            case STATIC_BEARER_TOKEN -> {
-                yield orionPasswordHashingService.comparePassword(SHA1, c.getValue(), provided);
             }
             case JWT_SIGNING_PUBLIC_KEY -> false;
         };
