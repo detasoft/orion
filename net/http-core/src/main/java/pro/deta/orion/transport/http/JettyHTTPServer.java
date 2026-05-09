@@ -2,10 +2,12 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.Servlet;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.server.*;
+import org.eclipse.jetty.ee10.servlet.FilterHolder;
 import org.eclipse.jetty.server.handler.gzip.GzipHandler;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
@@ -26,6 +28,7 @@ import pro.deta.orion.util.OrionUtils;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.KeyStore;
+import java.util.EnumSet;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -38,13 +41,22 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
     private final HttpTransportConfig httpTransportConfig;
     private final HttpsTransportConfig httpsTransportConfig;
     private final DispatcherServlet dispatcherServlet;
+    private final OrionAdminAuthorizationFilter adminAuthorizationFilter;
     private final AtomicReference<Server> jettyServer = new AtomicReference<>();
 
     @Inject
-    public JettyHTTPServer(OrionConfiguration orionConfiguration, DispatcherServlet dispatcherServlet) {
+    public JettyHTTPServer(
+            OrionConfiguration orionConfiguration,
+            DispatcherServlet dispatcherServlet,
+            OrionAdminAuthorizationFilter adminAuthorizationFilter) {
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
         this.httpsTransportConfig = orionConfiguration.getTransport().getHttps();
         this.dispatcherServlet = dispatcherServlet;
+        this.adminAuthorizationFilter = adminAuthorizationFilter;
+    }
+
+    public JettyHTTPServer(OrionConfiguration orionConfiguration, DispatcherServlet dispatcherServlet) {
+        this(orionConfiguration, dispatcherServlet, null);
     }
 
     @Override
@@ -80,6 +92,12 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
 
 
             addServletMapStartFrom(context, dispatcherServlet);
+            if (adminAuthorizationFilter != null) {
+                context.addFilter(
+                        new FilterHolder(adminAuthorizationFilter),
+                        adminAuthorizationFilter.filterPath(),
+                        EnumSet.of(DispatcherType.REQUEST));
+            }
             server.setHandler(context);
 
             enableHttpIfNeeded(server, httpTransportConfig);

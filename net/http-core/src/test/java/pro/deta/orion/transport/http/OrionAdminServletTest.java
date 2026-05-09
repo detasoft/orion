@@ -10,7 +10,6 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
-import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.Result;
@@ -22,30 +21,27 @@ import java.io.StringWriter;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminServletTest {
-    private static final String ACCESS_TOKEN = "access-token";
     private static final String BASIC_USER = "root";
     private static final String BASIC_PASSWORD = "root-password";
     private static final String ISSUED_TOKEN = "issued-jwt";
     private static final long TOKEN_EXPIRES_AT = 1_800_000_000L;
 
     @Test
-    void createsManagedUserWithBearerTokenAndAdminGrant() throws Exception {
+    void createsManagedUser() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
         OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
-                request("POST", "/api/admin/users", bearerAuth(ACCESS_TOKEN), """
+                request("POST", "/api/admin/users", null, """
                         {
                           "id": "client",
                           "email": "client@example.test",
@@ -82,14 +78,14 @@ class OrionAdminServletTest {
     }
 
     @Test
-    void createsRepositoryWithBearerTokenAndAdminGrant() throws Exception {
+    void createsRepository() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
         OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
-                request("POST", "/api/admin/repositories", bearerAuth(ACCESS_TOKEN), """
+                request("POST", "/api/admin/repositories", null, """
                         {"name":"project"}
                         """),
                 response.proxy());
@@ -137,72 +133,6 @@ class OrionAdminServletTest {
         assertThat(accessControlService.lastTokenUserName).isNull();
     }
 
-    @Test
-    void rejectsManagedUserRequestWithoutBearerToken() throws Exception {
-        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
-
-        ResponseRecorder response = new ResponseRecorder();
-        servlet.service(
-                request("POST", "/api/admin/users", null, "{\"id\":\"client\"}"),
-                response.proxy());
-
-        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
-        assertThat(accessControlService.lastUpdate).isNull();
-    }
-
-    @Test
-    void rejectsManagedUserRequestWithInvalidBearerToken() throws Exception {
-        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
-
-        ResponseRecorder response = new ResponseRecorder();
-        servlet.service(
-                request("POST", "/api/admin/users", bearerAuth("wrong"), "{\"id\":\"client\"}"),
-                response.proxy());
-
-        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
-        assertThat(accessControlService.lastUpdate).isNull();
-    }
-
-    @Test
-    void rejectsBasicCredentialsOnAdminResources() throws Exception {
-        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
-
-        ResponseRecorder response = new ResponseRecorder();
-        servlet.service(
-                request("POST", "/api/admin/users", basicAuth(BASIC_USER, BASIC_PASSWORD), "{\"id\":\"client\"}"),
-                response.proxy());
-
-        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
-        assertThat(accessControlService.lastUpdate).isNull();
-        assertThat(accessControlService.lastTokenUserName).isNull();
-    }
-
-    @Test
-    void rejectsManagedUserRequestWithoutAdminGrant() throws Exception {
-        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
-        accessControlService.adminGrant = false;
-        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
-
-        ResponseRecorder response = new ResponseRecorder();
-        servlet.service(
-                request("POST", "/api/admin/users", bearerAuth(ACCESS_TOKEN), "{\"id\":\"client\"}"),
-                response.proxy());
-
-        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
-        assertThat(accessControlService.lastUpdate).isNull();
-    }
-
-    private static String bearerAuth(String token) {
-        return "Bearer " + token;
-    }
-
     private static String basicAuth(String username, String password) {
         return "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
     }
@@ -232,7 +162,6 @@ class OrionAdminServletTest {
         private String lastTokenUserName;
         private byte[] lastTokenCredential;
         private long lastTokenExpiresInSeconds;
-        private boolean adminGrant = true;
 
         @Override
         public void addKeyToUser(String username, String publicKey) {
@@ -251,16 +180,7 @@ class OrionAdminServletTest {
 
         @Override
         public AuthenticationResult authenticateToken(byte[] token) {
-            if (!ACCESS_TOKEN.equals(new String(token, StandardCharsets.UTF_8))) {
-                return AuthenticationResult.failure("authentication failed");
-            }
-
-            List<AccessControl.Grant> grants = new ArrayList<>();
-            if (adminGrant) {
-                grants.add(new AccessControl.Grant("admin", new ArrayList<>())
-                        .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING));
-            }
-            return AuthenticationResult.success(new InternalUserImpl("token-user", grants));
+            throw new UnsupportedOperationException();
         }
 
         @Override
