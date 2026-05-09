@@ -55,8 +55,7 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
         registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.SSH_TRANSPORT_INIT, this::onInit);
         registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.SSH_TRANSPORT_START, this::onStart)
                 .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.SSH_TRANSPORT_STOP, this::onStop)
-                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.SSH_TRANSPORT_STOP, this::onStop);
     }
 
 

@@ -51,8 +51,7 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
         registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.HTTP_TRANSPORT_START, this::onStart)
                 .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.HTTP_TRANSPORT_STOP, this::onStop)
-                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.HTTP_TRANSPORT_STOP, this::onStop);
     }
 
     public OrionStageCallResult onStart() {
@@ -146,7 +145,7 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
     }
 
     private static void enableHttpIfNeeded(Server server, HttpTransportConfig httpTransportConfig) {
-        if (httpTransportConfig != null) {
+        if (httpTransportConfig != null && httpTransportConfig.isEnabled()) {
             ServerConnector httpConnector = new ServerConnector(server);
             httpConnector.setHost(httpTransportConfig.getAddress());
             httpConnector.setPort(httpTransportConfig.getPort());
@@ -157,6 +156,9 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
     public OrionStageCallResult onStop() {
         try {
             Server server = jettyServer.get();
+            if (server == null) {
+                return null;
+            }
             server.stop();
             server.join();
             server.destroy();

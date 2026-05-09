@@ -2,6 +2,7 @@ package pro.deta.orion.component;
 
 import dagger.Module;
 import dagger.Provides;
+import dagger.multibindings.ElementsIntoSet;
 import dagger.multibindings.IntoSet;
 
 import jakarta.inject.Singleton;
@@ -22,6 +23,12 @@ import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 
+import javax.inject.Provider;
+import java.security.PublicKey;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 
 @Module
 public class OrionRuntimeModule {
@@ -32,27 +39,29 @@ public class OrionRuntimeModule {
     }
 
     @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener jettyHttpServer(JettyHTTPServer jettyHTTPServer) {
-        return jettyHTTPServer;
+    @ElementsIntoSet
+    static Set<OrionApplicationStageEventListener> transportServices(
+            OrionConfiguration configuration,
+            Provider<JettyHTTPServer> jettyHttpServer,
+            Provider<GitNativeTransportService> gitNativeTransportService,
+            Provider<GitSshTransportService> gitSshTransportService) {
+        Set<OrionApplicationStageEventListener> services = new LinkedHashSet<>();
+        if (TransportRuntimeConfig.isHttpTransportEnabled(configuration)) {
+            services.add(jettyHttpServer.get());
+        }
+        if (TransportRuntimeConfig.isGitTransportEnabled(configuration)) {
+            services.add(gitNativeTransportService.get());
+        }
+        if (TransportRuntimeConfig.isSshTransportEnabled(configuration)) {
+            services.add(gitSshTransportService.get());
+        }
+        return services;
     }
 
     @Provides
     @IntoSet
-    static OrionApplicationStageEventListener gitNativeTransportService(GitNativeTransportService gitNativeTransportService) {
-        return gitNativeTransportService;
-    }
-
-    @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener gitSshTransportService(GitSshTransportService gitSshTransportService) {
-        return gitSshTransportService;
-    }
-
-    @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener transportLifecycleBarrier() {
-        return new TransportLifecycleBarrier();
+    static OrionApplicationStageEventListener transportLifecycleBarrier(TransportLifecycleBarrier barrier) {
+        return barrier;
     }
 
     @Provides
@@ -92,8 +101,13 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    PublicKeysProvider publicKeysProvider(ServerKeyService serverKeyService) {
-        return serverKeyService;
+    PublicKeysProvider publicKeysProvider(Provider<ServerKeyService> serverKeyService) {
+        return new PublicKeysProvider() {
+            @Override
+            public Collection<PublicKey> getPublicKeys() {
+                return serverKeyService.get().getPublicKeys();
+            }
+        };
     }
 
     @Provides

@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.GitRepositoryProvider;
-import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
@@ -16,32 +15,21 @@ import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.acl.storage.VersionedAccessControlStorage;
-import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.crypto.OrionPasswordHashingService;
-import pro.deta.orion.crypto.PublicKeysProvider;
-import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
-import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.lifecycle.ApplicationStateHolder;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.ConfigurationContext;
-import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.OutputStream;
-import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -52,7 +40,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OrionRuntimeModuleTest {
     private static final String BRANCH = "master";
     private static final String ACL_FILE = "acl.xml";
-    private static final String TEST_PASSWORD = "acl-password";
     private static final String TEST_PASSWORD_HASH = "acl-password-hash";
 
     @TempDir
@@ -61,20 +48,44 @@ class OrionRuntimeModuleTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
-    void runtimeInitPlanOrdersJGitAndEvents() {
+    void runtimeInitPlanOmitsDisabledTransportInit() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
+
+        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
+
+        assertTrue(plan.contains("JGIT_RUNTIME"));
+        assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
+        assertFalse(plan.contains("SSH_TRANSPORT_INIT"));
+        assertFalse(plan.contains("ACL_INIT"));
+    }
+
+    @Test
+    void runtimeInitPlanIncludesEnabledSshTransportInit() {
+        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
 
         assertTrue(plan.contains("JGIT_RUNTIME"));
         assertTrue(plan.contains("SSH_TRANSPORT_INIT"));
         assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
-        assertFalse(plan.contains("ACL_INIT"));
     }
 
     @Test
-    void runtimeStartingPlanOrdersAclBeforeTransports() {
+    void runtimeStartingPlanOmitsDisabledTransportServices() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
+
+        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
+
+        assertTrue(plan.contains("ACL_LOAD"));
+        assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
+        assertFalse(plan.contains("HTTP_TRANSPORT_START"));
+        assertFalse(plan.contains("GIT_TRANSPORT_START"));
+        assertFalse(plan.contains("SSH_TRANSPORT_START"));
+    }
+
+    @Test
+    void runtimeStartingPlanOrdersEnabledTransportsAfterAcl() {
+        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
 
@@ -86,27 +97,64 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    void runtimeStoppingPlanOrdersTransportsEventsAndExecutor() {
+    void runtimeStoppingPlanOmitsDisabledTransportServices() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
 
         assertTrue(plan.contains("TRANSPORTS_STOP"));
-        assertTrue(plan.contains("HTTP_TRANSPORT_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("GIT_TRANSPORT_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("SSH_TRANSPORT_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("EVENT_MANAGER_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
+        assertFalse(plan.contains("HTTP_TRANSPORT_STOP"));
+        assertFalse(plan.contains("GIT_TRANSPORT_STOP"));
+        assertFalse(plan.contains("SSH_TRANSPORT_STOP"));
+        assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
     }
 
     @Test
-    void runtimeServiceMapShowsTransportBarrierOwner() {
+    void runtimeStoppingPlanOrdersEnabledTransportsBeforeEventsAndExecutor() {
+        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
+
+        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
+
+        assertTrue(plan.contains("HTTP_TRANSPORT_STOP"));
+        assertTrue(plan.contains("GIT_TRANSPORT_STOP"));
+        assertTrue(plan.contains("SSH_TRANSPORT_STOP"));
+        assertTrue(plan.contains("TRANSPORTS_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
+        assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
+        assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
+    }
+
+    @Test
+    void runtimeServiceMapShowsDisabledTransportBarrierOnly() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
 
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP"));
+        assertFalse(serviceMap.contains("JettyHTTPServer: HTTP_TRANSPORT_START"));
+        assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_START"));
+        assertFalse(serviceMap.contains("GitSshTransportService: SSH_TRANSPORT_START"));
+    }
+
+    @Test
+    void runtimeServiceMapShowsEnabledTransportBarrierDependencies() {
+        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
+
+        String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
+
+        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
+        assertTrue(serviceMap.contains(
+                "TransportLifecycleBarrier: TRANSPORTS_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
+    }
+
+    @Test
+    void runtimePlanDoesNotLoadServerKeysWhenTransportsAreOnlyRegistered() {
+        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
+
+        component.orionApplicationLifecycle().describeLifecycle();
+
+        assertFalse(tempDir.resolve("server-keys").toFile().exists());
     }
 
     @Test
@@ -158,10 +206,8 @@ class OrionRuntimeModuleTest {
         FileGitRepositoryProvider repositoryProvider = new FileGitRepositoryProvider(new ConfigurationContext(configuration));
         AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
 
-        OrionAccessControlServiceImpl service = startAccessControlService(storage);
-
         assertInstanceOf(LocalAccessControlStorage.class, storage);
-        assertUserAuthenticates(service, "file-user");
+        assertStorageLoadsUser(storage, "file-user");
     }
 
     @Test
@@ -171,12 +217,10 @@ class OrionRuntimeModuleTest {
         seedBareRepository(repositoryProvider.repositoryPath("team/project"), "area-user");
         AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
 
-        OrionAccessControlServiceImpl service = startAccessControlService(storage);
-
         assertEquals(VersionedAccessControlStorage.class, storage.getClass());
-        assertEquals(2, repositoryProvider.findCalls);
+        assertStorageLoadsUser(storage, "area-user");
+        assertEquals(1, repositoryProvider.findCalls);
         assertEquals(0, repositoryProvider.findOrCreateCalls);
-        assertUserAuthenticates(service, "area-user");
     }
 
     @Test
@@ -271,56 +315,11 @@ class OrionRuntimeModuleTest {
         return accessControl;
     }
 
-    private OrionAccessControlServiceImpl startAccessControlService(AccessControlStorage storage) throws Exception {
-        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
-            OrionEventManager eventManager = startedEventManager();
-            OrionProvider provider = new OrionProvider(
-                    new ApplicationStateHolder(),
-                    () -> null,
-                    () -> eventManager,
-                    () -> executor);
-            OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
-                    storage,
-                    new FixedPasswordHashingService(),
-                    provider,
-                    new OrionConfiguration(),
-                    PublicKeysProvider.DEFAULT);
-            startWithoutRootPasswordOutput(service);
-            return service;
-        }
-    }
-
-    private OrionEventManager startedEventManager() {
-        OrionEventManager eventManager = new OrionEventManager();
-        eventManager.onInit();
-        return eventManager;
-    }
-
-    private void startWithoutRootPasswordOutput(OrionAccessControlServiceImpl service) throws Exception {
-        PrintStream originalOut = System.out;
-        try {
-            System.setOut(new PrintStream(OutputStream.nullOutputStream()));
-            OrionStageCallResult result = service.aclLoad();
-            waitForStageTasks(result);
-        } finally {
-            System.setOut(originalOut);
-        }
-    }
-
-    private void waitForStageTasks(OrionStageCallResult result) throws Exception {
-        for (var future : result.getFuturesToWait()) {
-            future.getFuture().get(5, TimeUnit.SECONDS);
-        }
-    }
-
-    private void assertUserAuthenticates(OrionAccessControlServiceImpl service, String userId) {
-        AuthenticationResult result = service.authenticateUser(
-                userId,
-                AccessControl.CredentialType.ARGON2,
-                TEST_PASSWORD.getBytes(StandardCharsets.UTF_8));
-
-        AuthenticationResult.Success success = assertInstanceOf(AuthenticationResult.Success.class, result);
-        assertEquals(userId, success.userIdentity().getUserId());
+    private void assertStorageLoadsUser(AccessControlStorage storage, String userId) throws Exception {
+        AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load from storage");
+        AccessControl accessControl = xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(ACL_FILE)));
+        assertEquals(1, accessControl.getUsers().size());
+        assertEquals(userId, accessControl.getUsers().getFirst().getId());
     }
 
     private OrionConfiguration configurationWithGitAcl(String location) {
@@ -341,6 +340,15 @@ class OrionRuntimeModuleTest {
         configuration.getTransport().getSsh().setEnabled(false);
         configuration.getTransport().getHttp().setEnabled(false);
         configuration.getTransport().getHttps().setEnabled(false);
+        return configuration;
+    }
+
+    private OrionConfiguration runtimeConfigurationWithEnabledTransports() {
+        OrionConfiguration configuration = defaultRuntimeConfiguration();
+        configuration.getTransport().getGit().setEnabled(true);
+        configuration.getTransport().getSsh().setEnabled(true);
+        configuration.getTransport().getHttp().setEnabled(true);
+        configuration.getTransport().getHttps().setEnabled(true);
         return configuration;
     }
 
@@ -371,22 +379,4 @@ class OrionRuntimeModuleTest {
         }
     }
 
-    private static final class FixedPasswordHashingService extends OrionPasswordHashingService {
-        @Override
-        public char[] generateRandomString(int length) {
-            return TEST_PASSWORD.toCharArray();
-        }
-
-        @Override
-        public String calculateHash(char[] password) {
-            assertEquals(TEST_PASSWORD, String.valueOf(password));
-            return TEST_PASSWORD_HASH;
-        }
-
-        @Override
-        public boolean comparePassword(String expected, byte[] provided) {
-            return TEST_PASSWORD_HASH.equals(expected)
-                    && TEST_PASSWORD.equals(new String(provided, StandardCharsets.UTF_8));
-        }
-    }
 }

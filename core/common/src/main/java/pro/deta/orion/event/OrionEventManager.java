@@ -51,9 +51,7 @@ public class OrionEventManager implements OrionApplicationStageEventListener {
                 .after(OrionLifecycleTasks.JGIT_RUNTIME)
                 .waitForCompletionSecs(2);
         registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.EVENT_MANAGER_STOP, this::onStop)
-                .after(OrionLifecycleTasks.HTTP_TRANSPORT_STOP)
-                .after(OrionLifecycleTasks.GIT_TRANSPORT_STOP)
-                .after(OrionLifecycleTasks.SSH_TRANSPORT_STOP);
+                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
     }
 
     public OrionStageCallResult onInit() {
