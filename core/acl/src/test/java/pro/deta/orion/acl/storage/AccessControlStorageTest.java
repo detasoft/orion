@@ -285,8 +285,7 @@ class AccessControlStorageTest {
         LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
 
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
-            OrionEventManager eventManager = new OrionEventManager();
-            eventManager.onInit();
+            OrionEventManager eventManager = startedEventManager();
             try {
                 OrionProvider provider = new OrionProvider(
                         new ApplicationStateHolder(),
@@ -507,10 +506,11 @@ class AccessControlStorageTest {
             OrionConfiguration configuration,
             PublicKeysProvider publicKeysProvider) throws Exception {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
+            OrionEventManager eventManager = startedEventManager();
             OrionProvider provider = new OrionProvider(
                     new ApplicationStateHolder(),
                     () -> null,
-                    OrionEventManager::new,
+                    () -> eventManager,
                     () -> executor);
             OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                     storage,
@@ -521,6 +521,12 @@ class AccessControlStorageTest {
             startWithoutRootPasswordOutput(service);
             return service;
         }
+    }
+
+    private OrionEventManager startedEventManager() {
+        OrionEventManager eventManager = new OrionEventManager();
+        eventManager.onInit();
+        return eventManager;
     }
 
     private void startWithoutRootPasswordOutput(OrionAccessControlServiceImpl service) throws Exception {

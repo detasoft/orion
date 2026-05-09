@@ -19,10 +19,6 @@ public class OrionProvider {
     private final Provider<OrionEventManager> eventManager;
     private final Provider<OrionExecutor> orionExecutor;
 
-    public boolean appIsActive() {
-        return applicationStateHolder.getState().appIsActive();
-    }
-
     public OrionApplicationLifecycle getOrionApplicationLifecycle() {
         return orionApplicationLifecycle.get();
     }

@@ -59,4 +59,5 @@ class OrionEventTest {
                         "result=OK")
                 .doesNotContain("@");
     }
+
 }

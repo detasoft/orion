@@ -13,6 +13,7 @@ import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.lifecycle.*;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
+import pro.deta.orion.util.OrionUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,8 +26,8 @@ import java.util.function.Supplier;
  * Application-wide asynchronous event bus for Orion events.
  *
  * <p>An event is a concrete {@link OrionEvent} subclass that describes something that already happened or must be
- * reacted to elsewhere in the application. Current examples include git receive/upload notifications, volatile ACL user
- * additions and ACL reload requests. Events should carry the data their handlers need, because handlers run later and
+ * reacted to elsewhere in the application. Current examples include git receive/upload notifications and ACL reload
+ * requests. Events should carry the data their handlers need, because handlers run later and
  * outside the original request flow.</p>
  *
  * <p>The manager owns a single root Disruptor and starts/stops it with the application lifecycle. Event dispatch is
@@ -103,5 +104,10 @@ public class OrionEventManager implements OrionApplicationStageEventListener {
     public void publish(OrionEvent orionEvent) {
         rootDisruptor.publish(orionEvent);
     }
-
+    public void publishAndWait(OrionEvent orionEvent) {
+        publish(orionEvent);
+        if (!OrionUtils.waitForCondition(orionEvent::isProcessed)) {
+            throw new IllegalStateException("Timed out waiting for ACL reload event: " + orionEvent);
+        }
+    }
 }

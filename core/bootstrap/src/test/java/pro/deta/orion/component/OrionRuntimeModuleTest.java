@@ -174,7 +174,7 @@ class OrionRuntimeModuleTest {
         OrionAccessControlServiceImpl service = startAccessControlService(storage);
 
         assertEquals(VersionedAccessControlStorage.class, storage.getClass());
-        assertEquals(1, repositoryProvider.findCalls);
+        assertEquals(2, repositoryProvider.findCalls);
         assertEquals(0, repositoryProvider.findOrCreateCalls);
         assertUserAuthenticates(service, "area-user");
     }
@@ -273,10 +273,11 @@ class OrionRuntimeModuleTest {
 
     private OrionAccessControlServiceImpl startAccessControlService(AccessControlStorage storage) throws Exception {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
+            OrionEventManager eventManager = startedEventManager();
             OrionProvider provider = new OrionProvider(
                     new ApplicationStateHolder(),
                     () -> null,
-                    OrionEventManager::new,
+                    () -> eventManager,
                     () -> executor);
             OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                     storage,
@@ -287,6 +288,12 @@ class OrionRuntimeModuleTest {
             startWithoutRootPasswordOutput(service);
             return service;
         }
+    }
+
+    private OrionEventManager startedEventManager() {
+        OrionEventManager eventManager = new OrionEventManager();
+        eventManager.onInit();
+        return eventManager;
     }
 
     private void startWithoutRootPasswordOutput(OrionAccessControlServiceImpl service) throws Exception {

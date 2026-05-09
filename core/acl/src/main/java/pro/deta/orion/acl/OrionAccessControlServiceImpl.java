@@ -86,33 +86,30 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             requestToUpdate();
         });
         OrionStageCallResult orionStageCallResult = OrionStageCallResult.defaultWithWait();
-        rwLock.writeLock().lock();
         try {
-            Result<AccessControl> loadedAccessControl = loadAccessControl();
-            loadedAccessControl.onFailure(f -> {
-                if (f.code() == Result.FailureCode.NOT_FOUND) {
-                    if (!configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing()) {
-                        throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
+            switch (loadAccessControl()) {
+                case Result.Success<AccessControl> ignored -> requestAclUpdateAndWait("aclLoad()");
+                case Result.Failure<AccessControl> f -> {
+                    if (f.code() == Result.FailureCode.NOT_FOUND) {
+                        if (!configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing()) {
+                            throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
+                        }
+                        orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
+                            char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
+                            String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);
+                            printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
+                            AccessControl ac = createDefaultAccessControl(passwordHash);
+                            saveAccessControlAndRequestUpdate(ac, "default scheme applied", UserEmail.EMPTY);
+                        });
+                    } else {
+                        log.error("Error while preparing configuration repository.", f.throwable());
+                        throw new IllegalStateException("Configuration repository not initialized.", f.throwable());
                     }
-                    orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
-                        char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
-                        String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);
-                        printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
-                        AccessControl ac = createDefaultAccessControl(passwordHash);
-                        saveAccessControl(ac, "default scheme applied", UserEmail.EMPTY);
-                        updateAccessControl(ac);
-                    });
-                } else {
-                    log.error("Error while preparing configuration repository.", f.throwable());
-                    throw new IllegalStateException("Configuration repository not initialized.", f.throwable());
                 }
-            }).onSuccess(this::prepareAndUpdateAccessControl);
-
+            }
         } catch (Exception e) {
             log.error("Error while preparing configuration repository.", e);
             throw new IllegalStateException("Configuration repository not initialized.", e);
-        } finally {
-            rwLock.writeLock().unlock();
         }
         return orionStageCallResult;
     }
@@ -139,11 +136,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return token.clone();
     }
 
-    /**
-     * Assume to be under rwLock.writeLock
-     *
-     * @param accessControl
-     */
     private void updateAccessControl(AccessControl accessControl) {
         this.accessControl.set(accessControl.unmodify());
     }
@@ -166,16 +158,22 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             if (performAuthentication(u, credentialType, encodedData))
                 return createUserIdentity(u);
         }
-        log.warn("Attempt to authenticate as {} with public key failed.", userName);
+        log.warn("Attempt to authenticate as '{}' with public key failed.", userName);
         return AuthenticationResult.failure("authentication failed");
     }
 
     private void requestToUpdate() {
-        try {
-            loadAccessControl().onSuccess(this::prepareAndUpdateAccessControl);
-        } catch (Throwable t) {
-            throw t;
+        switch (loadAccessControl()) {
+            case Result.Success<AccessControl>(var ac) -> prepareAndUpdateAccessControl(ac);
+            case Result.Failure<AccessControl> f -> {
+                log.error("Error while reloading ACL: [{}] {}", f.code(), f.message(), f.throwable());
+                throw new IllegalStateException("ACL cannot be reloaded.", f.throwable());
+            }
         }
+    }
+
+    private void requestAclUpdateAndWait(String initiator) {
+        orionProvider.getEventManager().publishAndWait(new RequestToAclUpdate(initiator));
     }
 
     private AccessControl createDefaultAccessControl(String passwordHash) {
@@ -327,8 +325,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private void holdWriteLock(Supplier<AccessControl> r) {
         rwLock.writeLock().lock();
         try {
-            AccessControl ac = r.get();
-            updateAccessControl(ac);
+            r.get();
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -351,7 +348,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 }
 
                 ac.getUsers().add(user);
-                saveAccessControl(ac, "createOrUpdateUser() " + userUpdate.id(), new UserEmail(userUpdate.id(), userUpdate.email()));
+                saveAccessControlAndRequestUpdate(ac, "createOrUpdateUser() " + userUpdate.id(), new UserEmail(userUpdate.id(), userUpdate.email()));
                 return ac;
             });
         }
@@ -368,13 +365,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 } else if (keyParts.length == 2) {
                     postfix = " " + keyParts[0];
                 }
-                saveAccessControl(ac, "addKeyToUser() to " + username + postfix, new UserEmail(username, user.getEmail()));
+                saveAccessControlAndRequestUpdate(ac, "addKeyToUser() to " + username + postfix, new UserEmail(username, user.getEmail()));
                 return ac;
             });
         }
 
         private AccessControl.User findUserById(AccessControl ac, String username) {
-            List<AccessControl.User> users = ac.getUsers().stream().filter(u -> u.getId().equalsIgnoreCase(username)).toList();
+            List<AccessControl.User> users = ac.getUsers().stream().filter(u -> u.getId() != null && u.getId().equalsIgnoreCase(username)).toList();
             if (users.size() > 1) {
                 throw new IllegalStateException("More than a single user found.");
             } else if (users.isEmpty()) {
@@ -471,5 +468,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         } catch (IOException e) {
             throw new IllegalStateException("Cannot serialize ACL", e);
         }
+    }
+
+    private void saveAccessControlAndRequestUpdate(AccessControl accessControl, String message, UserEmail author) {
+        saveAccessControl(accessControl, message, author);
+        requestAclUpdateAndWait(author + " " + message);
     }
 }
