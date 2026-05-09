@@ -6,12 +6,15 @@ import org.bouncycastle.crypto.params.Argon2Parameters;
 import pro.deta.orion.util.rle.RLETCoder;
 
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -19,6 +22,7 @@ import java.util.stream.Stream;
 
 import static java.util.Collections.shuffle;
 import static java.util.stream.Collectors.collectingAndThen;
+import static pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1;
 
 
 public class OrionPasswordHashingService {
@@ -30,6 +34,7 @@ public class OrionPasswordHashingService {
             }
     );
     private static final int HASH_LENGTH = 32;
+    private static final char[] HEX = "0123456789abcdef".toCharArray();
 
     private final SecureRandom random;
     private final Base64.Encoder encoder;
@@ -50,7 +55,10 @@ public class OrionPasswordHashingService {
         return generateSecureRandomPassword(length);
     }
 
-    public String calculateHash(char[] password) {
+    public String calculateHash(PasswordHashingAlgorithm algorithm, char[] password) {
+        if (algorithm == SHA1) {
+            return sha1Hex(password);
+        }
         byte[] salt = generateSalt16Byte();
         byte[] r = internalCalculateHash(salt, password);
         byte[] result = RLETCoder.ENCODER_SHORT.encodeRLET(salt, r);
@@ -136,7 +144,10 @@ public class OrionPasswordHashingService {
         return new OrionGenerator(generator);
     }
 
-    public boolean comparePassword(String expected, byte[] provided) {
+    public boolean comparePassword(PasswordHashingAlgorithm algorithm, String expected, byte[] provided) {
+        if (algorithm == SHA1) {
+            return sha1Hex(provided).equals(expected);
+        }
         ByteBuffer expectedByteBuffer = ByteBuffer.wrap(decoder.decode(expected));
         byte[][] parts = RLETCoder.ENCODER_SHORT.decodeRLET(expectedByteBuffer);
         if (parts.length != 2) {
@@ -144,5 +155,35 @@ public class OrionPasswordHashingService {
         }
         byte[] actualContent = internalCalculateHash(parts[0], provided);
         return Arrays.equals(actualContent, parts[1]);
+    }
+
+    private static String sha1Hex(byte[] content) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-1");
+            byte[] hash = digest.digest(content);
+            StringBuilder builder = new StringBuilder(hash.length * 2);
+            for (byte value : hash) {
+                int unsigned = value & 0xff;
+                builder.append(HEX[unsigned >>> 4]);
+                builder.append(HEX[unsigned & 0x0f]);
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-1 digest is not available", e);
+        }
+    }
+
+    private static String sha1Hex(char[] content) {
+        ByteBuffer buffer = StandardCharsets.UTF_8.encode(CharBuffer.wrap(content));
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        try {
+            return sha1Hex(bytes);
+        } finally {
+            Arrays.fill(bytes, (byte) 0);
+            if (buffer.hasArray()) {
+                Arrays.fill(buffer.array(), (byte) 0);
+            }
+        }
     }
 }

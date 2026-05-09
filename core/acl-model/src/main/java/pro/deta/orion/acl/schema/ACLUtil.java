@@ -4,6 +4,12 @@ import java.util.ArrayList;
 
 public class ACLUtil {
     public static AccessControl generateDefaultAccessControl(String defaultRootPasswordHash) {
+        return generateDefaultAccessControl(defaultRootPasswordHash, AccessControl.CredentialType.ARGON2);
+    }
+
+    public static AccessControl generateDefaultAccessControl(
+            String defaultRootPasswordHash,
+            AccessControl.CredentialType passwordCredentialType) {
         AccessControl s = new AccessControl();
         AccessControl.Grant connectFromLocalhost = createGrant("CONNECT")
                 .addKey(AccessControl.GrantKey.NETWORK_SOURCE, "127.0.0.1");
@@ -25,7 +31,7 @@ public class ACLUtil {
                 .addGrantReference(applicationControl.getId());
 
         AccessControl.User rootUser = createUser("root", "root@orion.pro")
-                .addCredential(AccessControl.CredentialType.ARGON2, defaultRootPasswordHash)
+                .addCredential(passwordCredentialType, defaultRootPasswordHash)
                 .addCredential(AccessControl.CredentialType.BEARER_TOKEN, defaultRootPasswordHash)
                 .addRole(rootRole.getId());
 

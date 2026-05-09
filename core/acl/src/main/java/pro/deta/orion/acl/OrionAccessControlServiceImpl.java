@@ -18,6 +18,7 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
@@ -44,6 +45,8 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static pro.deta.orion.acl.schema.AccessControl.CredentialType.OPENSSH_PUBLIC_KEY;
+import static pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2;
+import static pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1;
 import static pro.deta.orion.util.Result.Failure.generalFailure;
 
 @Slf4j
@@ -95,10 +98,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                             throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
                         }
                         orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
+                            PasswordHashingAlgorithm passwordHashingAlgorithm = defaultPasswordHashingAlgorithm();
                             char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
-                            String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);
+                            String passwordHash = orionPasswordHashingService.calculateHash(
+                                    passwordHashingAlgorithm,
+                                    defaultRootPassword);
                             printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
-                            AccessControl ac = createDefaultAccessControl(passwordHash);
+                            AccessControl ac = createDefaultAccessControl(
+                                    passwordHash,
+                                    defaultPasswordCredentialType(passwordHashingAlgorithm));
                             saveAccessControlAndRequestUpdate(ac, "default scheme applied", UserEmail.EMPTY);
                         });
                     } else {
@@ -176,10 +184,23 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         orionProvider.getEventManager().publishAndWait(new RequestToAclUpdate(initiator));
     }
 
-    private AccessControl createDefaultAccessControl(String passwordHash) {
-        AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash);
+    private AccessControl createDefaultAccessControl(
+            String passwordHash,
+            AccessControl.CredentialType passwordCredentialType) {
+        AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash, passwordCredentialType);
         addInternalServerKeysToRoot(ac);
         return ac;
+    }
+
+    protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {
+        return ARGON2;
+    }
+
+    private AccessControl.CredentialType defaultPasswordCredentialType(PasswordHashingAlgorithm algorithm) {
+        return switch (algorithm) {
+            case ARGON2 -> AccessControl.CredentialType.ARGON2;
+            case SHA1 -> AccessControl.CredentialType.SHA1;
+        };
     }
 
     private void prepareAndUpdateAccessControl(AccessControl ac) {
@@ -276,12 +297,17 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case OPENSSH_PUBLIC_KEY -> {
                 yield publicKeysAreEqual(expected, provided);
             }
-            case SHA1 -> false;
+            case SHA1 -> {
+                yield orionPasswordHashingService.comparePassword(SHA1, expected, provided);
+            }
             case MD5 -> false;
             case PLAIN -> false;
             case SHA3_256 -> false;
-            case ARGON2, BEARER_TOKEN -> {
-                yield orionPasswordHashingService.comparePassword(expected, provided);
+            case ARGON2 -> {
+                yield orionPasswordHashingService.comparePassword(ARGON2, expected, provided);
+            }
+            case BEARER_TOKEN -> {
+                yield orionPasswordHashingService.comparePassword(SHA1, expected, provided);
             }
         };
     }

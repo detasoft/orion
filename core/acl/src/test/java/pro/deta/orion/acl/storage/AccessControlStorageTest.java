@@ -5,6 +5,7 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.RefSpec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -18,6 +19,7 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.crypto.ServerKeyService;
 import pro.deta.orion.event.OrionEventManager;
@@ -51,17 +53,27 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1;
 
 class AccessControlStorageTest {
     private static final String BRANCH = "master";
     private static final String ACL_FILE = "config/orion.xml";
     private static final String DEFAULT_ROOT_PASSWORD = "root-password";
-    private static final String DEFAULT_ROOT_PASSWORD_HASH = "fixed-root-password-hash";
+    private static final String DEFAULT_ROOT_PASSWORD_HASH = "be1ec2bc9b9735be8fc708736e8e74a5bd46af75";
 
     @TempDir
     private Path tempDir;
 
     private final XmlService xmlService = new XmlService();
+    private final List<TestProviderContext> providerContexts = new ArrayList<>();
+
+    @AfterEach
+    void closeProviderContexts() {
+        for (TestProviderContext context : providerContexts) {
+            context.close();
+        }
+        providerContexts.clear();
+    }
 
     @Test
     void localStorageLoadsAclFromFile() throws Exception {
@@ -151,7 +163,7 @@ class AccessControlStorageTest {
     void accessControlServiceDoesNotCreateInitialAclWhenDisabled() {
         Path aclDirectory = tempDir.resolve("default-disabled-acl");
         LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
-        OrionConfiguration configuration = new OrionConfiguration();
+        OrionConfiguration configuration = testConfiguration();
         configuration.getBootstrap().getAccessControl().setCreateDefaultIfMissing(false);
 
         assertThatThrownBy(() -> startAccessControlService(storage, configuration))
@@ -220,7 +232,7 @@ class AccessControlStorageTest {
     @Test
     void defaultRootAuthenticatesWithInternalServerKey() throws Exception {
         Path aclDirectory = tempDir.resolve("server-key-root-acl");
-        OrionConfiguration configuration = new OrionConfiguration();
+        OrionConfiguration configuration = testConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.resolve("server-key-root-base").toString());
         ServerKeyService serverKeyService = new ServerKeyService(new ConfigurationContext(configuration));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
@@ -258,7 +270,7 @@ class AccessControlStorageTest {
         Path aclDirectory = tempDir.resolve("existing-server-key-root-acl");
         Files.createDirectories(aclDirectory.resolve("config"));
         Files.write(aclDirectory.resolve(ACL_FILE), aclBytesWithPasswordUser("root"));
-        OrionConfiguration configuration = new OrionConfiguration();
+        OrionConfiguration configuration = testConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.resolve("existing-server-key-root-base").toString());
         ServerKeyService serverKeyService = new ServerKeyService(new ConfigurationContext(configuration));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
@@ -284,33 +296,28 @@ class AccessControlStorageTest {
         Files.write(aclDirectory.resolve(ACL_FILE), aclBytesWithPasswordUser("initial-user"));
         LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
 
-        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
-            OrionEventManager eventManager = startedEventManager();
-            try {
-                OrionProvider provider = new OrionProvider(
-                        new ApplicationStateHolder(),
-                        () -> null,
-                        () -> eventManager,
-                        () -> executor);
-                OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
-                        storage,
-                        new FixedPasswordHashingService(),
-                        provider,
-                        new OrionConfiguration(),
-                        PublicKeysProvider.DEFAULT);
-                waitForStageTasks(service.aclLoad());
-                assertUserAuthenticates(service, "initial-user");
-
-                Files.write(aclDirectory.resolve(ACL_FILE), aclBytesWithPasswordUser("reloaded-user"));
-                RequestToAclUpdate event = new RequestToAclUpdate("test");
-                eventManager.publish(event);
-
-                assertThat(OrionUtils.waitForCondition(event::isProcessed, 5, TimeUnit.SECONDS)).isTrue();
-                assertUserAuthenticates(service, "reloaded-user");
-            } finally {
-                eventManager.onStop();
+        OrionConfiguration configuration = testConfiguration();
+        TestProviderContext providerContext = startedProviderContext();
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+                storage,
+                new FixedPasswordHashingService(),
+                providerContext.orionProvider(),
+                configuration,
+                PublicKeysProvider.DEFAULT) {
+            @Override
+            protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {
+                return SHA1;
             }
-        }
+        };
+        waitForStageTasks(service.aclLoad());
+        assertUserAuthenticates(service, "initial-user");
+
+        Files.write(aclDirectory.resolve(ACL_FILE), aclBytesWithPasswordUser("reloaded-user"));
+        RequestToAclUpdate event = new RequestToAclUpdate("test");
+        providerContext.eventManager().publish(event);
+
+        assertThat(OrionUtils.waitForCondition(event::isProcessed, 5, TimeUnit.SECONDS)).isTrue();
+        assertUserAuthenticates(service, "reloaded-user");
     }
 
     @Test
@@ -461,7 +468,7 @@ class AccessControlStorageTest {
     private AccessControl accessControlWithPasswordUser(String userId) {
         AccessControl accessControl = new AccessControl();
         accessControl.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
-                .addCredential(AccessControl.CredentialType.ARGON2, DEFAULT_ROOT_PASSWORD_HASH));
+                .addCredential(AccessControl.CredentialType.SHA1, DEFAULT_ROOT_PASSWORD_HASH));
         return accessControl;
     }
 
@@ -492,7 +499,7 @@ class AccessControlStorageTest {
     }
 
     private OrionAccessControlServiceImpl startAccessControlService(AccessControlStorage storage) throws Exception {
-        return startAccessControlService(storage, new OrionConfiguration());
+        return startAccessControlService(storage, testConfiguration());
     }
 
     private OrionAccessControlServiceImpl startAccessControlService(
@@ -505,28 +512,30 @@ class AccessControlStorageTest {
             AccessControlStorage storage,
             OrionConfiguration configuration,
             PublicKeysProvider publicKeysProvider) throws Exception {
-        try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
-            OrionEventManager eventManager = startedEventManager();
-            OrionProvider provider = new OrionProvider(
-                    new ApplicationStateHolder(),
-                    () -> null,
-                    () -> eventManager,
-                    () -> executor);
-            OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
-                    storage,
-                    new FixedPasswordHashingService(),
-                    provider,
-                    configuration,
-                    publicKeysProvider);
-            startWithoutRootPasswordOutput(service);
-            return service;
-        }
+        TestProviderContext providerContext = startedProviderContext();
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+                storage,
+                new FixedPasswordHashingService(),
+                providerContext.orionProvider(),
+                configuration,
+                publicKeysProvider) {
+            @Override
+            protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {
+                return SHA1;
+            }
+        };
+        startWithoutRootPasswordOutput(service);
+        return service;
     }
 
-    private OrionEventManager startedEventManager() {
-        OrionEventManager eventManager = new OrionEventManager();
-        eventManager.onInit();
-        return eventManager;
+    private OrionConfiguration testConfiguration() {
+        return new OrionConfiguration();
+    }
+
+    private TestProviderContext startedProviderContext() {
+        TestProviderContext providerContext = new TestProviderContext();
+        providerContexts.add(providerContext);
+        return providerContext;
     }
 
     private void startWithoutRootPasswordOutput(OrionAccessControlServiceImpl service) throws Exception {
@@ -557,7 +566,7 @@ class AccessControlStorageTest {
         assertThat(rootUser.getRoles()).containsExactly("ROOT");
         assertThat(credentialValues(rootUser))
                 .hasSize(2)
-                .containsEntry(AccessControl.CredentialType.ARGON2, DEFAULT_ROOT_PASSWORD_HASH)
+                .containsEntry(AccessControl.CredentialType.SHA1, DEFAULT_ROOT_PASSWORD_HASH)
                 .containsEntry(AccessControl.CredentialType.BEARER_TOKEN, DEFAULT_ROOT_PASSWORD_HASH);
 
         assertThat(roleIds(accessControl)).containsExactly("ROOT");
@@ -582,7 +591,7 @@ class AccessControlStorageTest {
     private void assertRootAuthenticates(OrionAccessControlServiceImpl service) {
         AuthenticationResult result = service.authenticateUser(
                 "root",
-                AccessControl.CredentialType.ARGON2,
+                AccessControl.CredentialType.SHA1,
                 DEFAULT_ROOT_PASSWORD.getBytes(StandardCharsets.UTF_8));
 
         assertThat(result).isInstanceOf(AuthenticationResult.Success.class);
@@ -606,7 +615,7 @@ class AccessControlStorageTest {
     private void assertUserAuthenticates(OrionAccessControlServiceImpl service, String userId) {
         AuthenticationResult result = service.authenticateUser(
                 userId,
-                AccessControl.CredentialType.ARGON2,
+                AccessControl.CredentialType.SHA1,
                 DEFAULT_ROOT_PASSWORD.getBytes(StandardCharsets.UTF_8));
 
         assertThat(result).isInstanceOf(AuthenticationResult.Success.class);
@@ -686,22 +695,38 @@ class AccessControlStorageTest {
         return names;
     }
 
+    private static final class TestProviderContext implements AutoCloseable {
+        private final OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+        private final OrionEventManager eventManager = new OrionEventManager();
+        private final OrionProvider provider = new OrionProvider(
+                new ApplicationStateHolder(),
+                () -> null,
+                () -> eventManager,
+                () -> executor);
+
+        private TestProviderContext() {
+            eventManager.onInit();
+        }
+
+        private OrionEventManager eventManager() {
+            return eventManager;
+        }
+
+        private OrionProvider orionProvider() {
+            return provider;
+        }
+
+        @Override
+        public void close() {
+            eventManager.onStop();
+            executor.onStop();
+        }
+    }
+
     private static final class FixedPasswordHashingService extends OrionPasswordHashingService {
         @Override
         public char[] generateRandomString(int length) {
             return DEFAULT_ROOT_PASSWORD.toCharArray();
-        }
-
-        @Override
-        public String calculateHash(char[] password) {
-            assertThat(String.valueOf(password)).isEqualTo(DEFAULT_ROOT_PASSWORD);
-            return DEFAULT_ROOT_PASSWORD_HASH;
-        }
-
-        @Override
-        public boolean comparePassword(String expected, byte[] provided) {
-            return DEFAULT_ROOT_PASSWORD_HASH.equals(expected)
-                    && DEFAULT_ROOT_PASSWORD.equals(new String(provided, StandardCharsets.UTF_8));
         }
     }
 
