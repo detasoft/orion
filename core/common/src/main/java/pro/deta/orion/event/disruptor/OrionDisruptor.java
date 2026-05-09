@@ -24,6 +24,7 @@ import java.util.function.Supplier;
  */
 public class OrionDisruptor {
     private final Disruptor<EventHolder> eventHolderDisruptor;
+    private volatile boolean started;
 
     public OrionDisruptor(int size) {
         eventHolderDisruptor = new Disruptor<>(EventHolder::new, size, DaemonThreadFactory.INSTANCE);
@@ -31,6 +32,7 @@ public class OrionDisruptor {
 
     public void start() {
         eventHolderDisruptor.start();
+        started = true;
     }
 
     public void publish(OrionEvent orionEvent) {
@@ -38,6 +40,9 @@ public class OrionDisruptor {
     }
 
     public void publish(Supplier<OrionEvent> eventPublisher) {
+        if (!started) {
+            throw new IllegalStateException("Cannot publish Orion event before event disruptor is started");
+        }
         eventHolderDisruptor.getRingBuffer().publishEvent(new EventTranslator<EventHolder>() {
             @Override
             public void translateTo(EventHolder eventHolder, long l) {
@@ -47,6 +52,7 @@ public class OrionDisruptor {
     }
 
     public void stop() throws TimeoutException {
+        started = false;
         eventHolderDisruptor.shutdown(10, TimeUnit.SECONDS);
     }
 
