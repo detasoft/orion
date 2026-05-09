@@ -48,6 +48,17 @@ backend credentials are not Orion ACL users.
 Startup and shutdown order is defined by explicit lifecycle flows and named task dependencies.
 See [docs/lifecycle.md](docs/lifecycle.md).
 
+# Unit test logging
+
+Unit tests run with normal log levels by default. To enable project DEBUG logs for a local test run:
+
+`mvn test -Pdev -Dorion.test.debug=true`
+
+The default debug category is `pro.deta.orion`. Use `orion.test.log.level` and `orion.test.log.categories` for a
+narrower or broader scope:
+
+`mvn test -Pdev -Dorion.test.debug=true -Dorion.test.log.level=TRACE -Dorion.test.log.categories=pro.deta.orion.git,org.eclipse.jgit=WARN`
+
 # Next steps
 1. [git-mirror] func to mirror github/gitlab hostings
 2. [ACL] [ssh-remote] add support for user's key provided

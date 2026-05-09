@@ -28,6 +28,9 @@
     <acme4j.version>3.5.0</acme4j.version>
     <sshd.version>2.13.2</sshd.version>
     <eddsa.version>0.3.0</eddsa.version>
+    <orion.test.debug>false</orion.test.debug>
+    <orion.test.log.level>DEBUG</orion.test.log.level>
+    <orion.test.log.categories>pro.deta.orion</orion.test.log.categories>
   </properties>
 
   <modules>
@@ -239,6 +242,9 @@
           <configuration>
             <systemPropertyVariables>
               <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+              <orion.test.debug>${orion.test.debug}</orion.test.debug>
+              <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
+              <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
             </systemPropertyVariables>
           </configuration>
         </plugin>
@@ -248,6 +254,9 @@
           <configuration>
             <systemPropertyVariables>
               <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+              <orion.test.debug>${orion.test.debug}</orion.test.debug>
+              <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
+              <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
             </systemPropertyVariables>
           </configuration>
         </plugin>
@@ -305,6 +314,9 @@
               <systemPropertyVariables>
                 <orion.testDurations.enabled>false</orion.testDurations.enabled>
                 <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+                <orion.test.debug>${orion.test.debug}</orion.test.debug>
+                <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
+                <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
               </systemPropertyVariables>
             </configuration>
           </plugin>
@@ -317,6 +329,9 @@
               <systemPropertyVariables>
                 <orion.testDurations.enabled>false</orion.testDurations.enabled>
                 <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+                <orion.test.debug>${orion.test.debug}</orion.test.debug>
+                <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
+                <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
               </systemPropertyVariables>
             </configuration>
           </plugin>
