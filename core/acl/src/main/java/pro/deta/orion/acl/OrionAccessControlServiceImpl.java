@@ -58,21 +58,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.ACL_INIT, this::onInit)
-                .after(OrionLifecycleTasks.EVENT_MANAGER);
         registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::aclLoad)
                 .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
     }
 
-    public OrionStageCallResult onInit() {
+    public OrionStageCallResult aclLoad() {
         orionProvider.getEventManager().registerTypeHandler(RequestToAclUpdate.class, (event) -> {
             log.debug("Request to update ACL received: {}", event);
             requestToUpdate();
         });
-        return OrionStageCallResult.EMPTY;
-    }
-
-    public OrionStageCallResult aclLoad() {
         OrionStageCallResult orionStageCallResult = OrionStageCallResult.defaultWithWait();
         rwLock.writeLock().lock();
         try {

@@ -24,8 +24,7 @@ Lifecycle code must register named tasks through `ApplicationStateListenerRegist
 JGIT_RUNTIME
 SSH_TRANSPORT_INIT
 EVENT_MANAGER after JGIT_RUNTIME
-ACL_INIT after EVENT_MANAGER
-GIT_BACKED_INTERNAL_STORAGE_INIT after ACL_INIT
+GIT_BACKED_INTERNAL_STORAGE_INIT after EVENT_MANAGER
 ```
 
 `STARTING` brings storage and ACL up before any transport accepts users:

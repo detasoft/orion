@@ -4,7 +4,6 @@ public final class OrionLifecycleTasks {
     public static final LifecycleTaskId JGIT_RUNTIME = new LifecycleTaskId("JGIT_RUNTIME");
     public static final LifecycleTaskId SSH_TRANSPORT_INIT = new LifecycleTaskId("SSH_TRANSPORT_INIT");
     public static final LifecycleTaskId EVENT_MANAGER = new LifecycleTaskId("EVENT_MANAGER");
-    public static final LifecycleTaskId ACL_INIT = new LifecycleTaskId("ACL_INIT");
     public static final LifecycleTaskId GIT_BACKED_INTERNAL_STORAGE_INIT =
             new LifecycleTaskId("GIT_BACKED_INTERNAL_STORAGE_INIT");
     public static final LifecycleTaskId REPOSITORY_STORAGE = new LifecycleTaskId("REPOSITORY_STORAGE");

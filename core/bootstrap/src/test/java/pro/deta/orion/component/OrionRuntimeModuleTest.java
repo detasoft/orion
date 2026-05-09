@@ -20,6 +20,7 @@ import pro.deta.orion.acl.storage.VersionedAccessControlStorage;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.GitRepositoryProviderImpl;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.OrionExecutor;
@@ -58,7 +59,7 @@ class OrionRuntimeModuleTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
-    void runtimeInitPlanOrdersJGitEventsAclAndStorageInit() {
+    void runtimeInitPlanOrdersJGitEventsAndStorageInit() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
@@ -66,8 +67,8 @@ class OrionRuntimeModuleTest {
         assertTrue(plan.contains("JGIT_RUNTIME"));
         assertTrue(plan.contains("SSH_TRANSPORT_INIT"));
         assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
-        assertTrue(plan.contains("ACL_INIT after EVENT_MANAGER"));
-        assertTrue(plan.contains("GIT_BACKED_INTERNAL_STORAGE_INIT after ACL_INIT"));
+        assertTrue(plan.contains("GIT_BACKED_INTERNAL_STORAGE_INIT after EVENT_MANAGER"));
+        assertFalse(plan.contains("ACL_INIT"));
     }
 
     @Test
@@ -249,7 +250,11 @@ class OrionRuntimeModuleTest {
 
     private OrionAccessControlServiceImpl startAccessControlService(AccessControlStorage storage) throws Exception {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
-            OrionProvider provider = new OrionProvider(new ApplicationStateHolder(), () -> null, () -> null, () -> executor);
+            OrionProvider provider = new OrionProvider(
+                    new ApplicationStateHolder(),
+                    () -> null,
+                    OrionEventManager::new,
+                    () -> executor);
             OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                     storage,
                     new FixedPasswordHashingService(),

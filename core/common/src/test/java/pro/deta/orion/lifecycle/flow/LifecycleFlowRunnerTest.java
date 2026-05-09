@@ -35,6 +35,23 @@ class LifecycleFlowRunnerTest {
     }
 
     @Test
+    void startupFlowDoesNotRunStagesAgainAfterApplicationIsUp() {
+        ApplicationStateHolder stateHolder = new ApplicationStateHolder();
+        List<ApplicationState> stages = new ArrayList<>();
+        LifecycleFlowRunner runner = new LifecycleFlowRunner(
+                stateHolder,
+                stage -> {
+                    stages.add(stage);
+                    return true;
+                });
+
+        assertThat(runner.runStartup()).isEqualTo(ApplicationState.UP);
+        assertThat(runner.runStartup()).isEqualTo(ApplicationState.UP);
+
+        assertThat(stages).containsExactly(ApplicationState.INIT, ApplicationState.STARTING);
+    }
+
+    @Test
     void transitionOnlyStepMovesStateWithoutRunningStage() {
         ApplicationStateHolder stateHolder = startedApplication();
         List<ApplicationState> stages = new ArrayList<>();
