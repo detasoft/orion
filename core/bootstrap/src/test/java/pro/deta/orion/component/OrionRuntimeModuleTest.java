@@ -19,6 +19,7 @@ import pro.deta.orion.acl.storage.VersionedAccessControlStorage;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
@@ -281,7 +282,8 @@ class OrionRuntimeModuleTest {
                     storage,
                     new FixedPasswordHashingService(),
                     provider,
-                    new OrionConfiguration());
+                    new OrionConfiguration(),
+                    PublicKeysProvider.DEFAULT);
             startWithoutRootPasswordOutput(service);
             return service;
         }

@@ -2,7 +2,6 @@ package pro.deta.orion.acl;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.OrionAccessControlService;
@@ -19,6 +18,7 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.security.PublicKey;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -47,16 +48,32 @@ import static pro.deta.orion.util.Result.Failure.generalFailure;
 
 @Slf4j
 @Singleton
-@RequiredArgsConstructor(onConstructor_ = @Inject)
 public class OrionAccessControlServiceImpl implements OrionAccessControlService, OrionApplicationStageEventListener {
+    private static final String ROOT_USER_ID = "root";
+
     private final XmlService xmlService = new XmlService();
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
     private final OrionConfiguration configuration;
+    private final PublicKeysProvider publicKeysProvider;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
+
+    @Inject
+    public OrionAccessControlServiceImpl(
+            AccessControlStorage accessControlStorage,
+            OrionPasswordHashingService orionPasswordHashingService,
+            OrionProvider orionProvider,
+            OrionConfiguration configuration,
+            PublicKeysProvider publicKeysProvider) {
+        this.accessControlStorage = accessControlStorage;
+        this.orionPasswordHashingService = orionPasswordHashingService;
+        this.orionProvider = orionProvider;
+        this.configuration = configuration;
+        this.publicKeysProvider = publicKeysProvider;
+    }
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
@@ -81,7 +98,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
                         String passwordHash = orionPasswordHashingService.calculateHash(defaultRootPassword);
                         printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
-                        AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash);
+                        AccessControl ac = createDefaultAccessControl(passwordHash);
                         saveAccessControl(ac, "default scheme applied", UserEmail.EMPTY);
                         updateAccessControl(ac);
                     });
@@ -89,7 +106,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     log.error("Error while preparing configuration repository.", f.throwable());
                     throw new IllegalStateException("Configuration repository not initialized.", f.throwable());
                 }
-            }).onSuccess(this::updateAccessControl);
+            }).onSuccess(this::prepareAndUpdateAccessControl);
 
         } catch (Exception e) {
             log.error("Error while preparing configuration repository.", e);
@@ -155,10 +172,58 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void requestToUpdate() {
         try {
-            loadAccessControl().onSuccess(this::updateAccessControl);
+            loadAccessControl().onSuccess(this::prepareAndUpdateAccessControl);
         } catch (Throwable t) {
             throw t;
         }
+    }
+
+    private AccessControl createDefaultAccessControl(String passwordHash) {
+        AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash);
+        addInternalServerKeysToRoot(ac);
+        return ac;
+    }
+
+    private void prepareAndUpdateAccessControl(AccessControl ac) {
+        if (addInternalServerKeysToRoot(ac)) {
+            saveAccessControl(ac, "add internal server keys to root", UserEmail.EMPTY);
+        }
+        updateAccessControl(ac);
+    }
+
+    private boolean addInternalServerKeysToRoot(AccessControl ac) {
+        AccessControl.User rootUser = findRootUser(ac);
+        if (rootUser == null) {
+            return false;
+        }
+
+        boolean changed = false;
+        for (PublicKey publicKey : publicKeysProvider.getPublicKeys()) {
+            if (!hasPublicKeyCredential(rootUser, publicKey)) {
+                rootUser.addCredential(OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(publicKey));
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private AccessControl.User findRootUser(AccessControl ac) {
+        for (AccessControl.User user : ac.getUsers()) {
+            if (user.getId() != null && ROOT_USER_ID.equalsIgnoreCase(user.getId())) {
+                return user;
+            }
+        }
+        return null;
+    }
+
+    private boolean hasPublicKeyCredential(AccessControl.User user, PublicKey publicKey) {
+        for (AccessControl.Credential credential : user.getCredentials()) {
+            if (credential.getType() == OPENSSH_PUBLIC_KEY
+                    && publicKeysAreEqual(credential.getValue(), publicKey.getEncoded())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private AuthenticationResult createUserIdentity(AccessControl.User u) {
@@ -211,9 +276,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private boolean valuesAreEqual(AccessControl.CredentialType credentialType, String expected, byte[] provided) {
         return switch (credentialType) {
             case OPENSSH_PUBLIC_KEY -> {
-                PublicKey authKey = KeyUtils.toRSAPublicKey(provided);
-                PublicKey userKey = KeyUtils.readPublicKeyFromString(expected);
-                yield org.apache.sshd.common.config.keys.KeyUtils.compareKeys(authKey, userKey);
+                yield publicKeysAreEqual(expected, provided);
             }
             case SHA1 -> false;
             case MD5 -> false;
@@ -223,6 +286,19 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 yield orionPasswordHashingService.comparePassword(expected, provided);
             }
         };
+    }
+
+    private boolean publicKeysAreEqual(String expected, byte[] provided) {
+        if (expected == null || provided == null) {
+            return false;
+        }
+        try {
+            PublicKey userKey = KeyUtils.readPublicKeyFromString(expected);
+            return Arrays.equals(userKey.getEncoded(), provided);
+        } catch (IllegalArgumentException e) {
+            log.warn("Cannot parse public key credential.", e);
+            return false;
+        }
     }
 
     private Result<AccessControl.User> findSingleUser(String userName) {

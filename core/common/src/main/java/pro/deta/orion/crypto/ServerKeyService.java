@@ -21,7 +21,7 @@ import static pro.deta.orion.util.KeyUtils.*;
 @Singleton
 @Slf4j
 @ToString
-public class ServerKeyService {
+public class ServerKeyService implements PublicKeysProvider {
     private final Path hostKeysDir;
     @Getter
     private final KeyPair keyPair;
@@ -43,6 +43,7 @@ public class ServerKeyService {
             case Result.Success<KeyPair>(var k) -> {
                 log.warn("Loaded main server public key: {}", k.getPublic());
                 keyPair = k;
+                addKey(k);
             }
         }
         createServerKeyIfNotExist(hostKeysDir.resolve("ecdsa.pem"), "ECDSA", 256).onSuccess(this::addKey);
@@ -69,6 +70,7 @@ public class ServerKeyService {
         return Collections.unmodifiableList(serverKeys);
     }
 
+    @Override
     public List<PublicKey> getPublicKeys() {
         return this.serverKeys.stream().map(it -> it.getPublic()).collect(Collectors.toList());
     }

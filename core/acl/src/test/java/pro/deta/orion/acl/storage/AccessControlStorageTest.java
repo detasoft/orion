@@ -18,6 +18,8 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.crypto.PublicKeysProvider;
+import pro.deta.orion.crypto.ServerKeyService;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.OrionExecutor;
@@ -25,6 +27,7 @@ import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateHolder;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionUtils;
 import pro.deta.orion.util.OrionProvider;
@@ -35,10 +38,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.security.KeyPair;
+import java.security.PublicKey;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -213,6 +218,66 @@ class AccessControlStorageTest {
     }
 
     @Test
+    void defaultRootAuthenticatesWithInternalServerKey() throws Exception {
+        Path aclDirectory = tempDir.resolve("server-key-root-acl");
+        OrionConfiguration configuration = new OrionConfiguration();
+        configuration.getBootstrap().setBaseDir(tempDir.resolve("server-key-root-base").toString());
+        ServerKeyService serverKeyService = new ServerKeyService(new ConfigurationContext(configuration));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+        OrionAccessControlServiceImpl service = startAccessControlService(storage, configuration, serverKeyService);
+        AccessControl savedAccessControl = accessControlFrom(storage.load()
+                .valueOrFailure("ACL should be saved with internal server keys"));
+        AccessControl.User rootUser = savedAccessControl.getUsers().getFirst();
+
+        for (PublicKey internalServerKey : serverKeyService.getPublicKeys()) {
+            assertThat(hasPublicKeyCredential(rootUser, internalServerKey)).isTrue();
+
+            AuthenticationResult rootResult = service.authenticateUser(
+                    "root",
+                    AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                    internalServerKey.getEncoded());
+            assertThat(rootResult).isInstanceOf(AuthenticationResult.Success.class);
+            AuthenticationResult.Success rootSuccess = (AuthenticationResult.Success) rootResult;
+
+            assertThat(rootSuccess.userIdentity().getUserId()).isEqualTo("root");
+        }
+
+        KeyPair unrelatedKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Unrelated key should be generated");
+        assertThat(service.authenticateUser(
+                "root",
+                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                unrelatedKey.getPublic().getEncoded())).isInstanceOf(AuthenticationResult.Failure.class);
+        assertThat(service.authenticateUser(
+                "client",
+                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                serverKeyService.getKeyPair().getPublic().getEncoded())).isInstanceOf(AuthenticationResult.Failure.class);
+    }
+
+    @Test
+    void existingRootReceivesInternalServerKeysOnLoad() throws Exception {
+        Path aclDirectory = tempDir.resolve("existing-server-key-root-acl");
+        Files.createDirectories(aclDirectory.resolve("config"));
+        Files.write(aclDirectory.resolve(ACL_FILE), aclBytesWithPasswordUser("root"));
+        OrionConfiguration configuration = new OrionConfiguration();
+        configuration.getBootstrap().setBaseDir(tempDir.resolve("existing-server-key-root-base").toString());
+        ServerKeyService serverKeyService = new ServerKeyService(new ConfigurationContext(configuration));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+
+        OrionAccessControlServiceImpl service = startAccessControlService(storage, configuration, serverKeyService);
+
+        AccessControl savedAccessControl = accessControlFrom(storage.load()
+                .valueOrFailure("Existing ACL should be updated with internal server keys"));
+        AccessControl.User rootUser = savedAccessControl.getUsers().getFirst();
+        for (PublicKey internalServerKey : serverKeyService.getPublicKeys()) {
+            assertThat(hasPublicKeyCredential(rootUser, internalServerKey)).isTrue();
+            assertThat(service.authenticateUser(
+                    "root",
+                    AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
+                    internalServerKey.getEncoded())).isInstanceOf(AuthenticationResult.Success.class);
+        }
+    }
+
+    @Test
     void accessControlServiceRegistersReloadHandlerWhenAclLoads() throws Exception {
         Path aclDirectory = tempDir.resolve("reload-acl-directory");
         Files.createDirectories(aclDirectory.resolve("config"));
@@ -232,7 +297,8 @@ class AccessControlStorageTest {
                         storage,
                         new FixedPasswordHashingService(),
                         provider,
-                        new OrionConfiguration());
+                        new OrionConfiguration(),
+                        PublicKeysProvider.DEFAULT);
                 waitForStageTasks(service.aclLoad());
                 assertUserAuthenticates(service, "initial-user");
 
@@ -433,6 +499,13 @@ class AccessControlStorageTest {
     private OrionAccessControlServiceImpl startAccessControlService(
             AccessControlStorage storage,
             OrionConfiguration configuration) throws Exception {
+        return startAccessControlService(storage, configuration, PublicKeysProvider.DEFAULT);
+    }
+
+    private OrionAccessControlServiceImpl startAccessControlService(
+            AccessControlStorage storage,
+            OrionConfiguration configuration,
+            PublicKeysProvider publicKeysProvider) throws Exception {
         try (OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory())) {
             OrionProvider provider = new OrionProvider(
                     new ApplicationStateHolder(),
@@ -443,7 +516,8 @@ class AccessControlStorageTest {
                     storage,
                     new FixedPasswordHashingService(),
                     provider,
-                    configuration);
+                    configuration,
+                    publicKeysProvider);
             startWithoutRootPasswordOutput(service);
             return service;
         }
@@ -582,6 +656,16 @@ class AccessControlStorageTest {
             credentials.put(credential.getType(), credential.getValue());
         }
         return credentials;
+    }
+
+    private boolean hasPublicKeyCredential(AccessControl.User user, PublicKey publicKey) {
+        for (AccessControl.Credential credential : user.getCredentials()) {
+            if (credential.getType() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY
+                    && Arrays.equals(KeyUtils.readPublicKeyFromString(credential.getValue()).getEncoded(), publicKey.getEncoded())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<String> repositoryNames(List<AccessControl.Grant> grants) {
