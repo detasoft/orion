@@ -47,6 +47,7 @@ import java.nio.file.StandardCopyOption;
 import java.security.KeyPair;
 import java.security.PublicKey;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -221,7 +222,8 @@ class GitSshTransportEndToEndIT {
         KeyPair clientKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Client SSH key should be generated");
 
         startedOrion = startFreshOrion(orionRoot);
-        String rootToken = String.valueOf(startedOrion.plainRootToken());
+        String rootPassword = String.valueOf(startedOrion.plainRootToken());
+        String rootToken = issueAdminToken(startedOrion, "root", rootPassword, 3_600);
         createManagedUser(startedOrion, rootToken, clientKey, repositoryName);
         createManagedRepository(startedOrion, rootToken, repositoryName);
 
@@ -315,6 +317,28 @@ class GitSshTransportEndToEndIT {
                 OBJECT_MAPPER.writeValueAsString(Map.of("name", repositoryName)));
     }
 
+    private static String issueAdminToken(StartedOrion orion, String username, String password, long expiresInSeconds) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl("/api/admin/token").openConnection();
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization", basicAuth(username, password));
+        connection.setRequestProperty("Content-Type", "application/json");
+        byte[] body = OBJECT_MAPPER.writeValueAsBytes(Map.of("expiresInSeconds", expiresInSeconds));
+        connection.setFixedLengthStreamingMode(body.length);
+        try (var output = connection.getOutputStream()) {
+            output.write(body);
+        }
+
+        assertThat(connection.getResponseCode())
+                .as("admin token issue")
+                .isEqualTo(HttpURLConnection.HTTP_OK);
+        try (InputStream input = connection.getInputStream()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = OBJECT_MAPPER.readValue(input, Map.class);
+            return (String) response.get("token");
+        }
+    }
+
     private static void postAdmin(StartedOrion orion, String rootToken, String path, String payload) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) orion.httpUrl(path).openConnection();
         connection.setRequestMethod("POST");
@@ -334,6 +358,10 @@ class GitSshTransportEndToEndIT {
 
     private static String bearerAuth(String token) {
         return "Bearer " + token;
+    }
+
+    private static String basicAuth(String username, String password) {
+        return "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
     }
 
     private static OrionConfiguration e2eConfiguration(Path orionRoot) throws Exception {

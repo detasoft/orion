@@ -2,6 +2,7 @@ package pro.deta.orion;
 
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.auth.TokenIssueResult;
 
 
 public interface OrionAccessControlService {
@@ -12,4 +13,6 @@ public interface OrionAccessControlService {
     AuthenticationResult authenticateUser(String userName, byte[] credential);
 
     AuthenticationResult authenticateToken(byte[] token);
+
+    TokenIssueResult authenticateUserAndIssueToken(String userName, byte[] credential, long expiresInSeconds);
 }

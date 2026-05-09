@@ -15,6 +15,7 @@ import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
@@ -23,6 +24,7 @@ import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
@@ -30,13 +32,19 @@ import static jakarta.servlet.http.HttpServletResponse.SC_CREATED;
 import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
 import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
+import static jakarta.servlet.http.HttpServletResponse.SC_OK;
+import static jakarta.servlet.http.HttpServletResponse.SC_UNAUTHORIZED;
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 @Singleton
 public class OrionAdminServlet implements MapToUrlServlet {
     private static final String USERS_PATH = "/api/admin/users";
     private static final String REPOSITORIES_PATH = "/api/admin/repositories";
+    private static final String TOKEN_PATH = "/api/admin/token";
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String BASIC_PREFIX = "Basic ";
+    private static final String BASIC_REALM = "orion-admin";
+    private static final long DEFAULT_TOKEN_EXPIRES_IN_SECONDS = 900;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final OrionAccessControlService accessControlService;
@@ -55,23 +63,27 @@ public class OrionAdminServlet implements MapToUrlServlet {
 
     @Override
     public void service(HttpServletRequest req, HttpServletResponse resp) throws IOException, ServletException {
-        SecurityContext securityContext = securityContextFor(req);
-        try {
-            accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
-            accessEnforcer().require(securityContext, ApplicationAdminResource.applicationAdmin(), ApplicationAccessRules.admin());
-        } catch (OrionSecurityException e) {
-            resp.sendError(SC_FORBIDDEN);
-            return;
-        }
-
-        if (!"POST".equalsIgnoreCase(req.getMethod())) {
-            resp.setStatus(SC_METHOD_NOT_ALLOWED);
-            resp.setHeader("Allow", "POST");
-            return;
-        }
-
         try {
             String pathInfo = req.getPathInfo();
+            if (TOKEN_PATH.equals(pathInfo)) {
+                issueToken(req, resp);
+                return;
+            }
+
+            SecurityContext securityContext = securityContextFor(req);
+            try {
+                accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
+                accessEnforcer().require(securityContext, ApplicationAdminResource.applicationAdmin(), ApplicationAccessRules.admin());
+            } catch (OrionSecurityException e) {
+                resp.sendError(SC_FORBIDDEN);
+                return;
+            }
+
+            if (!"POST".equalsIgnoreCase(req.getMethod())) {
+                resp.setStatus(SC_METHOD_NOT_ALLOWED);
+                resp.setHeader("Allow", "POST");
+                return;
+            }
             if (pathInfo == null) {
                 resp.sendError(SC_NOT_FOUND);
                 return;
@@ -85,6 +97,37 @@ public class OrionAdminServlet implements MapToUrlServlet {
             resp.sendError(SC_BAD_REQUEST, "Invalid JSON request");
         } catch (IllegalArgumentException | IllegalStateException e) {
             resp.sendError(SC_BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    private void issueToken(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        if (!"POST".equalsIgnoreCase(req.getMethod())) {
+            resp.setStatus(SC_METHOD_NOT_ALLOWED);
+            resp.setHeader("Allow", "POST");
+            return;
+        }
+
+        BasicCredentials credentials = basicCredentialsFrom(req);
+        if (credentials == null) {
+            sendBasicAuthenticationRequired(resp);
+            return;
+        }
+
+        AdminTokenRequest request = tokenRequest(req);
+        long expiresInSeconds = request.expiresInSecondsOrDefault();
+        TokenIssueResult token = accessControlService.authenticateUserAndIssueToken(
+                credentials.username(),
+                credentials.password().getBytes(StandardCharsets.UTF_8),
+                expiresInSeconds);
+        switch (token) {
+            case TokenIssueResult.Failure ignored -> sendBasicAuthenticationRequired(resp);
+            case TokenIssueResult.Success(var value, var expiresAtEpochSecond) -> {
+                resp.setStatus(SC_OK);
+                resp.setContentType("application/json");
+                objectMapper.writeValue(
+                        resp.getWriter(),
+                        new AdminTokenResponse(value, "Bearer", expiresInSeconds, expiresAtEpochSecond));
+            }
         }
     }
 
@@ -133,6 +176,70 @@ public class OrionAdminServlet implements MapToUrlServlet {
             return null;
         }
         return token;
+    }
+
+    private BasicCredentials basicCredentialsFrom(HttpServletRequest req) {
+        String authorization = req.getHeader("Authorization");
+        if (authorization == null || !authorization.startsWith(BASIC_PREFIX)) {
+            return null;
+        }
+        String encodedCredentials = authorization.substring(BASIC_PREFIX.length());
+        if (encodedCredentials.isBlank()) {
+            return null;
+        }
+        String decoded;
+        try {
+            decoded = new String(Base64.getDecoder().decode(encodedCredentials), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        int separator = decoded.indexOf(':');
+        if (separator <= 0) {
+            return null;
+        }
+        String username = decoded.substring(0, separator);
+        String password = decoded.substring(separator + 1);
+        if (username.isBlank() || password.isEmpty()) {
+            return null;
+        }
+        return new BasicCredentials(username, password);
+    }
+
+    private AdminTokenRequest tokenRequest(HttpServletRequest req) throws IOException {
+        byte[] body = req.getInputStream().readAllBytes();
+        if (body.length == 0) {
+            return AdminTokenRequest.DEFAULT;
+        }
+        return objectMapper.readValue(body, AdminTokenRequest.class);
+    }
+
+    private void sendBasicAuthenticationRequired(HttpServletResponse resp) throws IOException {
+        resp.setHeader("WWW-Authenticate", "Basic realm=\"" + BASIC_REALM + "\"");
+        resp.sendError(SC_UNAUTHORIZED);
+    }
+
+    private record BasicCredentials(String username, String password) {
+    }
+
+    public record AdminTokenRequest(Long expiresInSeconds) {
+        private static final AdminTokenRequest DEFAULT = new AdminTokenRequest(null);
+
+        private long expiresInSecondsOrDefault() {
+            if (expiresInSeconds == null) {
+                return DEFAULT_TOKEN_EXPIRES_IN_SECONDS;
+            }
+            if (expiresInSeconds <= 0) {
+                throw new IllegalArgumentException("Token expiration must be positive");
+            }
+            return expiresInSeconds;
+        }
+    }
+
+    public record AdminTokenResponse(
+            String token,
+            String tokenType,
+            long expiresInSeconds,
+            long expiresAtEpochSecond) {
     }
 
     public record AdminUserRequest(

@@ -17,11 +17,13 @@ import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.crypto.ServerIdentityKeyService;
+import pro.deta.orion.crypto.ServerKeySigner;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.OrionExecutor;
@@ -265,6 +267,34 @@ class AccessControlStorageTest {
     }
 
     @Test
+    void defaultRootCanIssueAndAuthenticateBearerToken() throws Exception {
+        Path aclDirectory = tempDir.resolve("server-key-token-acl");
+        OrionConfiguration configuration = testConfiguration();
+        configuration.getBootstrap().setBaseDir(tempDir.resolve("server-key-token-base").toString());
+        ServerIdentityKeyService serverIdentityKeyService = new ServerIdentityKeyService(new ConfigurationContext(configuration));
+        OrionAccessControlServiceImpl service = startAccessControlService(
+                new LocalAccessControlStorage(localConfig(aclDirectory)),
+                configuration,
+                serverIdentityKeyService);
+
+        TokenIssueResult issueResult = service.authenticateUserAndIssueToken(
+                "root",
+                String.valueOf(service.plainRootToken(PlainRootTokenAccessForTests.create())).getBytes(StandardCharsets.UTF_8),
+                600);
+
+        assertThat(issueResult).isInstanceOf(TokenIssueResult.Success.class);
+        TokenIssueResult.Success issuedToken = (TokenIssueResult.Success) issueResult;
+        assertThat(issuedToken.token()).isNotBlank();
+        assertThat(issuedToken.expiresAtEpochSecond()).isGreaterThan(0);
+
+        AuthenticationResult authenticationResult = service.authenticateToken(
+                issuedToken.token().getBytes(StandardCharsets.UTF_8));
+        assertThat(authenticationResult).isInstanceOf(AuthenticationResult.Success.class);
+        AuthenticationResult.Success authentication = (AuthenticationResult.Success) authenticationResult;
+        assertThat(authentication.userIdentity().getUserId()).isEqualTo("root");
+    }
+
+    @Test
     void existingRootReceivesInternalServerKeysOnLoad() throws Exception {
         Path aclDirectory = tempDir.resolve("existing-server-key-root-acl");
         Files.createDirectories(aclDirectory.resolve("config"));
@@ -301,7 +331,8 @@ class AccessControlStorageTest {
                 new FixedPasswordHashingService(),
                 providerContext.orionProvider(),
                 configuration,
-                PublicKeysProvider.DEFAULT) {
+                PublicKeysProvider.DEFAULT,
+                ServerKeySigner.DEFAULT) {
             @Override
             protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {
                 return SHA1;
@@ -579,13 +610,15 @@ class AccessControlStorageTest {
             AccessControlStorage storage,
             OrionConfiguration configuration,
             PublicKeysProvider publicKeysProvider) throws Exception {
+        ServerKeySigner serverKeySigner = serverKeySignerFor(publicKeysProvider);
         TestProviderContext providerContext = startedProviderContext();
         OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
                 storage,
                 new FixedPasswordHashingService(),
                 providerContext.orionProvider(),
                 configuration,
-                publicKeysProvider) {
+                publicKeysProvider,
+                serverKeySigner) {
             @Override
             protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {
                 return SHA1;
@@ -593,6 +626,13 @@ class AccessControlStorageTest {
         };
         startWithoutRootPasswordOutput(service);
         return service;
+    }
+
+    private ServerKeySigner serverKeySignerFor(PublicKeysProvider publicKeysProvider) {
+        if (publicKeysProvider instanceof ServerKeySigner provider) {
+            return provider;
+        }
+        return ServerKeySigner.DEFAULT;
     }
 
     private OrionConfiguration testConfiguration() {

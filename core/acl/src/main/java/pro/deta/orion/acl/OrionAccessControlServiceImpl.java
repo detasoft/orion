@@ -16,10 +16,12 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
+import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.crypto.PublicKeysProvider;
+import pro.deta.orion.crypto.ServerKeySigner;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
@@ -34,6 +36,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -57,6 +60,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionProvider orionProvider;
     private final OrionConfiguration configuration;
     private final PublicKeysProvider publicKeysProvider;
+    private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
@@ -67,12 +71,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             OrionPasswordHashingService orionPasswordHashingService,
             OrionProvider orionProvider,
             OrionConfiguration configuration,
-            PublicKeysProvider publicKeysProvider) {
+            PublicKeysProvider publicKeysProvider,
+            ServerKeySigner serverKeySigner) {
         this.accessControlStorage = accessControlStorage;
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.orionProvider = orionProvider;
         this.configuration = configuration;
         this.publicKeysProvider = publicKeysProvider;
+        this.jwtAccessTokenService = new JwtAccessTokenService(serverKeySigner, publicKeysProvider);
     }
 
     @Override
@@ -169,7 +175,36 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public AuthenticationResult authenticateToken(byte[] token) {
-        return AuthenticationResult.failure("token authentication is not implemented");
+        String tokenValue = new String(token, StandardCharsets.UTF_8);
+        return switch (jwtAccessTokenService.verify(tokenValue)) {
+            case JwtAccessTokenService.VerificationResult.Failure(var reason) ->
+                    AuthenticationResult.failure(reason);
+            case JwtAccessTokenService.VerificationResult.Success(var subject) -> {
+                Result<AccessControl.User> user = findSingleUser(subject);
+                if (user instanceof Result.Success<AccessControl.User>(var u)) {
+                    yield createUserIdentity(u);
+                }
+                yield AuthenticationResult.failure("authentication failed");
+            }
+        };
+    }
+
+    @Override
+    public TokenIssueResult authenticateUserAndIssueToken(String userName, byte[] credential, long expiresInSeconds) {
+        return switch (authenticateUser(userName, credential)) {
+            case AuthenticationResult.Failure(var reason, var throwable) ->
+                    TokenIssueResult.failure(reason, throwable);
+            case AuthenticationResult.Success(var userIdentity) -> {
+                try {
+                    JwtAccessTokenService.IssuedToken token = jwtAccessTokenService.issue(
+                            userIdentity.getUserId(),
+                            expiresInSeconds);
+                    yield TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
+                } catch (RuntimeException e) {
+                    yield TokenIssueResult.failure("token issue failed", e);
+                }
+            }
+        };
     }
 
     private void requestToUpdate() {
