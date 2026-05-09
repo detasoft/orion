@@ -17,7 +17,7 @@ Already implemented:
 - `AccessControlStorage`, `AccessControlSnapshot`, and `AccessControlSaveRequest` exist.
 - `OrionAccessControlServiceImpl` loads ACL through `AccessControlStorage`.
 - Local file ACL and local Git ACL storage exist.
-- `local:` ACL can be wired to `GitRepositoryProviderImpl.repositoryPath(...)` without `GitAccessControlStorage`.
+- `local:` ACL can be wired to `FileGitRepositoryProvider.repositoryPath(...)` without `GitAccessControlStorage`.
 - `OrionAccessControlServiceImpl` no longer subscribes to `VolatileUserAdded`.
 - README describes the target bootstrap flow at a high level.
 
@@ -291,13 +291,13 @@ git commit -m "feat: introduce repository storage api"
 
 **Files:**
 
-- Modify: `core/git-engine/src/main/java/pro/deta/orion/git/GitRepositoryProviderImpl.java`
-- Modify: `core/git-engine/src/test/java/pro/deta/orion/git/GitRepositoryProviderImplTest.java`
+- Modify: `core/git-engine/src/main/java/pro/deta/orion/git/FileGitRepositoryProvider.java`
+- Modify: `core/git-engine/src/test/java/pro/deta/orion/git/FileGitRepositoryProviderTest.java`
 - Modify: `core/common/src/main/java/pro/deta/orion/GitRepositoryProvider.java` if a storage-neutral method is needed.
 
 **Step 1: Write failing tests**
 
-Extend `GitRepositoryProviderImplTest` to assert:
+Extend `FileGitRepositoryProviderTest` to assert:
 
 - `storage.location: file:<temp>/repos` is used as repository root;
 - `createOnPush=false` makes `findOrCreate(...)` fail for a missing repository if that is the desired policy;
@@ -308,14 +308,14 @@ Extend `GitRepositoryProviderImplTest` to assert:
 Run:
 
 ```bash
-mvn test -Pdev -pl core/git-engine -am -Dtest=GitRepositoryProviderImplTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn test -Pdev -pl core/git-engine -am -Dtest=FileGitRepositoryProviderTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Expected: FAIL until provider reads effective storage configuration.
 
 **Step 3: Implement minimal provider update**
 
-Keep `GitRepositoryProviderImpl` local-file backed for this task, but make it consume `ConfigurationContext.getGitStoragePath()` after Task 1's storage parsing.
+Keep `FileGitRepositoryProvider` local-file backed for this task, but make it consume `ConfigurationContext.getGitStoragePath()` after Task 1's storage parsing.
 
 If `createOnPush=false` is implemented here, add a constructor parameter or effective config access. If it creates too much churn, document it as enforced in Task 4 through `LocalRepositoryStorage`.
 
@@ -324,7 +324,7 @@ If `createOnPush=false` is implemented here, add a constructor parameter or effe
 Run:
 
 ```bash
-mvn test -Pdev -pl core/git-engine -am -Dtest=GitRepositoryProviderImplTest,BasicGitInteractionTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn test -Pdev -pl core/git-engine -am -Dtest=FileGitRepositoryProviderTest,BasicGitInteractionTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Expected: PASS.
@@ -332,7 +332,7 @@ Expected: PASS.
 Commit:
 
 ```bash
-git add core/git-engine/src/main/java/pro/deta/orion/git/GitRepositoryProviderImpl.java core/git-engine/src/test/java/pro/deta/orion/git/GitRepositoryProviderImplTest.java core/common/src/main/java/pro/deta/orion/GitRepositoryProvider.java
+git add core/git-engine/src/main/java/pro/deta/orion/git/FileGitRepositoryProvider.java core/git-engine/src/test/java/pro/deta/orion/git/FileGitRepositoryProviderTest.java core/common/src/main/java/pro/deta/orion/GitRepositoryProvider.java
 git commit -m "feat: use deployment storage config for repositories"
 ```
 
@@ -481,7 +481,7 @@ git commit -m "feat: support multi-file local acl storage"
 
 Add tests:
 
-- `local:orion` opens repository through `RepositoryStorage`, not through `GitRepositoryProviderImpl.repositoryPath(...)`;
+- `local:orion` opens repository through `RepositoryStorage`, not through `FileGitRepositoryProvider.repositoryPath(...)`;
 - ACL is loaded without Orion user authorization;
 - multiple ACL paths are loaded from one repository snapshot;
 - save creates initial repository content when allowed.
@@ -881,7 +881,7 @@ git commit -m "docs: document acl bootstrap storage configuration"
 Run:
 
 ```bash
-mvn test -Pdev -pl core/acl,core/bootstrap,core/git-storage,core/git-engine -am -Dtest=AccessControlStorageTest,RemoteGitAccessControlStorageTest,LocalRepositoryStorageTest,OrionRuntimeModuleTest,AclBootstrapLifecycleTest,GitRepositoryProviderImplTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn test -Pdev -pl core/acl,core/bootstrap,core/git-storage,core/git-engine -am -Dtest=AccessControlStorageTest,RemoteGitAccessControlStorageTest,LocalRepositoryStorageTest,OrionRuntimeModuleTest,AclBootstrapLifecycleTest,FileGitRepositoryProviderTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Expected: PASS.

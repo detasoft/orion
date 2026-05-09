@@ -55,7 +55,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("existing repository can be pushed, listed and fetched without a network transport")
     void existingRepositoryCanBePushedListedAndFetchedWithoutNetworkTransport() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
@@ -73,7 +73,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("receive-pack creates the repository before accepting the first push")
     void receivePackCreatesRepositoryBeforeAcceptingFirstPush() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         RecordingEventManager events = new RecordingEventManager();
         GitInternalService service = new GitInternalService(repositoryProvider, events);
         InternalUserImpl creator = gitUser("creator", "project");
@@ -89,7 +89,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("receive-pack publishes an update event for fast-forward pushes")
     void receivePackPublishesUpdateEventForFastForwardPushes() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository repositoryHandle = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             Repository repository = jgitRepository(repositoryHandle);
             RecordingEventManager events = new RecordingEventManager();
@@ -109,7 +109,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("receive-pack publishes a delete event for deleted refs")
     void receivePackPublishesDeleteEventForDeletedRefs() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
@@ -128,7 +128,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("receive-pack publishes all refs from a multi-ref push")
     void receivePackPublishesAllRefsFromMultiRefPush() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
@@ -158,7 +158,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("upload-pack denies fetching a branch outside the user's branch grant")
     void uploadPackDeniesFetchingBranchOutsideUserBranchGrant() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository repositoryHandle = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             Repository repository = jgitRepository(repositoryHandle);
             RecordingEventManager events = new RecordingEventManager();
@@ -178,7 +178,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("upload-pack allows fetching a branch inside the user's branch grant")
     void uploadPackAllowsFetchingBranchInsideUserBranchGrant() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository repositoryHandle = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             Repository repository = jgitRepository(repositoryHandle);
             RecordingEventManager events = new RecordingEventManager();
@@ -198,7 +198,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("receive-pack publishes rejected non-fast-forward commands")
     void receivePackPublishesRejectedNonFastForwardCommands() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository repositoryHandle = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             Repository repository = jgitRepository(repositoryHandle);
             RecordingEventManager events = new RecordingEventManager();
@@ -224,7 +224,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("upload-pack for a missing repository publishes no upload event")
     void uploadPackForMissingRepositoryPublishesNoUploadEvent() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         RecordingEventManager events = new RecordingEventManager();
         GitInternalService service = new GitInternalService(repositoryProvider, events);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -243,7 +243,7 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     @Test
     @DisplayName("upload-pack for an unknown object publishes no upload event")
     void uploadPackForUnknownObjectPublishesNoUploadEvent() {
-        GitRepositoryProviderImpl repositoryProvider = newRepositoryProvider();
+        FileGitRepositoryProvider repositoryProvider = newRepositoryProvider();
         try (GitRepository ignored = repositoryProvider.findOrCreate("project").valueOrFailure("Cannot create project repository")) {
             RecordingEventManager events = new RecordingEventManager();
             GitInternalService service = new GitInternalService(repositoryProvider, events);
@@ -256,9 +256,9 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
         }
     }
 
-    private GitRepositoryProviderImpl newRepositoryProvider() {
+    private FileGitRepositoryProvider newRepositoryProvider() {
         assertControlledJGitSystemReaderInstalled();
-        return new GitRepositoryProviderImpl(gitStorageDir);
+        return new FileGitRepositoryProvider(gitStorageDir);
     }
 
     private static Repository jgitRepository(GitRepository repository) {

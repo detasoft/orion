@@ -26,17 +26,17 @@ import static pro.deta.orion.util.Result.FailureCode.NOT_FOUND;
 
 @Singleton
 @Slf4j
-public class GitRepositoryProviderImpl implements GitRepositoryProvider {
+public class FileGitRepositoryProvider implements GitRepositoryProvider {
     private final Path gitStorageDir;
 
     private final ConcurrentMap<String, GitRepository> repositoryCache = new ConcurrentHashMap<>();
 
     @Inject
-    public GitRepositoryProviderImpl(ConfigurationContext configurationContext) {
+    public FileGitRepositoryProvider(ConfigurationContext configurationContext) {
         this(Objects.requireNonNull(configurationContext, "configurationContext").getGitStoragePath());
     }
 
-    GitRepositoryProviderImpl(Path gitStorageDir) {
+    FileGitRepositoryProvider(Path gitStorageDir) {
         this.gitStorageDir = gitStorageDir.toAbsolutePath().normalize();
         FileUtils.mkdirs(this.gitStorageDir);
         log.warn("Git storage set to {}", this.gitStorageDir);

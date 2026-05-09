@@ -1381,7 +1381,7 @@ Expected: PASS.
 Run:
 
 ```bash
-mvn test -Pdev -pl core/common,core/acl,core/git-storage,core/git-engine,net/http-core,net/git-transport,core/bootstrap -am -Dtest=OrionApplicationLifecycleTest,AccessControlStorageTest,GitRepositoryProviderImplTest,JettyHTTPServerTest,OrionRuntimeModuleTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn test -Pdev -pl core/common,core/acl,core/git-storage,core/git-engine,net/http-core,net/git-transport,core/bootstrap -am -Dtest=OrionApplicationLifecycleTest,AccessControlStorageTest,FileGitRepositoryProviderTest,JettyHTTPServerTest,OrionRuntimeModuleTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Expected: PASS.

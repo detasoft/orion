@@ -28,7 +28,7 @@ import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.git.GitRepositoryProviderImpl;
+import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.KeyUtils;
@@ -540,7 +540,7 @@ class GitSshTransportEndToEndIT {
     }
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
-                                GitRepositoryProviderImpl gitRepositoryProvider,
+                                FileGitRepositoryProvider gitRepositoryProvider,
                                 OrionAccessControlServiceImpl accessControlService) {
         private String sshUrl(String repository) {
             return "ssh://%s@%s:%d/%s".formatted(

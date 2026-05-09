@@ -19,7 +19,7 @@ import static pro.deta.orion.git.JGitRuntimeAssertions.installDefaultControlledJ
 
 @DisplayName("Git repository provider path validation")
 @ResourceLock("jgit-system-reader")
-class GitRepositoryProviderImplTest {
+class FileGitRepositoryProviderTest {
     @TempDir
     private Path gitStorageDir;
 
@@ -40,7 +40,7 @@ class GitRepositoryProviderImplTest {
     @Test
     @DisplayName("nested repository names are allowed")
     void nestedRepositoryNamesAreAllowed() {
-        GitRepositoryProviderImpl provider = newProvider();
+        FileGitRepositoryProvider provider = newProvider();
 
         Result<GitRepository> result = provider.findOrCreate("team/project.git");
 
@@ -53,7 +53,7 @@ class GitRepositoryProviderImplTest {
     @Test
     @DisplayName("unsafe repository names are rejected")
     void unsafeRepositoryNamesAreRejected() {
-        GitRepositoryProviderImpl provider = newProvider();
+        FileGitRepositoryProvider provider = newProvider();
         Path outsideRepository = gitStorageDir.resolveSibling("outside.git");
         List<String> invalidNames = List.of(
                 "",
@@ -73,8 +73,8 @@ class GitRepositoryProviderImplTest {
         assertThat(gitStorageDir.resolve("absolute.git")).doesNotExist();
     }
 
-    private GitRepositoryProviderImpl newProvider() {
+    private FileGitRepositoryProvider newProvider() {
         assertControlledJGitSystemReaderInstalled();
-        return new GitRepositoryProviderImpl(gitStorageDir);
+        return new FileGitRepositoryProvider(gitStorageDir);
     }
 }

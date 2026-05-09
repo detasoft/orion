@@ -7,7 +7,7 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.git.GitRepositoryProviderImpl;
+import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.transport.http.OrionHttpModule;
 
@@ -17,7 +17,7 @@ public interface OrionComponent {
 
     OrionApplicationLifecycle orionApplicationLifecycle();
 
-    GitRepositoryProviderImpl gitRepositoryProvider();
+    FileGitRepositoryProvider gitRepositoryProvider();
 
     OrionAccessControlServiceImpl orionAccessControlService();
 

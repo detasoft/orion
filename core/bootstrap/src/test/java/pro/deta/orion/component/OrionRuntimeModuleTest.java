@@ -19,7 +19,7 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.git.GitRepositoryProviderImpl;
+import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
@@ -111,7 +111,7 @@ class OrionRuntimeModuleTest {
     @Test
     void localGitAreaAclUsesVersionedStorageWithoutGitAccessArea() {
         OrionConfiguration configuration = configurationWithGitAcl("local:team/project");
-        GitRepositoryProviderImpl repositoryProvider = new GitRepositoryProviderImpl(new ConfigurationContext(configuration));
+        FileGitRepositoryProvider repositoryProvider = new FileGitRepositoryProvider(new ConfigurationContext(configuration));
 
         AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
 
@@ -125,7 +125,7 @@ class OrionRuntimeModuleTest {
         Files.createDirectories(aclDirectory);
         Files.write(aclDirectory.resolve(ACL_FILE), aclBytes("file-user"));
         OrionConfiguration configuration = configurationWithGitAcl(aclDirectory.toUri().toString());
-        GitRepositoryProviderImpl repositoryProvider = new GitRepositoryProviderImpl(new ConfigurationContext(configuration));
+        FileGitRepositoryProvider repositoryProvider = new FileGitRepositoryProvider(new ConfigurationContext(configuration));
         AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
 
         OrionAccessControlServiceImpl service = startAccessControlService(storage);
@@ -186,7 +186,7 @@ class OrionRuntimeModuleTest {
     @Test
     void remoteGitAclIsUnsupportedUntilRemoteVersionedStorageIsAdded() {
         OrionConfiguration configuration = configurationWithGitAcl("ssh://git@example.test/acl.git");
-        GitRepositoryProviderImpl repositoryProvider = new GitRepositoryProviderImpl(new ConfigurationContext(configuration));
+        FileGitRepositoryProvider repositoryProvider = new FileGitRepositoryProvider(new ConfigurationContext(configuration));
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
@@ -196,7 +196,7 @@ class OrionRuntimeModuleTest {
     }
 
     private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration,
-                                                             GitRepositoryProviderImpl repositoryProvider) {
+                                                             FileGitRepositoryProvider repositoryProvider) {
         return new AccessControlStorageResolver(configuration, repositoryProvider).resolve();
     }
 
@@ -312,7 +312,7 @@ class OrionRuntimeModuleTest {
                 .build();
     }
 
-    private static final class RecordingGitRepositoryProvider extends GitRepositoryProviderImpl {
+    private static final class RecordingGitRepositoryProvider extends FileGitRepositoryProvider {
         private int findCalls;
         private int findOrCreateCalls;
 
