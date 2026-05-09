@@ -13,8 +13,7 @@ Lifecycle code must register named tasks through `ApplicationStateListenerRegist
 | --- | --- | --- | --- |
 | STARTUP | INIT | STARTING | FAILED |
 | STARTUP | STARTING | UP | FAILED |
-| SHUTDOWN | UP | BEGIN_SHUTDOWN | FAILED |
-| SHUTDOWN | BEGIN_SHUTDOWN | STOPPING | FAILED |
+| SHUTDOWN | UP | STOPPING | FAILED |
 | SHUTDOWN | STOPPING | OFF | FAILED |
 
 ## Current Runtime Task Graph

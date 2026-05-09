@@ -6,12 +6,12 @@ import lombok.RequiredArgsConstructor;
 @Getter
 @RequiredArgsConstructor
 public enum ApplicationState {
-    INIT(0), STARTING(1), UP(2), BEGIN_SHUTDOWN(3), STOPPING(4), OFF(5), FAILED(6);
+    INIT(0), STARTING(1), UP(2), STOPPING(3), OFF(4), FAILED(5);
 
     private final int level;
 
     public boolean appIsActive() {
-        return getLevel() < 3;
+        return getLevel() < STOPPING.getLevel();
     }
 
     public boolean appIsUp() {

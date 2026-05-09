@@ -6,8 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.flow.LifecycleFlow;
-import pro.deta.orion.lifecycle.flow.LifecycleStep;
+import pro.deta.orion.lifecycle.flow.LifecycleFlowRunner;
 import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
 import pro.deta.orion.lifecycle.task.LifecycleTaskPlan;
 import pro.deta.orion.lifecycle.task.LifecycleTaskPlanner;
@@ -19,8 +18,6 @@ import pro.deta.orion.util.OrionUtils;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
 
 import static pro.deta.orion.ApplicationState.*;
 
@@ -31,19 +28,16 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     private static final int DEFAULT_TASK_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC =
             OrionStageCallResult.DEFAULT_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC;
 
-    private final ApplicationStateHolder applicationStateHolder;
-    private final ReentrantLock stateLock = new ReentrantLock();
-    private final Condition stateChanged = stateLock.newCondition();
-
     private final List<LifecycleTaskRegistration> lifecycleTaskRegistrations = new CopyOnWriteArrayList<>();
     private final OrionProvider orionProvider;
+    private final LifecycleFlowRunner flowRunner;
 
     @Inject
     public OrionApplicationLifecycle(ApplicationStateHolder applicationStateHolder,
                                      OrionExecutor orionExecutor,
                                      Set<OrionApplicationStageEventListener> applicationEventListeners, OrionProvider orionProvider) {
-        this.applicationStateHolder = applicationStateHolder;
         this.orionProvider = orionProvider;
+        flowRunner = new LifecycleFlowRunner(applicationStateHolder, this::onStage);
         for (OrionApplicationStageEventListener applicationStageEventListener : applicationEventListeners) {
             applicationStageEventListener.registerToStage(this);
         }
@@ -136,7 +130,7 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
 
     public String describeLifecycle() {
         StringBuilder builder = new StringBuilder();
-        builder.append(describeFlows()).append('\n');
+        builder.append(flowRunner.describeFlows()).append('\n');
         for (ApplicationState state : ApplicationState.values()) {
             String taskPlan = describeTaskPlan(state);
             if (!taskPlan.isBlank()) {
@@ -182,42 +176,16 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
             log.debug("Lifecycle service map before initialization:\n{}", describeServiceMap());
             log.debug("Lifecycle plan:\n{}", describeLifecycle());
         }
-        return runFlow(LifecycleFlow.STARTUP);
-    }
-
-    private ApplicationState runFlow(LifecycleFlow flow) {
-        for (LifecycleStep step : flow.steps()) {
-            ApplicationState currentState = applicationStateHolder.getState();
-            if (currentState != step.from()) {
-                log.debug("Lifecycle flow '{}' stopped before {} because current state is {}", flow.name(), step, currentState);
-                return currentState;
-            }
-            followStep(flow, step);
-        }
-        return applicationStateHolder.getState();
-    }
-
-    private void followStep(LifecycleFlow flow, LifecycleStep step) {
-        boolean completed = !step.runListeners() || onStage(step.from());
-        ApplicationState targetState = completed ? step.success() : step.failure();
-        log.debug("Lifecycle flow '{}' moves {} -> {}", flow.name(), step.from(), targetState);
-        moveState(step.from(), targetState);
-    }
-
-    private void moveState(ApplicationState from, ApplicationState to) {
-        withStateLock(() -> {
-            applicationStateHolder.moveStateFrom(from, to);
-            stateChanged.signalAll();
-        });
+        return flowRunner.runStartup();
     }
 
     private void doShutdown() {
         log.info("System shutdown process initiated.");
-        runFlow(LifecycleFlow.SHUTDOWN);
+        flowRunner.runShutdown();
     }
 
     public String describeFlows() {
-        return LifecycleFlow.STARTUP.describe() + "\n" + LifecycleFlow.SHUTDOWN.describe();
+        return flowRunner.describeFlows();
     }
 
     private static String joinTaskIds(List<LifecycleTaskId> taskIds) {
@@ -235,39 +203,13 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
         orionProvider.getOrionExecutor().submit(this::doShutdown);
     }
 
-    private void withStateLock(Runnable r) {
-        try {
-            stateLock.lock();
-            r.run();
-        } finally {
-            stateLock.unlock();
-        }
-    }
-
     public void waitForStarting() {
-        waitAppForState(UP);
+        flowRunner.waitForState(UP);
         OrionUtils.waitForCondition(() -> orionProvider.getEventManager().getUnprocessedLength() == 0);
     }
 
-    private void waitAppForState(ApplicationState state) {
-        stateLock.lock();
-        try {
-            while (applicationStateHolder.getState() != state) {
-                log.debug("Waiting for desired state {} but current one is {}", state, applicationStateHolder.getState());
-                try {
-                    stateChanged.await();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException("Interrupted while waiting for application state " + state, e);
-                }
-            }
-        } finally {
-            stateLock.unlock();
-        }
-    }
-
     public void waitForShutdown() {
-        waitAppForState(OFF);
+        flowRunner.waitForState(OFF);
     }
 
     private static final class LifecycleTaskResult {

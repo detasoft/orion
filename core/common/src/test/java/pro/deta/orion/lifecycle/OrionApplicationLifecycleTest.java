@@ -90,7 +90,7 @@ class OrionApplicationLifecycleTest {
                     "INIT -> STARTING",
                     "STARTING -> UP",
                     "SHUTDOWN:",
-                    "UP -> BEGIN_SHUTDOWN",
+                    "UP -> STOPPING",
                     "STOPPING -> OFF");
         }
     }

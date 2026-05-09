@@ -24,8 +24,7 @@ class LifecycleFlowTest {
         assertThat(LifecycleFlow.SHUTDOWN.steps())
                 .extracting(LifecycleStep::from, LifecycleStep::success, LifecycleStep::failure)
                 .containsExactly(
-                        tuple(ApplicationState.UP, ApplicationState.BEGIN_SHUTDOWN, ApplicationState.FAILED),
-                        tuple(ApplicationState.BEGIN_SHUTDOWN, ApplicationState.STOPPING, ApplicationState.FAILED),
+                        tuple(ApplicationState.UP, ApplicationState.STOPPING, ApplicationState.FAILED),
                         tuple(ApplicationState.STOPPING, ApplicationState.OFF, ApplicationState.FAILED));
     }
 

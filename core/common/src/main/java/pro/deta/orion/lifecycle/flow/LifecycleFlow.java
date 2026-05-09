@@ -18,11 +18,6 @@ public record LifecycleFlow(String name, List<LifecycleStep> steps) {
 
     public static final LifecycleFlow SHUTDOWN = new LifecycleFlow("SHUTDOWN", List.of(
             LifecycleStep.from(ApplicationState.UP)
-                    .to(ApplicationState.BEGIN_SHUTDOWN)
-                    .onFailure(ApplicationState.FAILED)
-                    .transitionOnly()
-                    .build(),
-            LifecycleStep.from(ApplicationState.BEGIN_SHUTDOWN)
                     .to(ApplicationState.STOPPING)
                     .onFailure(ApplicationState.FAILED)
                     .transitionOnly()
@@ -54,7 +49,7 @@ public record LifecycleFlow(String name, List<LifecycleStep> steps) {
         }
     }
 
-    public String describe() {
+    String describe() {
         StringBuilder builder = new StringBuilder(name).append(":\n");
         for (LifecycleStep step : steps) {
             builder.append("  ")
