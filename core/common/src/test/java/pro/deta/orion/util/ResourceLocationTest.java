@@ -13,9 +13,7 @@ class ResourceLocationTest {
         ResourceLocation location = ResourceLocation.parse("repositories", "Resource location");
 
         assertThat(location.raw()).isEqualTo("repositories");
-        assertThat(location.hasNoScheme()).isTrue();
         assertThat(location.scheme()).isEqualTo(ResourceScheme.EMPTY);
-        assertThat(location.hasNoSchemeOrScheme(ResourceScheme.FILE)).isTrue();
     }
 
     @Test
@@ -23,7 +21,6 @@ class ResourceLocationTest {
         ResourceLocation location = ResourceLocation.parse("file:/tmp/orion-repos", "Resource location");
 
         assertThat(location.scheme()).isEqualTo(ResourceScheme.FILE);
-        assertThat(location.hasScheme(ResourceScheme.FILE)).isTrue();
         assertThat(location.pathOrSchemeSpecificPart("File location must include a path")).isEqualTo("/tmp/orion-repos");
     }
 

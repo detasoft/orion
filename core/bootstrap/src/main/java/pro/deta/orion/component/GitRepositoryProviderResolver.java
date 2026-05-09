@@ -32,12 +32,11 @@ public class GitRepositoryProviderResolver {
 
     GitRepositoryProvider resolve(String location) {
         ResourceLocation resourceLocation = ResourceLocation.parse(location, "Storage location");
-        if (resourceLocation.hasNoSchemeOrScheme(ResourceScheme.FILE)) {
-            return fileGitRepositoryProvider.get();
-        }
-        if (resourceLocation.hasScheme(ResourceScheme.other("s3"))) {
-            return s3GitRepositoryProvider.get();
-        }
-        throw new IllegalArgumentException("Unsupported repository storage location: " + location);
+        return switch (resourceLocation.scheme()) {
+            case ResourceScheme.Empty ignored -> fileGitRepositoryProvider.get();
+            case ResourceScheme.File ignored -> fileGitRepositoryProvider.get();
+            case ResourceScheme.Other other when "s3".equals(other.value()) -> s3GitRepositoryProvider.get();
+            default -> throw new IllegalArgumentException("Unsupported repository storage location: " + location);
+        };
     }
 }

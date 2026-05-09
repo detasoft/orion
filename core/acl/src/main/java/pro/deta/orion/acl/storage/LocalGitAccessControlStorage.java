@@ -27,9 +27,10 @@ public class LocalGitAccessControlStorage extends VersionedAccessControlStorage 
 
     private static Path repositoryPathFrom(OrionConfiguration.BootstrapAccessControlConfig config) {
         ResourceLocation location = ResourceLocation.parse(config.getLocation(), "ACL location");
-        if (location.hasScheme(ResourceScheme.FILE)) {
-            return Path.of(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
-        }
-        return Path.of(config.getLocation());
+        return switch (location.scheme()) {
+            case ResourceScheme.File ignored -> Path.of(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
+            case ResourceScheme.Empty ignored -> Path.of(config.getLocation());
+            default -> throw new IllegalArgumentException("Unsupported local Git ACL location: " + config.getLocation());
+        };
     }
 }

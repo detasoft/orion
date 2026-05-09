@@ -20,22 +20,24 @@ public class AccessControlStorageResolver {
     AccessControlStorage resolve(OrionConfiguration.BootstrapAccessControlConfig accessControlConfig) {
         String location = accessControlConfig.getLocation();
         ResourceLocation resourceLocation = ResourceLocation.parse(location, "ACL location");
-        if (resourceLocation.hasNoSchemeOrScheme(ResourceScheme.FILE)) {
-            return new LocalAccessControlStorage(accessControlConfig);
-        }
-        if (resourceLocation.hasScheme(ResourceScheme.LOCAL)) {
-            return new VersionedAccessControlStorage(
+        return switch (resourceLocation.scheme()) {
+            case ResourceScheme.Empty ignored -> new LocalAccessControlStorage(accessControlConfig);
+            case ResourceScheme.File ignored -> new LocalAccessControlStorage(accessControlConfig);
+            case ResourceScheme.Local ignored -> new VersionedAccessControlStorage(
                     new GitRepositoryProviderVersionedStorage(
                             gitRepositoryProvider,
                             resourceLocation.normalizedRelativePath(),
                             accessControlConfig.getBranch()),
                     accessControlConfig.getPaths());
-        }
-        throw new IllegalArgumentException("Unsupported ACL location: " + location);
+            case ResourceScheme.Other ignored -> throw new IllegalArgumentException("Unsupported ACL location: " + location);
+        };
     }
 
     public static boolean isInternalLocalGitStorage(String location) {
-        return ResourceLocation.parse(location, "ACL location").hasScheme(ResourceScheme.LOCAL);
+        return switch (ResourceLocation.parse(location, "ACL location").scheme()) {
+            case ResourceScheme.Local ignored -> true;
+            default -> false;
+        };
     }
 
     public static String localRepositoryName(String location) {

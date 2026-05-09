@@ -40,18 +40,6 @@ public abstract class ResourceLocation {
         return ResourceScheme.fromNullable(uri.getScheme());
     }
 
-    public boolean hasNoScheme() {
-        return ResourceScheme.EMPTY.equals(scheme());
-    }
-
-    public boolean hasScheme(ResourceScheme expected) {
-        return expected.equals(scheme());
-    }
-
-    public boolean hasNoSchemeOrScheme(ResourceScheme expected) {
-        return hasNoScheme() || hasScheme(expected);
-    }
-
     public String host() {
         return uri.getHost();
     }

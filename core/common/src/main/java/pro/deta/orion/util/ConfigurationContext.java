@@ -70,13 +70,13 @@ public class ConfigurationContext {
 
     private Path resolveStorageLocation(String location) {
         ResourceLocation resourceLocation = ResourceLocation.parse(location, "Storage location");
-        if (resourceLocation.hasNoScheme()) {
-            return resolve(location);
-        }
-        if (!resourceLocation.hasScheme(ResourceScheme.FILE)) {
-            throw new IllegalArgumentException("Unsupported repository storage location: " + location);
-        }
-        Path path = Paths.get(resourceLocation.pathOrSchemeSpecificPart("File storage location must include a path"));
-        return path.isAbsolute() ? path.normalize() : Paths.get("").resolve(path).toAbsolutePath().normalize();
+        return switch (resourceLocation.scheme()) {
+            case ResourceScheme.Empty ignored -> resolve(location);
+            case ResourceScheme.File ignored -> {
+                Path path = Paths.get(resourceLocation.pathOrSchemeSpecificPart("File storage location must include a path"));
+                yield path.isAbsolute() ? path.normalize() : Paths.get("").resolve(path).toAbsolutePath().normalize();
+            }
+            default -> throw new IllegalArgumentException("Unsupported repository storage location: " + location);
+        };
     }
 }

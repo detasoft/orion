@@ -68,14 +68,11 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
 
     private Path aclDirectory() {
         ResourceLocation location = ResourceLocation.parse(config.getLocation(), "ACL location");
-        Path path;
-        if (location.hasScheme(ResourceScheme.FILE)) {
-            path = Paths.get(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
-        } else if (location.hasNoScheme()) {
-            path = Path.of(config.getLocation());
-        } else {
-            throw new IllegalArgumentException("Unsupported local ACL location: " + config.getLocation());
-        }
+        Path path = switch (location.scheme()) {
+            case ResourceScheme.File ignored -> Paths.get(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
+            case ResourceScheme.Empty ignored -> Path.of(config.getLocation());
+            default -> throw new IllegalArgumentException("Unsupported local ACL location: " + config.getLocation());
+        };
         return path.toAbsolutePath().normalize();
     }
 }
