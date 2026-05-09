@@ -10,7 +10,6 @@ import org.apache.sshd.server.auth.password.PasswordChangeRequiredException;
 import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
 import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.auth.AuthenticationResult;
 
 import java.nio.charset.StandardCharsets;
@@ -26,16 +25,16 @@ public class OrionSSHPasswordAuthenticator implements PasswordAuthenticator, Pub
 
     @Override
     public boolean authenticate(String username, String password, ServerSession session) throws PasswordChangeRequiredException, AsyncAuthException {
-        return internalAuthenticate(username, password.getBytes(StandardCharsets.UTF_8), AccessControl.CredentialType.ARGON2, session);
+        return internalAuthenticate(username, password.getBytes(StandardCharsets.UTF_8), session);
     }
 
     @Override
     public boolean authenticate(String username, PublicKey key, ServerSession session) throws AsyncAuthException {
-        return internalAuthenticate(username, key.getEncoded(), AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, session);
+        return internalAuthenticate(username, key.getEncoded(), session);
     }
 
-    private boolean internalAuthenticate(String username, byte[] encodedData, AccessControl.CredentialType credentialType, ServerSession session) {
-        AuthenticationResult user = orionAccessControlService.authenticateUser(username, credentialType, encodedData);
+    private boolean internalAuthenticate(String username, byte[] encodedData, ServerSession session) {
+        AuthenticationResult user = orionAccessControlService.authenticateUser(username, encodedData);
         return switch (user) {
             case AuthenticationResult.Success(var u) -> {
                 log.trace("SSH user '{}' logged in.", username);

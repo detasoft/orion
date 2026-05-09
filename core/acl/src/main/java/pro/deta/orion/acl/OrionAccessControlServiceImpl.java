@@ -35,10 +35,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.security.PublicKey;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -160,13 +157,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public AuthenticationResult authenticateUser(String userName, AccessControl.CredentialType credentialType, byte[] encodedData) {
+    public AuthenticationResult authenticateUser(String userName, byte[] encodedData) {
         Result<AccessControl.User> user = findSingleUser(userName);
         if (user instanceof Result.Success<AccessControl.User>(var u)) {
-            if (performAuthentication(u, credentialType, encodedData))
+            if (performAuthentication(u, encodedData))
                 return createUserIdentity(u);
         }
-        log.warn("Attempt to authenticate as '{}' with public key failed.", userName);
+        log.warn("Attempt to authenticate as '{}' failed.", userName);
         return AuthenticationResult.failure("authentication failed");
     }
 
@@ -284,30 +281,40 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return accessControl.get().getGrants().stream().filter(r1 -> r1.getId().equalsIgnoreCase(grantReference)).toList();
     }
 
-    private boolean performAuthentication(AccessControl.User u, AccessControl.CredentialType credentialType, byte[] publicKey) {
+    private boolean performAuthentication(AccessControl.User u, byte[] encodedData) {
+        if (u.getCredentials() == null)
+            return false;
         for (AccessControl.Credential c : u.getCredentials()) {
-            if (c.getType() == credentialType && valuesAreEqual(credentialType, c.getValue(), publicKey))
-                return true;
+            try {
+                if (c != null && valuesAreEqual(c, encodedData)) {
+                    return true;
+                }
+            } catch (RuntimeException e) {
+                log.warn("Cannot verify {} credential for user '{}'.", c.getType(), u.getId(), e);
+                return false;
+            }
         }
         return false;
     }
 
-    private boolean valuesAreEqual(AccessControl.CredentialType credentialType, String expected, byte[] provided) {
-        return switch (credentialType) {
+    private boolean valuesAreEqual(AccessControl.Credential c, byte[] provided) {
+        if (c.getType() == null)
+            return false;
+        return switch (c.getType()) {
             case OPENSSH_PUBLIC_KEY -> {
-                yield publicKeysAreEqual(expected, provided);
+                yield publicKeysAreEqual(c.getValue(), provided);
             }
             case SHA1 -> {
-                yield orionPasswordHashingService.comparePassword(SHA1, expected, provided);
+                yield orionPasswordHashingService.comparePassword(SHA1, c.getValue(), provided);
             }
             case MD5 -> false;
             case PLAIN -> false;
             case SHA3_256 -> false;
             case ARGON2 -> {
-                yield orionPasswordHashingService.comparePassword(ARGON2, expected, provided);
+                yield orionPasswordHashingService.comparePassword(ARGON2, c.getValue(), provided);
             }
             case BEARER_TOKEN -> {
-                yield orionPasswordHashingService.comparePassword(SHA1, expected, provided);
+                yield orionPasswordHashingService.comparePassword(SHA1, c.getValue(), provided);
             }
         };
     }

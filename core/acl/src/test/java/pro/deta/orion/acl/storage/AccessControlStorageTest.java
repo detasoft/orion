@@ -246,7 +246,6 @@ class AccessControlStorageTest {
 
             AuthenticationResult rootResult = service.authenticateUser(
                     "root",
-                    AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
                     internalServerKey.getEncoded());
             assertThat(rootResult).isInstanceOf(AuthenticationResult.Success.class);
             AuthenticationResult.Success rootSuccess = (AuthenticationResult.Success) rootResult;
@@ -257,11 +256,9 @@ class AccessControlStorageTest {
         KeyPair unrelatedKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Unrelated key should be generated");
         assertThat(service.authenticateUser(
                 "root",
-                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
                 unrelatedKey.getPublic().getEncoded())).isInstanceOf(AuthenticationResult.Failure.class);
         assertThat(service.authenticateUser(
                 "client",
-                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
                 serverKeyService.getKeyPair().getPublic().getEncoded())).isInstanceOf(AuthenticationResult.Failure.class);
     }
 
@@ -284,7 +281,6 @@ class AccessControlStorageTest {
             assertThat(hasPublicKeyCredential(rootUser, internalServerKey)).isTrue();
             assertThat(service.authenticateUser(
                     "root",
-                    AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
                     internalServerKey.getEncoded())).isInstanceOf(AuthenticationResult.Success.class);
         }
     }
@@ -359,7 +355,6 @@ class AccessControlStorageTest {
 
         AuthenticationResult result = service.authenticateUser(
                 "client",
-                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
                 userKey.getPublic().getEncoded());
         assertThat(result).isInstanceOf(AuthenticationResult.Success.class);
         AuthenticationResult.Success success = (AuthenticationResult.Success) result;
@@ -386,7 +381,6 @@ class AccessControlStorageTest {
 
         AuthenticationResult updatedResult = service.authenticateUser(
                 "client",
-                AccessControl.CredentialType.OPENSSH_PUBLIC_KEY,
                 userKey.getPublic().getEncoded());
         assertThat(updatedResult).isInstanceOf(AuthenticationResult.Success.class);
         AuthenticationResult.Success updatedSuccess = (AuthenticationResult.Success) updatedResult;
@@ -394,6 +388,38 @@ class AccessControlStorageTest {
         assertThat(grantInfo(updatedSuccess.userIdentity().getGrants().getFirst()))
                 .containsEntry(AccessControl.GrantKey.BRANCH, "main")
                 .doesNotContainKeys(AccessControl.GrantKey.WRITE, AccessControl.GrantKey.CREATE);
+    }
+
+    @Test
+    void accessControlServiceCreatesManagedUserWithSha1Password() throws Exception {
+        Path aclDirectory = tempDir.resolve("managed-password-user-acl");
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+        OrionAccessControlServiceImpl service = startAccessControlService(storage);
+
+        service.createOrUpdateUser(new AccessControlUserUpdate(
+                "password-client",
+                "password-client@example.test",
+                List.of(new AccessControlCredentialUpdate(
+                        AccessControl.CredentialType.SHA1,
+                        DEFAULT_ROOT_PASSWORD_HASH)),
+                List.of(new AccessControlRepositoryGrantUpdate("project", true, false, false, false, "*"))));
+
+        AuthenticationResult passwordResult = service.authenticateUser(
+                "password-client",
+                DEFAULT_ROOT_PASSWORD.getBytes(StandardCharsets.UTF_8));
+        assertThat(passwordResult).isInstanceOf(AuthenticationResult.Success.class);
+        AuthenticationResult.Success passwordSuccess = (AuthenticationResult.Success) passwordResult;
+        assertThat(passwordSuccess.userIdentity().getUserId()).isEqualTo("password-client");
+        assertThat(repositoryNames(passwordSuccess.userIdentity().getGrants())).containsExactly("project");
+        assertThat(service.authenticateUser(
+                "password-client",
+                "other-password".getBytes(StandardCharsets.UTF_8))).isInstanceOf(AuthenticationResult.Failure.class);
+
+        AccessControl savedAccessControl = accessControlFrom(storage.load().valueOrFailure("ACL should be saved"));
+        AccessControl.User savedUser = userById(savedAccessControl, "password-client");
+        assertThat(credentialValues(savedUser))
+                .containsEntry(AccessControl.CredentialType.SHA1, DEFAULT_ROOT_PASSWORD_HASH)
+                .doesNotContainKey(AccessControl.CredentialType.ARGON2);
     }
 
     private OrionConfiguration.BootstrapAccessControlConfig localConfig(Path directory) {
@@ -591,7 +617,6 @@ class AccessControlStorageTest {
     private void assertRootAuthenticates(OrionAccessControlServiceImpl service) {
         AuthenticationResult result = service.authenticateUser(
                 "root",
-                AccessControl.CredentialType.SHA1,
                 DEFAULT_ROOT_PASSWORD.getBytes(StandardCharsets.UTF_8));
 
         assertThat(result).isInstanceOf(AuthenticationResult.Success.class);
@@ -604,7 +629,6 @@ class AccessControlStorageTest {
 
         AuthenticationResult bearerResult = service.authenticateUser(
                 "root",
-                AccessControl.CredentialType.BEARER_TOKEN,
                 DEFAULT_ROOT_PASSWORD.getBytes(StandardCharsets.UTF_8));
 
         assertThat(bearerResult).isInstanceOf(AuthenticationResult.Success.class);
@@ -615,7 +639,6 @@ class AccessControlStorageTest {
     private void assertUserAuthenticates(OrionAccessControlServiceImpl service, String userId) {
         AuthenticationResult result = service.authenticateUser(
                 userId,
-                AccessControl.CredentialType.SHA1,
                 DEFAULT_ROOT_PASSWORD.getBytes(StandardCharsets.UTF_8));
 
         assertThat(result).isInstanceOf(AuthenticationResult.Success.class);
@@ -671,6 +694,15 @@ class AccessControlStorageTest {
             credentials.put(credential.getType(), credential.getValue());
         }
         return credentials;
+    }
+
+    private AccessControl.User userById(AccessControl accessControl, String userId) {
+        for (AccessControl.User user : accessControl.getUsers()) {
+            if (userId.equals(user.getId())) {
+                return user;
+            }
+        }
+        throw new IllegalStateException("Missing user " + userId);
     }
 
     private boolean hasPublicKeyCredential(AccessControl.User user, PublicKey publicKey) {

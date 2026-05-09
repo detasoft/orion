@@ -118,7 +118,6 @@ public class OrionAdminServlet implements MapToUrlServlet {
 
         AuthenticationResult authentication = accessControlService.authenticateUser(
                 "root",
-                AccessControl.CredentialType.BEARER_TOKEN,
                 bearerToken.getBytes(StandardCharsets.UTF_8));
         if (authentication instanceof AuthenticationResult.Success(var userIdentity)) {
             securityContext.withUserIdentity(userIdentity);

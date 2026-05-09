@@ -176,11 +176,9 @@ class OrionAdminServletTest {
         }
 
         @Override
-        public AuthenticationResult authenticateUser(String userName, AccessControl.CredentialType credentialType, byte[] publicKey) {
-            String token = new String(publicKey, StandardCharsets.UTF_8);
-            if (!"root".equals(userName)
-                    || credentialType != AccessControl.CredentialType.BEARER_TOKEN
-                    || !ROOT_TOKEN.equals(token)) {
+        public AuthenticationResult authenticateUser(String userName, byte[] credential) {
+            String token = new String(credential, StandardCharsets.UTF_8);
+            if (!"root".equals(userName) || !ROOT_TOKEN.equals(token)) {
                 return AuthenticationResult.failure("authentication failed");
             }
 
