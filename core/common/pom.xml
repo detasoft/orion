@@ -29,10 +29,6 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>acl-model</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
             <artifactId>configuration</artifactId>
         </dependency>
         <dependency>

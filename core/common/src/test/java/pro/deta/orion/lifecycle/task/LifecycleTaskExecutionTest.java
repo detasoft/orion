@@ -19,10 +19,11 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.ACL_LOAD;
-import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.REPOSITORY_STORAGE;
 import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.TRANSPORTS_START;
 
 class LifecycleTaskExecutionTest {
+    private static final LifecycleTaskId STORAGE_TASK = new LifecycleTaskId("STORAGE");
+
     @Test
     void explicitTasksRunInDependencyOrder() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
@@ -34,8 +35,8 @@ class LifecycleTaskExecutionTest {
             registrar.task(ApplicationState.STARTING, ACL_LOAD, () -> {
                 events.add("acl");
                 return OrionStageCallResult.EMPTY;
-            }).after(REPOSITORY_STORAGE);
-            registrar.task(ApplicationState.STARTING, REPOSITORY_STORAGE, () -> {
+            }).after(STORAGE_TASK);
+            registrar.task(ApplicationState.STARTING, STORAGE_TASK, () -> {
                 events.add("storage");
                 return OrionStageCallResult.EMPTY;
             });
@@ -51,7 +52,7 @@ class LifecycleTaskExecutionTest {
     void failingExplicitTaskMovesApplicationToFailed() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
         OrionApplicationStageEventListener listener = registrar -> {
-            registrar.task(ApplicationState.INIT, REPOSITORY_STORAGE, () -> {
+            registrar.task(ApplicationState.INIT, STORAGE_TASK, () -> {
                 events.add("explicit");
                 throw new IllegalStateException("boom");
             });
@@ -70,16 +71,16 @@ class LifecycleTaskExecutionTest {
     @Test
     void exposesExplicitTaskPlanDescription() {
         OrionApplicationStageEventListener listener = registrar -> {
-            registrar.task(ApplicationState.STARTING, REPOSITORY_STORAGE, () -> OrionStageCallResult.EMPTY);
+            registrar.task(ApplicationState.STARTING, STORAGE_TASK, () -> OrionStageCallResult.EMPTY);
             registrar.task(ApplicationState.STARTING, ACL_LOAD, () -> OrionStageCallResult.EMPTY)
-                    .after(REPOSITORY_STORAGE);
+                    .after(STORAGE_TASK);
         };
 
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of(listener))) {
             assertThat(context.lifecycle().describeTaskPlan(ApplicationState.STARTING)).contains(
                     "STARTING:",
-                    "REPOSITORY_STORAGE",
-                    "ACL_LOAD after REPOSITORY_STORAGE");
+                    "STORAGE",
+                    "ACL_LOAD after STORAGE");
         }
     }
 

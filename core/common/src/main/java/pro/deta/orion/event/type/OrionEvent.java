@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * or services.</p>
  */
 @Getter
-public sealed abstract class OrionEvent permits GitReceiveOrionEvent, GitUploadOrionEvent, VolatileUserAdded, RequestToAclUpdate {
+public sealed abstract class OrionEvent permits GitReceiveOrionEvent, GitUploadOrionEvent, RequestToAclUpdate {
     private final Instant createdAt = Instant.now();
     private final AtomicBoolean processed = new AtomicBoolean(false);
 

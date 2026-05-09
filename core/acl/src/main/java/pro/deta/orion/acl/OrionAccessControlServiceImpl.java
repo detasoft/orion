@@ -60,8 +60,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::aclLoad)
-                .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
+        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::aclLoad);
     }
 
     public OrionStageCallResult aclLoad() {

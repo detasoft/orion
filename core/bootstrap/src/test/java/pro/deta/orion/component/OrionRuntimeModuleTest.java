@@ -60,7 +60,7 @@ class OrionRuntimeModuleTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
-    void runtimeInitPlanOrdersJGitEventsAndStorageInit() {
+    void runtimeInitPlanOrdersJGitAndEvents() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
@@ -68,18 +68,16 @@ class OrionRuntimeModuleTest {
         assertTrue(plan.contains("JGIT_RUNTIME"));
         assertTrue(plan.contains("SSH_TRANSPORT_INIT"));
         assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
-        assertTrue(plan.contains("GIT_BACKED_INTERNAL_STORAGE_INIT after EVENT_MANAGER"));
         assertFalse(plan.contains("ACL_INIT"));
     }
 
     @Test
-    void runtimeStartingPlanOrdersStorageAclBeforeTransports() {
+    void runtimeStartingPlanOrdersAclBeforeTransports() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
 
-        assertTrue(plan.contains("REPOSITORY_STORAGE"));
-        assertTrue(plan.contains("ACL_LOAD after REPOSITORY_STORAGE"));
+        assertTrue(plan.contains("ACL_LOAD"));
         assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
         assertTrue(plan.contains("HTTP_TRANSPORT_START after TRANSPORTS_START"));
         assertTrue(plan.contains("GIT_TRANSPORT_START after TRANSPORTS_START"));

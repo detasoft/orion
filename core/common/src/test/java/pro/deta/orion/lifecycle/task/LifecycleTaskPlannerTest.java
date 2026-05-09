@@ -10,21 +10,22 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.ACL_LOAD;
-import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.REPOSITORY_STORAGE;
 import static pro.deta.orion.lifecycle.task.OrionLifecycleTasks.TRANSPORTS_START;
 
 class LifecycleTaskPlannerTest {
+    private static final LifecycleTaskId STORAGE_TASK = new LifecycleTaskId("STORAGE");
+
     @Test
     void ordersTasksByDependencies() {
-        LifecycleTaskDefinition storage = task(REPOSITORY_STORAGE);
-        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(REPOSITORY_STORAGE));
+        LifecycleTaskDefinition storage = task(STORAGE_TASK);
+        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(STORAGE_TASK));
         LifecycleTaskDefinition transports = task(TRANSPORTS_START, List.of(ACL_LOAD));
 
         LifecycleTaskPlan plan = LifecycleTaskPlanner.plan(
                 ApplicationState.STARTING,
                 List.of(transports, acl, storage));
 
-        assertThat(taskIds(plan)).containsExactly(REPOSITORY_STORAGE, ACL_LOAD, TRANSPORTS_START);
+        assertThat(taskIds(plan)).containsExactly(STORAGE_TASK, ACL_LOAD, TRANSPORTS_START);
     }
 
     @Test
@@ -63,8 +64,8 @@ class LifecycleTaskPlannerTest {
 
     @Test
     void planDescriptionIsReadable() {
-        LifecycleTaskDefinition storage = task(REPOSITORY_STORAGE);
-        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(REPOSITORY_STORAGE));
+        LifecycleTaskDefinition storage = task(STORAGE_TASK);
+        LifecycleTaskDefinition acl = task(ACL_LOAD, List.of(STORAGE_TASK));
 
         LifecycleTaskPlan plan = LifecycleTaskPlanner.plan(
                 ApplicationState.STARTING,
@@ -72,8 +73,8 @@ class LifecycleTaskPlannerTest {
 
         assertThat(plan.describe()).contains(
                 "STARTING:",
-                "1. REPOSITORY_STORAGE",
-                "2. ACL_LOAD after REPOSITORY_STORAGE");
+                "1. STORAGE",
+                "2. ACL_LOAD after STORAGE");
     }
 
     private static LifecycleTaskDefinition task(LifecycleTaskId id) {

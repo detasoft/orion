@@ -12,6 +12,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LifecycleTaskRegistrationTest {
+    private static final LifecycleTaskId STORAGE_TASK = new LifecycleTaskId("STORAGE");
+
     @Test
     void taskRegistrationCapturesAfterDependencies() {
         LifecycleTaskRegistration registration = new LifecycleTaskRegistration(
@@ -19,10 +21,10 @@ class LifecycleTaskRegistrationTest {
                 OrionLifecycleTasks.ACL_LOAD,
                 () -> OrionStageCallResult.EMPTY);
 
-        registration.after(OrionLifecycleTasks.REPOSITORY_STORAGE);
+        registration.after(STORAGE_TASK);
 
         assertThat(registration.definition().serviceName()).isEmpty();
-        assertThat(registration.definition().after()).containsExactly(OrionLifecycleTasks.REPOSITORY_STORAGE);
+        assertThat(registration.definition().after()).containsExactly(STORAGE_TASK);
     }
 
     @Test
@@ -37,7 +39,7 @@ class LifecycleTaskRegistrationTest {
         };
         OrionApplicationStageEventListener acl = listenerRegistrar ->
                 listenerRegistrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
-                        .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
+                        .after(STORAGE_TASK);
 
         acl.registerToStage(registrar);
 
@@ -45,7 +47,7 @@ class LifecycleTaskRegistrationTest {
         LifecycleTaskDefinition definition = registrations.getFirst().definition();
         assertThat(definition.phase()).isEqualTo(ApplicationState.STARTING);
         assertThat(definition.id()).isEqualTo(OrionLifecycleTasks.ACL_LOAD);
-        assertThat(definition.after()).containsExactly(OrionLifecycleTasks.REPOSITORY_STORAGE);
+        assertThat(definition.after()).containsExactly(STORAGE_TASK);
     }
 
     @Test

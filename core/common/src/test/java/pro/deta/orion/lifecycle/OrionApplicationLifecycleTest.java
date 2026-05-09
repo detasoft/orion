@@ -23,6 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
 class OrionApplicationLifecycleTest {
+    private static final LifecycleTaskId STORAGE_TASK = new LifecycleTaskId("STORAGE");
+
     @Test
     void startupRunsInitThenStartingAndEndsUp() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
@@ -98,9 +100,9 @@ class OrionApplicationLifecycleTest {
     @Test
     void describeLifecycleShowsFlowsAndTaskPlans() {
         OrionApplicationStageEventListener startingTasks = registrar -> {
-            registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.REPOSITORY_STORAGE, () -> OrionStageCallResult.EMPTY);
+            registrar.task(ApplicationState.STARTING, STORAGE_TASK, () -> OrionStageCallResult.EMPTY);
             registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
-                    .after(OrionLifecycleTasks.REPOSITORY_STORAGE);
+                    .after(STORAGE_TASK);
         };
 
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of(startingTasks))) {
@@ -108,8 +110,8 @@ class OrionApplicationLifecycleTest {
                     "STARTUP:",
                     "INIT -> STARTING",
                     "STARTING:",
-                    "REPOSITORY_STORAGE",
-                    "ACL_LOAD after REPOSITORY_STORAGE");
+                    "STORAGE",
+                    "ACL_LOAD after STORAGE");
         }
     }
 
@@ -125,7 +127,7 @@ class OrionApplicationLifecycleTest {
                     "INIT:",
                     "  - ServiceMapLifecycleService: EVENT_MANAGER",
                     "STARTING:",
-                    "  - ServiceMapLifecycleService: ACL_LOAD after REPOSITORY_STORAGE wait 3s");
+                    "  - ServiceMapLifecycleService: ACL_LOAD after STORAGE wait 3s");
         }
     }
 
@@ -187,7 +189,7 @@ class OrionApplicationLifecycleTest {
         public void registerToStage(ApplicationStateListenerRegistrar registrar) {
             registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, () -> OrionStageCallResult.EMPTY);
             registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, () -> OrionStageCallResult.EMPTY)
-                    .after(OrionLifecycleTasks.REPOSITORY_STORAGE)
+                    .after(STORAGE_TASK)
                     .waitForCompletionSecs(3);
         }
     }
