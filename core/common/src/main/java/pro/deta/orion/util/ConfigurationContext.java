@@ -73,7 +73,7 @@ public class ConfigurationContext {
         if (resourceLocation.hasNoScheme()) {
             return resolve(location);
         }
-        if (!resourceLocation.hasScheme("file")) {
+        if (!resourceLocation.hasScheme(ResourceScheme.FILE)) {
             throw new IllegalArgumentException("Unsupported repository storage location: " + location);
         }
         Path path = Paths.get(resourceLocation.pathOrSchemeSpecificPart("File storage location must include a path"));

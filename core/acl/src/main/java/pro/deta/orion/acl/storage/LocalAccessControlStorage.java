@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionEnableServiceSupport;
 import pro.deta.orion.util.ResourceLocation;
+import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -68,7 +69,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     private Path aclDirectory() {
         ResourceLocation location = ResourceLocation.parse(config.getLocation(), "ACL location");
         Path path;
-        if (location.hasScheme("file")) {
+        if (location.hasScheme(ResourceScheme.FILE)) {
             path = Paths.get(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
         } else if (location.hasNoScheme()) {
             path = Path.of(config.getLocation());

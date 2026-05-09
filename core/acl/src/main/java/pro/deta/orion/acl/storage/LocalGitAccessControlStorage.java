@@ -4,6 +4,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.git.storage.LocalGitVersionedStorage;
 import pro.deta.orion.git.storage.VersionedStorage;
 import pro.deta.orion.util.ResourceLocation;
+import pro.deta.orion.util.ResourceScheme;
 
 import java.nio.file.Path;
 
@@ -26,7 +27,7 @@ public class LocalGitAccessControlStorage extends VersionedAccessControlStorage 
 
     private static Path repositoryPathFrom(OrionConfiguration.BootstrapAccessControlConfig config) {
         ResourceLocation location = ResourceLocation.parse(config.getLocation(), "ACL location");
-        if (location.hasScheme("file")) {
+        if (location.hasScheme(ResourceScheme.FILE)) {
             return Path.of(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
         }
         return Path.of(config.getLocation());

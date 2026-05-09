@@ -6,6 +6,7 @@ import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.git.storage.GitRepositoryProviderVersionedStorage;
 import pro.deta.orion.util.ResourceLocation;
+import pro.deta.orion.util.ResourceScheme;
 
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class AccessControlStorageResolver {
@@ -19,10 +20,10 @@ public class AccessControlStorageResolver {
     AccessControlStorage resolve(OrionConfiguration.BootstrapAccessControlConfig accessControlConfig) {
         String location = accessControlConfig.getLocation();
         ResourceLocation resourceLocation = ResourceLocation.parse(location, "ACL location");
-        if (resourceLocation.hasNoSchemeOrScheme("file")) {
+        if (resourceLocation.hasNoSchemeOrScheme(ResourceScheme.FILE)) {
             return new LocalAccessControlStorage(accessControlConfig);
         }
-        if (resourceLocation.hasScheme("local")) {
+        if (resourceLocation.hasScheme(ResourceScheme.LOCAL)) {
             return new VersionedAccessControlStorage(
                     new GitRepositoryProviderVersionedStorage(
                             gitRepositoryProvider,
@@ -34,7 +35,7 @@ public class AccessControlStorageResolver {
     }
 
     public static boolean isInternalLocalGitStorage(String location) {
-        return ResourceLocation.parse(location, "ACL location").hasScheme("local");
+        return ResourceLocation.parse(location, "ACL location").hasScheme(ResourceScheme.LOCAL);
     }
 
     public static String localRepositoryName(String location) {

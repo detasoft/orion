@@ -8,6 +8,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.util.ResourceLocation;
+import pro.deta.orion.util.ResourceScheme;
 
 @Singleton
 public class GitRepositoryProviderResolver {
@@ -31,10 +32,10 @@ public class GitRepositoryProviderResolver {
 
     GitRepositoryProvider resolve(String location) {
         ResourceLocation resourceLocation = ResourceLocation.parse(location, "Storage location");
-        if (resourceLocation.hasNoSchemeOrScheme("file")) {
+        if (resourceLocation.hasNoSchemeOrScheme(ResourceScheme.FILE)) {
             return fileGitRepositoryProvider.get();
         }
-        if (resourceLocation.hasScheme("s3")) {
+        if (resourceLocation.hasScheme(ResourceScheme.other("s3"))) {
             return s3GitRepositoryProvider.get();
         }
         throw new IllegalArgumentException("Unsupported repository storage location: " + location);

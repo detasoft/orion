@@ -36,19 +36,19 @@ public abstract class ResourceLocation {
         return uri;
     }
 
-    public String scheme() {
-        return uri.getScheme();
+    public ResourceScheme scheme() {
+        return ResourceScheme.fromNullable(uri.getScheme());
     }
 
     public boolean hasNoScheme() {
-        return scheme() == null;
+        return ResourceScheme.EMPTY.equals(scheme());
     }
 
-    public boolean hasScheme(String expected) {
-        return expected.equalsIgnoreCase(scheme());
+    public boolean hasScheme(ResourceScheme expected) {
+        return expected.equals(scheme());
     }
 
-    public boolean hasNoSchemeOrScheme(String expected) {
+    public boolean hasNoSchemeOrScheme(ResourceScheme expected) {
         return hasNoScheme() || hasScheme(expected);
     }
 
