@@ -13,7 +13,6 @@ import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.OrionJGitRuntime;
 import pro.deta.orion.git.storage.GitBackedInternalStorage;
 import pro.deta.orion.internal.OrionExecutor;
@@ -92,8 +91,8 @@ public class OrionRuntimeModule {
 
     @Provides
     @Singleton
-    GitRepositoryProvider defaultGitRepositoryProvider(FileGitRepositoryProvider impl) {
-        return impl;
+    GitRepositoryProvider defaultGitRepositoryProvider(GitRepositoryProviderResolver resolver) {
+        return resolver.resolve();
     }
 
     @Provides

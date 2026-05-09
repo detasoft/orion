@@ -26,6 +26,10 @@
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>http-core</artifactId>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>git-engine-s3</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

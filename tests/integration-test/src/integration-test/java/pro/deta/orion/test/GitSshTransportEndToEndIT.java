@@ -19,6 +19,7 @@ import org.eclipse.jgit.transport.sshd.SshdSessionFactoryBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
@@ -540,7 +541,7 @@ class GitSshTransportEndToEndIT {
     }
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
-                                FileGitRepositoryProvider gitRepositoryProvider,
+                                GitRepositoryProvider gitRepositoryProvider,
                                 OrionAccessControlServiceImpl accessControlService) {
         private String sshUrl(String repository) {
             return "ssh://%s@%s:%d/%s".formatted(
@@ -551,7 +552,7 @@ class GitSshTransportEndToEndIT {
         }
 
         private Path repositoryPath(String repository) {
-            return gitRepositoryProvider.repositoryPathForTests(repository);
+            return ((FileGitRepositoryProvider) gitRepositoryProvider).repositoryPathForTests(repository);
         }
 
         private URL httpUrl(String path) throws IOException {

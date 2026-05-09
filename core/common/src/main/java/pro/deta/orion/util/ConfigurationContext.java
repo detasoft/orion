@@ -52,7 +52,7 @@ public class ConfigurationContext {
         return Paths.get(f).isAbsolute();
     }
 
-    public Path getGitStoragePath() {
+    public Path getFileGitStoragePath() {
         return resolveStorageLocation(configuration.getStorage().getLocation());
     }
 

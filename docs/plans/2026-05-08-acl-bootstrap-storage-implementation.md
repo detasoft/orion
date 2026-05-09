@@ -151,7 +151,7 @@ public Path getWorkDir() {
     return resolve(configuration.getBootstrap().getWorkDir());
 }
 
-public Path getGitStoragePath() {
+public Path getFileGitStoragePath() {
     return resolveStorageLocation(configuration.getStorage().getLocation());
 }
 ```
@@ -315,7 +315,7 @@ Expected: FAIL until provider reads effective storage configuration.
 
 **Step 3: Implement minimal provider update**
 
-Keep `FileGitRepositoryProvider` local-file backed for this task, but make it consume `ConfigurationContext.getGitStoragePath()` after Task 1's storage parsing.
+Keep `FileGitRepositoryProvider` local-file backed for this task, but make it consume `ConfigurationContext.getFileGitStoragePath()` after Task 1's storage parsing.
 
 If `createOnPush=false` is implemented here, add a constructor parameter or effective config access. If it creates too much churn, document it as enforced in Task 4 through `LocalRepositoryStorage`.
 

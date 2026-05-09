@@ -19,7 +19,7 @@ class ConfigurationContextTest {
         OrionConfiguration configuration = configuration(tempDir);
         configuration.getStorage().setLocation("repos");
 
-        Path storagePath = new ConfigurationContext(configuration).getGitStoragePath();
+        Path storagePath = new ConfigurationContext(configuration).getFileGitStoragePath();
 
         assertThat(storagePath).isEqualTo(tempDir.resolve("repos").toAbsolutePath());
     }
@@ -30,7 +30,7 @@ class ConfigurationContextTest {
         Path storageLocation = tempDir.resolve("storage").resolve("repos");
         configuration.getStorage().setLocation(storageLocation.toUri().toString());
 
-        Path storagePath = new ConfigurationContext(configuration).getGitStoragePath();
+        Path storagePath = new ConfigurationContext(configuration).getFileGitStoragePath();
 
         assertThat(storagePath).isEqualTo(storageLocation.toAbsolutePath().normalize());
     }
@@ -40,7 +40,7 @@ class ConfigurationContextTest {
         OrionConfiguration configuration = configuration(tempDir);
         configuration.getStorage().setLocation("file:target/orion-test-repos");
 
-        Path storagePath = new ConfigurationContext(configuration).getGitStoragePath();
+        Path storagePath = new ConfigurationContext(configuration).getFileGitStoragePath();
 
         assertThat(storagePath).isEqualTo(Paths.get("")
                 .resolve("target/orion-test-repos")
@@ -49,11 +49,11 @@ class ConfigurationContextTest {
     }
 
     @Test
-    void rejectsUnsupportedStorageLocationScheme() {
+    void rejectsNonFileStorageLocationSchemeForFileGitStoragePath() {
         OrionConfiguration configuration = configuration(tempDir);
         configuration.getStorage().setLocation("s3://orion/repositories");
 
-        assertThatThrownBy(() -> new ConfigurationContext(configuration).getGitStoragePath())
+        assertThatThrownBy(() -> new ConfigurationContext(configuration).getFileGitStoragePath())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported repository storage location");
     }

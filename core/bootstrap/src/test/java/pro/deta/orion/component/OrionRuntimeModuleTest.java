@@ -5,6 +5,7 @@ import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
+import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
@@ -20,6 +21,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.FileGitRepositoryProvider;
+import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
@@ -106,6 +108,35 @@ class OrionRuntimeModuleTest {
 
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP"));
+    }
+
+    @Test
+    void runtimeRepositoryProviderUsesFileStorageLocation() {
+        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
+
+        assertInstanceOf(FileGitRepositoryProvider.class, component.gitRepositoryProvider());
+    }
+
+    @Test
+    void runtimeRepositoryProviderUsesS3StorageLocation() {
+        OrionConfiguration configuration = defaultRuntimeConfiguration();
+        configuration.getStorage().setLocation("s3://orion/repositories");
+        OrionComponent component = runtimeComponent(configuration);
+
+        assertInstanceOf(S3GitRepositoryProvider.class, component.gitRepositoryProvider());
+    }
+
+    @Test
+    void runtimeRepositoryProviderRejectsUnsupportedStorageLocation() {
+        OrionConfiguration configuration = defaultRuntimeConfiguration();
+        configuration.getStorage().setLocation("ssh://git@example.test/repositories");
+        OrionComponent component = runtimeComponent(configuration);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                component::gitRepositoryProvider);
+
+        assertEquals("Unsupported repository storage location: ssh://git@example.test/repositories", error.getMessage());
     }
 
     @Test
@@ -196,7 +227,7 @@ class OrionRuntimeModuleTest {
     }
 
     private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration,
-                                                             FileGitRepositoryProvider repositoryProvider) {
+                                                             GitRepositoryProvider repositoryProvider) {
         return new AccessControlStorageResolver(configuration, repositoryProvider).resolve();
     }
 

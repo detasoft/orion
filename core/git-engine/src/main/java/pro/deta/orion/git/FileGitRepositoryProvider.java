@@ -33,7 +33,7 @@ public class FileGitRepositoryProvider implements GitRepositoryProvider {
 
     @Inject
     public FileGitRepositoryProvider(ConfigurationContext configurationContext) {
-        this(Objects.requireNonNull(configurationContext, "configurationContext").getGitStoragePath());
+        this(Objects.requireNonNull(configurationContext, "configurationContext").getFileGitStoragePath());
     }
 
     FileGitRepositoryProvider(Path gitStorageDir) {

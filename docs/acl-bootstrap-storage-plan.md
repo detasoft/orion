@@ -272,10 +272,10 @@ Implemented:
 - local filesystem ACL through `file:` or a no-scheme path;
 - Git-over-local-repository-storage ACL through `local:repositoryName`;
 - multiple configured ACL paths are loaded and saved by the implemented ACL storages;
+- repository provider resolution by `storage.location`, including `file:` and an `s3:` provider placeholder;
 - ACL startup order before transports through named lifecycle task dependencies.
 
 Not implemented yet:
 
 - remote Git ACL bootstrap storage such as `git+ssh:`;
-- non-file repository storage backends behind `storage.location`;
-- multi-backend repository storage API separate from the current Git repository provider.
+- actual S3 repository read/write behavior behind the `s3:` provider placeholder.

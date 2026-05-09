@@ -4,10 +4,10 @@ import dagger.BindsInstance;
 import dagger.Component;
 
 import jakarta.inject.Singleton;
+import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.transport.http.OrionHttpModule;
 
@@ -17,7 +17,7 @@ public interface OrionComponent {
 
     OrionApplicationLifecycle orionApplicationLifecycle();
 
-    FileGitRepositoryProvider gitRepositoryProvider();
+    GitRepositoryProvider gitRepositoryProvider();
 
     OrionAccessControlServiceImpl orionAccessControlService();
 
