@@ -6,8 +6,6 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
@@ -71,35 +69,14 @@ public class ConfigurationContext {
     }
 
     private Path resolveStorageLocation(String location) {
-        if (OrionUtils.isNullOrEmpty(location)) {
-            throw new IllegalArgumentException("Storage location must not be empty");
-        }
-
-        URI uri = parseUri(location);
-        String scheme = uri.getScheme();
-        if (scheme == null) {
+        ResourceLocation resourceLocation = ResourceLocation.parse(location, "Storage location");
+        if (resourceLocation.hasNoScheme()) {
             return resolve(location);
         }
-        if (!"file".equalsIgnoreCase(scheme)) {
+        if (!resourceLocation.hasScheme("file")) {
             throw new IllegalArgumentException("Unsupported repository storage location: " + location);
         }
-        if (uri.getPath() != null && !uri.getPath().isBlank()) {
-            Path path = Paths.get(uri.getPath());
-            return path.isAbsolute() ? path.normalize() : Paths.get("").resolve(path).toAbsolutePath().normalize();
-        }
-        String schemeSpecificPart = uri.getSchemeSpecificPart();
-        if (OrionUtils.isNullOrEmpty(schemeSpecificPart)) {
-            throw new IllegalArgumentException("File storage location must include a path");
-        }
-        Path path = Paths.get(schemeSpecificPart);
+        Path path = Paths.get(resourceLocation.pathOrSchemeSpecificPart("File storage location must include a path"));
         return path.isAbsolute() ? path.normalize() : Paths.get("").resolve(path).toAbsolutePath().normalize();
-    }
-
-    private static URI parseUri(String value) {
-        try {
-            return new URI(value);
-        } catch (URISyntaxException e) {
-            throw new IllegalArgumentException("Invalid storage location: " + value, e);
-        }
     }
 }

@@ -18,6 +18,7 @@ import pro.deta.orion.git.storage.jgit.OrionClientSshdSessionFactoryProvider;
 import pro.deta.orion.internal.CheckedConsumer;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.util.KeyUtils;
+import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.Result;
 
 import java.net.URI;
@@ -65,7 +66,7 @@ public class GitAccessParams {
         this.orionClientSshdSessionFactoryProvider = orionClientSshdSessionFactoryProvider;
         switch (initialUri.getScheme()) {
             case "local" -> {
-                String repositoryName = localRepositoryName(initialUri);
+                String repositoryName = ResourceLocation.from(initialUri).normalizedRelativePath();
                 uri = GitAccessScheme.GIT.format(null, appTransport.getGit(), repositoryName);
                 auth = new Auth.LocalNoneAuth(repositoryName);
             }
@@ -123,30 +124,6 @@ public class GitAccessParams {
             }
         }
         return false;
-    }
-
-    private static String localRepositoryName(URI uri) {
-        StringBuilder repositoryName = new StringBuilder();
-        if (uri.getHost() != null && !uri.getHost().isBlank()) {
-            repositoryName.append(uri.getHost());
-        }
-        if (uri.getPath() != null && !uri.getPath().isBlank()) {
-            if (!repositoryName.isEmpty()) {
-                repositoryName.append("/");
-            }
-            repositoryName.append(stripLeadingSlashes(uri.getPath()));
-        }
-        if (repositoryName.isEmpty() && uri.getSchemeSpecificPart() != null) {
-            repositoryName.append(stripLeadingSlashes(uri.getSchemeSpecificPart()));
-        }
-        return Path.of(repositoryName.toString()).normalize().toString();
-    }
-
-    private static String stripLeadingSlashes(String value) {
-        while (value.startsWith("/")) {
-            value = value.substring(1);
-        }
-        return value;
     }
 
 

@@ -4,10 +4,10 @@ import jakarta.inject.Inject;
 import lombok.RequiredArgsConstructor;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionEnableServiceSupport;
+import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -66,15 +66,11 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     }
 
     private Path aclDirectory() {
-        URI uri = URI.create(config.getLocation());
+        ResourceLocation location = ResourceLocation.parse(config.getLocation(), "ACL location");
         Path path;
-        if ("file".equalsIgnoreCase(uri.getScheme())) {
-            if (uri.getPath() != null && !uri.getPath().isBlank()) {
-                path = Paths.get(uri.getPath());
-            } else {
-                path = Paths.get(uri.getSchemeSpecificPart());
-            }
-        } else if (uri.getScheme() == null) {
+        if (location.hasScheme("file")) {
+            path = Paths.get(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
+        } else if (location.hasNoScheme()) {
             path = Path.of(config.getLocation());
         } else {
             throw new IllegalArgumentException("Unsupported local ACL location: " + config.getLocation());

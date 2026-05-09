@@ -7,8 +7,7 @@ import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
-
-import java.net.URI;
+import pro.deta.orion.util.ResourceLocation;
 
 @Singleton
 public class GitRepositoryProviderResolver {
@@ -31,15 +30,11 @@ public class GitRepositoryProviderResolver {
     }
 
     GitRepositoryProvider resolve(String location) {
-        if (location == null || location.isBlank()) {
-            throw new IllegalArgumentException("Storage location must not be empty");
-        }
-        URI uri = URI.create(location);
-        String scheme = uri.getScheme();
-        if (scheme == null || "file".equalsIgnoreCase(scheme)) {
+        ResourceLocation resourceLocation = ResourceLocation.parse(location, "Storage location");
+        if (resourceLocation.hasNoSchemeOrScheme("file")) {
             return fileGitRepositoryProvider.get();
         }
-        if ("s3".equalsIgnoreCase(scheme)) {
+        if (resourceLocation.hasScheme("s3")) {
             return s3GitRepositoryProvider.get();
         }
         throw new IllegalArgumentException("Unsupported repository storage location: " + location);
