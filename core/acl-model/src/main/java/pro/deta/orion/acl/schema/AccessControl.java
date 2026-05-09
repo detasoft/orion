@@ -187,7 +187,7 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
 
 
     public enum CredentialType {
-        SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2, STATIC_BEARER_TOKEN, JWT_SIGNING_PUBLIC_KEY;
+        SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2, JWT_SIGNING_PUBLIC_KEY;
     }
 
     public enum GrantKey {

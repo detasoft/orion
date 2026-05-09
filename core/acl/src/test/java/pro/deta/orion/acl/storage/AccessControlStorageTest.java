@@ -632,9 +632,8 @@ class AccessControlStorageTest {
         assertThat(rootUser.getEmail()).isEqualTo("root@orion.pro");
         assertThat(rootUser.getRoles()).containsExactly("ROOT");
         assertThat(credentialValues(rootUser))
-                .hasSize(2)
-                .containsEntry(AccessControl.CredentialType.SHA1, DEFAULT_ROOT_PASSWORD_HASH)
-                .containsEntry(AccessControl.CredentialType.STATIC_BEARER_TOKEN, DEFAULT_ROOT_PASSWORD_HASH);
+                .hasSize(1)
+                .containsEntry(AccessControl.CredentialType.SHA1, DEFAULT_ROOT_PASSWORD_HASH);
 
         assertThat(roleIds(accessControl)).containsExactly("ROOT");
         AccessControl.Role rootRole = accessControl.getRoles().getFirst();
@@ -667,14 +666,6 @@ class AccessControlStorageTest {
                 "CONNECT",
                 "ALL_REPOSITORY",
                 "APPLICATION_CONTROL");
-
-        AuthenticationResult bearerResult = service.authenticateUser(
-                "root",
-                DEFAULT_ROOT_PASSWORD.getBytes(StandardCharsets.UTF_8));
-
-        assertThat(bearerResult).isInstanceOf(AuthenticationResult.Success.class);
-        AuthenticationResult.Success bearerSuccess = (AuthenticationResult.Success) bearerResult;
-        assertThat(bearerSuccess.userIdentity().getUserId()).isEqualTo("root");
     }
 
     private void assertUserAuthenticates(OrionAccessControlServiceImpl service, String userId) {

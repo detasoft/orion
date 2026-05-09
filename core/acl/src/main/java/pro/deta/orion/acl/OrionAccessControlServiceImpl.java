@@ -316,7 +316,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case OPENSSH_PUBLIC_KEY -> {
                 yield publicKeysAreEqual(c.getValue(), provided);
             }
-            case SHA1, STATIC_BEARER_TOKEN -> {
+            case SHA1 -> {
                 yield orionPasswordHashingService.comparePassword(SHA1, c.getValue(), provided);
             }
             case MD5 -> false;
