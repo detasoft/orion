@@ -32,7 +32,7 @@ public class ACLUtil {
 
         AccessControl.User rootUser = createUser("root", "root@orion.pro")
                 .addCredential(passwordCredentialType, defaultRootPasswordHash)
-                .addCredential(AccessControl.CredentialType.BEARER_TOKEN, defaultRootPasswordHash)
+                .addCredential(AccessControl.CredentialType.STATIC_BEARER_TOKEN, defaultRootPasswordHash)
                 .addRole(rootRole.getId());
 
 

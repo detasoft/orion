@@ -167,6 +167,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return AuthenticationResult.failure("authentication failed");
     }
 
+    @Override
+    public AuthenticationResult authenticateToken(byte[] token) {
+        return AuthenticationResult.failure("token authentication is not implemented");
+    }
+
     private void requestToUpdate() {
         switch (loadAccessControl()) {
             case Result.Success<AccessControl>(var ac) -> prepareAndUpdateAccessControl(ac);
@@ -285,16 +290,23 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         if (u.getCredentials() == null)
             return false;
         for (AccessControl.Credential c : u.getCredentials()) {
-            try {
-                if (c != null && valuesAreEqual(c, encodedData)) {
-                    return true;
-                }
-            } catch (RuntimeException e) {
-                log.warn("Cannot verify {} credential for user '{}'.", c.getType(), u.getId(), e);
-                return false;
+            if (credentialMatches(u, c, encodedData)) {
+                return true;
             }
         }
         return false;
+    }
+
+    private boolean credentialMatches(AccessControl.User user, AccessControl.Credential credential, byte[] encodedData) {
+        if (credential == null) {
+            return false;
+        }
+        try {
+            return valuesAreEqual(credential, encodedData);
+        } catch (RuntimeException e) {
+            log.warn("Cannot verify {} credential for user '{}'.", credential.getType(), user.getId(), e);
+            return false;
+        }
     }
 
     private boolean valuesAreEqual(AccessControl.Credential c, byte[] provided) {
@@ -313,9 +325,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case ARGON2 -> {
                 yield orionPasswordHashingService.comparePassword(ARGON2, c.getValue(), provided);
             }
-            case BEARER_TOKEN -> {
+            case STATIC_BEARER_TOKEN -> {
                 yield orionPasswordHashingService.comparePassword(SHA1, c.getValue(), provided);
             }
+            case JWT_SIGNING_PUBLIC_KEY -> false;
         };
     }
 
@@ -374,7 +387,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
                 AccessControl.User user = ACLUtil.createUser(userUpdate.id(), userUpdate.email());
                 for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
-                    user.addCredential(credential.type(), credential.value());
+                    user.addCredential(credential.type(), credential.keyId(), credential.value());
                 }
                 for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
                     addRepositoryGrant(user, repositoryGrant);
@@ -450,6 +463,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
                 if (credential.type() == null) {
                     throw new IllegalArgumentException("Credential type is required");
+                }
+                if (credential.type() == AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY
+                        && (credential.keyId() == null || credential.keyId().isBlank())) {
+                    throw new IllegalArgumentException("JWT signing key id is required");
                 }
                 if (credential.value() == null || credential.value().isBlank()) {
                     throw new IllegalArgumentException("Credential value is required");

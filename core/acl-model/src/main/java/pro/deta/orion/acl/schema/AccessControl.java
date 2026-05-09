@@ -72,7 +72,11 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
         }
 
         public User addCredential(CredentialType credentialType, String credentialValue) {
-            getCredentials().add(new Credential(credentialType, credentialValue));
+            return addCredential(credentialType, null, credentialValue);
+        }
+
+        public User addCredential(CredentialType credentialType, String keyId, String credentialValue) {
+            getCredentials().add(new Credential(credentialType, keyId, credentialValue));
             return this;
         }
 
@@ -93,16 +97,21 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     @AllArgsConstructor
     public static final class Credential extends CloneToUnmodifiable<Credential> {
         private final CredentialType type;
+        private final String keyId;
         private final String value;
+
+        public Credential(CredentialType type, String value) {
+            this(type, null, value);
+        }
 
         @Override
         public Credential unmodify() {
-            return new Credential(type, value);
+            return new Credential(type, keyId, value);
         }
 
         @Override
         public Credential modify() {
-            return new Credential(type, value);
+            return new Credential(type, keyId, value);
         }
     }
 
@@ -178,7 +187,7 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
 
 
     public enum CredentialType {
-        SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2, BEARER_TOKEN;
+        SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2, STATIC_BEARER_TOKEN, JWT_SIGNING_PUBLIC_KEY;
     }
 
     public enum GrantKey {

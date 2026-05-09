@@ -10,4 +10,6 @@ public interface OrionAccessControlService {
     void createOrUpdateUser(AccessControlUserUpdate userUpdate);
 
     AuthenticationResult authenticateUser(String userName, byte[] credential);
+
+    AuthenticationResult authenticateToken(byte[] token);
 }

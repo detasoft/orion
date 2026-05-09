@@ -189,6 +189,11 @@ class OrionAdminServletTest {
             }
             return AuthenticationResult.success(new InternalUserImpl(userName, grants));
         }
+
+        @Override
+        public AuthenticationResult authenticateToken(byte[] token) {
+            return AuthenticationResult.failure("token authentication is not implemented");
+        }
     }
 
     private static final class RecordingGitRepositoryProvider implements GitRepositoryProvider {

@@ -60,6 +60,8 @@ class AccessControlStorageTest {
     private static final String ACL_FILE = "config/orion.xml";
     private static final String DEFAULT_ROOT_PASSWORD = "root-password";
     private static final String DEFAULT_ROOT_PASSWORD_HASH = "be1ec2bc9b9735be8fc708736e8e74a5bd46af75";
+    private static final String JWT_SIGNING_KEY_ID = "laptop-2026";
+    private static final String JWT_SIGNING_PUBLIC_KEY = "ssh-ed25519 AAAATEST token-client@example.test";
 
     @TempDir
     private Path tempDir;
@@ -422,6 +424,45 @@ class AccessControlStorageTest {
                 .doesNotContainKey(AccessControl.CredentialType.ARGON2);
     }
 
+    @Test
+    void accessControlServiceSavesJwtSigningPublicKeyWithKeyId() throws Exception {
+        Path aclDirectory = tempDir.resolve("managed-token-user-acl");
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+        OrionAccessControlServiceImpl service = startAccessControlService(storage);
+
+        service.createOrUpdateUser(new AccessControlUserUpdate(
+                "token-client",
+                "token-client@example.test",
+                List.of(new AccessControlCredentialUpdate(
+                        AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY,
+                        JWT_SIGNING_KEY_ID,
+                        JWT_SIGNING_PUBLIC_KEY)),
+                List.of()));
+
+        AccessControl savedAccessControl = accessControlFrom(storage.load().valueOrFailure("ACL should be saved"));
+        AccessControl.Credential credential = credentialByType(
+                userById(savedAccessControl, "token-client"),
+                AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY);
+        assertThat(credential.getKeyId()).isEqualTo(JWT_SIGNING_KEY_ID);
+        assertThat(credential.getValue()).isEqualTo(JWT_SIGNING_PUBLIC_KEY);
+    }
+
+    @Test
+    void accessControlServiceRejectsJwtSigningPublicKeyWithoutKeyId() throws Exception {
+        Path aclDirectory = tempDir.resolve("managed-token-user-without-key-id-acl");
+        OrionAccessControlServiceImpl service = startAccessControlService(new LocalAccessControlStorage(localConfig(aclDirectory)));
+
+        assertThatThrownBy(() -> service.createOrUpdateUser(new AccessControlUserUpdate(
+                "token-client",
+                "token-client@example.test",
+                List.of(new AccessControlCredentialUpdate(
+                        AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY,
+                        JWT_SIGNING_PUBLIC_KEY)),
+                List.of())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("JWT signing key id is required");
+    }
+
     private OrionConfiguration.BootstrapAccessControlConfig localConfig(Path directory) {
         OrionConfiguration.BootstrapAccessControlConfig config = new OrionConfiguration.BootstrapAccessControlConfig();
         config.setLocation(directory.toUri().toString());
@@ -593,7 +634,7 @@ class AccessControlStorageTest {
         assertThat(credentialValues(rootUser))
                 .hasSize(2)
                 .containsEntry(AccessControl.CredentialType.SHA1, DEFAULT_ROOT_PASSWORD_HASH)
-                .containsEntry(AccessControl.CredentialType.BEARER_TOKEN, DEFAULT_ROOT_PASSWORD_HASH);
+                .containsEntry(AccessControl.CredentialType.STATIC_BEARER_TOKEN, DEFAULT_ROOT_PASSWORD_HASH);
 
         assertThat(roleIds(accessControl)).containsExactly("ROOT");
         AccessControl.Role rootRole = accessControl.getRoles().getFirst();
@@ -703,6 +744,15 @@ class AccessControlStorageTest {
             }
         }
         throw new IllegalStateException("Missing user " + userId);
+    }
+
+    private AccessControl.Credential credentialByType(AccessControl.User user, AccessControl.CredentialType type) {
+        for (AccessControl.Credential credential : user.getCredentials()) {
+            if (credential.getType() == type) {
+                return credential;
+            }
+        }
+        throw new IllegalStateException("Missing credential " + type);
     }
 
     private boolean hasPublicKeyCredential(AccessControl.User user, PublicKey publicKey) {
