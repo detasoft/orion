@@ -317,12 +317,14 @@ class OrionHttpRouteServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
         JsonNode routes = OBJECT_MAPPER.readTree(response.body.toString()).get("routes");
-        assertThat(routes).hasSize(9);
+        assertThat(routes).hasSize(10);
         assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("authorization").asText()).isEqualTo("application-admin");
+        assertThat(routeWithPattern(routes, "/api/admin/shutdown").get("methods").toString()).isEqualTo("[\"POST\"]");
+        assertThat(routeWithPattern(routes, "/api/admin/shutdown").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
@@ -330,6 +332,25 @@ class OrionHttpRouteServletTest {
         assertThat(routeWithPattern(routes, "/api/admin/token").get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("handler").asText())
                 .isEqualTo("OrionAdminRoutesRoute");
+    }
+
+    @Test
+    void requestsServerShutdown() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        RecordingShutdownLifecycle shutdownLifecycle = new RecordingShutdownLifecycle();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider, shutdownLifecycle);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("POST", "/api/admin/shutdown", null, ""),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_ACCEPTED);
+        assertThat(response.contentType).isEqualTo("application/json");
+        assertThat(response.body.toString()).isEqualTo("{\"status\":\"shutdown-requested\"}");
+        assertThat(response.flushed).isTrue();
+        assertThat(shutdownLifecycle.shutdownLifecycleStarted).isTrue();
     }
 
     @Test
@@ -407,10 +428,39 @@ class OrionHttpRouteServletTest {
         assertThat(response.body.toString()).isEmpty();
     }
 
+    @Test
+    void rejectsShutdownRequestWithoutAdminGrant() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        RecordingShutdownLifecycle shutdownLifecycle = new RecordingShutdownLifecycle();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider, shutdownLifecycle);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("POST", "/api/admin/shutdown", null, "", regularSecurityContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(response.body.toString()).isEmpty();
+        assertThat(shutdownLifecycle.shutdownLifecycleStarted).isFalse();
+    }
+
     private static OrionHttpRouteServlet servlet(
             RecordingAccessControlService accessControlService,
             RecordingGitRepositoryProvider gitRepositoryProvider) {
         return servlet(accessControlService, gitRepositoryProvider, new AcmeHttpChallengeService());
+    }
+
+    private static OrionHttpRouteServlet servlet(
+            RecordingAccessControlService accessControlService,
+            RecordingGitRepositoryProvider gitRepositoryProvider,
+            OrionShutdownLifecycle shutdownLifecycle) {
+        return servlet(
+                accessControlService,
+                gitRepositoryProvider,
+                new AcmeHttpChallengeService(),
+                new RecordingAcmeCertificateService(),
+                shutdownLifecycle);
     }
 
     private static OrionHttpRouteServlet servlet(
@@ -421,7 +471,8 @@ class OrionHttpRouteServletTest {
                 accessControlService,
                 gitRepositoryProvider,
                 challengeService,
-                new RecordingAcmeCertificateService());
+                new RecordingAcmeCertificateService(),
+                new RecordingShutdownLifecycle());
     }
 
     private static OrionHttpRouteServlet servlet(
@@ -429,6 +480,15 @@ class OrionHttpRouteServletTest {
             RecordingGitRepositoryProvider gitRepositoryProvider,
             AcmeHttpChallengeService challengeService,
             AcmeCertificateService acmeCertificateService) {
+        return servlet(accessControlService, gitRepositoryProvider, challengeService, acmeCertificateService, new RecordingShutdownLifecycle());
+    }
+
+    private static OrionHttpRouteServlet servlet(
+            RecordingAccessControlService accessControlService,
+            RecordingGitRepositoryProvider gitRepositoryProvider,
+            AcmeHttpChallengeService challengeService,
+            AcmeCertificateService acmeCertificateService,
+            OrionShutdownLifecycle shutdownLifecycle) {
         Set<OrionHttpRoute> routes = new LinkedHashSet<>();
         routes.add(new AcmeHttpChallengeRoute(challengeService));
         routes.add(new OrionGitRoute(gitRepositoryProvider));
@@ -437,6 +497,7 @@ class OrionHttpRouteServletTest {
         routes.add(new OrionAdminIssueTokenRoute(accessControlService, OBJECT_MAPPER));
         routes.add(new OrionAdminAccessControlRoute(accessControlService));
         routes.add(new OrionAdminRoutesRoute(() -> new OrionHttpRouteRegistry(routes)));
+        routes.add(new OrionAdminShutdownRoute(shutdownLifecycle));
         routes.add(new OrionAdminAcmeCertificateRoute(acmeCertificateService, OBJECT_MAPPER));
         routes.add(new OrionConfigurationSchemaRoute(new OrionConfigurationJsonSchema()));
         return new OrionHttpRouteServlet(new OrionHttpRouteRegistry(routes), new OrionHttpResponseWriter(OBJECT_MAPPER));
@@ -604,9 +665,19 @@ class OrionHttpRouteServletTest {
         }
     }
 
+    private static final class RecordingShutdownLifecycle implements OrionShutdownLifecycle {
+        private boolean shutdownLifecycleStarted;
+
+        @Override
+        public void beginShutdownLifecycle() {
+            shutdownLifecycleStarted = true;
+        }
+    }
+
     private static final class ResponseRecorder {
         private int status;
         private String contentType;
+        private boolean flushed;
         private final Map<String, String> headers = new LinkedHashMap<>();
         private final StringWriter body = new StringWriter();
 
@@ -629,6 +700,10 @@ class OrionHttpRouteServletTest {
                     yield null;
                 }
                 case "getWriter" -> new PrintWriter(body);
+                case "flushBuffer" -> {
+                    flushed = true;
+                    yield null;
+                }
                 case "toString" -> "HttpServletResponseRecorder";
                 case "hashCode" -> System.identityHashCode(proxy);
                 case "equals" -> proxy == args[0];

@@ -5,6 +5,7 @@ import dagger.Module;
 import dagger.Provides;
 import dagger.multibindings.IntoSet;
 import jakarta.inject.Singleton;
+import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 @Module
 public class OrionHttpModule {
@@ -58,6 +59,12 @@ public class OrionHttpModule {
 
     @Provides
     @IntoSet
+    static OrionHttpRoute shutdownRoute(OrionAdminShutdownRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute acmeCertificateRoute(OrionAdminAcmeCertificateRoute route) {
         return route;
     }
@@ -66,6 +73,12 @@ public class OrionHttpModule {
     @IntoSet
     static OrionHttpRoute configurationSchemaRoute(OrionConfigurationSchemaRoute route) {
         return route;
+    }
+
+    @Provides
+    @Singleton
+    static OrionShutdownLifecycle shutdownLifecycle(OrionApplicationLifecycle lifecycle) {
+        return lifecycle::beginShutdown;
     }
 
 }
