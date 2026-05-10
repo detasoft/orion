@@ -317,17 +317,49 @@ class OrionHttpRouteServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
         JsonNode routes = OBJECT_MAPPER.readTree(response.body.toString()).get("routes");
-        assertThat(routes).hasSize(8);
+        assertThat(routes).hasSize(9);
         assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("authorization").asText()).isEqualTo("application-admin");
+        assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("methods").toString()).isEqualTo("[\"GET\"]");
+        assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, "/api/admin/token").get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("handler").asText())
                 .isEqualTo("OrionAdminRoutesRoute");
+    }
+
+    @Test
+    void returnsConfigurationSchemaForEditors() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", OrionConfigurationSchemaRoute.URL_PATTERN, null, ""),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/schema+json");
+
+        JsonNode schema = OBJECT_MAPPER.readTree(response.body.toString());
+        assertThat(schema.get("$schema").asText()).isEqualTo("https://json-schema.org/draft/2020-12/schema");
+        assertThat(schema.get("additionalProperties").asBoolean()).isFalse();
+        assertThat(schemaAt(schema, "bootstrap", "baseDir").get("default").asText()).isEqualTo("orion");
+        assertThat(schemaAt(schema, "bootstrap", "accessControl", "paths").get("type").asText()).isEqualTo("array");
+        assertThat(schemaAt(schema, "bootstrap", "accessControl", "paths").get("default").get(0).asText())
+                .isEqualTo("orion.xml");
+        assertThat(schemaAt(schema, "storage", "auth").get("additionalProperties").get("type").asText())
+                .isEqualTo("string");
+        assertThat(schemaAt(schema, "transport", "http", "port").get("type").asText()).isEqualTo("integer");
+        assertThat(schemaAt(schema, "transport", "https", "acme", "directoryUrl").get("default").asText())
+                .isEqualTo("acme://letsencrypt.org/staging");
+        assertThat(schemaAt(schema, "transport", "https", "ksystore", "type").get("enum").toString())
+                .isEqualTo("[\"PEM\",\"JKS\",\"PKCS_12\"]");
     }
 
     @Test
@@ -343,6 +375,21 @@ class OrionHttpRouteServletTest {
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
         assertThat(response.body.toString()).isEmpty();
+    }
+
+    @Test
+    void returnsConfigurationSchemaWithoutAdminGrant() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", OrionConfigurationSchemaRoute.URL_PATTERN, null, "", regularSecurityContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/schema+json");
     }
 
     @Test
@@ -391,6 +438,7 @@ class OrionHttpRouteServletTest {
         routes.add(new OrionAdminAccessControlRoute(accessControlService));
         routes.add(new OrionAdminRoutesRoute(() -> new OrionHttpRouteRegistry(routes)));
         routes.add(new OrionAdminAcmeCertificateRoute(acmeCertificateService, OBJECT_MAPPER));
+        routes.add(new OrionConfigurationSchemaRoute(new OrionConfigurationJsonSchema()));
         return new OrionHttpRouteServlet(new OrionHttpRouteRegistry(routes), new OrionHttpResponseWriter(OBJECT_MAPPER));
     }
 
@@ -401,6 +449,14 @@ class OrionHttpRouteServletTest {
             }
         }
         throw new AssertionError("Route not found: " + pattern);
+    }
+
+    private static JsonNode schemaAt(JsonNode schema, String... path) {
+        JsonNode current = schema;
+        for (String segment : path) {
+            current = current.get("properties").get(segment);
+        }
+        return current;
     }
 
     private static String basicAuth(String username, String password) {

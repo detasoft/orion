@@ -33,6 +33,15 @@ public final class OrionHttpResponseWriter {
             return;
         }
         resp.setContentType(contentType);
+        if (isJsonContentType(contentType)) {
+            objectMapper.writeValue(resp.getWriter(), body);
+            return;
+        }
         resp.getWriter().write(String.valueOf(body));
+    }
+
+    private static boolean isJsonContentType(String contentType) {
+        return OrionHttpResponse.JSON_CONTENT_TYPE.equals(contentType)
+                || contentType.endsWith("+json");
     }
 }

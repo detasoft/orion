@@ -62,4 +62,10 @@ public class OrionHttpModule {
         return route;
     }
 
+    @Provides
+    @IntoSet
+    static OrionHttpRoute configurationSchemaRoute(OrionConfigurationSchemaRoute route) {
+        return route;
+    }
+
 }
