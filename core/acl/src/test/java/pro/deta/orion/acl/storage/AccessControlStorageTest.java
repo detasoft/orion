@@ -234,6 +234,40 @@ class AccessControlStorageTest {
     }
 
     @Test
+    void accessControlServiceReturnsPrimaryConfigurationFileContent() throws Exception {
+        Path aclDirectory = tempDir.resolve("raw-acl-directory");
+        Files.createDirectories(aclDirectory.resolve("config"));
+        byte[] aclContent = aclBytes("raw-file-user");
+        Files.write(aclDirectory.resolve(ACL_FILE), aclContent);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+
+        OrionAccessControlServiceImpl service = startAccessControlService(storage);
+
+        assertThat(service.accessControlConfigurationFile()).isEqualTo(aclContent);
+    }
+
+    @Test
+    void accessControlServiceSavesPrimaryConfigurationFileContentAndReloadsAcl() throws Exception {
+        Path aclDirectory = tempDir.resolve("raw-save-acl-directory");
+        Files.createDirectories(aclDirectory.resolve("config"));
+        byte[] initialAclContent = aclBytesWithPasswordUser("initial-raw-file-user");
+        Files.write(aclDirectory.resolve(ACL_FILE), initialAclContent);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+        OrionAccessControlServiceImpl service = startAccessControlService(storage);
+
+        byte[] updatedAclContent = aclBytesWithPasswordUser("updated-raw-file-user");
+        service.saveAccessControlConfigurationFile(updatedAclContent);
+
+        assertThat(storage.load().valueOrFailure("Updated ACL should be saved").files().get(ACL_FILE))
+                .isEqualTo(updatedAclContent);
+        assertThat(service.accessControlConfigurationFile()).isEqualTo(updatedAclContent);
+        assertThat(service.authenticateUser(
+                "initial-raw-file-user",
+                "password".getBytes(StandardCharsets.UTF_8))).isInstanceOf(AuthenticationResult.Failure.class);
+        assertUserAuthenticates(service, "updated-raw-file-user");
+    }
+
+    @Test
     void defaultRootAuthenticatesWithInternalServerKey() throws Exception {
         Path aclDirectory = tempDir.resolve("server-key-root-acl");
         OrionConfiguration configuration = testConfiguration();

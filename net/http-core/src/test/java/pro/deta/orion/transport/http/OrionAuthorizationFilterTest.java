@@ -235,6 +235,16 @@ class OrionAuthorizationFilterTest {
         public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public byte[] accessControlConfigurationFile() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void saveAccessControlConfigurationFile(byte[] content) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static final class RequestRecorder {

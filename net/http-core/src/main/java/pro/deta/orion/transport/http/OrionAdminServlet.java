@@ -32,6 +32,7 @@ import static jakarta.servlet.http.HttpServletResponse.SC_UNAUTHORIZED;
 public class OrionAdminServlet implements MapToUrlServlet {
     private static final String USERS_PATH = "/api/admin/users";
     private static final String REPOSITORIES_PATH = "/api/admin/repositories";
+    private static final String ACCESS_CONTROL_PATH = "/api/admin/acl";
     private static final String TOKEN_PATH = "/api/admin/token";
     private static final String BASIC_PREFIX = "Basic ";
     private static final String BASIC_REALM = "orion-admin";
@@ -60,6 +61,10 @@ public class OrionAdminServlet implements MapToUrlServlet {
                 issueToken(req, resp);
                 return;
             }
+            if (ACCESS_CONTROL_PATH.equals(pathInfo)) {
+                accessControlConfiguration(req, resp);
+                return;
+            }
 
             if (!"POST".equalsIgnoreCase(req.getMethod())) {
                 resp.setStatus(SC_METHOD_NOT_ALLOWED);
@@ -80,6 +85,24 @@ public class OrionAdminServlet implements MapToUrlServlet {
         } catch (IllegalArgumentException | IllegalStateException e) {
             resp.sendError(SC_BAD_REQUEST, e.getMessage());
         }
+    }
+
+    private void accessControlConfiguration(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        if ("GET".equalsIgnoreCase(req.getMethod())) {
+            byte[] content = accessControlService.accessControlConfigurationFile();
+            resp.setStatus(SC_OK);
+            resp.setContentType("application/xml");
+            resp.getWriter().write(new String(content, StandardCharsets.UTF_8));
+            return;
+        }
+        if ("POST".equalsIgnoreCase(req.getMethod())) {
+            accessControlService.saveAccessControlConfigurationFile(req.getInputStream().readAllBytes());
+            writeOk(resp);
+            return;
+        }
+
+        resp.setStatus(SC_METHOD_NOT_ALLOWED);
+        resp.setHeader("Allow", "GET, POST");
     }
 
     private void issueToken(HttpServletRequest req, HttpServletResponse resp) throws IOException {

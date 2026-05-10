@@ -33,6 +33,7 @@ class OrionAdminServletTest {
     private static final String BASIC_PASSWORD = "root-password";
     private static final String ISSUED_TOKEN = "issued-jwt";
     private static final long TOKEN_EXPIRES_AT = 1_800_000_000L;
+    private static final String ACL_CONFIGURATION = "<access-control/>";
 
     @Test
     void createsManagedUser() throws Exception {
@@ -119,6 +120,55 @@ class OrionAdminServletTest {
     }
 
     @Test
+    void returnsAccessControlConfigurationFile() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", "/api/admin/acl", null, ""),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/xml");
+        assertThat(response.body.toString()).isEqualTo(ACL_CONFIGURATION);
+    }
+
+    @Test
+    void commitsAccessControlConfigurationFile() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("POST", "/api/admin/acl", null, ACL_CONFIGURATION),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_CREATED);
+        assertThat(response.contentType).isEqualTo("application/json");
+        assertThat(response.body.toString()).isEqualTo("{\"status\":\"ok\"}");
+        assertThat(new String(accessControlService.lastAccessControlConfiguration, StandardCharsets.UTF_8))
+                .isEqualTo(ACL_CONFIGURATION);
+    }
+
+    @Test
+    void rejectsAccessControlConfigurationRequestWithWrongMethod() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionAdminServlet servlet = new OrionAdminServlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("PUT", "/api/admin/acl", null, ""),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+        assertThat(response.headers).containsEntry("Allow", "GET, POST");
+    }
+
+    @Test
     void rejectsTokenRequestWithoutBasicCredentials() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
@@ -163,6 +213,7 @@ class OrionAdminServletTest {
         private String lastTokenUserName;
         private byte[] lastTokenCredential;
         private long lastTokenExpiresInSeconds;
+        private byte[] lastAccessControlConfiguration;
 
         @Override
         public void addKeyToUser(String username, String publicKey) {
@@ -199,6 +250,16 @@ class OrionAdminServletTest {
         @Override
         public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public byte[] accessControlConfigurationFile() {
+            return ACL_CONFIGURATION.getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public void saveAccessControlConfigurationFile(byte[] content) {
+            lastAccessControlConfiguration = content;
         }
     }
 

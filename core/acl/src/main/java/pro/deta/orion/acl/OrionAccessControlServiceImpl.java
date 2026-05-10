@@ -218,6 +218,40 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
+    @Override
+    public byte[] accessControlConfigurationFile() {
+        return switch (accessControlStorage.load()) {
+            case Result.Success<AccessControlSnapshot>(var snapshot) -> {
+                byte[] content = snapshot.files().get(accessControlStorage.primaryPath());
+                if (content == null) {
+                    throw new IllegalStateException("Primary ACL configuration file is missing: " + accessControlStorage.primaryPath());
+                }
+                yield content.clone();
+            }
+            case Result.Failure<AccessControlSnapshot> failure ->
+                    throw new IllegalStateException("Cannot load ACL configuration file", failure.throwable());
+        };
+    }
+
+    @Override
+    public void saveAccessControlConfigurationFile(byte[] content) {
+        if (content == null || content.length == 0) {
+            throw new IllegalArgumentException("ACL configuration content is required");
+        }
+        String primaryPath = accessControlStorage.primaryPath();
+        AccessControlSnapshot snapshot = AccessControlSnapshot.singleFile(primaryPath, content);
+        switch (accessControlFrom(snapshot)) {
+            case Result.Success<AccessControl> ignored -> {
+                accessControlStorage.save(
+                        snapshot,
+                        new AccessControlSaveRequest("saveAccessControlConfigurationFile() " + primaryPath, UserEmail.EMPTY));
+                requestAclUpdateAndWait("saveAccessControlConfigurationFile()");
+            }
+            case Result.Failure<AccessControl> failure ->
+                    throw new IllegalArgumentException("Invalid ACL configuration file: " + failure.message(), failure.throwable());
+        }
+    }
+
     private void requestToUpdate() {
         switch (loadAccessControl()) {
             case Result.Success<AccessControl>(var ac) -> prepareAndUpdateAccessControl(ac);

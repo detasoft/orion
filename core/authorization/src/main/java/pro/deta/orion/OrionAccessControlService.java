@@ -18,4 +18,8 @@ public interface OrionAccessControlService {
     TokenIssueResult authenticateUserAndIssueToken(String userName, byte[] credential, long expiresInSeconds);
 
     TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds);
+
+    byte[] accessControlConfigurationFile();
+
+    void saveAccessControlConfigurationFile(byte[] content);
 }
