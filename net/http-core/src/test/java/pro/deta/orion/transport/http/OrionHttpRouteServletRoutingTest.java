@@ -21,17 +21,15 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class OrionHttpRouteDispatcherTest {
+class OrionHttpRouteServletRoutingTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Test
     void matchesRouteByUrlPattern() throws Exception {
-        OrionHttpRouteDispatcher dispatcher = new OrionHttpRouteDispatcher(
-                new OrionHttpRouteRegistry(Set.of(new TestRoute("/api/items/*", "pattern"))),
-                OBJECT_MAPPER);
+        OrionHttpRouteServlet servlet = servlet(new TestRoute("/api/items/*", "pattern"));
         ResponseRecorder response = new ResponseRecorder();
 
-        dispatcher.handle(request("GET", "/api/items/42"), response.proxy());
+        servlet.service(request("GET", "/api/items/42"), response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
@@ -40,14 +38,12 @@ class OrionHttpRouteDispatcherTest {
 
     @Test
     void prefersExactRouteOverUrlPattern() throws Exception {
-        OrionHttpRouteDispatcher dispatcher = new OrionHttpRouteDispatcher(
-                new OrionHttpRouteRegistry(Set.of(
-                        new TestRoute("/api/items/*", "pattern"),
-                        new TestRoute("/api/items/42", "exact"))),
-                OBJECT_MAPPER);
+        OrionHttpRouteServlet servlet = servlet(
+                new TestRoute("/api/items/*", "pattern"),
+                new TestRoute("/api/items/42", "exact"));
         ResponseRecorder response = new ResponseRecorder();
 
-        dispatcher.handle(request("GET", "/api/items/42"), response.proxy());
+        servlet.service(request("GET", "/api/items/42"), response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.body.toString()).isEqualTo("{\"route\":\"exact\"}");
@@ -55,14 +51,12 @@ class OrionHttpRouteDispatcherTest {
 
     @Test
     void prefersMoreSpecificUrlPattern() throws Exception {
-        OrionHttpRouteDispatcher dispatcher = new OrionHttpRouteDispatcher(
-                new OrionHttpRouteRegistry(Set.of(
-                        new TestRoute("/api/items/*", "base"),
-                        new TestRoute("/api/items/*/details", "details"))),
-                OBJECT_MAPPER);
+        OrionHttpRouteServlet servlet = servlet(
+                new TestRoute("/api/items/*", "base"),
+                new TestRoute("/api/items/*/details", "details"));
         ResponseRecorder response = new ResponseRecorder();
 
-        dispatcher.handle(request("GET", "/api/items/42/details"), response.proxy());
+        servlet.service(request("GET", "/api/items/42/details"), response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.body.toString()).isEqualTo("{\"route\":\"details\"}");
@@ -70,12 +64,10 @@ class OrionHttpRouteDispatcherTest {
 
     @Test
     void returnsMethodNotAllowedFromRouteService() throws Exception {
-        OrionHttpRouteDispatcher dispatcher = new OrionHttpRouteDispatcher(
-                new OrionHttpRouteRegistry(Set.of(new TestRoute("/api/items/*", "pattern"))),
-                OBJECT_MAPPER);
+        OrionHttpRouteServlet servlet = servlet(new TestRoute("/api/items/*", "pattern"));
         ResponseRecorder response = new ResponseRecorder();
 
-        dispatcher.handle(request("POST", "/api/items/42"), response.proxy());
+        servlet.service(request("POST", "/api/items/42"), response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
         assertThat(response.headers).containsEntry("Allow", "GET");
@@ -84,15 +76,19 @@ class OrionHttpRouteDispatcherTest {
 
     @Test
     void letsRouteRejectRequestUsingItsOwnAuthorizationLogic() throws Exception {
-        OrionHttpRouteDispatcher dispatcher = new OrionHttpRouteDispatcher(
-                new OrionHttpRouteRegistry(Set.of(new DeniedRoute("/api/items/*"))),
-                OBJECT_MAPPER);
+        OrionHttpRouteServlet servlet = servlet(new DeniedRoute("/api/items/*"));
         ResponseRecorder response = new ResponseRecorder();
 
-        dispatcher.handle(request("GET", "/api/items/42"), response.proxy());
+        servlet.service(request("GET", "/api/items/42"), response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
         assertThat(response.body.toString()).isEmpty();
+    }
+
+    private static OrionHttpRouteServlet servlet(OrionHttpRoute... routes) {
+        return new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(routes)),
+                new OrionHttpResponseWriter(OBJECT_MAPPER));
     }
 
     private static HttpServletRequest request(String method, String pathInfo) {

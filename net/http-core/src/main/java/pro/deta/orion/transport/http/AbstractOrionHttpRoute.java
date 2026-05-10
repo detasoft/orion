@@ -1,6 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.ServletException;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -41,7 +42,7 @@ public abstract class AbstractOrionHttpRoute implements OrionHttpRoute {
     }
 
     @Override
-    public final OrionHttpResponse service(HttpServletRequest req) throws IOException {
+    public final OrionHttpResponse service(HttpServletRequest req) throws IOException, ServletException {
         OrionHttpResponse accessDenied = accessDenied(req);
         if (accessDenied != null) {
             return accessDenied;

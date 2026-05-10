@@ -15,12 +15,15 @@ public class OrionHttpModule {
     }
 
     @Provides
-    @Singleton
-    static DispatcherServlet dispatcherServlet(OrionGitServlet orionGitServlet, OrionAdminServlet orionAdminServlet) {
-        DispatcherServlet dispatcherServlet = new DispatcherServlet();
-        dispatcherServlet.register(orionGitServlet);
-        dispatcherServlet.register(orionAdminServlet);
-        return dispatcherServlet;
+    @IntoSet
+    static OrionHttpRoute acmeHttpChallengeRoute(AcmeHttpChallengeRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
+    static OrionHttpRoute gitRoute(OrionGitRoute route) {
+        return route;
     }
 
     @Provides

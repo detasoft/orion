@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.Disabled;
@@ -22,7 +23,8 @@ import java.net.URL;
 import java.security.KeyPair;
 import java.security.Security;
 import java.time.Duration;
-import java.util.concurrent.TimeUnit;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -33,25 +35,16 @@ public class ACMECertificateChallengeTest {
 
     @Test
     public void testChallengeHttp01() throws Exception {
-        JettyHTTPServer server = startHttp();
+        try (AcmeHttpTestServer server = startHttp()) {
+            server.challengeService().registerChallenge("test-token", "test-authorization");
 
-        try {
-            ChallengeAuthorizationServlet challengeServlet = new ChallengeAuthorizationServlet(
-                    "test-token",
-                    "test-authorization");
-            server.getDispatcherServlet().register(challengeServlet);
-
-            HttpURLConnection connection = get(server.relativiseHttp(challengeServlet.servletPath()));
-
+            HttpURLConnection connection = get(server.challengeUrl("test-token"));
             assertThat(connection.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
-            assertThat(new String(connection.getInputStream().readAllBytes()).trim()).isEqualTo("test-authorization");
-            assertThat(challengeServlet.getLatch().await(1, TimeUnit.SECONDS)).isTrue();
-        } finally {
-            server.onStop();
+            assertThat(new String(connection.getInputStream().readAllBytes())).isEqualTo("test-authorization");
         }
     }
 
-    private static JettyHTTPServer startHttp() throws IOException {
+    private static AcmeHttpTestServer startHttp() throws IOException {
         OrionConfiguration orionConfiguration = new OrionConfiguration();
         OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
         transports.setHttp(new HttpTransportConfig("localhost", NetworkUtils.findAvailablePort()));
@@ -62,10 +55,15 @@ public class ACMECertificateChallengeTest {
 
         orionConfiguration.setTransport(transports);
 
-        DispatcherServlet dispatcherServlet = new DispatcherServlet();
-        JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, dispatcherServlet);
+        AcmeHttpChallengeService challengeService = new AcmeHttpChallengeService();
+        Set<OrionHttpRoute> routes = new LinkedHashSet<>();
+        routes.add(new AcmeHttpChallengeRoute(challengeService));
+        OrionHttpRouteServlet rootServlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(routes),
+                new OrionHttpResponseWriter(new ObjectMapper()));
+        JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, rootServlet);
         server.onStart();
-        return server;
+        return new AcmeHttpTestServer(server, challengeService);
     }
 
     @Test
@@ -73,9 +71,8 @@ public class ACMECertificateChallengeTest {
     public void createAcmeAccountManually() throws Exception {
         Security.setProperty("crypto.policy", "unlimited");
         Security.addProvider(new BouncyCastleProvider());
-        JettyHTTPServer server = startHttp();
 
-        try {
+        try (AcmeHttpTestServer server = startHttp()) {
             Session session = new Session("acme://letsencrypt.org/staging");
             KeyPair accountKeyPair = readOrGenerateKeyPair(ACCOUNT_KEYPAIR);
             Account account = new AccountBuilder()
@@ -93,15 +90,18 @@ public class ACMECertificateChallengeTest {
                     if (challenge == null) {
                         continue;
                     }
-                    ChallengeAuthorizationServlet cas = new ChallengeAuthorizationServlet(challenge.getToken(), challenge.getAuthorization());
-                    server.getDispatcherServlet().register(cas);
-                    challenge.trigger();
-                    cas.getLatch().await(5, TimeUnit.SECONDS);
-                    log.info("Waiting for authorization status change");
-                    Status s = auth.waitForCompletion(Duration.ofSeconds(20));
-                    switch (s) {
-                        case VALID -> log.info("Challenge completed.");
-                        default -> throw new IllegalStateException("ACME authorization failed with status " + s);
+                    String token = challenge.getToken();
+                    server.challengeService().registerChallenge(token, challenge.getAuthorization());
+                    try {
+                        challenge.trigger();
+                        log.info("Waiting for authorization status change");
+                        Status s = auth.waitForCompletion(Duration.ofSeconds(20));
+                        switch (s) {
+                            case VALID -> log.info("Challenge completed.");
+                            default -> throw new IllegalStateException("ACME authorization failed with status " + s);
+                        }
+                    } finally {
+                        server.challengeService().removeChallenge(token);
                     }
                 }
             }
@@ -122,7 +122,18 @@ public class ACMECertificateChallengeTest {
                 }
                 default -> log.error("No certificate created.");
             }
-        } finally {
+        }
+    }
+
+    private record AcmeHttpTestServer(
+            JettyHTTPServer server,
+            AcmeHttpChallengeService challengeService) implements AutoCloseable {
+        private URL challengeUrl(String token) throws IOException {
+            return server.relativiseHttp(AcmeHttpChallengeRoute.CHALLENGE_PREFIX + token);
+        }
+
+        @Override
+        public void close() {
             server.onStop();
         }
     }
@@ -150,10 +161,13 @@ public class ACMECertificateChallengeTest {
         transports.setHttps(new HttpsTransportConfig("localhost", NetworkUtils.findAvailablePort()));
         orionConfiguration.setTransport(transports);
 
-        DispatcherServlet dispatcherServlet = new DispatcherServlet();
-        JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, dispatcherServlet);
+        Set<OrionHttpRoute> routes = new LinkedHashSet<>();
+        routes.add(new OkRoute());
+        OrionHttpRouteServlet rootServlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(routes),
+                new OrionHttpResponseWriter(new ObjectMapper()));
+        JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, rootServlet);
         server.onStart();
-        server.getDispatcherServlet().register(new PlainOkServlet());
 
         try {
             SSLContext sslContext = SSLContext.getInstance("TLS");
@@ -168,6 +182,17 @@ public class ACMECertificateChallengeTest {
             assertThat(httpsConnection.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
         } finally {
             server.onStop();
+        }
+    }
+
+    private static final class OkRoute extends AbstractOrionHttpRoute {
+        private OkRoute() {
+            super("/ok", "GET");
+        }
+
+        @Override
+        protected OrionHttpResponse doGet(jakarta.servlet.http.HttpServletRequest req) {
+            return OrionHttpResponse.text(HttpURLConnection.HTTP_OK, "OK");
         }
     }
 

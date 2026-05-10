@@ -36,7 +36,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class OrionAdminServletTest {
+class OrionHttpRouteServletTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String BASIC_USER = "root";
     private static final String BASIC_PASSWORD = "root-password";
@@ -48,7 +48,7 @@ class OrionAdminServletTest {
     void createsManagedUser() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -92,7 +92,7 @@ class OrionAdminServletTest {
     void createsRepository() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -110,7 +110,7 @@ class OrionAdminServletTest {
     void issuesBearerTokenWithBasicCredentials() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -132,7 +132,7 @@ class OrionAdminServletTest {
     void returnsAccessControlConfigurationFile() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -148,7 +148,7 @@ class OrionAdminServletTest {
     void commitsAccessControlConfigurationFile() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -166,7 +166,7 @@ class OrionAdminServletTest {
     void rejectsAccessControlConfigurationRequestWithWrongMethod() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -181,7 +181,7 @@ class OrionAdminServletTest {
     void rejectsTokenRequestWithoutBasicCredentials() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -194,10 +194,59 @@ class OrionAdminServletTest {
     }
 
     @Test
+    void servesAcmeHttpChallenge() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        AcmeHttpChallengeService challengeService = new AcmeHttpChallengeService();
+        challengeService.registerChallenge("test-token", "test-authorization");
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider, challengeService);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", AcmeHttpChallengeRoute.CHALLENGE_PREFIX + "test-token", null, "", SecurityContext.createContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("text/plain");
+        assertThat(response.body.toString()).isEqualTo("test-authorization");
+    }
+
+    @Test
+    void returnsNotFoundForUnknownAcmeHttpChallenge() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", AcmeHttpChallengeRoute.CHALLENGE_PREFIX + "missing-token", null, "", SecurityContext.createContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_NOT_FOUND);
+        assertThat(response.body.toString()).isEmpty();
+    }
+
+    @Test
+    void rejectsUnsupportedGitHttpMethodAtRouteLayer() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("DELETE", "/r/project/info/refs", null, "", SecurityContext.createContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+        assertThat(response.headers).containsEntry("Allow", "GET, POST");
+        assertThat(gitRepositoryProvider.lastCreatedRepository).isNull();
+    }
+
+    @Test
     void returnsRuntimeRouteTable() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -207,7 +256,9 @@ class OrionAdminServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
         JsonNode routes = OBJECT_MAPPER.readTree(response.body.toString()).get("routes");
-        assertThat(routes).hasSize(5);
+        assertThat(routes).hasSize(7);
+        assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
+        assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("authorization").asText()).isEqualTo("application-admin");
@@ -220,7 +271,7 @@ class OrionAdminServletTest {
     void rejectsRouteTableRequestWithoutAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        OrionAdminServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -231,16 +282,25 @@ class OrionAdminServletTest {
         assertThat(response.body.toString()).isEmpty();
     }
 
-    private static OrionAdminServlet servlet(
+    private static OrionHttpRouteServlet servlet(
             RecordingAccessControlService accessControlService,
             RecordingGitRepositoryProvider gitRepositoryProvider) {
+        return servlet(accessControlService, gitRepositoryProvider, new AcmeHttpChallengeService());
+    }
+
+    private static OrionHttpRouteServlet servlet(
+            RecordingAccessControlService accessControlService,
+            RecordingGitRepositoryProvider gitRepositoryProvider,
+            AcmeHttpChallengeService challengeService) {
         Set<OrionHttpRoute> routes = new LinkedHashSet<>();
+        routes.add(new AcmeHttpChallengeRoute(challengeService));
+        routes.add(new OrionGitRoute(gitRepositoryProvider));
         routes.add(new OrionAdminCreateOrUpdateUserRoute(accessControlService, OBJECT_MAPPER));
         routes.add(new OrionAdminCreateRepositoryRoute(gitRepositoryProvider, OBJECT_MAPPER));
         routes.add(new OrionAdminIssueTokenRoute(accessControlService, OBJECT_MAPPER));
         routes.add(new OrionAdminAccessControlRoute(accessControlService));
         routes.add(new OrionAdminRoutesRoute(() -> new OrionHttpRouteRegistry(routes)));
-        return new OrionAdminServlet(new OrionHttpRouteDispatcher(new OrionHttpRouteRegistry(routes), OBJECT_MAPPER));
+        return new OrionHttpRouteServlet(new OrionHttpRouteRegistry(routes), new OrionHttpResponseWriter(OBJECT_MAPPER));
     }
 
     private static JsonNode routeWithPattern(JsonNode routes, String pattern) {

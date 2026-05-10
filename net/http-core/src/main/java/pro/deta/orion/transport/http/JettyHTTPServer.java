@@ -3,7 +3,6 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import jakarta.servlet.DispatcherType;
-import jakarta.servlet.Servlet;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.server.*;
@@ -40,23 +39,23 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
 
     private final HttpTransportConfig httpTransportConfig;
     private final HttpsTransportConfig httpsTransportConfig;
-    private final DispatcherServlet dispatcherServlet;
+    private final OrionHttpRouteServlet rootServlet;
     private final OrionAuthorizationFilter authorizationFilter;
     private final AtomicReference<Server> jettyServer = new AtomicReference<>();
 
     @Inject
     public JettyHTTPServer(
             OrionConfiguration orionConfiguration,
-            DispatcherServlet dispatcherServlet,
+            OrionHttpRouteServlet rootServlet,
             OrionAuthorizationFilter authorizationFilter) {
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
         this.httpsTransportConfig = orionConfiguration.getTransport().getHttps();
-        this.dispatcherServlet = dispatcherServlet;
+        this.rootServlet = rootServlet;
         this.authorizationFilter = authorizationFilter;
     }
 
-    public JettyHTTPServer(OrionConfiguration orionConfiguration, DispatcherServlet dispatcherServlet) {
-        this(orionConfiguration, dispatcherServlet, null);
+    public JettyHTTPServer(OrionConfiguration orionConfiguration, OrionHttpRouteServlet rootServlet) {
+        this(orionConfiguration, rootServlet, null);
     }
 
     @Override
@@ -91,7 +90,7 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
             context.insertHandler(gzipHandler);
 
 
-            addServletMapStartFrom(context, dispatcherServlet);
+            context.addServlet(new ServletHolder(rootServlet), "/*");
             if (authorizationFilter != null) {
                 context.addFilter(
                         new FilterHolder(authorizationFilter),
@@ -109,19 +108,6 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
             log.error("Failed to initialize server", e);
             throw new RuntimeException("Failed to initialize server", e);
         }
-    }
-
-    private <T extends Servlet & MapToUrlServlet> void addServletMapStartFrom(ServletContextHandler context, T servlet) {
-        context.addServlet(new ServletHolder(dispatcherServlet), pathToMask(servlet.servletPath()));
-    }
-
-    private static String pathToMask(String path) {
-        if (path.contains("*"))
-            return path;
-        if (path.endsWith("/"))
-            return path + "*";
-        else
-            return path + "/*";
     }
 
     private static void enableHttpsIfNeeded(Server server, HttpsTransportConfig httpsTransportConfig) throws Exception {

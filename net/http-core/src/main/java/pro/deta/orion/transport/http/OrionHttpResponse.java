@@ -8,6 +8,7 @@ import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 public final class OrionHttpResponse {
     public static final String JSON_CONTENT_TYPE = "application/json";
+    public static final String TEXT_CONTENT_TYPE = "text/plain";
     public static final String XML_CONTENT_TYPE = "application/xml";
 
     private final int status;
@@ -36,6 +37,10 @@ public final class OrionHttpResponse {
 
     public static OrionHttpResponse json(int status, Object body) {
         return new OrionHttpResponse(status, body, null, Map.of());
+    }
+
+    public static OrionHttpResponse text(int status, String body) {
+        return new OrionHttpResponse(status, body, TEXT_CONTENT_TYPE, Map.of());
     }
 
     public static OrionHttpResponse xml(int status, String body) {
