@@ -10,10 +10,13 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.URL;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHTTPServerTest {
 
@@ -55,6 +58,28 @@ class JettyHTTPServerTest {
 
         } finally {
             server.onStop();
+        }
+    }
+
+    @Test
+    void failsStartupWhenHttpPortIsAlreadyInUse() throws Exception {
+        try (ServerSocket occupiedHttpPort = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            OrionConfiguration orionConfiguration = new OrionConfiguration();
+            OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
+            transports.setHttp(new HttpTransportConfig("127.0.0.1", occupiedHttpPort.getLocalPort()));
+            HttpsTransportConfig https = new HttpsTransportConfig("127.0.0.1", 0);
+            https.setEnabled(false);
+            transports.setHttps(https);
+            orionConfiguration.setTransport(transports);
+
+            OrionHttpRouteServlet rootServlet = new OrionHttpRouteServlet(
+                    new OrionHttpRouteRegistry(Set.of(new OkRoute())),
+                    new OrionHttpResponseWriter(new com.fasterxml.jackson.databind.ObjectMapper()));
+            JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, rootServlet);
+
+            assertThatThrownBy(server::onStart)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Cannot start Jetty HTTP server");
         }
     }
 

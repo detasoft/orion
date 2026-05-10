@@ -71,7 +71,8 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
         try {
             jettyServer.get().start();
         } catch (Exception e) {
-            log.error("Can't start jetty server");
+            destroyFailedServer();
+            throw new IllegalStateException("Cannot start Jetty HTTP server", e);
         }
         log.warn("HTTP Listening on {}:{}", httpTransportConfig.getAddress(), httpTransportConfig.getPort());
         log.warn("HTTPS Listening on {}:{}", httpsTransportConfig.getAddress(), httpsTransportConfig.getPort());
@@ -154,6 +155,23 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
             httpConnector.setHost(httpTransportConfig.getAddress());
             httpConnector.setPort(httpTransportConfig.getPort());
             server.addConnector(httpConnector);
+        }
+    }
+
+    private void destroyFailedServer() {
+        Server server = jettyServer.getAndSet(null);
+        if (server == null) {
+            return;
+        }
+        try {
+            server.stop();
+        } catch (Exception e) {
+            log.warn("Failed to stop Jetty server after startup failure", e);
+        }
+        try {
+            server.destroy();
+        } catch (Exception e) {
+            log.warn("Failed to destroy Jetty server after startup failure", e);
         }
     }
 

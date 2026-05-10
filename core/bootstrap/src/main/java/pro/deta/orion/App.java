@@ -13,6 +13,10 @@ public class App {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(new FileConfigurationProviderImpl())
                 .build();
-        orionComponent.orionApplicationLifecycle().runApplication();
+        ApplicationState state = orionComponent.orionApplicationLifecycle().runApplication();
+        if (state != ApplicationState.UP) {
+            log.error("Orion startup failed with state {}", state);
+            System.exit(1);
+        }
     }
 }
