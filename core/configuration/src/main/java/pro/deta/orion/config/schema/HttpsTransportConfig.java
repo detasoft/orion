@@ -11,6 +11,7 @@ import lombok.ToString;
 @NoArgsConstructor
 public class HttpsTransportConfig extends TransportConfig {
     private SSLKeyStoreConfig ksystore = null;
+    private AcmeConfig acme = new AcmeConfig();
 
     public HttpsTransportConfig(String defaultAddress, int defaultPort) {
         super(defaultAddress, defaultPort);

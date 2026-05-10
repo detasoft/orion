@@ -10,6 +10,7 @@ public final class OrionHttpResponse {
     public static final String JSON_CONTENT_TYPE = "application/json";
     public static final String TEXT_CONTENT_TYPE = "text/plain";
     public static final String XML_CONTENT_TYPE = "application/xml";
+    public static final String PEM_CONTENT_TYPE = "application/x-pem-file";
 
     private final int status;
     private final Object body;
@@ -45,6 +46,10 @@ public final class OrionHttpResponse {
 
     public static OrionHttpResponse xml(int status, String body) {
         return new OrionHttpResponse(status, body, XML_CONTENT_TYPE, Map.of());
+    }
+
+    public static OrionHttpResponse pem(int status, String body) {
+        return new OrionHttpResponse(status, body, PEM_CONTENT_TYPE, Map.of());
     }
 
     public OrionHttpResponse withHeader(String name, String value) {

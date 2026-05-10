@@ -5,8 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
-import org.shredzone.acme4j.*;
-import org.shredzone.acme4j.challenge.Http01Challenge;
 import org.shredzone.acme4j.util.KeyPairUtils;
 import pro.deta.orion.config.schema.HttpTransportConfig;
 import pro.deta.orion.config.schema.HttpsTransportConfig;
@@ -24,6 +22,7 @@ import java.security.KeyPair;
 import java.security.Security;
 import java.time.Duration;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,55 +72,21 @@ public class ACMECertificateChallengeTest {
         Security.addProvider(new BouncyCastleProvider());
 
         try (AcmeHttpTestServer server = startHttp()) {
-            Session session = new Session("acme://letsencrypt.org/staging");
-            KeyPair accountKeyPair = readOrGenerateKeyPair(ACCOUNT_KEYPAIR);
-            Account account = new AccountBuilder()
-                    .addEmail("tenteaday@gmail.com")
-                    .useKeyPair(accountKeyPair)
-                    .agreeToTermsOfService()
-                    .create(session);
-            Order order = account.newOrder().domains("ams.deta.pro")
-                    .create();
-            for (Authorization auth : order.getAuthorizations()) {
-                if (auth.getStatus() == Status.PENDING) {
-                    log.info("Authorizing " + auth.getIdentifier());
-                    Http01Challenge challenge = auth.findChallenge(Http01Challenge.class)
-                            .orElse(null);
-                    if (challenge == null) {
-                        continue;
-                    }
-                    String token = challenge.getToken();
-                    server.challengeService().registerChallenge(token, challenge.getAuthorization());
-                    try {
-                        challenge.trigger();
-                        log.info("Waiting for authorization status change");
-                        Status s = auth.waitForCompletion(Duration.ofSeconds(20));
-                        switch (s) {
-                            case VALID -> log.info("Challenge completed.");
-                            default -> throw new IllegalStateException("ACME authorization failed with status " + s);
-                        }
-                    } finally {
-                        server.challengeService().removeChallenge(token);
-                    }
-                }
+            AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(server.challengeService());
+            IssuedAcmeCertificate certificate = issuer.issue(new AcmeCertificateIssueRequest(
+                    "acme://letsencrypt.org/staging",
+                    "tenteaday@gmail.com",
+                    readOrGenerateKeyPair(ACCOUNT_KEYPAIR),
+                    readOrGenerateKeyPair(DOMAIN_KEYPAIR),
+                    List.of("ams.deta.pro"),
+                    "DETA PRO",
+                    Duration.ofSeconds(20),
+                    Duration.ofSeconds(20),
+                    true));
+            try (FileWriter fw = new FileWriter("domain.crt")) {
+                fw.write(certificate.nginxPem());
             }
-            KeyPair domainKeyPair = readOrGenerateKeyPair(DOMAIN_KEYPAIR);
-            String domainCertificate = "domain.crt";
-            order.execute(domainKeyPair, csr -> {
-                csr.setOrganization("DETA PRO");
-            });
-            order.waitForCompletion(Duration.ofSeconds(20));
-            switch (order.getStatus()) {
-                case VALID -> {
-                    Certificate cert = order.getCertificate();
-                    try (FileWriter fw = new FileWriter(domainCertificate)) {
-                        cert.writeCertificate(fw);
-                        KeyPairUtils.writeKeyPair(domainKeyPair, fw);
-                    }
-                    log.info("Certificate created.");
-                }
-                default -> log.error("No certificate created.");
-            }
+            log.info("Certificate created.");
         }
     }
 

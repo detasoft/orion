@@ -16,6 +16,7 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.Result;
 
@@ -43,6 +44,16 @@ class OrionHttpRouteServletTest {
     private static final String ISSUED_TOKEN = "issued-jwt";
     private static final long TOKEN_EXPIRES_AT = 1_800_000_000L;
     private static final String ACL_CONFIGURATION = "<access-control/>";
+    private static final String ACME_CERTIFICATE_PEM = """
+            -----BEGIN CERTIFICATE-----
+            TEST
+            -----END CERTIFICATE-----
+            """;
+    private static final String ACME_PRIVATE_KEY_PEM = """
+            -----BEGIN RSA PRIVATE KEY-----
+            TEST
+            -----END RSA PRIVATE KEY-----
+            """;
 
     @Test
     void createsManagedUser() throws Exception {
@@ -227,6 +238,56 @@ class OrionHttpRouteServletTest {
     }
 
     @Test
+    void issuesAcmeCertificateAsNginxPem() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        RecordingAcmeCertificateService acmeCertificateService = new RecordingAcmeCertificateService();
+        OrionHttpRouteServlet servlet = servlet(
+                accessControlService,
+                gitRepositoryProvider,
+                new AcmeHttpChallengeService(),
+                acmeCertificateService);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("POST", "/api/admin/acme/certificate", null, """
+                        {"domains":["other.example.test"],"persist":false}
+                        """),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/x-pem-file");
+        assertThat(response.headers)
+                .containsEntry("Content-Disposition", "attachment; filename=\"orion-acme-other.example.test-nginx.pem\"")
+                .containsEntry("Cache-Control", "no-store");
+        assertThat(response.body.toString()).isEqualTo(ACME_CERTIFICATE_PEM + ACME_PRIVATE_KEY_PEM);
+        assertThat(acmeCertificateService.lastIssueRequest.domains()).containsExactly("other.example.test");
+        assertThat(acmeCertificateService.lastIssueRequest.persist()).isFalse();
+    }
+
+    @Test
+    void downloadsSavedAcmeCertificateAsNginxPem() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        RecordingAcmeCertificateService acmeCertificateService = new RecordingAcmeCertificateService();
+        acmeCertificateService.savedCertificate = ACME_CERTIFICATE_PEM + ACME_PRIVATE_KEY_PEM;
+        OrionHttpRouteServlet servlet = servlet(
+                accessControlService,
+                gitRepositoryProvider,
+                new AcmeHttpChallengeService(),
+                acmeCertificateService);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", "/api/admin/acme/certificate", null, ""),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/x-pem-file");
+        assertThat(response.body.toString()).isEqualTo(ACME_CERTIFICATE_PEM + ACME_PRIVATE_KEY_PEM);
+    }
+
+    @Test
     void rejectsUnsupportedGitHttpMethodAtRouteLayer() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
@@ -256,12 +317,14 @@ class OrionHttpRouteServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
         JsonNode routes = OBJECT_MAPPER.readTree(response.body.toString()).get("routes");
-        assertThat(routes).hasSize(7);
+        assertThat(routes).hasSize(8);
         assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("authorization").asText()).isEqualTo("application-admin");
+        assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
+        assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, "/api/admin/token").get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("handler").asText())
                 .isEqualTo("OrionAdminRoutesRoute");
@@ -282,6 +345,21 @@ class OrionHttpRouteServletTest {
         assertThat(response.body.toString()).isEmpty();
     }
 
+    @Test
+    void rejectsAcmeCertificateRequestWithoutAdminGrant() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("POST", "/api/admin/acme/certificate", null, "", regularSecurityContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(response.body.toString()).isEmpty();
+    }
+
     private static OrionHttpRouteServlet servlet(
             RecordingAccessControlService accessControlService,
             RecordingGitRepositoryProvider gitRepositoryProvider) {
@@ -292,6 +370,18 @@ class OrionHttpRouteServletTest {
             RecordingAccessControlService accessControlService,
             RecordingGitRepositoryProvider gitRepositoryProvider,
             AcmeHttpChallengeService challengeService) {
+        return servlet(
+                accessControlService,
+                gitRepositoryProvider,
+                challengeService,
+                new RecordingAcmeCertificateService());
+    }
+
+    private static OrionHttpRouteServlet servlet(
+            RecordingAccessControlService accessControlService,
+            RecordingGitRepositoryProvider gitRepositoryProvider,
+            AcmeHttpChallengeService challengeService,
+            AcmeCertificateService acmeCertificateService) {
         Set<OrionHttpRoute> routes = new LinkedHashSet<>();
         routes.add(new AcmeHttpChallengeRoute(challengeService));
         routes.add(new OrionGitRoute(gitRepositoryProvider));
@@ -300,6 +390,7 @@ class OrionHttpRouteServletTest {
         routes.add(new OrionAdminIssueTokenRoute(accessControlService, OBJECT_MAPPER));
         routes.add(new OrionAdminAccessControlRoute(accessControlService));
         routes.add(new OrionAdminRoutesRoute(() -> new OrionHttpRouteRegistry(routes)));
+        routes.add(new OrionAdminAcmeCertificateRoute(acmeCertificateService, OBJECT_MAPPER));
         return new OrionHttpRouteServlet(new OrionHttpRouteRegistry(routes), new OrionHttpResponseWriter(OBJECT_MAPPER));
     }
 
@@ -433,6 +524,27 @@ class OrionHttpRouteServletTest {
         public Result<GitRepository> findOrCreate(String repositoryName) {
             lastCreatedRepository = repositoryName;
             return new Result.Success<>(null);
+        }
+    }
+
+    private static final class RecordingAcmeCertificateService extends AcmeCertificateService {
+        private AcmeCertificateService.IssueRequest lastIssueRequest;
+        private String savedCertificate;
+
+        private RecordingAcmeCertificateService() {
+            super(new OrionConfiguration(), new AcmeCertificateIssuer(new AcmeHttpChallengeService()));
+        }
+
+        @Override
+        public IssuedAcmeCertificate issue(AcmeCertificateService.IssueRequest request) {
+            lastIssueRequest = request;
+            List<String> domains = request.domains() == null ? List.of("example.test") : request.domains();
+            return new IssuedAcmeCertificate(domains, ACME_CERTIFICATE_PEM, ACME_PRIVATE_KEY_PEM);
+        }
+
+        @Override
+        public java.util.Optional<String> savedNginxCertificate() {
+            return java.util.Optional.ofNullable(savedCertificate);
         }
     }
 

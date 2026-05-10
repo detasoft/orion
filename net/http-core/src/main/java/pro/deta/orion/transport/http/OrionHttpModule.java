@@ -56,4 +56,10 @@ public class OrionHttpModule {
         return route;
     }
 
+    @Provides
+    @IntoSet
+    static OrionHttpRoute acmeCertificateRoute(OrionAdminAcmeCertificateRoute route) {
+        return route;
+    }
+
 }

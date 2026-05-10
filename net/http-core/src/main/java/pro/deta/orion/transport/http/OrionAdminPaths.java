@@ -6,6 +6,7 @@ final class OrionAdminPaths {
     static final String REPOSITORIES = ADMIN + "/repositories";
     static final String ACCESS_CONTROL = ADMIN + "/acl";
     static final String ROUTES = ADMIN + "/routes";
+    static final String ACME_CERTIFICATE = ADMIN + "/acme/certificate";
     static final String TOKEN = ADMIN + "/token";
 
     private OrionAdminPaths() {

@@ -26,5 +26,12 @@ port = 8000
 [transport.https]
 port = 8443
 
+[transport.https.acme]
+enabled = false
+directoryUrl = "acme://letsencrypt.org/staging"
+accountKeyPath = "acme/account.keypair"
+domainKeyPath = "acme/domain.keypair"
+certificatePath = "acme/nginx.pem"
+
 [transport.ssh]
 port = 8022
