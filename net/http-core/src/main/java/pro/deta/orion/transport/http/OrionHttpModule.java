@@ -7,6 +7,8 @@ import dagger.multibindings.IntoSet;
 import jakarta.inject.Singleton;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
+import javax.inject.Provider;
+
 @Module
 public class OrionHttpModule {
     @Provides
@@ -77,8 +79,8 @@ public class OrionHttpModule {
 
     @Provides
     @Singleton
-    static OrionShutdownLifecycle shutdownLifecycle(OrionApplicationLifecycle lifecycle) {
-        return lifecycle::beginShutdown;
+    static OrionShutdownLifecycle shutdownLifecycle(Provider<OrionApplicationLifecycle> lifecycle) {
+        return () -> lifecycle.get().beginShutdown();
     }
 
 }

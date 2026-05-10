@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -156,6 +157,15 @@ class OrionRuntimeModuleTest {
 
         assertFalse(tempDir.resolve("server-identity").toFile().exists());
         assertFalse(tempDir.resolve("ssh-host-keys").toFile().exists());
+    }
+
+    @Test
+    void runtimeLifecycleResolvesWithHttpShutdownRoute() {
+        OrionConfiguration configuration = defaultRuntimeConfiguration();
+        configuration.getTransport().getHttp().setEnabled(true);
+        OrionComponent component = runtimeComponent(configuration);
+
+        assertDoesNotThrow(() -> component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING));
     }
 
     @Test
