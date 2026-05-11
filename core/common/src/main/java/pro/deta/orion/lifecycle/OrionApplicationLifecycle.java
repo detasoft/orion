@@ -179,9 +179,13 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
         return flowRunner.runStartup();
     }
 
-    private void doShutdown() {
+    public ApplicationState shutdownApplication() {
         log.info("System shutdown process initiated.");
-        flowRunner.runShutdown();
+        return flowRunner.runShutdown();
+    }
+
+    private void doShutdown() {
+        shutdownApplication();
     }
 
     public String describeFlows() {

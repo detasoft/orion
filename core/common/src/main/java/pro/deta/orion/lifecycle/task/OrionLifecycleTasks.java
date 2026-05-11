@@ -2,6 +2,7 @@ package pro.deta.orion.lifecycle.task;
 
 public final class OrionLifecycleTasks {
     public static final LifecycleTaskId JGIT_RUNTIME = new LifecycleTaskId("JGIT_RUNTIME");
+    public static final LifecycleTaskId JGIT_RUNTIME_STOP = new LifecycleTaskId("JGIT_RUNTIME_STOP");
     public static final LifecycleTaskId SSH_TRANSPORT_INIT = new LifecycleTaskId("SSH_TRANSPORT_INIT");
     public static final LifecycleTaskId EVENT_MANAGER = new LifecycleTaskId("EVENT_MANAGER");
     public static final LifecycleTaskId ACL_LOAD = new LifecycleTaskId("ACL_LOAD");

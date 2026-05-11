@@ -23,19 +23,33 @@ import java.util.Objects;
 @Singleton
 public class OrionJGitRuntime implements OrionApplicationStageEventListener {
     private final ControlledOrionJGitSystemReader systemReader;
+    private final JGitGlobalRuntime globalRuntime;
 
     @Inject
-    public OrionJGitRuntime(ControlledOrionJGitSystemReader systemReader) {
+    public OrionJGitRuntime(ControlledOrionJGitSystemReader systemReader, JGitGlobalRuntime globalRuntime) {
         this.systemReader = Objects.requireNonNull(systemReader, "systemReader");
+        this.globalRuntime = Objects.requireNonNull(globalRuntime, "globalRuntime");
+    }
+
+    public OrionJGitRuntime(ControlledOrionJGitSystemReader systemReader) {
+        this(systemReader, new JGitGlobalRuntime());
     }
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
         registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install);
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.JGIT_RUNTIME_STOP, this::shutdown)
+                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
     }
 
     public OrionStageCallResult install() {
         SystemReader.setInstance(systemReader);
+        globalRuntime.initializeGlobalExecutors();
+        return OrionStageCallResult.EMPTY;
+    }
+
+    public OrionStageCallResult shutdown() {
+        globalRuntime.shutdownGlobalExecutors();
         return OrionStageCallResult.EMPTY;
     }
 }

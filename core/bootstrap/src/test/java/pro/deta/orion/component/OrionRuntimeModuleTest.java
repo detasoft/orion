@@ -107,6 +107,7 @@ class OrionRuntimeModuleTest {
         assertFalse(plan.contains("HTTP_TRANSPORT_STOP"));
         assertFalse(plan.contains("GIT_TRANSPORT_STOP"));
         assertFalse(plan.contains("SSH_TRANSPORT_STOP"));
+        assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
     }
@@ -121,6 +122,7 @@ class OrionRuntimeModuleTest {
         assertTrue(plan.contains("GIT_TRANSPORT_STOP"));
         assertTrue(plan.contains("SSH_TRANSPORT_STOP"));
         assertTrue(plan.contains("TRANSPORTS_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
+        assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
     }
@@ -133,6 +135,7 @@ class OrionRuntimeModuleTest {
 
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP"));
+        assertTrue(serviceMap.contains("OrionJGitRuntime: JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertFalse(serviceMap.contains("JettyHTTPServer: HTTP_TRANSPORT_START"));
         assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_START"));
         assertFalse(serviceMap.contains("GitSshTransportService: SSH_TRANSPORT_START"));
