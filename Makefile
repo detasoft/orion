@@ -6,27 +6,32 @@ ORION_HTTP_HOST ?= localhost
 ORION_HTTP_PORT ?= 8000
 ORION_SERVER_IDENTITY_KEY ?= $(ORION_ROOT)/server-identity/signing-rsa.pem
 ORION_TOKEN_TTL_SECONDS ?= 3600
+ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_HOST) -p $(ORION_SSH_PORT) -i $(ORION_SERVER_IDENTITY_KEY) -l root issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: run-server issue-token admin-acl admin-acl-with-token
+.PHONY: run-server issue-token issue-token-raw admin-acl admin-acl-with-token
 
 run-server:
 	$(MAVEN) -pl core/bootstrap -am -Prun-server process-classes
 
 # Scenario:
 # 1. Start the server: make run-server
-# 2. Issue a temporary admin token over SSH using the server identity key:
-#      make issue-token
+# 2. Issue a temporary admin token and export it into the current shell:
+#      eval "$$(make -s issue-token)"
 # 3. Use that token for the HTTP admin API:
-#      ORION_TOKEN="$$(make -s issue-token)" make admin-acl
+#      make admin-acl
 # Or run both token issue and ACL request in one command:
 #      make admin-acl-with-token
 issue-token:
-	@ssh $(ORION_SSH_HOST) -p $(ORION_SSH_PORT) -i $(ORION_SERVER_IDENTITY_KEY) -l root issue-token $(ORION_TOKEN_TTL_SECONDS)
+	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
+	printf 'export ORION_TOKEN=%s\n' "$$token"
+
+issue-token-raw:
+	@$(ISSUE_TOKEN_COMMAND)
 
 admin-acl:
-	@test -n "$$ORION_TOKEN" || (echo 'ORION_TOKEN is required. Run: ORION_TOKEN="$$(make -s issue-token)" make admin-acl' >&2; exit 1)
+	@test -n "$$ORION_TOKEN" || (echo 'ORION_TOKEN is required. Run: eval "$$(make -s issue-token)"' >&2; exit 1)
 	curl -v http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/api/admin/acl -H "Authorization: Bearer $$ORION_TOKEN"
 
 admin-acl-with-token:
-	@ORION_TOKEN="$$(ssh $(ORION_SSH_HOST) -p $(ORION_SSH_PORT) -i $(ORION_SERVER_IDENTITY_KEY) -l root issue-token $(ORION_TOKEN_TTL_SECONDS))"; \
+	@ORION_TOKEN="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	curl -v http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/api/admin/acl -H "Authorization: Bearer $$ORION_TOKEN"

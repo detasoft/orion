@@ -63,17 +63,19 @@ user. For local development, issue a token through the SSH helper that
 authenticates as `root` with Orion's generated server identity key:
 
 ```sh
-make issue-token
+eval "$(make -s issue-token)"
 ```
 
 Use the token with admin helpers or direct HTTP calls:
 
 ```sh
-ORION_TOKEN="$(make -s issue-token)" make admin-acl
-ORION_TOKEN="$(make -s issue-token)"
+make admin-acl
 curl http://localhost:8000/api/admin/routes \
   -H "Authorization: Bearer $ORION_TOKEN"
 ```
+
+For scripts that need the raw JWT value instead of an `export` command, use
+`make -s issue-token-raw`.
 
 The configuration JSON schema is public and does not require an admin token:
 
