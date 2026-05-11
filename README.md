@@ -189,6 +189,28 @@ mvn test -Pdev \
 - `infrastructure/` - Terraform and deployment-related helpers.
 - `docs/plans/` - design and implementation notes for larger changes.
 
+## License
+
+Orion is source-available under the Business Source License 1.1 with
+DETA PRO B.V. as the licensor. DETA PRO B.V. is available at
+https://www.deta-it.com. Each version changes to the GNU Affero General Public
+License version 3 or later four years after its first public distribution.
+
+Free production use is allowed for internal self-hosted business operations.
+Hosted access, SaaS, managed services, resale, embedding in a commercial
+product or service, paid support, paid maintenance, paid operations, and paid
+professional services where Orion is a material part of the offering require a
+commercial agreement with DETA PRO B.V.
+
+See [LICENSE](LICENSE), [NOTICE.md](NOTICE.md), and
+[TRADEMARKS.md](TRADEMARKS.md).
+
+## Contributing
+
+Contributions are accepted under the process in
+[CONTRIBUTING.md](CONTRIBUTING.md). Contributors keep copyright in their work
+and grant DETA PRO B.V. the rights described in [CLA.md](CLA.md).
+
 ## Roadmap
 
 Open development areas are tracked in [ROADMAP.md](ROADMAP.md).

@@ -1,0 +1,67 @@
+# Orion License
+
+Copyright (c) 2026 DETA PRO B.V.
+
+Orion is licensed under the Business Source License 1.1 (`BUSL-1.1`) with the
+project-specific parameters below.
+
+The canonical Business Source License 1.1 terms published by MariaDB apply to
+the Licensed Work. This file defines Orion's licensor, additional use grant,
+change date, and change license.
+
+## Licensor
+
+DETA PRO B.V.
+
+Website: https://www.deta-it.com
+
+## Licensed Work
+
+The "Orion" software, source code, build scripts, configuration examples,
+documentation, tests, and other materials distributed from official Orion
+repositories by DETA PRO B.V.
+
+## Additional Use Grant
+
+You may use the Licensed Work in production for Internal Business Use.
+
+"Internal Business Use" means use by you, your employees, your contractors,
+and your affiliates for your own internal operations. It includes self-hosting
+Orion to manage repositories for those internal users.
+
+Internal Business Use does not include Commercial Services.
+
+"Commercial Services" means offering or providing Orion, or a product or
+service materially based on Orion, to third parties for fees or other
+commercial consideration. Commercial Services include hosted access, SaaS,
+managed services, resale, embedding in a commercial product or service, paid
+support, paid maintenance, paid operations, and paid professional services
+where Orion is a material part of the offering.
+
+Any use outside this Additional Use Grant requires a separate commercial
+agreement with DETA PRO B.V.
+
+## Change Date
+
+For each version of the Licensed Work, the Change Date is the fourth
+anniversary of the first public distribution of that version under this
+License.
+
+## Change License
+
+GNU Affero General Public License version 3 or any later version
+(`AGPL-3.0-or-later`).
+
+On the Change Date, the corresponding version of the Licensed Work becomes
+available under the Change License.
+
+## Trademarks
+
+This license does not grant trademark rights. See `TRADEMARKS.md`.
+
+## Contributions
+
+Contributions are accepted under the process described in `CONTRIBUTING.md`
+and the contributor license terms in `CLA.md`. The CLA is required to preserve
+DETA PRO B.V.'s ability to change licensing terms, dual-license Orion, and
+offer commercial licenses without seeking additional contributor permission.

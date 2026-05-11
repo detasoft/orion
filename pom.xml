@@ -15,6 +15,14 @@
   <url>https://www.deta.pro/orion</url>
   <packaging>pom</packaging>
 
+  <licenses>
+    <license>
+      <name>Business Source License 1.1, changing to GNU Affero General Public License v3.0 or later</name>
+      <url>https://mariadb.com/bsl11/</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>21</maven.compiler.release>
