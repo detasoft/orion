@@ -2,78 +2,108 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add Maven packaging that produces Orion runnable jars for `java -jar` and Unix init.d-style service use.
+**Goal:** Build Orion as a single self-executable jar without Spring Boot.
 
-**Architecture:** Configure packaging in `core/bootstrap`, the module that owns `pro.deta.orion.App` and has the runtime dependency graph. Use Spring Boot's Maven plugin as a repackager only, attaching classified artifacts without adding Spring runtime dependencies. Document the produced artifacts and their intended deployment modes.
+**Architecture:** Package `core/bootstrap` as a shaded runnable jar, then prepend a small POSIX launcher script to create an executable jar that can run directly or act as an init.d service target. Keep the normal shaded jar available for `java -jar` use.
 
-**Tech Stack:** Maven, `spring-boot-maven-plugin`, Java 21, existing `core/bootstrap` application entry point.
+**Tech Stack:** Maven, `maven-shade-plugin`, `maven-antrun-plugin`, Java 21, POSIX shell, existing `pro.deta.orion.App` entry point.
 
 ---
 
-### Task 1: Configure Executable Jar Packaging
+### Task 1: Add Launcher Script Coverage
 
 **Files:**
-- Modify: `pom.xml`
-- Modify: `core/bootstrap/pom.xml`
+- Create: `core/bootstrap/src/test/java/pro/deta/orion/bootstrap/ExecutableLauncherScriptTest.java`
 
-**Step 1: Add a Spring Boot Maven plugin version property**
+**Step 1: Write the failing test**
 
-Add a root Maven property:
+Add a JUnit test that reads `src/main/launcher/orion-launcher.sh` and checks:
 
-```xml
-<spring-boot-maven-plugin.version>3.5.0</spring-boot-maven-plugin.version>
-```
+- it starts with `#!/bin/sh`;
+- it declares LSB init metadata;
+- it supports `run`, `start`, `stop`, `status`, and `restart`;
+- it delegates to `java -jar "$SELF"`.
 
-**Step 2: Add plugin management**
-
-In root `pom.xml` plugin management, add:
-
-```xml
-<plugin>
-  <groupId>org.springframework.boot</groupId>
-  <artifactId>spring-boot-maven-plugin</artifactId>
-  <version>${spring-boot-maven-plugin.version}</version>
-</plugin>
-```
-
-**Step 3: Configure `core/bootstrap` packaging executions**
-
-In `core/bootstrap/pom.xml`, add `spring-boot-maven-plugin` with two `repackage`
-executions bound to `package`:
-
-- `repackage-app`, classifier `app`, executable `false`
-- `repackage-initd`, classifier `initd`, executable `true`
-
-Both executions use:
-
-```xml
-<mainClass>pro.deta.orion.App</mainClass>
-```
-
-**Step 4: Run focused package build**
+**Step 2: Run the focused test**
 
 Run:
 
 ```sh
-mvn package -Pdev -pl core/bootstrap -am
+mvn test -Pdev -pl core/bootstrap -am -Dtest=ExecutableLauncherScriptTest -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-Expected: build succeeds and creates:
+Expected: fails because the launcher script does not exist yet.
 
-- `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-app.jar`
-- `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-initd.jar`
+### Task 2: Add Custom Executable Packaging
 
-### Task 2: Add Packaging Documentation
+**Files:**
+- Modify: `pom.xml`
+- Modify: `core/bootstrap/pom.xml`
+- Create: `core/bootstrap/src/main/launcher/orion-launcher.sh`
+
+**Step 1: Replace Spring Boot plugin management**
+
+Remove `spring-boot-maven-plugin` and add managed versions for:
+
+- `maven-shade-plugin`;
+- `maven-antrun-plugin`;
+- `build-helper-maven-plugin`.
+
+**Step 2: Configure shaded jar**
+
+In `core/bootstrap/pom.xml`, add `maven-shade-plugin` bound to `package` with:
+
+- `shadedArtifactAttached=true`;
+- `shadedClassifierName=all`;
+- `createDependencyReducedPom=false`;
+- `ManifestResourceTransformer` with `mainClass=pro.deta.orion.App`;
+- `ServicesResourceTransformer`;
+- artifact exclusions for inherited compile-only or test APIs such as Lombok
+  and JUnit;
+- signature-file exclusions under `META-INF`.
+
+**Step 3: Create executable jar**
+
+Add an `maven-antrun-plugin` `package` execution that concatenates:
+
+1. `src/main/launcher/orion-launcher.sh`
+2. `target/bootstrap-${project.version}-all.jar`
+
+into:
+
+```text
+target/bootstrap-${project.version}-executable.jar
+```
+
+Then chmod that file to `755`.
+
+**Step 4: Attach executable jar**
+
+Use `build-helper-maven-plugin` to attach the executable jar with classifier
+`executable` and type `jar`.
+
+**Step 5: Run focused test**
+
+Run the same focused test again.
+
+Expected: passes.
+
+### Task 3: Update Documentation
 
 **Files:**
 - Modify: `README.md`
 
-**Step 1: Add a distribution section**
+**Step 1: Update distribution section**
 
-Document the package command, `java -jar` usage, direct executable usage, and an
-init.d symlink example.
+Document:
 
-**Step 2: Verify documentation formatting**
+- `mvn package -Pdev -pl core/bootstrap -am`;
+- `bootstrap-1.0-SNAPSHOT-all.jar` for `java -jar`;
+- `bootstrap-1.0-SNAPSHOT-executable.jar` for direct execution;
+- direct commands: `run`, `start`, `status`, `stop`, `restart`;
+- init.d symlink installation.
+
+**Step 2: Check formatting**
 
 Run:
 
@@ -83,32 +113,53 @@ git diff --check
 
 Expected: no output and exit code 0.
 
-### Task 3: Verify End-To-End
+### Task 4: Verify Packaging End-To-End
 
 **Files:**
 - No source edits.
 
-**Step 1: Check produced artifacts**
+**Step 1: Build bootstrap package**
 
 Run:
 
 ```sh
-ls -l core/bootstrap/target/*-app.jar core/bootstrap/target/*-initd.jar
+mvn package -Pdev -pl core/bootstrap -am
 ```
 
-Expected: both files exist.
+Expected: build succeeds.
 
-**Step 2: Check init.d jar shell preamble**
+**Step 2: Check artifacts**
 
 Run:
 
 ```sh
-head -1 core/bootstrap/target/bootstrap-1.0-SNAPSHOT-initd.jar
+ls -l core/bootstrap/target/bootstrap-1.0-SNAPSHOT-all.jar \
+  core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar
 ```
 
-Expected: the first line starts with `#!/`.
+Expected: both files exist and executable jar has executable bit.
 
-**Step 3: Run routine tests**
+**Step 3: Check launcher preamble**
+
+Run:
+
+```sh
+head -1 core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar
+```
+
+Expected: `#!/bin/sh`.
+
+**Step 4: Check manifests**
+
+Run:
+
+```sh
+unzip -p core/bootstrap/target/bootstrap-1.0-SNAPSHOT-all.jar META-INF/MANIFEST.MF
+```
+
+Expected: `Main-Class: pro.deta.orion.App`.
+
+**Step 5: Run routine tests**
 
 Run:
 

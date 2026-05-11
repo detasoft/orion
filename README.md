@@ -56,6 +56,49 @@ Default local listeners:
 The HTTPS listener uses a self-signed certificate unless
 `transport.https.ksystore` is configured.
 
+## Distribution
+
+Build runnable bootstrap artifacts with the `dev` profile:
+
+```sh
+mvn package -Pdev -pl core/bootstrap -am
+```
+
+The build attaches two single-file jars:
+
+- `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-all.jar` - a regular shaded
+  `java -jar` artifact.
+- `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar` - the same
+  application with Orion's POSIX launcher prepended for direct execution and
+  init.d-compatible commands.
+
+Run the regular artifact directly:
+
+```sh
+java -jar core/bootstrap/target/bootstrap-1.0-SNAPSHOT-all.jar
+```
+
+Run the executable artifact from the command line:
+
+```sh
+core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar run
+core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar start
+core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar status
+core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar stop
+core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar restart
+```
+
+For a Linux service-style installation, copy the executable artifact to the
+target host and register it under `/etc/init.d`:
+
+```sh
+sudo install -d /opt/orion
+sudo install -m 755 core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar \
+  /opt/orion/orion.jar
+sudo ln -s /opt/orion/orion.jar /etc/init.d/orion
+sudo service orion start
+```
+
 ## Admin API
 
 Most `/api/admin/*` routes require a bearer token from an application admin
