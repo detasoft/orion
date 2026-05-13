@@ -1,12 +1,15 @@
 package pro.deta.orion.acl.schema;
 
+import jakarta.xml.bind.annotation.XmlRootElement;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.acl.schema.v1.AccessControlV1;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AccessControlXmlSchemaTest {
     private final AccessControlXmlSchema xmlSchema = new AccessControlXmlSchema();
@@ -19,13 +22,26 @@ class AccessControlXmlSchemaTest {
         AccessControlXmlSchema.ValidationResult result = validate(xml);
 
         assertThat(result.valid()).isTrue();
+        assertThat(xml).contains("schemaVersion=\"1\"");
 
         assertThat(schema).contains("name=\"AccessControl\"");
+        assertThat(schema).contains("name=\"schemaVersion\"");
+        assertThat(schema).contains("<xs:enumeration value=\"1\"/>");
         assertThat(schema).contains("name=\"user\"");
         assertThat(schema).contains("name=\"role\"");
         assertThat(schema).contains("name=\"grant\"");
         assertThat(schema).contains("<xs:enumeration value=\"ARGON2\"/>");
+        assertThat(schema).contains("<xs:enumeration value=\"JWT_SIGNING_PUBLIC_KEY\"/>");
         assertThat(schema).contains("<xs:enumeration value=\"ADMIN\"/>");
+        assertThat(schema).contains("<xs:enumeration value=\"NETWORK_PORT\"/>");
+    }
+
+    @Test
+    void schemaContractLivesInVersionedDtoPackage() {
+        assertThat(AccessControl.class.getAnnotation(XmlRootElement.class)).isNull();
+        assertThat(AccessControlV1.class.getAnnotation(XmlRootElement.class)).isNotNull();
+        assertThat(AccessControlV1.class.getPackageName()).endsWith(".schema.v1");
+        assertThat(AccessControlXml.currentSchemaVersion()).isEqualTo(AccessControlXmlSchemaVersion.V1);
     }
 
     @Test
@@ -44,6 +60,31 @@ class AccessControlXmlSchemaTest {
 
         assertThat(result.valid()).isFalse();
         assertThat(result.message()).isNotBlank();
+    }
+
+    @Test
+    void rejectsUnsupportedSchemaVersion() {
+        String xml = """
+                <AccessControl schemaVersion="999">
+                </AccessControl>
+                """;
+
+        assertThatThrownBy(() -> AccessControlXml.read(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8))))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("Unsupported ACL XML schema version: 999");
+    }
+
+    @Test
+    void schemaRejectsUnsupportedSchemaVersion() throws Exception {
+        String xml = """
+                <AccessControl schemaVersion="999">
+                </AccessControl>
+                """;
+
+        AccessControlXmlSchema.ValidationResult result = validate(xml);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.message()).contains("999");
     }
 
     @Test
@@ -119,6 +160,24 @@ class AccessControlXmlSchemaTest {
         assertThat(acl.getUsers().getFirst().getCredentials()).isEmpty();
         assertThat(acl.getUsers().getFirst().getRoles()).isEmpty();
         assertThat(acl.getUsers().getFirst().getGrants()).isEmpty();
+    }
+
+    @Test
+    void mapsCurrentModelThroughVersionedDto() throws Exception {
+        AccessControl accessControl = new AccessControl();
+        accessControl.getUsers().add(ACLUtil.createUser("server", "server@orion.pro")
+                .addCredential(AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY, "server-key", "public-key"));
+        accessControl.getGrants().add(ACLUtil.createGrant("PORT_22")
+                .addKey(AccessControl.GrantKey.NETWORK_PORT, "22"));
+
+        AccessControl read = AccessControlXml.read(new ByteArrayInputStream(serialize(accessControl)
+                .getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(read.getUsers().getFirst().getCredentials().getFirst().getType())
+                .isEqualTo(AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY);
+        assertThat(read.getUsers().getFirst().getCredentials().getFirst().getKeyId()).isEqualTo("server-key");
+        assertThat(read.getGrants().getFirst().getInfo().getFirst().getKey())
+                .isEqualTo(AccessControl.GrantKey.NETWORK_PORT);
     }
 
     private String serialize(AccessControl accessControl) throws Exception {
