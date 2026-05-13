@@ -287,6 +287,47 @@ class GitSshTransportEndToEndIT {
                 .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
     }
 
+    @Test
+    void componentCanRestartAndServeSshGitOperationsInSameJvm() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        FileUtils.wipeDirectory(orionRoot);
+        seedServerKeys(orionRoot);
+        seedAclRepository(orionRoot, TRUSTED_USER_KEY);
+
+        startedOrion = startExistingOrion(orionRoot);
+        startedOrion.stopSynchronously();
+        startedOrion = null;
+
+        startedOrion = startExistingOrion(orionRoot);
+        pushCloneAndFetchThroughSsh(
+                startedOrion,
+                "project",
+                tempDir.resolve("component-restart"),
+                "after component restart\n",
+                "after component restart fetch\n");
+    }
+
+    @Test
+    void preseededAclSshScenarioCanRunTwiceInSameJvm() throws Exception {
+        startedOrion = startOrion(tempDir.resolve("first-orion-root"), TRUSTED_USER_KEY);
+        pushCloneAndFetchThroughSsh(
+                startedOrion,
+                "project",
+                tempDir.resolve("first-e2e"),
+                "first scenario\n",
+                "first scenario fetch\n");
+        startedOrion.stop();
+        startedOrion = null;
+
+        startedOrion = startOrion(tempDir.resolve("second-orion-root"), TRUSTED_USER_KEY);
+        pushCloneAndFetchThroughSsh(
+                startedOrion,
+                "project",
+                tempDir.resolve("second-e2e"),
+                "second scenario\n",
+                "second scenario fetch\n");
+    }
+
     private StartedOrion startOrion(Path orionRoot, KeyPair userKey) throws Exception {
         /*
          * The application normally creates fresh server host keys and a default root user on first startup.
@@ -443,7 +484,12 @@ class GitSshTransportEndToEndIT {
     }
 
     private void assertRepositoryContains(String repositoryName, ObjectId commitId, String fileName, String expectedContent) throws Exception {
-        try (Repository repository = FileRepositoryBuilder.create(startedOrion.repositoryPath(repositoryName).toFile())) {
+        assertRepositoryContains(startedOrion, repositoryName, commitId, fileName, expectedContent);
+    }
+
+    private static void assertRepositoryContains(StartedOrion orion, String repositoryName, ObjectId commitId,
+                                                 String fileName, String expectedContent) throws Exception {
+        try (Repository repository = FileRepositoryBuilder.create(orion.repositoryPath(repositoryName).toFile())) {
             assertThat(repository.exactRef("refs/heads/" + BRANCH).getObjectId())
                     .as("server %s ref", repositoryName)
                     .isEqualTo(commitId);
@@ -451,6 +497,59 @@ class GitSshTransportEndToEndIT {
                     .as("server %s object database contains %s", repositoryName, commitId.name())
                     .isTrue();
             assertThat(readFileFromCommit(repository, commitId, fileName)).isEqualTo(expectedContent);
+        }
+    }
+
+    private static void pushCloneAndFetchThroughSsh(StartedOrion orion, String repositoryName, Path root,
+                                                    String initialContent, String updatedContent) throws Exception {
+        Path sourceDirectory = root.resolve("source");
+        Path cloneDirectory = root.resolve("clone");
+        String remoteUrl = orion.sshUrl(repositoryName + ".git");
+
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(root.resolve("ssh-home"), TRUSTED_USER_KEY);
+             Git source = initRepository(sourceDirectory)) {
+            ObjectId initialCommit = createCommit(source, "state.txt", initialContent, "initial e2e state");
+            Iterable<PushResult> initialPushResults = source.push()
+                    .setRemote(remoteUrl)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+
+            assertThat(initialPushResults)
+                    .flatExtracting(PushResult::getRemoteUpdates)
+                    .extracting(RemoteRefUpdate::getStatus)
+                    .containsExactly(RemoteRefUpdate.Status.OK);
+            assertRepositoryContains(orion, repositoryName, initialCommit, "state.txt", initialContent);
+
+            try (Git clone = Git.cloneRepository()
+                    .setURI(remoteUrl)
+                    .setDirectory(cloneDirectory.toFile())
+                    .setBranch(BRANCH)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .call()) {
+                assertThat(Files.readString(cloneDirectory.resolve("state.txt"))).isEqualTo(initialContent);
+
+                ObjectId updatedCommit = createCommit(source, "state.txt", updatedContent, "updated e2e state");
+                Iterable<PushResult> updatedPushResults = source.push()
+                        .setRemote(remoteUrl)
+                        .setTransportConfigCallback(sshCallback(ssh))
+                        .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                        .call();
+
+                assertThat(updatedPushResults)
+                        .flatExtracting(PushResult::getRemoteUpdates)
+                        .extracting(RemoteRefUpdate::getStatus)
+                        .containsExactly(RemoteRefUpdate.Status.OK);
+                assertRepositoryContains(orion, repositoryName, updatedCommit, "state.txt", updatedContent);
+
+                clone.fetch()
+                        .setRemote("origin")
+                        .setTransportConfigCallback(sshCallback(ssh))
+                        .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/remotes/origin/" + BRANCH))
+                        .call();
+
+                assertThat(clone.getRepository().resolve("refs/remotes/origin/" + BRANCH)).isEqualTo(updatedCommit);
+            }
         }
     }
 
@@ -646,6 +745,10 @@ class GitSshTransportEndToEndIT {
 
         private char[] plainRootToken() {
             return accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
+        }
+
+        private void stopSynchronously() {
+            assertThat(lifecycle.shutdownApplication()).isEqualTo(ApplicationState.OFF);
         }
 
         private void stop() {

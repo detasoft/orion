@@ -1,12 +1,14 @@
 package pro.deta.orion.test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
@@ -24,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -78,6 +81,17 @@ class OrionStartupIT {
             assertThat(validation).containsEntry("valid", true);
             assertThat(validation).doesNotContainKey("message");
         }
+    }
+
+    @Test
+    void serverShutdownDoesNotBreakStandaloneJGitPushInSameJvm() throws Exception {
+        Path orionRoot = tempDir.resolve("orion");
+
+        try (StartedOrion ignored = startServerWithConfig(serverConfiguration(orionRoot))) {
+            assertInitialConfigurationCreated(orionRoot);
+        }
+
+        pushToBareRepository(tempDir.resolve("standalone-jgit"));
     }
 
     private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
@@ -209,6 +223,40 @@ class OrionStartupIT {
             }
         }
         throw new IOException("Failed to find an unused port for test configuration");
+    }
+
+    private static void pushToBareRepository(Path root) throws Exception {
+        Path bareRepository = root.resolve("bare.git");
+        Files.createDirectories(bareRepository);
+        try (Git ignored = Git.init()
+                .setBare(true)
+                .setGitDir(bareRepository.toFile())
+                .setInitialBranch(BRANCH)
+                .call()) {
+            // The bare repository is the target for a normal local push.
+        }
+
+        Path workTree = root.resolve("worktree");
+        try (Git git = Git.init()
+                .setDirectory(workTree.toFile())
+                .setInitialBranch(BRANCH)
+                .call()) {
+            git.getRepository().getConfig().setString("user", null, "name", "Standalone JGit Test");
+            git.getRepository().getConfig().setString("user", null, "email", "standalone-jgit@example.test");
+            git.getRepository().getConfig().save();
+
+            Files.writeString(workTree.resolve("README.md"), "standalone jgit push\n");
+            git.add().addFilepattern("README.md").call();
+            git.commit()
+                    .setAuthor("Standalone JGit Test", "standalone-jgit@example.test")
+                    .setCommitter("Standalone JGit Test", "standalone-jgit@example.test")
+                    .setMessage("verify standalone jgit push")
+                    .call();
+            git.push()
+                    .setRemote(bareRepository.toUri().toString())
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+        }
     }
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle)

@@ -98,6 +98,7 @@ class OrionJGitRuntimeTest {
         installDefaultControlledJGitRuntime();
         JGitGlobalRuntime globalRuntime = new JGitGlobalRuntime();
 
+        globalRuntime.initializeGlobalExecutors();
         pushToBareRepository(tempDir.resolve("before-shutdown"));
         globalRuntime.shutdownGlobalExecutors();
 
