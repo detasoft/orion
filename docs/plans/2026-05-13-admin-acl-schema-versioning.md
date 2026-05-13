@@ -5,10 +5,13 @@
 The admin ACL XML contract is generated from the JAXB annotations on
 `pro.deta.orion.acl.schema.AccessControl`.
 
-`/schemas/orion-admin-acl.xsd` exposes the current editor schema. Runtime parsing
-also accepts the old repeated-plural collection element shape, such as
-`<users><users>...</users></users>`, but that shape is a compatibility quirk and
-is not part of the published schema.
+`GET /schemas/orion-admin-acl.xsd` exposes the current editor schema.
+`POST /schemas/orion-admin-acl.xsd` validates a submitted XML document against
+that schema and returns a JSON validation result.
+
+Runtime parsing also accepts the old repeated-plural collection element shape,
+such as `<users><users>...</users></users>`, but that shape is a compatibility
+quirk and is not part of the published schema.
 
 ## When a New Version Is Needed
 

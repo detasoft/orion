@@ -2,16 +2,11 @@ package pro.deta.orion.acl.schema;
 
 import org.junit.jupiter.api.Test;
 
-import javax.xml.XMLConstants;
-import javax.xml.transform.stream.StreamSource;
-import javax.xml.validation.SchemaFactory;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AccessControlXmlSchemaTest {
     private final AccessControlXmlSchema xmlSchema = new AccessControlXmlSchema();
@@ -21,7 +16,9 @@ class AccessControlXmlSchemaTest {
         String schema = xmlSchema.document();
         String xml = serialize(ACLUtil.generateDefaultAccessControl("root-password-hash"));
 
-        validate(schema, xml);
+        AccessControlXmlSchema.ValidationResult result = validate(xml);
+
+        assertThat(result.valid()).isTrue();
 
         assertThat(schema).contains("name=\"AccessControl\"");
         assertThat(schema).contains("name=\"user\"");
@@ -32,7 +29,7 @@ class AccessControlXmlSchemaTest {
     }
 
     @Test
-    void schemaRejectsLegacyPluralCollectionItemNames() {
+    void schemaRejectsLegacyPluralCollectionItemNames() throws Exception {
         String legacyXml = """
                 <AccessControl>
                   <users>
@@ -43,8 +40,10 @@ class AccessControlXmlSchemaTest {
                 </AccessControl>
                 """;
 
-        assertThatThrownBy(() -> validate(xmlSchema.document(), legacyXml))
-                .isInstanceOf(org.xml.sax.SAXException.class);
+        AccessControlXmlSchema.ValidationResult result = validate(legacyXml);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.message()).isNotBlank();
     }
 
     @Test
@@ -128,10 +127,7 @@ class AccessControlXmlSchemaTest {
         return output.toString(StandardCharsets.UTF_8);
     }
 
-    private void validate(String schema, String xml) throws Exception {
-        SchemaFactory schemaFactory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI);
-        schemaFactory.newSchema(new StreamSource(new StringReader(schema)))
-                .newValidator()
-                .validate(new StreamSource(new StringReader(xml)));
+    private AccessControlXmlSchema.ValidationResult validate(String xml) throws Exception {
+        return xmlSchema.validate(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
     }
 }

@@ -1,5 +1,6 @@
 package pro.deta.orion.test;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
@@ -15,12 +16,17 @@ import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 import pro.deta.orion.util.NetworkUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrionStartupIT {
     private static final String BRANCH = "master";
     private static final String ACL_FILE = "orion.xml";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @TempDir
     Path tempDir;
@@ -59,6 +66,20 @@ class OrionStartupIT {
         }
     }
 
+    @Test
+    void createdAccessControlConfigurationMatchesPublishedSchema() throws Exception {
+        Path orionRoot = tempDir.resolve("orion");
+
+        try (StartedOrion orion = startServerWithConfig(serverConfiguration(orionRoot))) {
+            byte[] aclContent = readFileFromAclRepository(orionRoot);
+
+            Map<String, Object> validation = validateAccessControlXml(orion, aclContent);
+
+            assertThat(validation).containsEntry("valid", true);
+            assertThat(validation).doesNotContainKey("message");
+        }
+    }
+
     private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> orionConfiguration)
@@ -67,7 +88,7 @@ class OrionStartupIT {
         ApplicationState state = lifecycle.runApplication();
         assertThat(state).isEqualTo(ApplicationState.UP);
         lifecycle.waitForStarting();
-        return new StartedOrion(lifecycle);
+        return new StartedOrion(orionConfiguration, lifecycle);
     }
 
     private static void assertInitialConfigurationCreated(Path orionRoot) throws IOException {
@@ -105,6 +126,29 @@ class OrionStartupIT {
                 assertThat(treeWalk).isNotNull();
                 return repository.open(treeWalk.getObjectId(0)).getBytes();
             }
+        }
+    }
+
+    private static Map<String, Object> validateAccessControlXml(StartedOrion orion, byte[] content) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl(OrionAccessControlSchemaRoute.URL_PATTERN)
+                .openConnection();
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/xml");
+        connection.setFixedLengthStreamingMode(content.length);
+        try (var output = connection.getOutputStream()) {
+            output.write(content);
+        }
+
+        assertThat(connection.getResponseCode())
+                .as("ACL schema validation endpoint")
+                .isEqualTo(HttpURLConnection.HTTP_OK);
+        assertThat(connection.getContentType()).startsWith("application/json");
+
+        try (InputStream input = connection.getInputStream()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> response = OBJECT_MAPPER.readValue(input, Map.class);
+            return response;
         }
     }
 
@@ -167,7 +211,16 @@ class OrionStartupIT {
         throw new IOException("Failed to find an unused port for test configuration");
     }
 
-    private record StartedOrion(OrionApplicationLifecycle lifecycle) implements AutoCloseable {
+    private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle)
+            implements AutoCloseable {
+        private URL httpUrl(String path) throws IOException {
+            return new URL(
+                    "http",
+                    configuration.getTransport().getHttp().getAddress(),
+                    configuration.getTransport().getHttp().getPort(),
+                    path);
+        }
+
         @Override
         public void close() {
             lifecycle.beginShutdown();

@@ -9,7 +9,9 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlXml;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
@@ -21,6 +23,7 @@ import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -327,7 +330,7 @@ class OrionHttpRouteServletTest {
         assertThat(routeWithPattern(routes, "/api/admin/shutdown").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
-        assertThat(routeWithPattern(routes, OrionAccessControlSchemaRoute.URL_PATTERN).get("methods").toString()).isEqualTo("[\"GET\"]");
+        assertThat(routeWithPattern(routes, OrionAccessControlSchemaRoute.URL_PATTERN).get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, OrionAccessControlSchemaRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("authorization").asText()).isEqualTo("application-admin");
@@ -435,6 +438,52 @@ class OrionHttpRouteServletTest {
     }
 
     @Test
+    void validatesAccessControlDocumentForEditors() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("POST", OrionAccessControlSchemaRoute.URL_PATTERN, null, validAclXml(), regularSecurityContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/json");
+
+        JsonNode validation = OBJECT_MAPPER.readTree(response.body.toString());
+        assertThat(validation.get("valid").asBoolean()).isTrue();
+        assertThat(validation.has("message")).isFalse();
+    }
+
+    @Test
+    void reportsAccessControlDocumentSchemaErrorsForEditors() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("POST", OrionAccessControlSchemaRoute.URL_PATTERN, null, """
+                        <AccessControl>
+                          <users>
+                            <users>
+                              <id>root</id>
+                            </users>
+                          </users>
+                        </AccessControl>
+                        """, regularSecurityContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/json");
+
+        JsonNode validation = OBJECT_MAPPER.readTree(response.body.toString());
+        assertThat(validation.get("valid").asBoolean()).isFalse();
+        assertThat(validation.get("message").asText()).isNotBlank();
+    }
+
+    @Test
     void rejectsAcmeCertificateRequestWithoutAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
@@ -532,6 +581,12 @@ class OrionHttpRouteServletTest {
             }
         }
         throw new AssertionError("Route not found: " + pattern);
+    }
+
+    private static String validAclXml() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        AccessControlXml.write(ACLUtil.generateDefaultAccessControl("root-password-hash"), output);
+        return output.toString(StandardCharsets.UTF_8);
     }
 
     private static JsonNode schemaAt(JsonNode schema, String... path) {
