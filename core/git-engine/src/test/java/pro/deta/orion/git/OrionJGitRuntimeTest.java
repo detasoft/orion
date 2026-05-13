@@ -11,6 +11,8 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
 import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
@@ -21,6 +23,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -123,6 +127,44 @@ class OrionJGitRuntimeTest {
         assertThat(WorkQueue.getExecutor()).isSameAs(workQueue);
         assertThat(workQueue.isShutdown()).isFalse();
         assertThat(workQueue.isTerminated()).isFalse();
+    }
+
+    @Test
+    @DisplayName("creates JGit helper threads outside the Orion executor thread group")
+    void createsJGitHelperThreadsOutsideOrionExecutorThreadGroup() throws Exception {
+        OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+        try {
+            Thread jgitThread = executor.submit(() -> {
+                ThreadFactory factory = JGitGlobalRuntime.daemonThreadFactory("JGit-Test");
+                return factory.newThread(() -> {
+                });
+            }).get(1, TimeUnit.SECONDS);
+
+            assertThat(jgitThread.isDaemon()).isTrue();
+            assertThat(jgitThread.getContextClassLoader()).isNull();
+            assertThat(hasThreadGroupNamed(jgitThread, "OrionExecutor")).isFalse();
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("initializes JGit WorkQueue outside the Orion executor thread group")
+    void initializesJGitWorkQueueOutsideOrionExecutorThreadGroup() throws Exception {
+        OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
+        try {
+            JGitGlobalRuntime globalRuntime = executor.submit(JGitGlobalRuntime::new).get(1, TimeUnit.SECONDS);
+            globalRuntime.initializeGlobalExecutors();
+
+            Thread workQueueThread = WorkQueue.getExecutor()
+                    .submit(Thread::currentThread)
+                    .get(1, TimeUnit.SECONDS);
+
+            assertThat(workQueueThread.isDaemon()).isTrue();
+            assertThat(hasThreadGroupNamed(workQueueThread, "OrionExecutor")).isFalse();
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -234,5 +276,16 @@ class OrionJGitRuntimeTest {
                     .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
                     .call();
         }
+    }
+
+    private static boolean hasThreadGroupNamed(Thread thread, String name) {
+        ThreadGroup group = thread.getThreadGroup();
+        while (group != null) {
+            if (group.getName().equals(name)) {
+                return true;
+            }
+            group = group.getParent();
+        }
+        return false;
     }
 }
