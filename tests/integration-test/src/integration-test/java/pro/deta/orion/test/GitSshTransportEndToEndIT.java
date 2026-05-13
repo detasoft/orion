@@ -289,6 +289,24 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void shutdownCommandStopsServerPromptlyOverSsh() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
+                .valueOrFailure("Server identity key should be available after startup");
+
+        long startedAtNanos = System.nanoTime();
+        int exitStatus = executeShutdownOverSsh(startedOrion, serverIdentityKey);
+        startedOrion.lifecycle().waitForShutdown();
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+
+        assertThat(exitStatus).isEqualTo(0);
+        assertThat(elapsedMillis).isLessThan(3_000);
+        startedOrion = null;
+    }
+
+    @Test
     void componentCanRestartAndServeSshGitOperationsInSameJvm() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         FileUtils.wipeDirectory(orionRoot);
@@ -454,6 +472,37 @@ class GitSshTransportEndToEndIT {
                         .isEqualTo(0);
             }
             return new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
+        } finally {
+            client.stop();
+        }
+    }
+
+    private static int executeShutdownOverSsh(StartedOrion orion, KeyPair keyPair) throws Exception {
+        SshClient client = SshClient.setUpDefaultClient();
+        client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
+        client.start();
+        try (ClientSession session = client.connect(
+                        "root",
+                        orion.configuration().getTransport().getSsh().getAddress(),
+                        orion.configuration().getTransport().getSsh().getPort())
+                .verify(10, TimeUnit.SECONDS)
+                .getSession()) {
+            session.addPublicKeyIdentity(keyPair);
+            session.auth().verify(10, TimeUnit.SECONDS);
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            ByteArrayOutputStream error = new ByteArrayOutputStream();
+            try (ClientChannel channel = session.createExecChannel("shutdown")) {
+                channel.setOut(output);
+                channel.setErr(error);
+                channel.open().verify(10, TimeUnit.SECONDS);
+                channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(10));
+
+                assertThat(channel.getExitStatus())
+                        .as("shutdown stderr: %s", new String(error.toByteArray(), StandardCharsets.UTF_8))
+                        .isNotNull();
+                return channel.getExitStatus();
+            }
         } finally {
             client.stop();
         }

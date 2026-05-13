@@ -41,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class GitSshTransportService implements AutoCloseable, OrionApplicationStageEventListener {
     public static final AttributeRepository.AttributeKey<UserIdentity> SSH_AUTHENTICATED_USER = new AttributeRepository.AttributeKey<>();
+    private static final long STOP_WAIT_MILLIS = 500;
 
     private final OrionConfiguration orionConfiguration;
     private final SshServer sshd = SshServer.setUpDefaultServer();
@@ -128,7 +129,10 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
 
     public OrionStageCallResult onStop() {
         try {
-            sshd.close(true).await(5, TimeUnit.SECONDS, CancelOption.CANCEL_ON_TIMEOUT);
+            boolean closed = sshd.close(true).await(STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS, CancelOption.CANCEL_ON_TIMEOUT);
+            if (!closed) {
+                log.warn("SSHD close did not complete within {}ms; continuing shutdown.", STOP_WAIT_MILLIS);
+            }
         } catch (IOException e) {
             log.error("Error while closing sshd.", e);
         }

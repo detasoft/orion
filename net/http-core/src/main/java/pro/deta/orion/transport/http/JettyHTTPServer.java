@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 public class JettyHTTPServer implements OrionApplicationStageEventListener {
     public static final String ROOT_CONTEXT_PATH = "/";
+    private static final long STOP_TIMEOUT_MILLIS = 1_000;
 
 
     private final HttpTransportConfig httpTransportConfig;
@@ -84,6 +85,8 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
         try {
             QueuedThreadPool threadPool = new QueuedThreadPool(10, 2, 120);
             Server server = new Server(threadPool);
+            server.setStopTimeout(STOP_TIMEOUT_MILLIS);
+            server.setStopAtShutdown(false);
             GzipHandler gzipHandler = new GzipHandler();
             gzipHandler.setIncludedMimeTypes("text/html", "text/plain", "text/xml", "text/css", "application/json", "text/javascript");
             ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
@@ -182,7 +185,6 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
                 return null;
             }
             server.stop();
-            server.join();
             server.destroy();
         } catch (Exception e) {
             log.error("Failed to stop Jetty server", e);
