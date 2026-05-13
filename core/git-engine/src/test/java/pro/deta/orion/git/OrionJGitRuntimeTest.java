@@ -1,6 +1,7 @@
 package pro.deta.orion.git;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.internal.WorkQueue;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.util.SystemReader;
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,6 +107,41 @@ class OrionJGitRuntimeTest {
         assertThatCode(() -> {
             globalRuntime.initializeGlobalExecutors();
             pushToBareRepository(tempDir.resolve("after-restart"));
+        }).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("does not stop JGit WorkQueue during lifecycle shutdown")
+    void doesNotStopJGitWorkQueueDuringLifecycleShutdown() {
+        installDefaultControlledJGitRuntime();
+        JGitGlobalRuntime globalRuntime = new JGitGlobalRuntime();
+        ScheduledThreadPoolExecutor workQueue = WorkQueue.getExecutor();
+
+        globalRuntime.initializeGlobalExecutors();
+        globalRuntime.shutdownGlobalExecutors();
+
+        assertThat(WorkQueue.getExecutor()).isSameAs(workQueue);
+        assertThat(workQueue.isShutdown()).isFalse();
+        assertThat(workQueue.isTerminated()).isFalse();
+    }
+
+    @Test
+    @DisplayName("can repeat JGit global executor lifecycle")
+    void canRepeatJGitGlobalExecutorLifecycle() {
+        installDefaultControlledJGitRuntime();
+        JGitGlobalRuntime globalRuntime = new JGitGlobalRuntime();
+
+        assertThatCode(() -> {
+            globalRuntime.initializeGlobalExecutors();
+            globalRuntime.initializeGlobalExecutors();
+            pushToBareRepository(tempDir.resolve("first-cycle"));
+
+            globalRuntime.shutdownGlobalExecutors();
+            globalRuntime.shutdownGlobalExecutors();
+
+            globalRuntime.initializeGlobalExecutors();
+            globalRuntime.initializeGlobalExecutors();
+            pushToBareRepository(tempDir.resolve("second-cycle"));
         }).doesNotThrowAnyException();
     }
 
