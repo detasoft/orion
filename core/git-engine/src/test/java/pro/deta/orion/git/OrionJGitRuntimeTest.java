@@ -1,10 +1,13 @@
 package pro.deta.orion.git;
 
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.util.SystemReader;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
@@ -12,9 +15,12 @@ import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
 import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static pro.deta.orion.git.JGitRuntimeAssertions.assertControlledJGitSystemReaderInstalled;
@@ -23,6 +29,11 @@ import static pro.deta.orion.git.JGitRuntimeAssertions.installDefaultControlledJ
 @ResourceLock("jgit-system-reader")
 @DisplayName("Orion JGit runtime")
 class OrionJGitRuntimeTest {
+    private static final String BRANCH = "master";
+
+    @TempDir
+    private Path tempDir;
+
     @AfterEach
     void resetControlledJGitRuntime() {
         try {
@@ -82,6 +93,21 @@ class OrionJGitRuntimeTest {
     }
 
     @Test
+    @DisplayName("keeps JGit global executors usable after lifecycle shutdown")
+    void keepsJGitGlobalExecutorsUsableAfterLifecycleShutdown() throws Exception {
+        installDefaultControlledJGitRuntime();
+        JGitGlobalRuntime globalRuntime = new JGitGlobalRuntime();
+
+        pushToBareRepository(tempDir.resolve("before-shutdown"));
+        globalRuntime.shutdownGlobalExecutors();
+
+        assertThatCode(() -> {
+            globalRuntime.initializeGlobalExecutors();
+            pushToBareRepository(tempDir.resolve("after-restart"));
+        }).doesNotThrowAnyException();
+    }
+
+    @Test
     @DisplayName("does not accept a missing system reader")
     void doesNotAcceptMissingSystemReader() {
         installDefaultControlledJGitRuntime();
@@ -135,6 +161,40 @@ class OrionJGitRuntimeTest {
                 }
             }
             throw new AssertionError("Missing lifecycle task " + id);
+        }
+    }
+
+    private static void pushToBareRepository(Path root) throws Exception {
+        Path bareRepository = root.resolve("bare.git");
+        Files.createDirectories(bareRepository);
+        try (Git ignored = Git.init()
+                .setBare(true)
+                .setGitDir(bareRepository.toFile())
+                .setInitialBranch(BRANCH)
+                .call()) {
+            // The bare repository is the target for a normal local push.
+        }
+
+        Path workTree = root.resolve("worktree");
+        try (Git git = Git.init()
+                .setDirectory(workTree.toFile())
+                .setInitialBranch(BRANCH)
+                .call()) {
+            git.getRepository().getConfig().setString("user", null, "name", "JGit Runtime Test");
+            git.getRepository().getConfig().setString("user", null, "email", "jgit-runtime@example.test");
+            git.getRepository().getConfig().save();
+
+            Files.writeString(workTree.resolve("README.md"), "jgit runtime restart\n");
+            git.add().addFilepattern("README.md").call();
+            git.commit()
+                    .setAuthor("JGit Runtime Test", "jgit-runtime@example.test")
+                    .setCommitter("JGit Runtime Test", "jgit-runtime@example.test")
+                    .setMessage("verify runtime restart")
+                    .call();
+            git.push()
+                    .setRemote(bareRepository.toUri().toString())
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
         }
     }
 }
