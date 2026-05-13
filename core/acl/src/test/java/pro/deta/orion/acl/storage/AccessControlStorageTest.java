@@ -243,7 +243,26 @@ class AccessControlStorageTest {
 
         OrionAccessControlServiceImpl service = startAccessControlService(storage);
 
-        assertThat(service.accessControlConfigurationFile()).isEqualTo(aclContent);
+        byte[] content = service.accessControlConfigurationFile();
+        assertThat(userIds(content)).containsExactly("raw-file-user");
+        assertThat(new String(content, StandardCharsets.UTF_8))
+                .contains("<user>")
+                .doesNotContain("<users>\n    <users>");
+    }
+
+    @Test
+    void accessControlServiceReturnsNormalizedPrimaryConfigurationFileContent() throws Exception {
+        Path aclDirectory = tempDir.resolve("legacy-acl-directory");
+        Files.createDirectories(aclDirectory.resolve("config"));
+        Files.write(aclDirectory.resolve(ACL_FILE), legacyAclBytes("legacy-file-user", false));
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+
+        OrionAccessControlServiceImpl service = createAccessControlService(storage);
+
+        String content = new String(service.accessControlConfigurationFile(), StandardCharsets.UTF_8);
+        assertThat(content).contains("<users>");
+        assertThat(content).contains("<user>");
+        assertThat(content).doesNotContain("<users>\n    <users>");
     }
 
     @Test
@@ -258,13 +277,33 @@ class AccessControlStorageTest {
         byte[] updatedAclContent = aclBytesWithPasswordUser("updated-raw-file-user");
         service.saveAccessControlConfigurationFile(updatedAclContent);
 
-        assertThat(storage.load().valueOrFailure("Updated ACL should be saved").files().get(ACL_FILE))
-                .isEqualTo(updatedAclContent);
-        assertThat(service.accessControlConfigurationFile()).isEqualTo(updatedAclContent);
+        byte[] savedContent = storage.load().valueOrFailure("Updated ACL should be saved").files().get(ACL_FILE);
+        assertThat(userIds(savedContent)).containsExactly("updated-raw-file-user");
+        assertThat(userIds(service.accessControlConfigurationFile())).containsExactly("updated-raw-file-user");
         assertThat(service.authenticateUser(
                 "initial-raw-file-user",
                 "password".getBytes(StandardCharsets.UTF_8))).isInstanceOf(AuthenticationResult.Failure.class);
         assertUserAuthenticates(service, "updated-raw-file-user");
+    }
+
+    @Test
+    void accessControlServiceNormalizesSavedPrimaryConfigurationFileContent() throws Exception {
+        Path aclDirectory = tempDir.resolve("legacy-save-acl-directory");
+        Files.createDirectories(aclDirectory.resolve("config"));
+        byte[] initialAclContent = aclBytesWithPasswordUser("initial-legacy-file-user");
+        Files.write(aclDirectory.resolve(ACL_FILE), initialAclContent);
+        LocalAccessControlStorage storage = new LocalAccessControlStorage(localConfig(aclDirectory));
+        OrionAccessControlServiceImpl service = startAccessControlService(storage);
+
+        service.saveAccessControlConfigurationFile(legacyAclBytes("updated-legacy-file-user", true));
+
+        String savedContent = new String(
+                storage.load().valueOrFailure("Updated ACL should be saved").files().get(ACL_FILE),
+                StandardCharsets.UTF_8);
+        assertThat(savedContent).contains("<users>");
+        assertThat(savedContent).contains("<user>");
+        assertThat(savedContent).doesNotContain("<users>\n    <users>");
+        assertUserAuthenticates(service, "updated-legacy-file-user");
     }
 
     @Test
@@ -617,6 +656,35 @@ class AccessControlStorageTest {
         return output.toByteArray();
     }
 
+    private byte[] legacyAclBytes(String userId, boolean includePasswordCredential) {
+        String credentials = "";
+        if (includePasswordCredential) {
+            credentials = """
+                          <credentials>
+                            <credentials>
+                              <type>SHA1</type>
+                              <value>%s</value>
+                            </credentials>
+                          </credentials>
+                    """.formatted(DEFAULT_ROOT_PASSWORD_HASH);
+        }
+        String xml = """
+                <AccessControl>
+                  <users>
+                    <users>
+                      <id>%s</id>
+                      <email>%s@example.test</email>
+                %s      <roles/>
+                      <grants/>
+                    </users>
+                  </users>
+                  <roles/>
+                  <grants/>
+                </AccessControl>
+                """.formatted(userId, userId, credentials);
+        return xml.getBytes(StandardCharsets.UTF_8);
+    }
+
     private AccessControl accessControlWithUser(String userId) {
         AccessControl accessControl = new AccessControl();
         accessControl.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test"));
@@ -670,9 +738,22 @@ class AccessControlStorageTest {
             AccessControlStorage storage,
             OrionConfiguration configuration,
             PublicKeysProvider publicKeysProvider) throws Exception {
+        OrionAccessControlServiceImpl service = createAccessControlService(storage, configuration, publicKeysProvider);
+        startWithoutRootPasswordOutput(service);
+        return service;
+    }
+
+    private OrionAccessControlServiceImpl createAccessControlService(AccessControlStorage storage) {
+        return createAccessControlService(storage, testConfiguration(), PublicKeysProvider.DEFAULT);
+    }
+
+    private OrionAccessControlServiceImpl createAccessControlService(
+            AccessControlStorage storage,
+            OrionConfiguration configuration,
+            PublicKeysProvider publicKeysProvider) {
         ServerKeySigner serverKeySigner = serverKeySignerFor(publicKeysProvider);
         TestProviderContext providerContext = startedProviderContext();
-        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+        return new OrionAccessControlServiceImpl(
                 storage,
                 new FixedPasswordHashingService(),
                 providerContext.orionProvider(),
@@ -684,8 +765,6 @@ class AccessControlStorageTest {
                 return SHA1;
             }
         };
-        startWithoutRootPasswordOutput(service);
-        return service;
     }
 
     private ServerKeySigner serverKeySignerFor(PublicKeysProvider publicKeysProvider) {

@@ -226,7 +226,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 if (content == null) {
                     throw new IllegalStateException("Primary ACL configuration file is missing: " + accessControlStorage.primaryPath());
                 }
-                yield content.clone();
+                yield serializeAccessControlConfiguration(parseAccessControlConfiguration(
+                        content,
+                        accessControlStorage.primaryPath()));
             }
             case Result.Failure<AccessControlSnapshot> failure ->
                     throw new IllegalStateException("Cannot load ACL configuration file", failure.throwable());
@@ -239,7 +241,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             throw new IllegalArgumentException("ACL configuration content is required");
         }
         String primaryPath = accessControlStorage.primaryPath();
-        AccessControlSnapshot snapshot = AccessControlSnapshot.singleFile(primaryPath, content);
+        AccessControl accessControl = parseAccessControlConfiguration(content, primaryPath);
+        AccessControlSnapshot snapshot = AccessControlSnapshot.singleFile(
+                primaryPath,
+                serializeAccessControlConfiguration(accessControl));
         switch (accessControlFrom(snapshot)) {
             case Result.Success<AccessControl> ignored -> {
                 accessControlStorage.save(
@@ -249,6 +254,23 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
             case Result.Failure<AccessControl> failure ->
                     throw new IllegalArgumentException("Invalid ACL configuration file: " + failure.message(), failure.throwable());
+        }
+    }
+
+    private AccessControl parseAccessControlConfiguration(byte[] content, String sourceName) {
+        try (ByteArrayInputStream input = new ByteArrayInputStream(content)) {
+            return xmlService.deserialize(input);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Invalid ACL configuration file: Cannot parse ACL file " + sourceName, e);
+        }
+    }
+
+    private byte[] serializeAccessControlConfiguration(AccessControl accessControl) {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            xmlService.serialize(accessControl, output);
+            return output.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot serialize ACL configuration file", e);
         }
     }
 
