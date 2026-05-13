@@ -317,7 +317,7 @@ class OrionHttpRouteServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
         JsonNode routes = OBJECT_MAPPER.readTree(response.body.toString()).get("routes");
-        assertThat(routes).hasSize(10);
+        assertThat(routes).hasSize(11);
         assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
@@ -327,6 +327,8 @@ class OrionHttpRouteServletTest {
         assertThat(routeWithPattern(routes, "/api/admin/shutdown").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, OrionConfigurationSchemaRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
+        assertThat(routeWithPattern(routes, OrionAccessControlSchemaRoute.URL_PATTERN).get("methods").toString()).isEqualTo("[\"GET\"]");
+        assertThat(routeWithPattern(routes, OrionAccessControlSchemaRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/acme/certificate").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, "/api/admin/token").get("authorization").asText()).isEqualTo("anonymous");
@@ -411,6 +413,25 @@ class OrionHttpRouteServletTest {
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/schema+json");
+    }
+
+    @Test
+    void returnsAccessControlSchemaForEditors() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", OrionAccessControlSchemaRoute.URL_PATTERN, null, "", regularSecurityContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("application/xml");
+        String schema = response.body.toString();
+        assertThat(schema).contains("name=\"AccessControl\"");
+        assertThat(schema).contains("name=\"user\"");
+        assertThat(schema).contains("name=\"grant\"");
     }
 
     @Test
@@ -500,6 +521,7 @@ class OrionHttpRouteServletTest {
         routes.add(new OrionAdminShutdownRoute(shutdownLifecycle));
         routes.add(new OrionAdminAcmeCertificateRoute(acmeCertificateService, OBJECT_MAPPER));
         routes.add(new OrionConfigurationSchemaRoute(new OrionConfigurationJsonSchema()));
+        routes.add(new OrionAccessControlSchemaRoute());
         return new OrionHttpRouteServlet(new OrionHttpRouteRegistry(routes), new OrionHttpResponseWriter(OBJECT_MAPPER));
     }
 

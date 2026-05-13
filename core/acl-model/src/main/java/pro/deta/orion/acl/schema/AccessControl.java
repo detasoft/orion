@@ -1,5 +1,11 @@
 package pro.deta.orion.acl.schema;
 
+import jakarta.xml.bind.annotation.XmlAccessType;
+import jakarta.xml.bind.annotation.XmlAccessorType;
+import jakarta.xml.bind.annotation.XmlElement;
+import jakarta.xml.bind.annotation.XmlElementWrapper;
+import jakarta.xml.bind.annotation.XmlRootElement;
+import jakarta.xml.bind.annotation.XmlType;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -10,11 +16,20 @@ import java.util.stream.Collectors;
 
 @Data
 @RequiredArgsConstructor
+@XmlRootElement(name = "AccessControl")
+@XmlAccessorType(XmlAccessType.FIELD)
+@XmlType(propOrder = {"grants", "roles", "users"})
 public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     public static final String TRUE_STRING = "true";
 
+    @XmlElementWrapper(name = "users")
+    @XmlElement(name = "user")
     private final List<User> users;
+    @XmlElementWrapper(name = "roles")
+    @XmlElement(name = "role")
     private final List<Role> roles;
+    @XmlElementWrapper(name = "grants")
+    @XmlElement(name = "grant")
     private final List<Grant> grants;
 
     public AccessControl() {
@@ -44,13 +59,21 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     @Data
     @NoArgsConstructor(force = true)
     @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"credentials", "email", "first", "grants", "id", "last", "roles"})
     public static final class User extends CloneToUnmodifiable<User> {
         private final String id;
         private final String first;
         private final String last;
         private final String email;
+        @XmlElementWrapper(name = "credentials")
+        @XmlElement(name = "credential")
         private final List<Credential> credentials;
+        @XmlElementWrapper(name = "roles")
+        @XmlElement(name = "role")
         private final List<String> roles;
+        @XmlElementWrapper(name = "grants")
+        @XmlElement(name = "grant")
         private final List<Grant> grants;
 
         @Override
@@ -95,6 +118,8 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     @Data
     @NoArgsConstructor(force = true)
     @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"keyId", "type", "value"})
     public static final class Credential extends CloneToUnmodifiable<Credential> {
         private final CredentialType type;
         private final String keyId;
@@ -118,9 +143,15 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     @Data
     @NoArgsConstructor(force = true)
     @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"grantReferences", "grants", "id"})
     public static final class Role extends CloneToUnmodifiable<Role> {
         private final String id;
+        @XmlElementWrapper(name = "grants")
+        @XmlElement(name = "grant")
         private final List<Grant> grants;
+        @XmlElementWrapper(name = "grantReferences")
+        @XmlElement(name = "grantReference")
         private final List<String> grantReferences;
 
         @Override
@@ -147,8 +178,12 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     @Data
     @NoArgsConstructor(force = true)
     @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"id", "info"})
     public static final class Grant extends CloneToUnmodifiable<Grant> {
         private final String id;
+        @XmlElementWrapper(name = "info")
+        @XmlElement(name = "expression")
         private final List<GrantExpression> info;
 
         @Override
@@ -170,6 +205,8 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     @Data
     @NoArgsConstructor(force = true)
     @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"key", "value"})
     public static class GrantExpression extends CloneToUnmodifiable<GrantExpression> {
         private final GrantKey key;
         private final String value;

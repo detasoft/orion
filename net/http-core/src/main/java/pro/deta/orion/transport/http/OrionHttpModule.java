@@ -78,6 +78,12 @@ public class OrionHttpModule {
     }
 
     @Provides
+    @IntoSet
+    static OrionHttpRoute accessControlSchemaRoute(OrionAccessControlSchemaRoute route) {
+        return route;
+    }
+
+    @Provides
     @Singleton
     static OrionShutdownLifecycle shutdownLifecycle(Provider<OrionApplicationLifecycle> lifecycle) {
         return () -> lifecycle.get().beginShutdown();
