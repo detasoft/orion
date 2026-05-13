@@ -10,49 +10,49 @@ public class ACLUtil {
     public static AccessControl generateDefaultAccessControl(
             String defaultRootPasswordHash,
             AccessControl.CredentialType passwordCredentialType) {
-        AccessControl s = new AccessControl();
-        AccessControl.Grant connectFromLocalhost = createGrant("CONNECT")
+        AccessControlDraft draft = new AccessControlDraft();
+        AccessControlDraft.Grant connectFromLocalhost = createGrant("CONNECT")
                 .addKey(AccessControl.GrantKey.NETWORK_SOURCE, "127.0.0.1");
 
-        AccessControl.Grant allRepository = createGrant("ALL_REPOSITORY")
+        AccessControlDraft.Grant allRepository = createGrant("ALL_REPOSITORY")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "*")
                 .addKey(AccessControl.GrantKey.READ, "true")
                 .addKey(AccessControl.GrantKey.WRITE, "true")
                 .addKey(AccessControl.GrantKey.CREATE, "true")
                 .addKey(AccessControl.GrantKey.BRANCH, "*")
                 .addKey(AccessControl.GrantKey.FORCE, "true");
-        AccessControl.Grant applicationControl = createGrant("APPLICATION_CONTROL")
+        AccessControlDraft.Grant applicationControl = createGrant("APPLICATION_CONTROL")
                 .addKey(AccessControl.GrantKey.SHUTDOWN, "true")
                 .addKey(AccessControl.GrantKey.ADMIN, "true");
 
-        AccessControl.Role rootRole = createRole("ROOT")
+        AccessControlDraft.Role rootRole = createRole("ROOT")
                 .addGrantReference(connectFromLocalhost.getId())
                 .addGrantReference(allRepository.getId())
                 .addGrantReference(applicationControl.getId());
 
-        AccessControl.User rootUser = createUser("root", "root@orion.pro")
+        AccessControlDraft.User rootUser = createUser("root", "root@orion.pro")
                 .addCredential(passwordCredentialType, defaultRootPasswordHash)
                 .addRole(rootRole.getId());
 
 
-        s.getUsers().add(rootUser);
-        s.getRoles().add(rootRole);
-        s.getGrants().add(connectFromLocalhost);
-        s.getGrants().add(allRepository);
-        s.getGrants().add(applicationControl);
-        return s;
+        draft.getUsers().add(rootUser);
+        draft.getRoles().add(rootRole);
+        draft.getGrants().add(connectFromLocalhost);
+        draft.getGrants().add(allRepository);
+        draft.getGrants().add(applicationControl);
+        return draft.toAccessControl();
     }
 
 
-    public static AccessControl.User createUser(String id, String email) {
-        return new AccessControl.User(id, null, null, email, new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+    public static AccessControlDraft.User createUser(String id, String email) {
+        return new AccessControlDraft.User(id, null, null, email, new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
     }
 
-    public static AccessControl.Role createRole(String id) {
-        return new AccessControl.Role(id, new ArrayList<>(), new ArrayList<>());
+    public static AccessControlDraft.Role createRole(String id) {
+        return new AccessControlDraft.Role(id, new ArrayList<>(), new ArrayList<>());
     }
 
-    public static AccessControl.Grant createGrant(String id) {
-        return new AccessControl.Grant(id, new ArrayList<>());
+    public static AccessControlDraft.Grant createGrant(String id) {
+        return new AccessControlDraft.Grant(id, new ArrayList<>());
     }
 }

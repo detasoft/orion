@@ -165,11 +165,12 @@ class AccessControlXmlSchemaTest {
 
     @Test
     void mapsCurrentModelThroughVersionedDto() throws Exception {
-        AccessControl accessControl = new AccessControl();
-        accessControl.getUsers().add(ACLUtil.createUser("server", "server@orion.pro")
+        AccessControlDraft draft = new AccessControlDraft();
+        draft.getUsers().add(ACLUtil.createUser("server", "server@orion.pro")
                 .addCredential(AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY, "server-key", "public-key"));
-        accessControl.getGrants().add(ACLUtil.createGrant("PORT_22")
+        draft.getGrants().add(ACLUtil.createGrant("PORT_22")
                 .addKey(AccessControl.GrantKey.NETWORK_PORT, "22"));
+        AccessControl accessControl = draft.toAccessControl();
 
         AccessControl read = AccessControlXml.read(new ByteArrayInputStream(serialize(accessControl)
                 .getBytes(StandardCharsets.UTF_8)));

@@ -29,6 +29,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
@@ -620,16 +621,16 @@ class GitSshTransportEndToEndIT {
          * the full SSH transport path and repository lifecycle, not fine-grained ACL matching; narrower ACL
          * behavior is covered by unit tests around access rules.
          */
-        AccessControl accessControl = new AccessControl();
-        AccessControl.User user = ACLUtil.createUser(USERNAME, "e2e@example.test")
+        AccessControlDraft draft = new AccessControlDraft();
+        AccessControlDraft.User user = ACLUtil.createUser(USERNAME, "e2e@example.test")
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(userPublicKey));
         allowRepository(user, "project");
         allowRepository(user, "fetch-project");
-        accessControl.getUsers().add(user);
-        return accessControl;
+        draft.getUsers().add(user);
+        return draft.toAccessControl();
     }
 
-    private static void allowRepository(AccessControl.User user, String repositoryName) {
+    private static void allowRepository(AccessControlDraft.User user, String repositoryName) {
         user.addGrant("REPOSITORY_" + repositoryName)
                 .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
                 .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.event.OrionEventManager;
@@ -282,23 +283,29 @@ class GitInternalServiceProtocolTest extends BaseOrionTest {
     }
 
     private static InternalUserImpl gitUser(String userId, String repositoryName) {
-        AccessControl.Grant grant = new AccessControl.Grant("git-" + repositoryName, new ArrayList<>())
+        AccessControl.Grant grant = grantDraft("git-" + repositoryName)
                 .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
                 .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, "*");
+                .addKey(AccessControl.GrantKey.BRANCH, "*")
+                .toAccessControl();
 
         return new InternalUserImpl(userId, List.of(grant));
     }
 
     private static InternalUserImpl gitReader(String userId, String repositoryName, String branchName) {
-        AccessControl.Grant grant = new AccessControl.Grant("git-" + repositoryName + "-reader", new ArrayList<>())
+        AccessControl.Grant grant = grantDraft("git-" + repositoryName + "-reader")
                 .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
                 .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.BRANCH, branchName);
+                .addKey(AccessControl.GrantKey.BRANCH, branchName)
+                .toAccessControl();
 
         return new InternalUserImpl(userId, List.of(grant));
+    }
+
+    private static AccessControlDraft.Grant grantDraft(String id) {
+        return new AccessControlDraft.Grant(id, new java.util.ArrayList<>());
     }
 
     private static void assertFirstCommitReceiveEvent(RecordingEventManager events, String repositoryName, String userName) {

@@ -11,6 +11,7 @@ import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.acl.schema.AccessControlXml;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
@@ -637,8 +638,9 @@ class OrionHttpRouteServletTest {
     }
 
     private static SecurityContext adminSecurityContext() {
-        AccessControl.Grant adminGrant = new AccessControl.Grant("admin", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING);
+        AccessControl.Grant adminGrant = new AccessControlDraft.Grant("admin", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)
+                .toAccessControl();
         return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("admin", List.of(adminGrant)));
     }
 

@@ -3,6 +3,7 @@ package pro.deta.orion.auth.check;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -18,7 +19,6 @@ import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,8 +69,9 @@ public class AccessRulesTest {
                 .isInstanceOf(OrionSecurityException.class)
                 .hasMessageContaining("repository create");
 
-        AccessControl.Grant createGrant = repositoryGrant("project")
-                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING);
+        AccessControl.Grant createGrant = repositoryGrantDraft("project")
+                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING)
+                .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
 
         assertThatCode(() -> requireRepositoryCreate(creator, "project"))
@@ -82,8 +83,9 @@ public class AccessRulesTest {
 
     @Test
     public void createAccessAllowsRepositoryPatternGrant() {
-        AccessControl.Grant createGrant = repositoryGrant("team/*")
-                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING);
+        AccessControl.Grant createGrant = repositoryGrantDraft("team/*")
+                .addKey(AccessControl.GrantKey.CREATE, TRUE_STRING)
+                .toAccessControl();
         SecurityContext creator = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
 
         assertThatCode(() -> requireRepositoryCreate(creator, "team/project"))
@@ -92,15 +94,17 @@ public class AccessRulesTest {
 
     @Test
     public void writeAccessRequiresRepositoryWriteGrant() {
-        AccessControl.Grant repositoryGrant = new AccessControl.Grant("repository-only", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project");
+        AccessControl.Grant repositoryGrant = grantDraft("repository-only")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .toAccessControl();
         SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant)));
         assertThatThrownBy(() -> requireRepositoryWrite(reader, "project"))
                 .isInstanceOf(OrionSecurityException.class);
 
-        AccessControl.Grant writeGrant = new AccessControl.Grant("write", new ArrayList<>())
+        AccessControl.Grant writeGrant = grantDraft("write")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING);
+                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .toAccessControl();
         SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
 
         assertThatCode(() -> requireRepositoryWrite(writer, "project"))
@@ -116,8 +120,9 @@ public class AccessRulesTest {
                 .isInstanceOf(OrionSecurityException.class)
                 .hasMessageContaining("application shutdown");
 
-        AccessControl.Grant shutdownGrant = new AccessControl.Grant("shutdown", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING);
+        AccessControl.Grant shutdownGrant = grantDraft("shutdown")
+                .addKey(AccessControl.GrantKey.SHUTDOWN, TRUE_STRING)
+                .toAccessControl();
         SecurityContext operator = securityContext(new InternalUserImpl("operator", List.of(shutdownGrant)));
 
         assertThatCode(() -> requireApplicationShutdown(operator))
@@ -131,8 +136,9 @@ public class AccessRulesTest {
                 .isInstanceOf(OrionSecurityException.class)
                 .hasMessageContaining("application admin");
 
-        AccessControl.Grant adminGrant = new AccessControl.Grant("admin", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.ADMIN, TRUE_STRING);
+        AccessControl.Grant adminGrant = grantDraft("admin")
+                .addKey(AccessControl.GrantKey.ADMIN, TRUE_STRING)
+                .toAccessControl();
         SecurityContext admin = securityContext(new InternalUserImpl("admin", List.of(adminGrant)));
 
         assertThatCode(() -> requireApplicationAdmin(admin))
@@ -291,13 +297,22 @@ public class AccessRulesTest {
     }
 
     private static AccessControl.Grant repositoryGrant(String repositoryName) {
-        return new AccessControl.Grant("repository", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName);
+        return repositoryGrantDraft(repositoryName).toAccessControl();
     }
 
     private static AccessControl.Grant repositoryGrant(String repositoryName, String branchName) {
-        return repositoryGrant(repositoryName)
-                .addKey(AccessControl.GrantKey.BRANCH, branchName);
+        return repositoryGrantDraft(repositoryName)
+                .addKey(AccessControl.GrantKey.BRANCH, branchName)
+                .toAccessControl();
+    }
+
+    private static AccessControlDraft.Grant repositoryGrantDraft(String repositoryName) {
+        return grantDraft("repository")
+                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName);
+    }
+
+    private static AccessControlDraft.Grant grantDraft(String id) {
+        return new AccessControlDraft.Grant(id, new java.util.ArrayList<>());
     }
 
     private static SecurityContext securityContext(InternalUserImpl userIdentity) {

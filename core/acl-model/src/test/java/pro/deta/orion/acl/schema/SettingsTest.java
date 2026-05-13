@@ -1,39 +1,44 @@
 package pro.deta.orion.acl.schema;
 
-import org.jeasy.random.EasyRandom;
-import org.jeasy.random.EasyRandomParameters;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
-import java.time.LocalTime;
+import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static pro.deta.orion.acl.schema.AccessControl.getAccessControlClasses;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class SettingsTest {
-    EasyRandomParameters parameters = new EasyRandomParameters()
-            .seed(123L)
-            .objectPoolSize(100)
-            .randomizationDepth(3)
-            .charset(StandardCharsets.UTF_8)
-            .timeRange(LocalTime.of(9, 0, 0), LocalTime.of(17, 0, 0))
-            .dateRange(LocalDate.now(), LocalDate.now().plusDays(1))
-            .stringLengthRange(5, 50)
-            .collectionSizeRange(1, 10)
-            .scanClasspathForConcreteTypes(true)
-            .overrideDefaultInitialization(false)
-            .ignoreRandomizationErrors(true);
+    @Test
+    public void accessControlListsAreImmutableSnapshots() {
+        AccessControlDraft draft = new AccessControlDraft();
+        AccessControlDraft.User user = ACLUtil.createUser("root", "root@orion.pro")
+                .addCredential(AccessControl.CredentialType.ARGON2, "hash");
+        draft.getUsers().add(user);
 
-    EasyRandom easyRandom = new EasyRandom(parameters);
+        AccessControl accessControl = draft.toAccessControl();
+        user.addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, "public-key");
+
+        assertThat(accessControl.getUsers()).hasSize(1);
+        assertThat(accessControl.getUsers().getFirst().getCredentials()).hasSize(1);
+        assertThatThrownBy(() -> accessControl.getUsers().add(ACLUtil.createUser("other", "other@example.test").toAccessControl()))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> accessControl.getUsers().getFirst().getCredentials()
+                .add(new AccessControl.Credential(AccessControl.CredentialType.PLAIN, "plain")))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
 
     @Test
-    @SuppressWarnings("rawtypes")
-    public void testAccessControlFreeze() {
-        for(Class<CloneToUnmodifiable> cls: getAccessControlClasses()) {
-            CloneToUnmodifiable orig = easyRandom.nextObject(cls);
-            Object freeze = orig.unmodify();
-            assertThat(freeze).isEqualTo(orig);
-        }
+    public void draftCanBeCreatedFromImmutableAccessControlAndChangedIndependently() {
+        AccessControl accessControl = new AccessControl(
+                new ArrayList<>(),
+                new ArrayList<>(),
+                new ArrayList<>());
+
+        AccessControlDraft draft = accessControl.toDraft();
+        draft.getUsers().add(ACLUtil.createUser("root", "root@orion.pro"));
+        AccessControl changed = draft.toAccessControl();
+
+        assertThat(accessControl.getUsers()).isEmpty();
+        assertThat(changed.getUsers()).extracting(AccessControl.User::getId).containsExactly("root");
     }
 }

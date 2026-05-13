@@ -9,6 +9,7 @@ import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
@@ -323,10 +324,10 @@ class OrionRuntimeModuleTest {
     }
 
     private AccessControl accessControlWithUser(String userId) {
-        AccessControl accessControl = new AccessControl();
-        accessControl.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
+        AccessControlDraft draft = new AccessControlDraft();
+        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
                 .addCredential(AccessControl.CredentialType.ARGON2, TEST_PASSWORD_HASH));
-        return accessControl;
+        return draft.toAccessControl();
     }
 
     private void assertStorageLoadsUser(AccessControlStorage storage, String userId) throws Exception {

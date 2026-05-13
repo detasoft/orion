@@ -2,6 +2,7 @@ package pro.deta.orion.git.auth;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.NestedResource;
@@ -11,7 +12,6 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
 import pro.deta.orion.git.common.GitObjectId;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -148,13 +148,18 @@ class GitFetchAccessRulesTest {
     }
 
     private static AccessControl.Grant repositoryGrant(String repositoryName) {
-        return new AccessControl.Grant("repository", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName);
+        return repositoryGrantDraft(repositoryName).toAccessControl();
     }
 
     private static AccessControl.Grant repositoryGrant(String repositoryName, String branchName) {
-        return repositoryGrant(repositoryName)
-                .addKey(AccessControl.GrantKey.BRANCH, branchName);
+        return repositoryGrantDraft(repositoryName)
+                .addKey(AccessControl.GrantKey.BRANCH, branchName)
+                .toAccessControl();
+    }
+
+    private static AccessControlDraft.Grant repositoryGrantDraft(String repositoryName) {
+        return new AccessControlDraft.Grant("repository", new java.util.ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName);
     }
 
     private static GitFetchAccessRequest fetchRequest(String repositoryName, Map<GitObjectId, String> resolvedBranches, GitObjectId... wants) {

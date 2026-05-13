@@ -12,6 +12,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
@@ -686,16 +687,16 @@ class AccessControlStorageTest {
     }
 
     private AccessControl accessControlWithUser(String userId) {
-        AccessControl accessControl = new AccessControl();
-        accessControl.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test"));
-        return accessControl;
+        AccessControlDraft draft = new AccessControlDraft();
+        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test"));
+        return draft.toAccessControl();
     }
 
     private AccessControl accessControlWithPasswordUser(String userId) {
-        AccessControl accessControl = new AccessControl();
-        accessControl.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
+        AccessControlDraft draft = new AccessControlDraft();
+        draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
                 .addCredential(AccessControl.CredentialType.SHA1, DEFAULT_ROOT_PASSWORD_HASH));
-        return accessControl;
+        return draft.toAccessControl();
     }
 
     private List<String> userIds(AccessControlSnapshot snapshot) throws Exception {

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.common.GitFetchAccessRequest;
@@ -20,7 +21,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -32,8 +32,9 @@ class GitInternalServiceTest {
     @Test
     @DisplayName("receive-pack for an existing repository requires write access")
     void receivePackForExistingRepositoryRequiresWriteAccess() {
-        AccessControl.Grant repositoryGrant = new AccessControl.Grant("repository-only", new ArrayList<>())
-                .addKey(AccessControl.GrantKey.REPOSITORY, "project");
+        AccessControl.Grant repositoryGrant = grantDraft("repository-only")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .toAccessControl();
         SecurityContext securityContext = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(true);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
@@ -53,9 +54,10 @@ class GitInternalServiceTest {
     @Test
     @DisplayName("receive-pack for a missing repository requires create access")
     void receivePackForMissingRepositoryRequiresCreateAccess() {
-        AccessControl.Grant writeOnlyGrant = new AccessControl.Grant("write-only", new ArrayList<>())
+        AccessControl.Grant writeOnlyGrant = grantDraft("write-only")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "project")
-                .addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING);
+                .addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING)
+                .toAccessControl();
         SecurityContext securityContext = securityContext(new InternalUserImpl("writer", List.of(writeOnlyGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
@@ -132,9 +134,10 @@ class GitInternalServiceTest {
     @Test
     @DisplayName("service passes nested repository locators without losing path segments")
     void servicePassesNestedRepositoryLocatorsWithoutLosingPathSegments() {
-        AccessControl.Grant createGrant = new AccessControl.Grant("create-nested", new ArrayList<>())
+        AccessControl.Grant createGrant = grantDraft("create-nested")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "team/project")
-                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
+                .toAccessControl();
         SecurityContext securityContext = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
@@ -153,9 +156,10 @@ class GitInternalServiceTest {
     @Test
     @DisplayName("service keeps unsafe locators inside repository validation")
     void serviceKeepsUnsafeLocatorsInsideRepositoryValidation() {
-        AccessControl.Grant createGrant = new AccessControl.Grant("create-any", new ArrayList<>())
+        AccessControl.Grant createGrant = grantDraft("create-any")
                 .addKey(AccessControl.GrantKey.REPOSITORY, "*")
-                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
+                .toAccessControl();
         SecurityContext securityContext = securityContext(new InternalUserImpl("creator", List.of(createGrant)));
         TrackingRepositoryProvider repositoryProvider = new TrackingRepositoryProvider(false);
         GitInternalService service = new GitInternalService(repositoryProvider, null);
@@ -178,6 +182,10 @@ class GitInternalServiceTest {
 
     private static SecurityContext securityContext(InternalUserImpl userIdentity) {
         return SecurityContext.createContext().withUserIdentity(userIdentity);
+    }
+
+    private static AccessControlDraft.Grant grantDraft(String id) {
+        return new AccessControlDraft.Grant(id, new java.util.ArrayList<>());
     }
 
     private static final class TrackingRepositoryProvider implements GitRepositoryProvider {

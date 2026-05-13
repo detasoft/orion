@@ -1,16 +1,16 @@
 package pro.deta.orion.acl.schema;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.ToString;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.List;
 
-@Data
-@RequiredArgsConstructor
-public class AccessControl extends CloneToUnmodifiable<AccessControl> {
+@Getter
+@EqualsAndHashCode
+@ToString
+public final class AccessControl {
     public static final String TRUE_STRING = "true";
 
     private final List<User> users;
@@ -18,33 +18,87 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     private final List<Grant> grants;
 
     public AccessControl() {
-        users = new ArrayList<>();
-        roles = new ArrayList<>();
-        grants = new ArrayList<>();
+        this(List.of(), List.of(), List.of());
     }
 
-    @Override
-    public AccessControl unmodify() {
-        return new AccessControl(
-                users.stream().map(CloneToUnmodifiable::unmodify).toList(),
-                roles.stream().map(CloneToUnmodifiable::unmodify).toList(),
-                grants.stream().map(CloneToUnmodifiable::unmodify).toList()
-        );
+    public AccessControl(List<User> users, List<Role> roles, List<Grant> grants) {
+        this.users = copyUsers(users);
+        this.roles = copyRoles(roles);
+        this.grants = copyGrants(grants);
     }
 
-    @Override
-    public AccessControl modify() {
-        return new AccessControl(
-                users.stream().map(CloneToUnmodifiable::modify).collect(Collectors.toList()),
-                roles.stream().map(CloneToUnmodifiable::modify).collect(Collectors.toList()),
-                grants.stream().map(CloneToUnmodifiable::modify).collect(Collectors.toList())
-        );
+    public AccessControlDraft toDraft() {
+        return AccessControlDraft.from(this);
     }
 
-    @Data
-    @NoArgsConstructor(force = true)
-    @AllArgsConstructor
-    public static final class User extends CloneToUnmodifiable<User> {
+    private static List<User> copyUsers(List<User> source) {
+        List<User> result = new ArrayList<>();
+        for (User user : listOrEmpty(source)) {
+            if (user != null) {
+                result.add(new User(
+                        user.getId(),
+                        user.getFirst(),
+                        user.getLast(),
+                        user.getEmail(),
+                        user.getCredentials(),
+                        user.getRoles(),
+                        user.getGrants()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<Role> copyRoles(List<Role> source) {
+        List<Role> result = new ArrayList<>();
+        for (Role role : listOrEmpty(source)) {
+            if (role != null) {
+                result.add(new Role(role.getId(), role.getGrants(), role.getGrantReferences()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<Grant> copyGrants(List<Grant> source) {
+        List<Grant> result = new ArrayList<>();
+        for (Grant grant : listOrEmpty(source)) {
+            if (grant != null) {
+                result.add(new Grant(grant.getId(), grant.getInfo()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<Credential> copyCredentials(List<Credential> source) {
+        List<Credential> result = new ArrayList<>();
+        for (Credential credential : listOrEmpty(source)) {
+            if (credential != null) {
+                result.add(new Credential(credential.getType(), credential.getKeyId(), credential.getValue()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<GrantExpression> copyGrantExpressions(List<GrantExpression> source) {
+        List<GrantExpression> result = new ArrayList<>();
+        for (GrantExpression expression : listOrEmpty(source)) {
+            if (expression != null) {
+                result.add(new GrantExpression(expression.getKey(), expression.getValue()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static <T> List<T> listOrEmpty(List<T> source) {
+        if (source == null) {
+            return List.of();
+        }
+        return source;
+    }
+
+    @Getter
+    @EqualsAndHashCode
+    @ToString
+    public static final class User {
         private final String id;
         private final String first;
         private final String last;
@@ -53,49 +107,22 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
         private final List<String> roles;
         private final List<Grant> grants;
 
-        @Override
-        public User unmodify() {
-            return new User(id, first, last, email,
-                    credentials.stream().map(CloneToUnmodifiable::unmodify).toList(),
-                    Collections.unmodifiableList(roles),
-                    grants.stream().map(CloneToUnmodifiable::unmodify).toList()
-            );
-        }
-
-        @Override
-        public User modify() {
-            return new User(id, first, last, email,
-                    credentials.stream().map(CloneToUnmodifiable::modify).collect(Collectors.toList()),
-                    new ArrayList<>(roles),
-                    grants.stream().map(CloneToUnmodifiable::modify).collect(Collectors.toList())
-            );
-        }
-
-        public User addCredential(CredentialType credentialType, String credentialValue) {
-            return addCredential(credentialType, null, credentialValue);
-        }
-
-        public User addCredential(CredentialType credentialType, String keyId, String credentialValue) {
-            getCredentials().add(new Credential(credentialType, keyId, credentialValue));
-            return this;
-        }
-
-        public User addRole(String role) {
-            getRoles().add(role);
-            return this;
-        }
-
-        public Grant addGrant(String grantId) {
-            Grant grant = new Grant(grantId, new ArrayList<>());
-            getGrants().add(grant);
-            return grant;
+        public User(String id, String first, String last, String email,
+                    List<Credential> credentials, List<String> roles, List<Grant> grants) {
+            this.id = id;
+            this.first = first;
+            this.last = last;
+            this.email = email;
+            this.credentials = copyCredentials(credentials);
+            this.roles = List.copyOf(listOrEmpty(roles));
+            this.grants = copyGrants(grants);
         }
     }
 
-    @Data
-    @NoArgsConstructor(force = true)
-    @AllArgsConstructor
-    public static final class Credential extends CloneToUnmodifiable<Credential> {
+    @Getter
+    @EqualsAndHashCode
+    @ToString
+    public static final class Credential {
         private final CredentialType type;
         private final String keyId;
         private final String value;
@@ -104,87 +131,53 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
             this(type, null, value);
         }
 
-        @Override
-        public Credential unmodify() {
-            return new Credential(type, keyId, value);
-        }
-
-        @Override
-        public Credential modify() {
-            return new Credential(type, keyId, value);
+        public Credential(CredentialType type, String keyId, String value) {
+            this.type = type;
+            this.keyId = keyId;
+            this.value = value;
         }
     }
 
-    @Data
-    @NoArgsConstructor(force = true)
-    @AllArgsConstructor
-    public static final class Role extends CloneToUnmodifiable<Role> {
+    @Getter
+    @EqualsAndHashCode
+    @ToString
+    public static final class Role {
         private final String id;
         private final List<Grant> grants;
         private final List<String> grantReferences;
 
-        @Override
-        public Role unmodify() {
-            return new Role(id, grants.stream().map(CloneToUnmodifiable::unmodify).toList(), Collections.unmodifiableList(grantReferences));
-        }
-
-        @Override
-        public Role modify() {
-            return new Role(id, new ArrayList<>(grants), new ArrayList<>(grantReferences));
-        }
-
-        public AccessControl.Role addGrant(Grant grant) {
-            getGrants().add(grant);
-            return this;
-        }
-
-        public AccessControl.Role addGrantReference(String grant) {
-            getGrantReferences().add(grant);
-            return this;
+        public Role(String id, List<Grant> grants, List<String> grantReferences) {
+            this.id = id;
+            this.grants = copyGrants(grants);
+            this.grantReferences = List.copyOf(listOrEmpty(grantReferences));
         }
     }
 
-    @Data
-    @NoArgsConstructor(force = true)
-    @AllArgsConstructor
-    public static final class Grant extends CloneToUnmodifiable<Grant> {
+    @Getter
+    @EqualsAndHashCode
+    @ToString
+    public static final class Grant {
         private final String id;
         private final List<GrantExpression> info;
 
-        @Override
-        public Grant unmodify() {
-            return new Grant(id, info.stream().map(CloneToUnmodifiable::modify).collect(Collectors.toList()));
-        }
-
-        @Override
-        public Grant modify() {
-            return new Grant(id, new ArrayList<>(info));
-        }
-
-        public Grant addKey(GrantKey grantKey, String value) {
-            getInfo().add(new GrantExpression(grantKey, value));
-            return this;
+        public Grant(String id, List<GrantExpression> info) {
+            this.id = id;
+            this.info = copyGrantExpressions(info);
         }
     }
 
-    @Data
-    @NoArgsConstructor(force = true)
-    @AllArgsConstructor
-    public static class GrantExpression extends CloneToUnmodifiable<GrantExpression> {
+    @Getter
+    @EqualsAndHashCode
+    @ToString
+    public static final class GrantExpression {
         private final GrantKey key;
         private final String value;
 
-        @Override
-        public GrantExpression unmodify() {
-            return this;
-        }
-
-        @Override
-        public GrantExpression modify() {
-            return this;
+        public GrantExpression(GrantKey key, String value) {
+            this.key = key;
+            this.value = value;
         }
     }
-
 
     public enum CredentialType {
         SHA1, MD5, PLAIN, OPENSSH_PUBLIC_KEY, SHA3_256, ARGON2, JWT_SIGNING_PUBLIC_KEY;
@@ -193,16 +186,4 @@ public class AccessControl extends CloneToUnmodifiable<AccessControl> {
     public enum GrantKey {
         REPOSITORY, BRANCH, FORCE, READ, WRITE, CREATE, NETWORK_SOURCE, NETWORK_PORT, SHUTDOWN, ADMIN
     }
-
-    @SuppressWarnings("rawtypes")
-    public static Class<CloneToUnmodifiable>[] getAccessControlClasses() {
-        return new Class[] {
-                AccessControl.class,
-                User.class,
-                Role.class,
-                Grant.class,
-                Credential.class,
-        };
-    }
-
 }

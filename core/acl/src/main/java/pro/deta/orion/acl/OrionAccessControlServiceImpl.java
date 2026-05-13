@@ -10,6 +10,7 @@ import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
@@ -41,9 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 import static pro.deta.orion.acl.schema.AccessControl.CredentialType.OPENSSH_PUBLIC_KEY;
 import static pro.deta.orion.crypto.PasswordHashingAlgorithm.ARGON2;
@@ -64,7 +63,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
-    private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     @Inject
     public OrionAccessControlServiceImpl(
@@ -149,18 +147,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private void updateAccessControl(AccessControl accessControl) {
-        this.accessControl.set(accessControl.unmodify());
+        this.accessControl.set(accessControl);
     }
 
 
     @Override
     public void addKeyToUser(String username, String publicKey) {
-        new UnderWriteLock().addKeyToUser(username, publicKey);
+        new AccessControlWriter().addKeyToUser(username, publicKey);
     }
 
     @Override
     public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
-        new UnderWriteLock().createOrUpdateUser(userUpdate);
+        new AccessControlWriter().createOrUpdateUser(userUpdate);
     }
 
     @Override
@@ -291,9 +289,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private AccessControl createDefaultAccessControl(
             String passwordHash,
             AccessControl.CredentialType passwordCredentialType) {
-        AccessControl ac = ACLUtil.generateDefaultAccessControl(passwordHash, passwordCredentialType);
-        addInternalServerKeysToRoot(ac);
-        return ac;
+        AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(passwordHash, passwordCredentialType).toDraft();
+        addInternalServerKeysToRoot(draft);
+        return draft.toAccessControl();
     }
 
     protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {
@@ -308,14 +306,17 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private void prepareAndUpdateAccessControl(AccessControl ac) {
-        if (addInternalServerKeysToRoot(ac)) {
-            saveAccessControl(ac, "add internal server keys to root", UserEmail.EMPTY);
+        AccessControl preparedAccessControl = ac;
+        AccessControlDraft draft = ac.toDraft();
+        if (addInternalServerKeysToRoot(draft)) {
+            preparedAccessControl = draft.toAccessControl();
+            saveAccessControl(preparedAccessControl, "add internal server keys to root", UserEmail.EMPTY);
         }
-        updateAccessControl(ac);
+        updateAccessControl(preparedAccessControl);
     }
 
-    private boolean addInternalServerKeysToRoot(AccessControl ac) {
-        AccessControl.User rootUser = findRootUser(ac);
+    private boolean addInternalServerKeysToRoot(AccessControlDraft draft) {
+        AccessControlDraft.User rootUser = findRootUser(draft);
         if (rootUser == null) {
             return false;
         }
@@ -330,8 +331,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return changed;
     }
 
-    private AccessControl.User findRootUser(AccessControl ac) {
-        for (AccessControl.User user : ac.getUsers()) {
+    private AccessControlDraft.User findRootUser(AccessControlDraft draft) {
+        for (AccessControlDraft.User user : draft.getUsers()) {
             if (user.getId() != null && ROOT_USER_ID.equalsIgnoreCase(user.getId())) {
                 return user;
             }
@@ -339,8 +340,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return null;
     }
 
-    private boolean hasPublicKeyCredential(AccessControl.User user, PublicKey publicKey) {
-        for (AccessControl.Credential credential : user.getCredentials()) {
+    private boolean hasPublicKeyCredential(AccessControlDraft.User user, PublicKey publicKey) {
+        for (AccessControlDraft.Credential credential : user.getCredentials()) {
             if (credential.getType() == OPENSSH_PUBLIC_KEY
                     && publicKeysAreEqual(credential.getValue(), publicKey.getEncoded())) {
                 return true;
@@ -467,56 +468,42 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private void holdWriteLock(Supplier<AccessControl> r) {
-        rwLock.writeLock().lock();
-        try {
-            r.get();
-        } finally {
-            rwLock.writeLock().unlock();
-        }
-    }
-
-
-    private class UnderWriteLock {
+    private class AccessControlWriter {
         private void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
             validateUserUpdate(userUpdate);
-            holdWriteLock(() -> {
-                AccessControl ac = accessControl.get().modify();
-                ac.getUsers().removeIf(user -> user.getId() != null && user.getId().equalsIgnoreCase(userUpdate.id()));
+            AccessControlDraft draft = accessControl.get().toDraft();
+            draft.getUsers().removeIf(user -> user.getId() != null && user.getId().equalsIgnoreCase(userUpdate.id()));
 
-                AccessControl.User user = ACLUtil.createUser(userUpdate.id(), userUpdate.email());
-                for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
-                    user.addCredential(credential.type(), credential.keyId(), credential.value());
-                }
-                for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
-                    addRepositoryGrant(user, repositoryGrant);
-                }
+            AccessControlDraft.User user = ACLUtil.createUser(userUpdate.id(), userUpdate.email());
+            for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
+                user.addCredential(credential.type(), credential.keyId(), credential.value());
+            }
+            for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
+                addRepositoryGrant(user, repositoryGrant);
+            }
 
-                ac.getUsers().add(user);
-                saveAccessControlAndRequestUpdate(ac, "createOrUpdateUser() " + userUpdate.id(), new UserEmail(userUpdate.id(), userUpdate.email()));
-                return ac;
-            });
+            draft.getUsers().add(user);
+            AccessControl ac = draft.toAccessControl();
+            saveAccessControlAndRequestUpdate(ac, "createOrUpdateUser() " + userUpdate.id(), new UserEmail(userUpdate.id(), userUpdate.email()));
         }
 
         private void addKeyToUser(String username, String publicKey) {
-            holdWriteLock(() -> {
-                AccessControl ac = accessControl.get().modify();
-                AccessControl.User user = findUserById(ac, username);
-                user.getCredentials().add(new AccessControl.Credential(OPENSSH_PUBLIC_KEY, publicKey));
-                String[] keyParts = publicKey.split("\\s");
-                String postfix = "";
-                if (keyParts.length == 3) {
-                    postfix = " " + keyParts[0] + " " + keyParts[2];
-                } else if (keyParts.length == 2) {
-                    postfix = " " + keyParts[0];
-                }
-                saveAccessControlAndRequestUpdate(ac, "addKeyToUser() to " + username + postfix, new UserEmail(username, user.getEmail()));
-                return ac;
-            });
+            AccessControlDraft draft = accessControl.get().toDraft();
+            AccessControlDraft.User user = findUserById(draft, username);
+            user.addCredential(OPENSSH_PUBLIC_KEY, publicKey);
+            String[] keyParts = publicKey.split("\\s");
+            String postfix = "";
+            if (keyParts.length == 3) {
+                postfix = " " + keyParts[0] + " " + keyParts[2];
+            } else if (keyParts.length == 2) {
+                postfix = " " + keyParts[0];
+            }
+            AccessControl ac = draft.toAccessControl();
+            saveAccessControlAndRequestUpdate(ac, "addKeyToUser() to " + username + postfix, new UserEmail(username, user.getEmail()));
         }
 
-        private AccessControl.User findUserById(AccessControl ac, String username) {
-            List<AccessControl.User> users = ac.getUsers().stream().filter(u -> u.getId() != null && u.getId().equalsIgnoreCase(username)).toList();
+        private AccessControlDraft.User findUserById(AccessControlDraft draft, String username) {
+            List<AccessControlDraft.User> users = draft.getUsers().stream().filter(u -> u.getId() != null && u.getId().equalsIgnoreCase(username)).toList();
             if (users.size() > 1) {
                 throw new IllegalStateException("More than a single user found.");
             } else if (users.isEmpty()) {
@@ -526,8 +513,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
         }
 
-        private void addRepositoryGrant(AccessControl.User user, AccessControlRepositoryGrantUpdate repositoryGrant) {
-            AccessControl.Grant grant = user.addGrant(repositoryGrantId(user.getId(), repositoryGrant.repository()))
+        private void addRepositoryGrant(AccessControlDraft.User user, AccessControlRepositoryGrantUpdate repositoryGrant) {
+            AccessControlDraft.Grant grant = user.addGrant(repositoryGrantId(user.getId(), repositoryGrant.repository()))
                     .addKey(AccessControl.GrantKey.REPOSITORY, repositoryGrant.repository())
                     .addKey(AccessControl.GrantKey.BRANCH, repositoryGrant.branch());
             if (repositoryGrant.read()) {
@@ -591,7 +578,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
         }
 
-        AccessControl result = new AccessControl();
+        AccessControlDraft result = new AccessControlDraft();
         for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
             try (ByteArrayInputStream input = new ByteArrayInputStream(entry.getValue())) {
                 mergeAccessControl(result, xmlService.deserialize(input));
@@ -599,13 +586,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 return new Result.Failure<>(Result.FailureCode.GENERAL, "Cannot parse ACL file " + entry.getKey(), e);
             }
         }
-        return new Result.Success<>(result);
+        return new Result.Success<>(result.toAccessControl());
     }
 
-    private static void mergeAccessControl(AccessControl target, AccessControl source) {
-        target.getUsers().addAll(source.getUsers());
-        target.getRoles().addAll(source.getRoles());
-        target.getGrants().addAll(source.getGrants());
+    private static void mergeAccessControl(AccessControlDraft target, AccessControl source) {
+        target.merge(source);
     }
 
     private void saveAccessControl(AccessControl accessControl, String message, UserEmail author) {
