@@ -6,6 +6,7 @@ import pro.deta.orion.acl.schema.v1.AccessControlV1;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -180,6 +181,22 @@ class AccessControlXmlSchemaTest {
                 .isEqualTo(AccessControl.GrantKey.NETWORK_PORT);
     }
 
+    @Test
+    void readsLegacyFixtureWithoutSchemaVersionAndWritesLatestVersion() throws Exception {
+        String legacyXml = testResource("pro/deta/orion/acl/schema/legacy-orion.xml");
+
+        AccessControl accessControl = AccessControlXml.read(new ByteArrayInputStream(legacyXml.getBytes(StandardCharsets.UTF_8)));
+        String latestXml = serialize(accessControl);
+
+        assertThat(accessControl.getUsers()).hasSize(1);
+        assertThat(accessControl.getUsers().getFirst().getId()).isEqualTo("root");
+        assertThat(accessControl.getRoles().getFirst().getId()).isEqualTo("ROOT");
+        assertThat(accessControl.getGrants().getFirst().getId()).isEqualTo("ALL_REPOSITORY");
+        assertThat(legacyXml).doesNotContain("schemaVersion=");
+        assertThat(latestXml).contains("schemaVersion=\"1\"");
+        assertThat(validate(latestXml).valid()).isTrue();
+    }
+
     private String serialize(AccessControl accessControl) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         AccessControlXml.write(accessControl, output);
@@ -188,5 +205,12 @@ class AccessControlXmlSchemaTest {
 
     private AccessControlXmlSchema.ValidationResult validate(String xml) throws Exception {
         return xmlSchema.validate(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static String testResource(String resourceName) throws Exception {
+        try (InputStream input = AccessControlXmlSchemaTest.class.getClassLoader().getResourceAsStream(resourceName)) {
+            assertThat(input).as("test resource %s", resourceName).isNotNull();
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 }
