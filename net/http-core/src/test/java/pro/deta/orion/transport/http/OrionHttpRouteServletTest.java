@@ -20,6 +20,9 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
+import pro.deta.orion.event.type.OrionEvent;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.util.Result;
 
@@ -344,8 +347,8 @@ class OrionHttpRouteServletTest {
     void requestsServerShutdown() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        RecordingShutdownLifecycle shutdownLifecycle = new RecordingShutdownLifecycle();
-        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider, shutdownLifecycle);
+        RecordingEventManager eventManager = new RecordingEventManager();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider, eventManager);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -356,7 +359,9 @@ class OrionHttpRouteServletTest {
         assertThat(response.contentType).isEqualTo("application/json");
         assertThat(response.body.toString()).isEqualTo("{\"status\":\"shutdown-requested\"}");
         assertThat(response.flushed).isTrue();
-        assertThat(shutdownLifecycle.shutdownLifecycleStarted).isTrue();
+        assertThat(eventManager.published)
+                .isInstanceOfSatisfying(ApplicationShutdownRequestedEvent.class, event ->
+                        assertThat(event.getSource()).isEqualTo("http-admin"));
     }
 
     @Test
@@ -503,8 +508,8 @@ class OrionHttpRouteServletTest {
     void rejectsShutdownRequestWithoutAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
-        RecordingShutdownLifecycle shutdownLifecycle = new RecordingShutdownLifecycle();
-        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider, shutdownLifecycle);
+        RecordingEventManager eventManager = new RecordingEventManager();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider, eventManager);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
@@ -513,7 +518,7 @@ class OrionHttpRouteServletTest {
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
         assertThat(response.body.toString()).isEmpty();
-        assertThat(shutdownLifecycle.shutdownLifecycleStarted).isFalse();
+        assertThat(eventManager.published).isNull();
     }
 
     private static OrionHttpRouteServlet servlet(
@@ -525,13 +530,13 @@ class OrionHttpRouteServletTest {
     private static OrionHttpRouteServlet servlet(
             RecordingAccessControlService accessControlService,
             RecordingGitRepositoryProvider gitRepositoryProvider,
-            OrionShutdownLifecycle shutdownLifecycle) {
+            OrionEventManager eventManager) {
         return servlet(
                 accessControlService,
                 gitRepositoryProvider,
                 new AcmeHttpChallengeService(),
                 new RecordingAcmeCertificateService(),
-                shutdownLifecycle);
+                eventManager);
     }
 
     private static OrionHttpRouteServlet servlet(
@@ -543,7 +548,7 @@ class OrionHttpRouteServletTest {
                 gitRepositoryProvider,
                 challengeService,
                 new RecordingAcmeCertificateService(),
-                new RecordingShutdownLifecycle());
+                new OrionEventManager());
     }
 
     private static OrionHttpRouteServlet servlet(
@@ -551,7 +556,7 @@ class OrionHttpRouteServletTest {
             RecordingGitRepositoryProvider gitRepositoryProvider,
             AcmeHttpChallengeService challengeService,
             AcmeCertificateService acmeCertificateService) {
-        return servlet(accessControlService, gitRepositoryProvider, challengeService, acmeCertificateService, new RecordingShutdownLifecycle());
+        return servlet(accessControlService, gitRepositoryProvider, challengeService, acmeCertificateService, new OrionEventManager());
     }
 
     private static OrionHttpRouteServlet servlet(
@@ -559,7 +564,7 @@ class OrionHttpRouteServletTest {
             RecordingGitRepositoryProvider gitRepositoryProvider,
             AcmeHttpChallengeService challengeService,
             AcmeCertificateService acmeCertificateService,
-            OrionShutdownLifecycle shutdownLifecycle) {
+            OrionEventManager eventManager) {
         Set<OrionHttpRoute> routes = new LinkedHashSet<>();
         routes.add(new AcmeHttpChallengeRoute(challengeService));
         routes.add(new OrionGitRoute(gitRepositoryProvider));
@@ -568,7 +573,7 @@ class OrionHttpRouteServletTest {
         routes.add(new OrionAdminIssueTokenRoute(accessControlService, OBJECT_MAPPER));
         routes.add(new OrionAdminAccessControlRoute(accessControlService));
         routes.add(new OrionAdminRoutesRoute(() -> new OrionHttpRouteRegistry(routes)));
-        routes.add(new OrionAdminShutdownRoute(shutdownLifecycle));
+        routes.add(new OrionAdminShutdownRoute(eventManager));
         routes.add(new OrionAdminAcmeCertificateRoute(acmeCertificateService, OBJECT_MAPPER));
         routes.add(new OrionConfigurationSchemaRoute(new OrionConfigurationJsonSchema()));
         routes.add(new OrionAccessControlSchemaRoute());
@@ -744,12 +749,12 @@ class OrionHttpRouteServletTest {
         }
     }
 
-    private static final class RecordingShutdownLifecycle implements OrionShutdownLifecycle {
-        private boolean shutdownLifecycleStarted;
+    private static final class RecordingEventManager extends OrionEventManager {
+        private OrionEvent published;
 
         @Override
-        public void beginShutdownLifecycle() {
-            shutdownLifecycleStarted = true;
+        public void publish(OrionEvent orionEvent) {
+            published = orionEvent;
         }
     }
 

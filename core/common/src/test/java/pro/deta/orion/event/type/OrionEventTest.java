@@ -38,6 +38,16 @@ class OrionEventTest {
     }
 
     @Test
+    @DisplayName("prints shutdown request source")
+    void printsShutdownRequestSource() {
+        ApplicationShutdownRequestedEvent event = new ApplicationShutdownRequestedEvent("http-admin");
+
+        assertThat(event.toString())
+                .startsWith("ApplicationShutdownRequestedEvent{")
+                .contains("source='http-admin'");
+    }
+
+    @Test
     @DisplayName("prints git receive refs without object identity noise")
     void printsGitReceiveRefsWithoutObjectIdentityNoise() {
         GitReceiveOrionEvent event = new GitReceiveOrionEvent("project", "writer");

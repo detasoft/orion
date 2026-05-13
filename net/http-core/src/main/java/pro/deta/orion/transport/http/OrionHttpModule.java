@@ -5,9 +5,6 @@ import dagger.Module;
 import dagger.Provides;
 import dagger.multibindings.IntoSet;
 import jakarta.inject.Singleton;
-import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-
-import javax.inject.Provider;
 
 @Module
 public class OrionHttpModule {
@@ -81,12 +78,6 @@ public class OrionHttpModule {
     @IntoSet
     static OrionHttpRoute accessControlSchemaRoute(OrionAccessControlSchemaRoute route) {
         return route;
-    }
-
-    @Provides
-    @Singleton
-    static OrionShutdownLifecycle shutdownLifecycle(Provider<OrionApplicationLifecycle> lifecycle) {
-        return () -> lifecycle.get().beginShutdown();
     }
 
 }

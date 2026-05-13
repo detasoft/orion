@@ -4,6 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.ApplicationState;
+import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.flow.LifecycleFlowRunner;
@@ -27,6 +28,7 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
     public final static ApplicationBootstrap BOOTSTRAP = new ApplicationBootstrap();
     private static final int DEFAULT_TASK_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC =
             OrionStageCallResult.DEFAULT_WAIT_FOR_COMPLETION_TIMEOUT_IN_SEC;
+    private static final long SHUTDOWN_REQUEST_DELAY_MILLIS = 100;
 
     private final List<LifecycleTaskRegistration> lifecycleTaskRegistrations = new CopyOnWriteArrayList<>();
     private final OrionProvider orionProvider;
@@ -38,6 +40,7 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
                                      Set<OrionApplicationStageEventListener> applicationEventListeners, OrionProvider orionProvider) {
         this.orionProvider = orionProvider;
         flowRunner = new LifecycleFlowRunner(applicationStateHolder, this::onStage);
+        registerLifecycleEventHandlers();
         for (OrionApplicationStageEventListener applicationStageEventListener : applicationEventListeners) {
             applicationStageEventListener.registerToStage(this);
         }
@@ -186,6 +189,16 @@ public class OrionApplicationLifecycle  implements ApplicationStateListenerRegis
 
     private void doShutdown() {
         shutdownApplication();
+    }
+
+    private void registerLifecycleEventHandlers() {
+        orionProvider.getEventManager().registerTypeHandler(
+                ApplicationShutdownRequestedEvent.class,
+                this::handleShutdownRequested);
+    }
+
+    private void handleShutdownRequested(ApplicationShutdownRequestedEvent event) {
+        orionProvider.getOrionExecutor().schedule(this::doShutdown, SHUTDOWN_REQUEST_DELAY_MILLIS, TimeUnit.MILLISECONDS);
     }
 
     public String describeFlows() {

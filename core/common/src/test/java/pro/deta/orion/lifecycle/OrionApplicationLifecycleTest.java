@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
@@ -13,6 +14,7 @@ import pro.deta.orion.util.OrionProvider;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -143,6 +145,23 @@ class OrionApplicationLifecycleTest {
     }
 
     @Test
+    void shutdownRequestEventUsesShutdownFlow() {
+        OrionApplicationStageEventListener jgitRuntime = registrar ->
+                registrar.task(ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, () -> OrionStageCallResult.EMPTY);
+        OrionApplicationStageEventListener transportsStop = registrar ->
+                registrar.task(ApplicationState.STOPPING, OrionLifecycleTasks.TRANSPORTS_STOP, () -> OrionStageCallResult.EMPTY);
+
+        try (TestLifecycleContext context = new TestLifecycleContext(Set.of(jgitRuntime, transportsStop), true)) {
+            context.lifecycle().runApplication();
+
+            context.eventManager().publish(new ApplicationShutdownRequestedEvent("test"));
+            context.lifecycle().waitForShutdown();
+
+            assertThat(context.stateHolder().getState()).isEqualTo(ApplicationState.OFF);
+        }
+    }
+
+    @Test
     void waitsForDependentInitTaskBeforeStartingNextInitTask() {
         List<String> events = Collections.synchronizedList(new ArrayList<>());
         List<Consumer<String>> initSubscribers = new CopyOnWriteArrayList<>();
@@ -203,19 +222,28 @@ class OrionApplicationLifecycleTest {
     private static final class TestLifecycleContext implements AutoCloseable {
         private final OrionExecutor executor = new OrionExecutor(4, new OrionThreadFactory());
         private final ApplicationStateHolder stateHolder = new ApplicationStateHolder();
+        private final OrionEventManager eventManager = new OrionEventManager();
         private final OrionApplicationLifecycle lifecycle;
 
         private TestLifecycleContext(Set<OrionApplicationStageEventListener> listeners) {
+            this(listeners, false);
+        }
+
+        private TestLifecycleContext(Set<OrionApplicationStageEventListener> listeners, boolean includeEventManager) {
             AtomicReference<OrionApplicationLifecycle> lifecycleRef = new AtomicReference<>();
             OrionProvider provider = new OrionProvider(
                     stateHolder,
                     lifecycleRef::get,
-                    OrionEventManager::new,
+                    () -> eventManager,
                     () -> executor);
+            Set<OrionApplicationStageEventListener> lifecycleListeners = new LinkedHashSet<>(listeners);
+            if (includeEventManager) {
+                lifecycleListeners.add(eventManager);
+            }
             lifecycle = new OrionApplicationLifecycle(
                     stateHolder,
                     executor,
-                    listeners,
+                    lifecycleListeners,
                     provider);
             lifecycleRef.set(lifecycle);
         }
@@ -226,6 +254,10 @@ class OrionApplicationLifecycleTest {
 
         private OrionApplicationLifecycle lifecycle() {
             return lifecycle;
+        }
+
+        private OrionEventManager eventManager() {
+            return eventManager;
         }
 
         @Override

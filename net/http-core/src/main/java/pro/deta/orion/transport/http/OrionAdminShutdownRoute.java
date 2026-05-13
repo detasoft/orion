@@ -4,18 +4,21 @@ import jakarta.inject.Inject;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 
 import java.io.IOException;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_ACCEPTED;
 
 public class OrionAdminShutdownRoute extends BaseAdminRoute {
-    private final OrionShutdownLifecycle shutdownLifecycle;
+    private static final String SOURCE = "http-admin";
+    private final OrionEventManager eventManager;
 
     @Inject
-    public OrionAdminShutdownRoute(OrionShutdownLifecycle shutdownLifecycle) {
+    public OrionAdminShutdownRoute(OrionEventManager eventManager) {
         super(OrionAdminPaths.SHUTDOWN, "POST");
-        this.shutdownLifecycle = shutdownLifecycle;
+        this.eventManager = eventManager;
     }
 
     @Override
@@ -27,7 +30,7 @@ public class OrionAdminShutdownRoute extends BaseAdminRoute {
         responseWriter.write(resp, response);
         if (response.status() == SC_ACCEPTED) {
             resp.flushBuffer();
-            shutdownLifecycle.beginShutdownLifecycle();
+            eventManager.publish(new ApplicationShutdownRequestedEvent(SOURCE));
         }
     }
 

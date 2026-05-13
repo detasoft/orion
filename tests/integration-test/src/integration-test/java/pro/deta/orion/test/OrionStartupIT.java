@@ -14,6 +14,9 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.OrionAccessControlServiceImpl;
+import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.schema.OrionConfiguration;
@@ -26,11 +29,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -94,6 +100,23 @@ class OrionStartupIT {
         pushToBareRepository(tempDir.resolve("standalone-jgit"));
     }
 
+    @Test
+    void httpShutdownRequestStopsServerPromptly() throws Exception {
+        Path orionRoot = tempDir.resolve("orion");
+
+        try (StartedOrion orion = startServerWithConfig(serverConfiguration(orionRoot))) {
+            String token = issueRootToken(orion);
+
+            long startedAtNanos = System.nanoTime();
+            int responseCode = postShutdown(orion, token);
+            orion.lifecycle().waitForShutdown();
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+
+            assertThat(responseCode).isEqualTo(HttpURLConnection.HTTP_ACCEPTED);
+            assertThat(elapsedMillis).isLessThan(2_000);
+        }
+    }
+
     private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> orionConfiguration)
@@ -102,7 +125,7 @@ class OrionStartupIT {
         ApplicationState state = lifecycle.runApplication();
         assertThat(state).isEqualTo(ApplicationState.UP);
         lifecycle.waitForStarting();
-        return new StartedOrion(orionConfiguration, lifecycle);
+        return new StartedOrion(orionConfiguration, lifecycle, orionComponent.orionAccessControlService());
     }
 
     private static void assertInitialConfigurationCreated(Path orionRoot) throws IOException {
@@ -164,6 +187,36 @@ class OrionStartupIT {
             Map<String, Object> response = OBJECT_MAPPER.readValue(input, Map.class);
             return response;
         }
+    }
+
+    private static String issueRootToken(StartedOrion orion) {
+        char[] rootToken = orion.accessControlService().plainRootToken(PlainRootTokenAccessForTests.create());
+        try {
+            TokenIssueResult issueResult = orion.accessControlService().authenticateUserAndIssueToken(
+                    "root",
+                    String.valueOf(rootToken).getBytes(StandardCharsets.UTF_8),
+                    600);
+            return switch (issueResult) {
+                case TokenIssueResult.Success(var token, var expiresAtEpochSecond) -> token;
+                case TokenIssueResult.Failure(var reason, var throwable) ->
+                        throw new AssertionError("Failed to issue root token: " + reason, throwable);
+            };
+        } finally {
+            Arrays.fill(rootToken, '\0');
+        }
+    }
+
+    private static int postShutdown(StartedOrion orion, String token) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl("/api/admin/shutdown")
+                .openConnection();
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization", "Bearer " + token);
+        connection.setFixedLengthStreamingMode(0);
+        try (var output = connection.getOutputStream()) {
+            // Send an explicit empty POST body.
+        }
+        return connection.getResponseCode();
     }
 
     private static boolean hasUser(AccessControl accessControl, String id) {
@@ -259,7 +312,10 @@ class OrionStartupIT {
         }
     }
 
-    private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle)
+    private record StartedOrion(
+            OrionConfiguration configuration,
+            OrionApplicationLifecycle lifecycle,
+            OrionAccessControlServiceImpl accessControlService)
             implements AutoCloseable {
         private URL httpUrl(String path) throws IOException {
             return new URL(
@@ -271,7 +327,7 @@ class OrionStartupIT {
 
         @Override
         public void close() {
-            lifecycle.beginShutdown();
+            lifecycle.shutdownApplication();
             lifecycle.waitForShutdown();
         }
     }
