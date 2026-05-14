@@ -10,7 +10,7 @@ import java.io.*;
 
 @Slf4j
 public class FileConfigurationProviderImpl implements ConfigurationProvider {
-    private static final String[] CONFIGURATION_LOCATION = new String[] { // order by priority
+    private static final String[] DEFAULT_CONFIGURATION_LOCATIONS = new String[] { // order by priority
             "config.toml",
             "config.yml",
             "/etc/orion/orion.yml",
@@ -19,6 +19,21 @@ public class FileConfigurationProviderImpl implements ConfigurationProvider {
     };
     private final ObjectMapper yom = new ObjectMapper(new YAMLFactory());
     private final Toml toml = new Toml();
+    private final String[] configurationLocations;
+    private final boolean explicitConfigurationLocation;
+
+    public FileConfigurationProviderImpl() {
+        this(DEFAULT_CONFIGURATION_LOCATIONS, false);
+    }
+
+    public FileConfigurationProviderImpl(String configurationLocation) {
+        this(new String[]{requiredLocation(configurationLocation)}, true);
+    }
+
+    private FileConfigurationProviderImpl(String[] configurationLocations, boolean explicitConfigurationLocation) {
+        this.configurationLocations = configurationLocations.clone();
+        this.explicitConfigurationLocation = explicitConfigurationLocation;
+    }
 
     @Override
     public OrionConfiguration readConfiguration() {
@@ -31,11 +46,15 @@ public class FileConfigurationProviderImpl implements ConfigurationProvider {
      * @return configuration input stream
      */
     private OrionConfiguration findConfiguration() {
-        for(String s : CONFIGURATION_LOCATION) {
+        for(String s : configurationLocations) {
             OrionConfiguration orionConfiguration = configurationLookup(s);
             if (orionConfiguration != null) {
                 return orionConfiguration;
             }
+        }
+        if (explicitConfigurationLocation) {
+            throw new IllegalArgumentException(
+                    "Configuration location not found or unsupported: " + configurationLocations[0]);
         }
         return parseYaml(localResourceConfig("config.yml")); // take from classpath
     }
@@ -85,5 +104,12 @@ public class FileConfigurationProviderImpl implements ConfigurationProvider {
 
     public InputStream localResourceConfig(String name) {
         return Thread.currentThread().getContextClassLoader().getResourceAsStream(name);
+    }
+
+    private static String requiredLocation(String configurationLocation) {
+        if (configurationLocation == null || configurationLocation.isBlank()) {
+            throw new IllegalArgumentException("Configuration location must not be blank");
+        }
+        return configurationLocation;
     }
 }

@@ -112,4 +112,29 @@ class OrionConfigurationBootstrapShapeTest {
         assertThrows(RuntimeException.class, () -> new FileConfigurationProviderImpl()
                 .configurationLookup(configFile.toString()));
     }
+
+    @Test
+    void explicitConfigurationLocationIsUsed() throws Exception {
+        Path configFile = tempDir.resolve("explicit.yml");
+        Files.writeString(configFile, """
+                bootstrap:
+                  baseDir: /tmp/explicit-orion
+                """);
+
+        OrionConfiguration configuration = new FileConfigurationProviderImpl(configFile.toString())
+                .readConfiguration();
+
+        assertEquals("/tmp/explicit-orion", configuration.getBootstrap().getBaseDir());
+    }
+
+    @Test
+    void explicitMissingConfigurationLocationIsRejected() {
+        Path configFile = tempDir.resolve("missing.yml");
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> new FileConfigurationProviderImpl(configFile.toString()).readConfiguration());
+
+        assertEquals("Configuration location not found or unsupported: " + configFile, error.getMessage());
+    }
 }

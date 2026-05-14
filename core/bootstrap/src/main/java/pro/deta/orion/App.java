@@ -3,6 +3,7 @@ package pro.deta.orion;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
+import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.FileConfigurationProviderImpl;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
@@ -11,13 +12,37 @@ import java.io.IOException;
 @Slf4j
 public class App {
     public static void main(String[] args) throws IOException {
+        AppOptions options = parseOptions(args);
+        if (options.helpRequested()) {
+            System.out.print(AppOptions.usage());
+            return;
+        }
+
         OrionComponent orionComponent = DaggerOrionComponent.builder()
-                .configurationProvider(new FileConfigurationProviderImpl())
+                .configurationProvider(configurationProvider(options))
                 .build();
         int exitCode = run(orionComponent.orionApplicationLifecycle(), true);
         if (exitCode != 0) {
             System.exit(exitCode);
         }
+    }
+
+    private static AppOptions parseOptions(String[] args) {
+        try {
+            return AppOptions.parse(args);
+        } catch (IllegalArgumentException e) {
+            System.err.println(e.getMessage());
+            System.err.print(AppOptions.usage());
+            System.exit(2);
+            throw e;
+        }
+    }
+
+    static ConfigurationProvider configurationProvider(AppOptions options) {
+        if (options.configurationLocation() == null) {
+            return new FileConfigurationProviderImpl();
+        }
+        return new FileConfigurationProviderImpl(options.configurationLocation());
     }
 
     static int run(OrionApplicationLifecycle lifecycle, boolean installShutdownHook) {
