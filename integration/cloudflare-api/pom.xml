@@ -12,10 +12,6 @@
     </parent>
     <artifactId>cloudflare-api</artifactId>
 
-    <properties>
-        <jackson.version>2.13.0</jackson.version>
-    </properties>
-
     <dependencies>
         <!-- HTTP Client -->
         <dependency>
@@ -76,21 +72,5 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <artifactId>maven-failsafe-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>integration-test</goal>
-                            <goal>verify</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
 
 </project>

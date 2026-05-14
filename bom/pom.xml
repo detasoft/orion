@@ -80,6 +80,11 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
+                <groupId>pro.deta.orion.core</groupId>
+                <artifactId>communication</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>pro.deta.orion.net</groupId>
                 <artifactId>git-transport</artifactId>
                 <version>${project.version}</version>
@@ -100,7 +105,7 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion</groupId>
+                <groupId>pro.deta.orion.integration</groupId>
                 <artifactId>cloudflare-api</artifactId>
                 <version>${project.version}</version>
             </dependency>

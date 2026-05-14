@@ -1,6 +1,8 @@
 package pro.deta.orion.comm.handler;
 
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -10,7 +12,8 @@ import io.netty.util.concurrent.DefaultEventExecutorGroup;
 import io.netty.util.concurrent.EventExecutorGroup;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.comm.app.EchoDtlsApplication;
+import pro.deta.orion.comm.DtlsApplication;
+import pro.deta.orion.comm.common.DtlsSessionEndpoint;
 import pro.deta.orion.comm.v3.OrionDTLSAsyncHandler;
 import pro.deta.orion.comm.v3.netty.OrionV3DtlsChannelInboundHandler;
 import pro.deta.orion.test.util.ResourceUtils;
@@ -21,6 +24,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -118,5 +122,17 @@ public class OrionDTLSOpenSSLIT {
         output = output.replaceAll(sessionTicketReplace, "$1\n    <TLS_SESSION_TICKET>\n\n");
         output = output.replaceAll(validCertificateReplace, "$1<DATE>$2<DATE>");
         return output;
+    }
+
+    private static final class EchoDtlsApplication extends DtlsApplication<InetSocketAddress> {
+        @Override
+        public void read(DtlsSessionEndpoint<InetSocketAddress> source, ByteBuf data) {
+            String input = data.readCharSequence(data.readableBytes(), StandardCharsets.UTF_8).toString();
+            write(source, Unpooled.copiedBuffer(makeResponse(input).getBytes(StandardCharsets.UTF_8)));
+        }
+
+        private String makeResponse(String message) {
+            return "Hello " + message;
+        }
     }
 }

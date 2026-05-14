@@ -18,6 +18,22 @@
             <artifactId>bootstrap</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>communication</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>git-engine-s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.integration</groupId>
+            <artifactId>cloudflare-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>git-engine-test-support</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>test-support</artifactId>
         </dependency>
