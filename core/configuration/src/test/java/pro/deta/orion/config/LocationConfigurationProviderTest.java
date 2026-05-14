@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -166,7 +167,8 @@ class LocationConfigurationProviderTest {
                 "s3.xml",
                 33080));
         LocationConfigurationProvider provider = providerFor(
-                "s3://orion-config/env/orion.yml",
+                "s3://orion-config/env/orion.yml?endpoint=http://localhost:19000&region=us-east-1"
+                        + "&accessKeyId=orion&secretAccessKey=file:/tmp/orion-secret",
                 new S3ConfigurationLocationReader(client));
 
         OrionConfiguration configuration = provider.readConfiguration();
@@ -174,6 +176,10 @@ class LocationConfigurationProviderTest {
         assertConfiguration(configuration, "/tmp/orion-s3", "s3.xml", 33080);
         assertEquals("orion-config", client.bucket);
         assertEquals("env/orion.yml", client.key);
+        assertEquals("http://localhost:19000", client.auth.get("endpoint"));
+        assertEquals("us-east-1", client.auth.get("region"));
+        assertEquals("orion", client.auth.get("accessKeyId"));
+        assertEquals("file:/tmp/orion-secret", client.auth.get("secretAccessKey"));
     }
 
     private static LocationConfigurationProvider providerFor(String location, ConfigurationLocationReader reader) {
@@ -227,10 +233,10 @@ class LocationConfigurationProviderTest {
         }
 
         @Override
-        public Optional<byte[]> readFile(String remoteUri, String ref, String path) {
-            this.remoteUri = remoteUri;
-            this.ref = ref;
-            this.path = path;
+        public Optional<byte[]> readFile(GitConfigurationObject object) {
+            this.remoteUri = object.remoteUri();
+            this.ref = object.ref();
+            this.path = object.path();
             return Optional.of(content);
         }
     }
@@ -239,15 +245,17 @@ class LocationConfigurationProviderTest {
         private final byte[] content;
         private String bucket;
         private String key;
+        private Map<String, String> auth;
 
         private RecordingS3Client(byte[] content) {
             this.content = content;
         }
 
         @Override
-        public Optional<byte[]> readObject(String bucket, String key) {
-            this.bucket = bucket;
-            this.key = key;
+        public Optional<byte[]> readObject(S3ConfigurationObject object) {
+            this.bucket = object.bucket();
+            this.key = object.key();
+            this.auth = object.auth();
             return Optional.of(content);
         }
     }

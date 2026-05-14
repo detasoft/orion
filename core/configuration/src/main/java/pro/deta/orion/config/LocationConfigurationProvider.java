@@ -3,26 +3,43 @@ package pro.deta.orion.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.moandjiezana.toml.Toml;
+import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.transport.CredentialsProvider;
+import org.eclipse.jgit.transport.SshTransport;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
+import org.eclipse.jgit.transport.sshd.KeyPasswordProvider;
+import org.eclipse.jgit.transport.sshd.SshdSessionFactory;
+import org.eclipse.jgit.transport.sshd.SshdSessionFactoryBuilder;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -250,16 +267,16 @@ final class GitConfigurationLocationReader implements ConfigurationLocationReade
 
     @Override
     public Optional<ConfigurationContent> read(ResourceLocation location) {
-        Map<String, String> query = queryParameters(location);
-        String filePath = firstPresent(query, "path", "file");
+        Map<String, String> query = ConfigurationLocationParameters.query(location);
+        String filePath = ConfigurationLocationParameters.firstPresent(query, "path", "file");
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("Git configuration location must include path query parameter");
         }
-        String ref = firstPresent(query, "ref", "branch");
+        String ref = ConfigurationLocationParameters.firstPresent(query, "ref", "branch");
         if (ref == null || ref.isBlank()) {
             ref = DEFAULT_REF;
         }
-        return client.readFile(remoteUri(location), ref, filePath)
+        return client.readFile(new GitConfigurationObject(remoteUri(location), ref, filePath, query))
                 .map(content -> new ConfigurationContent(filePath, content));
     }
 
@@ -267,10 +284,16 @@ final class GitConfigurationLocationReader implements ConfigurationLocationReade
         if (!(location.scheme() instanceof ResourceScheme.Other other) || !other.value().startsWith(GIT_SCHEME_PREFIX)) {
             throw new IllegalArgumentException("Unsupported git configuration scheme: " + location.scheme().value());
         }
-        return stripQueryAndFragment(location.withScheme(other.value().substring(GIT_SCHEME_PREFIX.length())).raw());
+        return ConfigurationLocationUri.stripQueryAndFragment(
+                location.withScheme(other.value().substring(GIT_SCHEME_PREFIX.length())).raw());
+    }
+}
+
+final class ConfigurationLocationParameters {
+    private ConfigurationLocationParameters() {
     }
 
-    private static Map<String, String> queryParameters(ResourceLocation location) {
+    static Map<String, String> query(ResourceLocation location) {
         String rawQuery = location.uri().getRawQuery();
         if (rawQuery == null || rawQuery.isBlank()) {
             return Map.of();
@@ -285,7 +308,7 @@ final class GitConfigurationLocationReader implements ConfigurationLocationReade
         return result;
     }
 
-    private static String firstPresent(Map<String, String> values, String... keys) {
+    static String firstPresent(Map<String, String> values, String... keys) {
         for (String key : keys) {
             String value = values.get(key);
             if (value != null && !value.isBlank()) {
@@ -298,8 +321,13 @@ final class GitConfigurationLocationReader implements ConfigurationLocationReade
     private static String decode(String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
+}
 
-    private static String stripQueryAndFragment(String value) {
+final class ConfigurationLocationUri {
+    private ConfigurationLocationUri() {
+    }
+
+    static String stripQueryAndFragment(String value) {
         int end = value.length();
         int queryStart = value.indexOf('?');
         if (queryStart >= 0) {
@@ -314,12 +342,27 @@ final class GitConfigurationLocationReader implements ConfigurationLocationReade
 }
 
 interface GitRepositoryFileClient {
-    Optional<byte[]> readFile(String remoteUri, String ref, String path);
+    Optional<byte[]> readFile(GitConfigurationObject object);
+}
+
+record GitConfigurationObject(String remoteUri, String ref, String path, Map<String, String> auth) {
+    GitConfigurationObject {
+        if (remoteUri == null || remoteUri.isBlank()) {
+            throw new IllegalArgumentException("Git configuration remote URI must not be blank");
+        }
+        if (ref == null || ref.isBlank()) {
+            throw new IllegalArgumentException("Git configuration ref must not be blank");
+        }
+        if (path == null || path.isBlank()) {
+            throw new IllegalArgumentException("Git configuration path must not be blank");
+        }
+        auth = Map.copyOf(auth == null ? Map.of() : auth);
+    }
 }
 
 final class JGitRepositoryFileClient implements GitRepositoryFileClient {
     @Override
-    public Optional<byte[]> readFile(String remoteUri, String ref, String path) {
+    public Optional<byte[]> readFile(GitConfigurationObject object) {
         Path cloneDirectory;
         try {
             cloneDirectory = Files.createTempDirectory("orion-config-git-");
@@ -328,36 +371,90 @@ final class JGitRepositoryFileClient implements GitRepositoryFileClient {
         }
 
         try {
-            clone(remoteUri, ref, cloneDirectory);
-            Path file = cloneDirectory.resolve(path).normalize();
+            clone(object, cloneDirectory);
+            Path file = cloneDirectory.resolve(object.path()).normalize();
             if (!file.startsWith(cloneDirectory)) {
-                throw new IllegalArgumentException("Git configuration path must stay inside repository: " + path);
+                throw new IllegalArgumentException("Git configuration path must stay inside repository: " + object.path());
             }
             if (!Files.exists(file)) {
                 return Optional.empty();
             }
             return Optional.of(Files.readAllBytes(file));
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot read configuration file from git repository " + remoteUri, e);
+            throw new IllegalStateException(
+                    "Cannot read configuration file from git repository " + object.remoteUri(),
+                    e);
         } finally {
             deleteRecursively(cloneDirectory);
         }
     }
 
-    private static void clone(String remoteUri, String ref, Path directory) {
+    private static void clone(GitConfigurationObject object, Path directory) {
         try {
-            var clone = Git.cloneRepository()
-                    .setURI(remoteUri)
-                    .setDirectory(directory.toFile());
-            if (!"HEAD".equals(ref)) {
-                clone.setBranch(ref);
+            CloneCommand clone = configure(
+                    Git.cloneRepository()
+                            .setURI(object.remoteUri())
+                            .setDirectory(directory.toFile()),
+                    object,
+                    directory);
+            if (!"HEAD".equals(object.ref())) {
+                clone.setBranch(object.ref());
             }
             try (Git ignored = clone.call()) {
                 // Repository is cloned so the requested file can be read from the work tree.
             }
         } catch (GitAPIException e) {
-            throw new IllegalStateException("Cannot clone configuration git repository " + remoteUri, e);
+            throw new IllegalStateException("Cannot clone configuration git repository " + object.remoteUri(), e);
         }
+    }
+
+    private static CloneCommand configure(CloneCommand command, GitConfigurationObject object, Path worktree) {
+        CredentialsProvider credentialsProvider = credentialsProvider(object.auth());
+        if (credentialsProvider != null) {
+            command.setCredentialsProvider(credentialsProvider);
+        }
+        TransportConfigCallback transportConfigCallback = transportConfigCallback(object.auth(), worktree);
+        if (transportConfigCallback != null) {
+            command.setTransportConfigCallback(transportConfigCallback);
+        }
+        return command;
+    }
+
+    private static CredentialsProvider credentialsProvider(Map<String, String> auth) {
+        if (auth == null || (!auth.containsKey("username") && !auth.containsKey("password"))) {
+            return null;
+        }
+        String username = auth.getOrDefault("username", "");
+        String password = ConfigurationLocationSecret.optionalSecret("git.password", auth.get("password"));
+        return new UsernamePasswordCredentialsProvider(username, password);
+    }
+
+    private static TransportConfigCallback transportConfigCallback(Map<String, String> auth, Path worktree) {
+        if (auth == null || !auth.containsKey("privateKey")) {
+            return null;
+        }
+        Path privateKey = ConfigurationLocationSecret.fileReference("git.privateKey", auth.get("privateKey"));
+        Path sshDirectory = worktree.resolve(".ssh").toAbsolutePath().normalize();
+        SshdSessionFactoryBuilder builder = new SshdSessionFactoryBuilder()
+                .setHomeDirectory(worktree.toFile())
+                .setSshDirectory(sshDirectory.toFile())
+                .setDefaultIdentities(ignored -> List.of(privateKey));
+        if (auth.containsKey("knownHosts")) {
+            Path knownHosts = ConfigurationLocationSecret.fileReference("git.knownHosts", auth.get("knownHosts"));
+            builder.setDefaultKnownHostsFiles(ignored -> List.of(knownHosts));
+        }
+        if (auth.containsKey("passphrase")) {
+            char[] passphrase = ConfigurationLocationSecret.optionalSecret(
+                    "git.passphrase",
+                    auth.get("passphrase")).toCharArray();
+            builder.setKeyPasswordProvider(ignored -> new StaticKeyPasswordProvider(passphrase));
+        }
+        SshdSessionFactory sessionFactory = builder.build(null);
+        return transport -> {
+            if (transport instanceof SshTransport sshTransport) {
+                sshTransport.setSshSessionFactory(sessionFactory);
+            }
+        };
     }
 
     private static void deleteRecursively(Path path) {
@@ -374,6 +471,39 @@ final class JGitRepositoryFileClient implements GitRepositoryFileClient {
             }
             Files.deleteIfExists(path);
         } catch (IOException ignored) {
+        }
+    }
+
+    private static final class StaticKeyPasswordProvider implements KeyPasswordProvider {
+        private final char[] passphrase;
+        private int attempts;
+
+        private StaticKeyPasswordProvider(char[] passphrase) {
+            this.passphrase = passphrase.clone();
+        }
+
+        @Override
+        public char[] getPassphrase(org.eclipse.jgit.transport.URIish uri, int attempt) {
+            return passphrase.clone();
+        }
+
+        @Override
+        public void setAttempts(int attempts) {
+            this.attempts = attempts;
+        }
+
+        @Override
+        public int getAttempts() {
+            return attempts;
+        }
+
+        @Override
+        public boolean keyLoaded(org.eclipse.jgit.transport.URIish uri, int attempt, Exception error)
+                throws IOException, GeneralSecurityException {
+            if (error != null) {
+                throw new GeneralSecurityException(error);
+            }
+            return true;
         }
     }
 }
@@ -400,7 +530,10 @@ final class S3ConfigurationLocationReader implements ConfigurationLocationReader
         if (key.isBlank()) {
             throw new IllegalArgumentException("S3 configuration location must include object key");
         }
-        return client.readObject(bucket, key)
+        return client.readObject(new S3ConfigurationObject(
+                        bucket,
+                        key,
+                        ConfigurationLocationParameters.query(location)))
                 .map(content -> new ConfigurationContent(key, content));
     }
 
@@ -415,21 +548,126 @@ final class S3ConfigurationLocationReader implements ConfigurationLocationReader
     }
 }
 
+record S3ConfigurationObject(String bucket, String key, Map<String, String> auth) {
+    S3ConfigurationObject {
+        if (bucket == null || bucket.isBlank()) {
+            throw new IllegalArgumentException("S3 configuration bucket must not be blank");
+        }
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("S3 configuration object key must not be blank");
+        }
+        auth = Map.copyOf(auth == null ? Map.of() : auth);
+    }
+}
+
 interface S3ObjectClient {
-    Optional<byte[]> readObject(String bucket, String key);
+    Optional<byte[]> readObject(S3ConfigurationObject object);
 }
 
 final class AwsS3ObjectClient implements S3ObjectClient {
     @Override
-    public Optional<byte[]> readObject(String bucket, String key) {
-        try (S3Client client = S3Client.create()) {
+    public Optional<byte[]> readObject(S3ConfigurationObject object) {
+        try (S3Client client = createClient(object.auth())) {
             ResponseBytes<GetObjectResponse> response = client.getObjectAsBytes(GetObjectRequest.builder()
-                    .bucket(bucket)
-                    .key(key)
+                    .bucket(object.bucket())
+                    .key(object.key())
                     .build());
             return Optional.of(response.asByteArray());
         } catch (NoSuchBucketException | NoSuchKeyException e) {
             return Optional.empty();
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return Optional.empty();
+            }
+            throw e;
         }
+    }
+
+    private static S3Client createClient(Map<String, String> auth) {
+        var builder = S3Client.builder()
+                .region(Region.of(auth.getOrDefault("region", "us-east-1")));
+
+        String endpoint = auth.get("endpoint");
+        if (endpoint != null && !endpoint.isBlank()) {
+            builder.endpointOverride(URI.create(endpoint));
+            builder.serviceConfiguration(s3Configuration(true));
+        } else if ("true".equalsIgnoreCase(auth.get("pathStyleAccess"))) {
+            builder.serviceConfiguration(s3Configuration(true));
+        }
+
+        if (auth.containsKey("accessKeyId") || auth.containsKey("secretAccessKey")) {
+            String accessKeyId = auth.get("accessKeyId");
+            if (accessKeyId == null || accessKeyId.isBlank()) {
+                throw new IllegalArgumentException("s3.accessKeyId must not be blank");
+            }
+            String secretAccessKey = ConfigurationLocationSecret.requiredSecret(
+                    "s3.secretAccessKey",
+                    auth.get("secretAccessKey"));
+            if (auth.containsKey("sessionToken")) {
+                String sessionToken = ConfigurationLocationSecret.requiredSecret(
+                        "s3.sessionToken",
+                        auth.get("sessionToken"));
+                builder.credentialsProvider(StaticCredentialsProvider.create(
+                        AwsSessionCredentials.create(accessKeyId, secretAccessKey, sessionToken)));
+            } else {
+                builder.credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create(accessKeyId, secretAccessKey)));
+            }
+        } else {
+            builder.credentialsProvider(DefaultCredentialsProvider.create());
+        }
+        return builder.build();
+    }
+
+    private static S3Configuration s3Configuration(boolean pathStyleAccess) {
+        return S3Configuration.builder()
+                .pathStyleAccessEnabled(pathStyleAccess)
+                .chunkedEncodingEnabled(false)
+                .build();
+    }
+}
+
+final class ConfigurationLocationSecret {
+    private ConfigurationLocationSecret() {
+    }
+
+    static String requiredSecret(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        if (value.startsWith("env:")) {
+            String variableName = value.substring("env:".length());
+            String secret = System.getenv(variableName);
+            if (secret == null) {
+                throw new IllegalArgumentException(name + " environment variable is not set: " + variableName);
+            }
+            return secret;
+        }
+        if (value.startsWith("file:")) {
+            try {
+                return Files.readString(fileReference(name, value), StandardCharsets.UTF_8).trim();
+            } catch (IOException e) {
+                throw new IllegalArgumentException("Cannot read " + name + " from " + value, e);
+            }
+        }
+        throw new IllegalArgumentException(name + " must use env: or file: reference");
+    }
+
+    static String optionalSecret(String name, String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return requiredSecret(name, value);
+    }
+
+    static Path fileReference(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        ResourceLocation location = ResourceLocation.parse(value, name);
+        return switch (location.scheme()) {
+            case ResourceScheme.File ignored -> Path.of(location.pathOrSchemeSpecificPart(name + " must include a path"));
+            default -> throw new IllegalArgumentException(name + " must use file: reference");
+        };
     }
 }
