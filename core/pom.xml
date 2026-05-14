@@ -16,6 +16,7 @@
 
     <modules>
         <module>acl-model</module>
+        <module>resource-addressing</module>
         <module>acl</module>
         <module>bc</module>
         <module>bootstrap</module>
