@@ -40,6 +40,44 @@ The result type may differ by use case:
 But the rules for interpreting `file:`, empty paths, `s3:`, `git+...`,
 `local:`, `classpath:`, `env:`, and `content:` should live in one registry.
 
+## Content Access vs Storage Access
+
+The shared resolver should distinguish "read this referenced thing" from "open
+this as a storage backend".
+
+For read-only inputs such as application configuration, bootstrap files, and
+secrets, the resolved implementation can be a content source:
+
+```text
+ResourceContent / ContentSource
+```
+
+The resolver owns the small client needed to perform the read:
+
+- local file reader for plain paths and `file:`;
+- classpath reader for bundled defaults;
+- HTTP/HTTPS client for URL content;
+- S3-compatible object client for `s3:`;
+- Git single-path reader for `git+file:`, `git+ssh:`, `git+http:`, and
+  `git+https:`.
+
+For mutable domains such as ACL storage, token storage, key material storage, or
+future repository-backed state, the caller should request a storage capability
+instead of raw content. The returned implementation must be a read-write store
+when the requested capabilities include writing:
+
+```text
+READ_CONTENT -> content source
+READ_CONTENT + WRITE_CONTENT -> writable content store
+READ_CONTENT + WRITE_CONTENT + VERSIONED_CONTENT -> versioned content store
+REPOSITORY_STORAGE -> repository provider
+```
+
+This keeps configuration and secret loading simple while letting ACL resolve to
+a storage abstraction backed by a local directory, S3, Git, or another backend.
+The feature layer should not need to know whether the resolver used HTTP, S3, or
+Git clients internally to access the requested path.
+
 ## Request Model
 
 Introduce a request object:

@@ -267,6 +267,38 @@ record ResourceResolutionContext(
 
 The resolved `ResourceAddress` then goes to `ResourceBackendRegistry`.
 
+## Resolver Client Boundary
+
+Resolvers may need small backend clients to turn an address into something the
+caller can use. This should be part of the shared resource layer, not repeated
+inside configuration, ACL, bootstrap, or secret code.
+
+The initial client set should be deliberately minimal:
+
+- HTTP/HTTPS: read bytes from a concrete URL with timeouts, size limits,
+  redirect policy, and safe error reporting;
+- S3-compatible storage: read an object by bucket/key and later expose a
+  writable object-store adapter when the caller asks for write capability;
+- Git: read a single path from a repository/ref without forcing feature code to
+  clone or understand Git transport details, and expose a versioned writable
+  store when the caller needs read-write semantics.
+
+The resolver should hide these clients behind typed results. A caller that asks
+for configuration content or a secret receives content bytes plus metadata. A
+caller that asks for ACL storage receives a storage abstraction backed by local
+directory, S3, Git, or another backend, and that abstraction can be read-write.
+
+Feature code should not receive raw HTTP, S3, or Git clients unless the feature
+explicitly is a transport feature. Most callers should depend on one of these
+forms:
+
+```text
+read-only content: bytes/stream + source metadata
+read-write content store: load/save/delete/list as needed
+versioned content store: load/save with version or commit metadata
+repository provider: backend-specific repository access
+```
+
 ## Resolution Rules
 
 - Resolve from the innermost reference provider outward.
