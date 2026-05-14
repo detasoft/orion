@@ -5,9 +5,9 @@ Copyright (c) 2026 DETA PRO B.V.
 Orion is licensed under the Business Source License 1.1 (`BUSL-1.1`) with the
 project-specific parameters below.
 
-The canonical Business Source License 1.1 terms published by MariaDB apply to
-the Licensed Work. This file defines Orion's licensor, additional use grant,
-change date, and change license.
+The canonical Business Source License 1.1 terms in `LICENSE-BUSL-1.1.txt`
+apply to the Licensed Work. This file defines Orion's licensor, additional use
+grant, change date, and change license.
 
 ## Licensor
 
@@ -45,7 +45,8 @@ agreement with DETA PRO B.V.
 
 For each version of the Licensed Work, the Change Date is the fourth
 anniversary of the first public distribution of that version under this
-License.
+License. Public distribution dates and calculated change dates are tracked in
+`RELEASES.md`.
 
 ## Change License
 
@@ -54,6 +55,19 @@ GNU Affero General Public License version 3 or any later version
 
 On the Change Date, the corresponding version of the Licensed Work becomes
 available under the Change License.
+
+The GNU Affero General Public License version 3 text is included in
+`LICENSE-AGPL-3.0-or-later.txt`.
+
+## Commercial Licensing
+
+Uses outside the Additional Use Grant require a commercial agreement with
+DETA PRO B.V.
+
+Commercial licensing and legal questions can be sent to:
+
+- info@deta-it.com
+- info@detasoft.net
 
 ## Trademarks
 

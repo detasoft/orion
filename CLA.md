@@ -72,3 +72,8 @@ particular purpose, and non-infringement.
 To the extent allowed by law, you waive and agree not to assert moral rights
 that would interfere with DETA PRO B.V.'s exercise of the rights granted in
 this Agreement.
+
+## Contact
+
+Questions about this Agreement can be sent to info@deta-it.com or
+info@detasoft.net.

@@ -205,7 +205,13 @@ professional services where Orion is a material part of the offering require a
 commercial agreement with DETA PRO B.V.
 
 See [LICENSE](LICENSE), [NOTICE.md](NOTICE.md), and
-[TRADEMARKS.md](TRADEMARKS.md).
+[TRADEMARKS.md](TRADEMARKS.md). The canonical license texts are included in
+[LICENSE-BUSL-1.1.txt](LICENSE-BUSL-1.1.txt) and
+[LICENSE-AGPL-3.0-or-later.txt](LICENSE-AGPL-3.0-or-later.txt). Release
+distribution dates are tracked in [RELEASES.md](RELEASES.md).
+
+Commercial licensing and legal questions can be sent to info@deta-it.com or
+info@detasoft.net.
 
 ## Contributing
 

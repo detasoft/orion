@@ -13,13 +13,19 @@
 
   <name>orion</name>
   <url>https://www.deta.pro/orion</url>
+  <inceptionYear>2026</inceptionYear>
+  <organization>
+    <name>DETA PRO B.V.</name>
+    <url>https://www.deta-it.com</url>
+  </organization>
   <packaging>pom</packaging>
 
   <licenses>
     <license>
       <name>Business Source License 1.1, changing to GNU Affero General Public License v3.0 or later</name>
-      <url>https://mariadb.com/bsl11/</url>
+      <url>https://www.deta.pro/orion</url>
       <distribution>repo</distribution>
+      <comments>See LICENSE for Orion-specific BSL parameters and commercial contacts.</comments>
     </license>
   </licenses>
 
@@ -302,6 +308,38 @@
         </plugin>
       </plugins>
     </pluginManagement>
+    <plugins>
+      <plugin>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-legal-notices</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/META-INF</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${maven.multiModuleProjectDirectory}</directory>
+                  <filtering>false</filtering>
+                  <includes>
+                    <include>LICENSE</include>
+                    <include>LICENSE-BUSL-1.1.txt</include>
+                    <include>LICENSE-AGPL-3.0-or-later.txt</include>
+                    <include>NOTICE.md</include>
+                    <include>RELEASES.md</include>
+                    <include>THIRD_PARTY_NOTICES.md</include>
+                    <include>TRADEMARKS.md</include>
+                  </includes>
+                </resource>
+              </resources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 
   <profiles>

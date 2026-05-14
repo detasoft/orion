@@ -18,6 +18,9 @@ If the contribution is made as part of your employment or on behalf of an
 organization, the organization must have the rights needed to submit the
 contribution and DETA PRO B.V. may require a corporate CLA before accepting it.
 
+CLA and contribution licensing questions can be sent to info@deta-it.com or
+info@detasoft.net.
+
 ## Contribution Rules
 
 - Submit only work that you wrote or are authorized to contribute.

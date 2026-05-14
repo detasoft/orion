@@ -33,3 +33,10 @@ You may not, without written permission from DETA PRO B.V.:
 Forks and derived works should use a distinct name and should clearly state
 that they are not official DETA PRO B.V. releases unless DETA PRO B.V. has
 approved the branding in writing.
+
+## Contact
+
+Trademark, commercial licensing, and legal questions can be sent to:
+
+- info@deta-it.com
+- info@detasoft.net
