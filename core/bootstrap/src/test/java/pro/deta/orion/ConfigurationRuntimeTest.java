@@ -1,7 +1,7 @@
 package pro.deta.orion;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.FileConfigurationProviderImpl;
+import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class ConfigurationRuntimeTest {
     @Test
     public void testConfigurationLookup() {
-        FileConfigurationProviderImpl fcp = new FileConfigurationProviderImpl();
+        LocationConfigurationProvider fcp = new LocationConfigurationProvider();
         OrionConfiguration oc = fcp.configurationLookup("classpath://config.toml");
 
         assertEquals("target/orion_root", oc.getBootstrap().getBaseDir());

@@ -1,0 +1,8 @@
+bootstrap:
+  baseDir: /tmp/orion-default-location
+  accessControl:
+    paths:
+      - default-location.xml
+transport:
+  http:
+    port: 17080

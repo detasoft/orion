@@ -1,0 +1,8 @@
+bootstrap:
+  baseDir: /tmp/orion-classpath-yaml
+  accessControl:
+    paths:
+      - classpath-yaml.xml
+transport:
+  http:
+    port: 18080

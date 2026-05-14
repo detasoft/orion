@@ -56,7 +56,7 @@ public abstract class ResourceLocation {
         if (path() != null && !path().isBlank()) {
             return path();
         }
-        if (!OrionUtils.isNullOrEmpty(schemeSpecificPart())) {
+        if (!isNullOrEmpty(schemeSpecificPart())) {
             return schemeSpecificPart();
         }
         throw new IllegalArgumentException(emptyMessage);
@@ -65,7 +65,7 @@ public abstract class ResourceLocation {
     public ResourceLocation withScheme(String replacementScheme) {
         ResourceScheme normalizedScheme = ResourceScheme.from(replacementScheme);
         String originalScheme = uri.getScheme();
-        if (OrionUtils.isNullOrEmpty(originalScheme)) {
+        if (isNullOrEmpty(originalScheme)) {
             throw new IllegalArgumentException("Resource location does not have a scheme: " + raw);
         }
         return parse(normalizedScheme.value() + raw.substring(originalScheme.length()), "Resource location");
@@ -86,6 +86,10 @@ public abstract class ResourceLocation {
             relativePath.append(stripLeadingSlashes(schemeSpecificPart()));
         }
         return Path.of(relativePath.toString()).normalize().toString();
+    }
+
+    private static boolean isNullOrEmpty(String value) {
+        return value == null || value.isEmpty();
     }
 
     private static String stripLeadingSlashes(String value) {

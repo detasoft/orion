@@ -67,7 +67,7 @@ class OrionConfigurationBootstrapShapeTest {
                       allowRequestedDomains: true
                 """);
 
-        OrionConfiguration configuration = new FileConfigurationProviderImpl()
+        OrionConfiguration configuration = new LocationConfigurationProvider()
                 .configurationLookup(configFile.toString());
 
         assertEquals("/tmp/orion", configuration.getBootstrap().getBaseDir());
@@ -109,7 +109,7 @@ class OrionConfigurationBootstrapShapeTest {
                   defaultAddress: localhost
                 """);
 
-        assertThrows(RuntimeException.class, () -> new FileConfigurationProviderImpl()
+        assertThrows(RuntimeException.class, () -> new LocationConfigurationProvider()
                 .configurationLookup(configFile.toString()));
     }
 
@@ -121,7 +121,7 @@ class OrionConfigurationBootstrapShapeTest {
                   baseDir: /tmp/explicit-orion
                 """);
 
-        OrionConfiguration configuration = new FileConfigurationProviderImpl(configFile.toString())
+        OrionConfiguration configuration = new LocationConfigurationProvider(configFile.toString())
                 .readConfiguration();
 
         assertEquals("/tmp/explicit-orion", configuration.getBootstrap().getBaseDir());
@@ -133,7 +133,7 @@ class OrionConfigurationBootstrapShapeTest {
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
-                () -> new FileConfigurationProviderImpl(configFile.toString()).readConfiguration());
+                () -> new LocationConfigurationProvider(configFile.toString()).readConfiguration());
 
         assertEquals("Configuration location not found or unsupported: " + configFile, error.getMessage());
     }

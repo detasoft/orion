@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationProvider;
-import pro.deta.orion.config.FileConfigurationProviderImpl;
+import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 import java.io.IOException;
@@ -40,9 +40,9 @@ public class App {
 
     static ConfigurationProvider configurationProvider(AppOptions options) {
         if (options.configurationLocation() == null) {
-            return new FileConfigurationProviderImpl();
+            return new LocationConfigurationProvider();
         }
-        return new FileConfigurationProviderImpl(options.configurationLocation());
+        return new LocationConfigurationProvider(options.configurationLocation());
     }
 
     static int run(OrionApplicationLifecycle lifecycle, boolean installShutdownHook) {
