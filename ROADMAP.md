@@ -5,10 +5,4 @@ start or development workflow.
 
 ## Open Areas
 
-- GitHub and GitLab repository mirroring.
-- OAuth and application-token authentication improvements.
-- Build execution and agent management.
-- Maven repository serving over HTTP and HTTPS.
-- Dynamic domain allocation.
-- Native Git transport migration to NIO if the protocol implementation becomes
-  ready to benefit from it.
+No open roadmap areas without a detailed plan.
