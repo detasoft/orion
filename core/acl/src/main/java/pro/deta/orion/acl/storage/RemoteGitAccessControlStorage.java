@@ -297,7 +297,7 @@ public class RemoteGitAccessControlStorage implements AccessControlStorage {
             return null;
         }
         String username = auth.getOrDefault("username", "");
-        String password = resolveSecret("auth.password", auth.get("password"));
+        String password = AccessControlStorageSecret.optionalSecret("auth.password", auth.get("password"));
         return new UsernamePasswordCredentialsProvider(username, password);
     }
 
@@ -305,17 +305,17 @@ public class RemoteGitAccessControlStorage implements AccessControlStorage {
         if (auth == null || !auth.containsKey("privateKey")) {
             return null;
         }
-        Path privateKey = fileReference("auth.privateKey", auth.get("privateKey"));
+        Path privateKey = AccessControlStorageSecret.fileReference("auth.privateKey", auth.get("privateKey"));
         Path sshDirectory = worktree.resolve(".ssh").toAbsolutePath().normalize();
         SshdSessionFactoryBuilder builder = new SshdSessionFactoryBuilder()
                 .setSshDirectory(sshDirectory.toFile())
                 .setDefaultIdentities(ignored -> List.of(privateKey));
         if (auth.containsKey("knownHosts")) {
-            Path knownHosts = fileReference("auth.knownHosts", auth.get("knownHosts"));
+            Path knownHosts = AccessControlStorageSecret.fileReference("auth.knownHosts", auth.get("knownHosts"));
             builder.setDefaultKnownHostsFiles(ignored -> List.of(knownHosts));
         }
         if (auth.containsKey("passphrase")) {
-            char[] passphrase = resolveSecret("auth.passphrase", auth.get("passphrase")).toCharArray();
+            char[] passphrase = AccessControlStorageSecret.optionalSecret("auth.passphrase", auth.get("passphrase")).toCharArray();
             builder.setKeyPasswordProvider(ignored -> new StaticKeyPasswordProvider(passphrase));
         }
         SshdSessionFactory sessionFactory = builder.build(null);
@@ -324,39 +324,6 @@ public class RemoteGitAccessControlStorage implements AccessControlStorage {
                 sshTransport.setSshSessionFactory(sessionFactory);
             }
         };
-    }
-
-    private static Path fileReference(String name, String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(name + " must not be blank");
-        }
-        ResourceLocation location = ResourceLocation.parse(value, name);
-        return switch (location.scheme()) {
-            case ResourceScheme.File ignored -> Path.of(location.pathOrSchemeSpecificPart(name + " must include a path"));
-            default -> throw new IllegalArgumentException(name + " must use file: reference");
-        };
-    }
-
-    private static String resolveSecret(String name, String value) {
-        if (value == null || value.isBlank()) {
-            return "";
-        }
-        if (value.startsWith("env:")) {
-            String variableName = value.substring("env:".length());
-            String secret = System.getenv(variableName);
-            if (secret == null) {
-                throw new IllegalArgumentException(name + " environment variable is not set: " + variableName);
-            }
-            return secret;
-        }
-        if (value.startsWith("file:")) {
-            try {
-                return Files.readString(fileReference(name, value), StandardCharsets.UTF_8).trim();
-            } catch (IOException e) {
-                throw new IllegalArgumentException("Cannot read " + name + " from " + value, e);
-            }
-        }
-        throw new IllegalArgumentException(name + " must use env: or file: reference");
     }
 
     private static Path remoteWorktree(

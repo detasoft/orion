@@ -13,7 +13,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.auth.TokenIssueResult;
@@ -21,6 +23,7 @@ import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 import pro.deta.orion.util.NetworkUtils;
 
@@ -34,8 +37,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -86,6 +91,63 @@ class OrionStartupIT {
 
             assertThat(validation).containsEntry("valid", true);
             assertThat(validation).doesNotContainKey("message");
+        }
+    }
+
+    @Test
+    void remoteGitAclIsLoadedAndSavedThroughRuntime() throws Exception {
+        Path orionRoot = tempDir.resolve("orion");
+        Path remoteAclRepository = tempDir.resolve("remote-acl.git");
+        seedRemoteAclRepository(remoteAclRepository, accessControlWithUsers("root", "remote-user"));
+        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        configuration.getBootstrap().getAccessControl().setLocation("git+" + remoteAclRepository.toUri());
+        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+
+        try (StartedOrion orion = startServerWithConfig(configuration)) {
+            AccessControl loadedAcl = deserialize(orion.accessControlService().accessControlConfigurationFile());
+
+            assertThat(hasUser(loadedAcl, "remote-user")).isTrue();
+            assertThat(aclRepository(orionRoot)).doesNotExist();
+
+            orion.accessControlService().saveAccessControlConfigurationFile(
+                    serialize(accessControlWithUsers("root", "saved-remote-user")));
+        }
+
+        AccessControl savedAcl = deserialize(readFileFromRepository(remoteAclRepository, ACL_FILE));
+        assertThat(hasUser(savedAcl, "remote-user")).isFalse();
+        assertThat(hasUser(savedAcl, "saved-remote-user")).isTrue();
+    }
+
+    @Test
+    void s3AclIsLoadedAndSavedThroughRuntime() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-s3");
+        Path secretFile = tempDir.resolve("s3-secret.txt");
+        String bucketName = "orion-acl-" + UUID.randomUUID();
+
+        try (MinioS3TestServer s3 = MinioS3TestServer.start(bucketName)) {
+            Files.writeString(secretFile, s3.secretAccessKey());
+            s3.putObject("bootstrap/orion.xml", serialize(accessControlWithUsers("root", "s3-user")));
+            OrionConfiguration configuration = serverConfiguration(orionRoot);
+            configuration.getBootstrap().getAccessControl().setLocation("s3://" + s3.bucketName() + "/bootstrap");
+            configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+            configuration.getBootstrap().getAccessControl().getAuth().put("endpoint", s3.endpoint());
+            configuration.getBootstrap().getAccessControl().getAuth().put("region", "us-east-1");
+            configuration.getBootstrap().getAccessControl().getAuth().put("accessKeyId", s3.accessKeyId());
+            configuration.getBootstrap().getAccessControl().getAuth().put("secretAccessKey", secretFile.toUri().toString());
+
+            try (StartedOrion orion = startServerWithConfig(configuration)) {
+                AccessControl loadedAcl = deserialize(orion.accessControlService().accessControlConfigurationFile());
+
+                assertThat(hasUser(loadedAcl, "s3-user")).isTrue();
+                assertThat(aclRepository(orionRoot)).doesNotExist();
+
+                orion.accessControlService().saveAccessControlConfigurationFile(
+                        serialize(accessControlWithUsers("root", "saved-s3-user")));
+            }
+
+            AccessControl savedAcl = deserialize(s3.getObject("bootstrap/orion.xml"));
+            assertThat(hasUser(savedAcl, "s3-user")).isFalse();
+            assertThat(hasUser(savedAcl, "saved-s3-user")).isTrue();
         }
     }
 
@@ -154,16 +216,69 @@ class OrionStartupIT {
     }
 
     private static byte[] readFileFromAclRepository(Path orionRoot) throws IOException {
-        try (Repository repository = FileRepositoryBuilder.create(aclRepository(orionRoot).toFile());
+        return readFileFromRepository(aclRepository(orionRoot), ACL_FILE);
+    }
+
+    private static byte[] readFileFromRepository(Path repositoryPath, String filePath) throws IOException {
+        try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile());
              RevWalk revWalk = new RevWalk(repository)) {
             ObjectId head = repository.resolve(Constants.R_HEADS + BRANCH);
             assertThat(head).isNotNull();
             var commit = revWalk.parseCommit(head);
-            try (TreeWalk treeWalk = TreeWalk.forPath(repository, ACL_FILE, commit.getTree())) {
+            try (TreeWalk treeWalk = TreeWalk.forPath(repository, filePath, commit.getTree())) {
                 assertThat(treeWalk).isNotNull();
                 return repository.open(treeWalk.getObjectId(0)).getBytes();
             }
         }
+    }
+
+    private static void seedRemoteAclRepository(Path bareRepository, AccessControl accessControl) throws Exception {
+        try (Git ignored = Git.init()
+                .setBare(true)
+                .setGitDir(bareRepository.toFile())
+                .setInitialBranch(BRANCH)
+                .call()) {
+            // The bare repository is the remote ACL storage target.
+        }
+
+        Path seedWorktree = bareRepository.getParent().resolve("remote-acl-seed");
+        try (Git seed = Git.init()
+                .setDirectory(seedWorktree.toFile())
+                .setInitialBranch(BRANCH)
+                .call()) {
+            Files.write(seedWorktree.resolve(ACL_FILE), serialize(accessControl));
+            seed.add().addFilepattern(ACL_FILE).call();
+            seed.commit()
+                    .setAuthor("ACL Test", "acl@example.test")
+                    .setCommitter("ACL Test", "acl@example.test")
+                    .setMessage("seed remote ACL")
+                    .call();
+            seed.push()
+                    .setRemote(bareRepository.toUri().toString())
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+        }
+    }
+
+    private static byte[] serialize(AccessControl accessControl) throws IOException {
+        try (var output = new java.io.ByteArrayOutputStream()) {
+            new XmlService().serialize(accessControl, output);
+            return output.toByteArray();
+        }
+    }
+
+    private static AccessControl deserialize(byte[] content) throws IOException {
+        return new XmlService().deserialize(new ByteArrayInputStream(content));
+    }
+
+    private static AccessControl accessControlWithUsers(String... userIds) {
+        AccessControlDraft draft = ACLUtil.generateDefaultAccessControl("remote-root-password-hash").toDraft();
+        for (String userId : userIds) {
+            if (!"root".equalsIgnoreCase(userId)) {
+                draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test"));
+            }
+        }
+        return draft.toAccessControl();
     }
 
     private static Map<String, Object> validateAccessControlXml(StartedOrion orion, byte[] content) throws IOException {
@@ -331,4 +446,5 @@ class OrionStartupIT {
             lifecycle.waitForShutdown();
         }
     }
+
 }
