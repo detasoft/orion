@@ -62,6 +62,15 @@ public abstract class ResourceLocation {
         throw new IllegalArgumentException(emptyMessage);
     }
 
+    public ResourceLocation withScheme(String replacementScheme) {
+        ResourceScheme normalizedScheme = ResourceScheme.from(replacementScheme);
+        String originalScheme = uri.getScheme();
+        if (OrionUtils.isNullOrEmpty(originalScheme)) {
+            throw new IllegalArgumentException("Resource location does not have a scheme: " + raw);
+        }
+        return parse(normalizedScheme.value() + raw.substring(originalScheme.length()), "Resource location");
+    }
+
     public String normalizedRelativePath() {
         StringBuilder relativePath = new StringBuilder();
         if (host() != null && !host().isBlank()) {

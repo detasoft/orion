@@ -29,6 +29,8 @@ public class AccessControlStorageResolver {
                             resourceLocation.normalizedRelativePath(),
                             accessControlConfig.getBranch()),
                     accessControlConfig.getPaths());
+            case ResourceScheme.Other ignored when RemoteGitAccessControlStorage.supportsLocation(location) ->
+                    new RemoteGitAccessControlStorage(configuration, accessControlConfig);
             case ResourceScheme.Other ignored -> throw new IllegalArgumentException("Unsupported ACL location: " + location);
         };
     }

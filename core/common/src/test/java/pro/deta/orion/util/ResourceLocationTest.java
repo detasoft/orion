@@ -64,6 +64,39 @@ class ResourceLocationTest {
     }
 
     @Test
+    void replacesSchemeAndKeepsOpaqueLocationBody() {
+        ResourceLocation location = ResourceLocation.parse("git+file:target/orion-acl.git", "Resource location");
+
+        ResourceLocation normalized = location.withScheme("file");
+
+        assertThat(normalized.raw()).isEqualTo("file:target/orion-acl.git");
+        assertThat(normalized.scheme()).isEqualTo(ResourceScheme.FILE);
+        assertThat(normalized.pathOrSchemeSpecificPart("File location must include a path"))
+                .isEqualTo("target/orion-acl.git");
+    }
+
+    @Test
+    void replacesSchemeAndKeepsHierarchicalLocationBody() {
+        ResourceLocation location = ResourceLocation.parse("git+ssh://git@example.test/orion/acl.git", "Resource location");
+
+        ResourceLocation normalized = location.withScheme("ssh");
+
+        assertThat(normalized.raw()).isEqualTo("ssh://git@example.test/orion/acl.git");
+        assertThat(normalized.scheme()).isEqualTo(ResourceScheme.other("ssh"));
+        assertThat(normalized.host()).isEqualTo("example.test");
+        assertThat(normalized.path()).isEqualTo("/orion/acl.git");
+    }
+
+    @Test
+    void rejectsSchemeReplacementForPlainPath() {
+        ResourceLocation location = ResourceLocation.parse("repositories", "Resource location");
+
+        assertThatThrownBy(() -> location.withScheme("file"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Resource location does not have a scheme: repositories");
+    }
+
+    @Test
     void rejectsBlankLocation() {
         assertThatThrownBy(() -> ResourceLocation.parse(" ", "Resource location"))
                 .isInstanceOf(IllegalArgumentException.class)
