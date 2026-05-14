@@ -60,6 +60,14 @@ public final class MinioS3TestServer implements AutoCloseable {
         return endpoint(minio);
     }
 
+    public String host() {
+        return minio.getHost();
+    }
+
+    public int port() {
+        return minio.getMappedPort(MINIO_API_PORT);
+    }
+
     public String accessKeyId() {
         return USERNAME;
     }
