@@ -78,6 +78,22 @@ is read as an immutable content snapshot. If the call site does not yet know the
 capability, it should first resolve to a neutral resolved reference/address and
 then dispatch by scheme and usage.
 
+The resource-addressing module should provide lightweight built-in resolvers for
+the common schemes needed by this model: `file:`, `http:`, `https:`, `s3:`,
+`git:`, and remote Git schemes such as `git+ssh:`, `git+http:`, and
+`git+https:`. These resolvers should avoid depending on the heavier runtime
+storage or transport implementations. They exist to parse addresses, perform
+small immutable reads when a call site requests `ResourceContent`, and keep
+reference resolution behavior deterministic and testable.
+
+Resolver selection must be extensible. Other modules should be able to
+contribute scheme/capability resolvers through an explicit registry or provider
+interface without changing the core parser. For example, the Orion runtime
+module can register a resolver for `local:` so `local:orion` is interpreted as a
+reference to an internal local `GitRepository` in Orion's configured repository
+storage, while the core resource-addressing module can still treat `local:` as
+unknown unless that resolver is installed.
+
 Inline Kubernetes-style config data should be expressible explicitly. The
 current candidate is `content:` for literal content, while address schemes such
 as `file:`, `s3:`, and `git+...` still identify resources that can produce
