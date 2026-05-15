@@ -109,6 +109,9 @@
                                 </concat>
                                 <chmod file="${project.build.directory}/${project.build.finalName}-executable.jar"
                                        perm="755"/>
+                                <checksum file="${project.build.directory}/${project.build.finalName}-executable.jar"
+                                          algorithm="SHA-256"
+                                          fileext=".sha256"/>
                             </target>
                         </configuration>
                     </execution>
@@ -129,6 +132,11 @@
                                 <artifact>
                                     <file>${project.build.directory}/${project.build.finalName}-executable.jar</file>
                                     <type>jar</type>
+                                    <classifier>executable</classifier>
+                                </artifact>
+                                <artifact>
+                                    <file>${project.build.directory}/${project.build.finalName}-executable.jar.sha256</file>
+                                    <type>sha256</type>
                                     <classifier>executable</classifier>
                                 </artifact>
                             </artifacts>

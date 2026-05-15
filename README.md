@@ -72,6 +72,10 @@ The build attaches two single-file jars:
   application with Orion's POSIX launcher prepended for direct execution and
   init.d-compatible commands.
 
+The executable jar also gets a convenience checksum:
+
+- `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar.sha256`
+
 Run the regular artifact directly:
 
 ```sh
@@ -98,6 +102,37 @@ sudo install -m 755 core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar 
 sudo ln -s /opt/orion/orion.jar /etc/init.d/orion
 sudo service orion start
 ```
+
+### Release Verification
+
+Published releases should be verified with a detached GPG signature:
+
+```sh
+gpg --verify orion.jar.asc orion.jar
+```
+
+The self-executable jar also exposes a convenience verifier. It still delegates
+cryptographic verification to `gpg`, but handles argument parsing, key download,
+fingerprint checks, and temporary keyring setup in Java:
+
+```sh
+./orion.jar verify --fingerprint "<release-key-fingerprint>"
+```
+
+By default, the verifier downloads the release public key from
+`https://www.deta-it.com/.well-known/orion/release.asc` and reads a sibling
+signature file named `<orion.jar>.asc`. Use these options or matching
+environment variables to override the defaults:
+
+- `--key PATH` or `ORION_RELEASE_PUBLIC_KEY`
+- `--key-url URL` or `ORION_RELEASE_PUBLIC_KEY_URL`
+- `--fingerprint VALUE` or `ORION_RELEASE_KEY_FINGERPRINT`
+- `--signature PATH` or `ORION_RELEASE_SIGNATURE`
+- `--signature-url URL` or `ORION_RELEASE_SIGNATURE_URL`
+- `--artifact PATH`
+- `--gpg PATH` or `ORION_GPG`
+
+The command fails closed when no expected release key fingerprint is supplied.
 
 ## Admin API
 
