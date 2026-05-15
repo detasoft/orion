@@ -1,0 +1,16 @@
+=== ENVIRONMENT ===
+PATH_TO_CONFIG=conf/orion.toml
+EMPTY_ROOT=
+
+=== SOURCE toml ===
+[bootstrap]
+baseDir = "${ORION_ROOT:-orion_root}"
+cacheDir = "${CACHE_DIR-cache}"
+configPath = "${bootstrap.baseDir}/${PATH_TO_CONFIG?configuration path is required}"
+emptyRootDefault = "${EMPTY_ROOT:-fallback_root}"
+
+=== EXPECTED ===
+String bootstrap.baseDir=orion_root
+String bootstrap.cacheDir=cache
+Path bootstrap.configPath=orion_root/conf/orion.toml
+String bootstrap.emptyRootDefault=fallback_root

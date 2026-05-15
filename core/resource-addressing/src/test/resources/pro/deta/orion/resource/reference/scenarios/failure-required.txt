@@ -1,0 +1,13 @@
+=== ENVIRONMENT ===
+EMPTY=
+
+=== SOURCE yaml ===
+bootstrap:
+  requiredConfig: '${PATH_TO_CONFIG?configuration path is required}'
+  blankRoot: '${EMPTY:?base dir is required}'
+  unset: '$MISSING'
+
+=== EXPECTED ===
+Failure String bootstrap.requiredConfig contains=configuration path is required
+Failure String bootstrap.blankRoot contains=base dir is required
+Failure String bootstrap.unset contains=Resource reference variable is not set: MISSING

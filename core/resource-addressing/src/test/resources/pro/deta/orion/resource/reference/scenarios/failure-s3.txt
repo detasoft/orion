@@ -1,0 +1,9 @@
+=== ENVIRONMENT ===
+CONFIG_BUCKET=
+
+=== SOURCE yaml ===
+repositories:
+  s3Config: 's3://$CONFIG_BUCKET'
+
+=== EXPECTED ===
+Failure S3ObjectLocation repositories.s3Config contains=S3 resource reference must contain a bucket

@@ -1,0 +1,9 @@
+=== ENVIRONMENT ===
+ORION_ROOT=/srv/orion
+
+=== SOURCE string ===
+${ORION_ROOT:-orion_root}/orion.xml
+
+=== EXPECTED ===
+String .=/srv/orion/orion.xml
+Path .=/srv/orion/orion.xml

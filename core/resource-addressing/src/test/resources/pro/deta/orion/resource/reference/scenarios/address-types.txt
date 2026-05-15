@@ -1,0 +1,17 @@
+=== ENVIRONMENT ===
+CONFIG_BUCKET=orion-configs
+GIT_SSH_HOST=git.ssh.example
+
+=== SOURCE yaml ===
+repositories:
+  local: 'git+file:/var/lib/orion/repo?branch=main'
+  ssh: 'git+ssh://git@$GIT_SSH_HOST/orion/config.git?ref=main'
+resources:
+  emptyS3Key: 's3://$CONFIG_BUCKET?region=us-east-1'
+  inlineContent: 'content:bootstrap.baseDir=/srv/orion'
+
+=== EXPECTED ===
+GitRepositoryLocation repositories.local kind=LOCAL location=/var/lib/orion/repo ref=main
+GitRepositoryLocation repositories.ssh kind=SSH location=ssh://git@git.ssh.example/orion/config.git ref=main
+S3ObjectLocation resources.emptyS3Key bucket=orion-configs key= region=us-east-1
+ResourceContent resources.inlineContent text=bootstrap.baseDir=/srv/orion

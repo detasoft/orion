@@ -1,0 +1,10 @@
+=== ENVIRONMENT ===
+
+=== SOURCE yaml ===
+bootstrap:
+  baseDir: '${storage.root}'
+storage:
+  root: '${bootstrap.baseDir}'
+
+=== EXPECTED ===
+Failure String bootstrap.baseDir contains=Resource reference cycle detected

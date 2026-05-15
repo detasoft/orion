@@ -1,0 +1,9 @@
+=== ENVIRONMENT ===
+ORION_CONFIG_DATA=bootstrap:\n  baseDir: /var/lib/orion\n
+
+=== SOURCE yaml ===
+bootstrap:
+  baseDir: '${yaml:$ORION_CONFIG_DATA/bootstrap/missing}'
+
+=== EXPECTED ===
+Failure String bootstrap.baseDir contains=Document path does not exist

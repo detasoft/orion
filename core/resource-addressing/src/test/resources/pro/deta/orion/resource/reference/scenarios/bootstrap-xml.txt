@@ -1,0 +1,16 @@
+=== ENVIRONMENT ===
+ORION_ROOT=/opt/orion
+PATH_TO_CONFIG=etc/orion.xml
+HTTP_PORT=18111
+
+=== SOURCE xml ===
+<bootstrap>
+  <baseDir>${ORION_ROOT:-orion_root}</baseDir>
+  <configPath>${bootstrap.baseDir}/$PATH_TO_CONFIG</configPath>
+  <httpPort>${HTTP_PORT?http port is required}</httpPort>
+</bootstrap>
+
+=== EXPECTED ===
+String bootstrap.baseDir=/opt/orion
+Path bootstrap.configPath=/opt/orion/etc/orion.xml
+String bootstrap.httpPort=18111

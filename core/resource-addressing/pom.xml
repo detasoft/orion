@@ -14,7 +14,26 @@
     <groupId>pro.deta.orion.core</groupId>
     <artifactId>resource-addressing</artifactId>
 
+    <properties>
+        <antlr4.version>4.13.2</antlr4.version>
+    </properties>
+
     <dependencies>
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4-runtime</artifactId>
+            <version>${antlr4.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>2.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.moandjiezana.toml</groupId>
+            <artifactId>toml4j</artifactId>
+            <version>0.7.2</version>
+        </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
@@ -26,4 +45,61 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>generate-resource-reference-parser</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>org.antlr.v4.Tool</mainClass>
+                            <includePluginDependencies>true</includePluginDependencies>
+                            <blockSystemExit>true</blockSystemExit>
+                            <arguments>
+                                <argument>-visitor</argument>
+                                <argument>-no-listener</argument>
+                                <argument>-Xexact-output-dir</argument>
+                                <argument>-o</argument>
+                                <argument>${project.build.directory}/generated-sources/resource-reference/pro/deta/orion/resource/reference/generated</argument>
+                                <argument>${project.basedir}/src/main/resources/pro/deta/orion/resource/reference/ResourceReference.g4</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.antlr</groupId>
+                        <artifactId>antlr4</artifactId>
+                        <version>${antlr4.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-resource-reference-generated-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/resource-reference</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

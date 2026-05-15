@@ -1,0 +1,8 @@
+=== ENVIRONMENT ===
+
+=== SOURCE yaml ===
+bootstrap:
+  baseDir: '${yaml:bootstrap/baseDir}'
+
+=== EXPECTED ===
+Failure String bootstrap.baseDir contains=Document source must be a nested reference

@@ -1,0 +1,20 @@
+=== ENVIRONMENT ===
+ORION_CONFIG_DATA=bootstrap:\n  baseDir: /var/lib/orion\n  paths:\n    config: etc/orion.yml\n  mirrors:\n    - s3://mirror-one/orion.yml\n    - s3://mirror-two/orion.yml\n
+ORION_RUNTIME_TOML=[bootstrap]\ndataDir = "/var/lib/orion/data"\n
+ORION_ACL_XML=<accessControl><users><root>admin</root></users></accessControl>
+
+=== SOURCE yaml ===
+bootstrap:
+  baseDir: '${yaml:$ORION_CONFIG_DATA/bootstrap/baseDir}'
+  configPath: '${bootstrap.baseDir}/${yaml:$ORION_CONFIG_DATA/bootstrap/paths/config}'
+  firstMirror: '${yaml:$ORION_CONFIG_DATA/bootstrap/mirrors/0}'
+  dataDir: '${toml:$ORION_RUNTIME_TOML/bootstrap/dataDir}'
+accessControl:
+  rootUser: '${xml:$ORION_ACL_XML/accessControl/users/root}'
+
+=== EXPECTED ===
+String bootstrap.baseDir=/var/lib/orion
+Path bootstrap.configPath=/var/lib/orion/etc/orion.yml
+String bootstrap.firstMirror=s3://mirror-one/orion.yml
+String bootstrap.dataDir=/var/lib/orion/data
+String accessControl.rootUser=admin

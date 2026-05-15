@@ -1,0 +1,10 @@
+=== ENVIRONMENT ===
+GIT_HOST=git.example.test
+
+=== SOURCE yaml ===
+repository:
+  remote: 'remotegit:https://$GIT_HOST/team/config.git?ref=main'
+
+=== EXPECTED ===
+Failure RemoteGitRepository repository.remote contains=No resource capability resolver
+WithResolver RemoteGitRepository repository.remote scheme=remotegit location=https://git.example.test/team/config.git ref=main

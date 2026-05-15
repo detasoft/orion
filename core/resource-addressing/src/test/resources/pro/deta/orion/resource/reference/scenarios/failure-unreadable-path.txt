@@ -1,0 +1,9 @@
+=== ENVIRONMENT ===
+ORION_CONFIG=/path/that/should/not/exist/orion.yml
+
+=== SOURCE yaml ===
+bootstrap:
+  baseDir: '${yaml:$ORION_CONFIG/bootstrap/baseDir}'
+
+=== EXPECTED ===
+Failure String bootstrap.baseDir contains=Cannot read document source
