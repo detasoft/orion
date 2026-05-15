@@ -23,11 +23,13 @@ class ExecutableLauncherScriptTest {
         assertTrue(script.contains("Default-Start:"));
         assertTrue(script.contains("Default-Stop:"));
         assertTrue(script.contains("java\" $JAVA_OPTS -jar \"$SELF\""));
+        assertTrue(script.contains("run_app verify \"$@\""));
 
         assertTrue(script.contains("run)"));
         assertTrue(script.contains("start)"));
         assertTrue(script.contains("stop)"));
         assertTrue(script.contains("status)"));
         assertTrue(script.contains("restart)"));
+        assertTrue(script.contains("verify)"));
     }
 }

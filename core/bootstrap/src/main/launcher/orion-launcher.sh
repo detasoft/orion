@@ -101,7 +101,7 @@ status_app() {
 }
 
 usage() {
-  echo "Usage: $0 {run|start|stop|status|restart} [orion arguments]"
+  echo "Usage: $0 {run|start|stop|status|restart|verify} [orion arguments]"
 }
 
 command=${1:-run}
@@ -125,6 +125,9 @@ case "$command" in
   restart)
     stop_app
     start_app "$@"
+    ;;
+  verify)
+    run_app verify "$@"
     ;;
   *)
     usage

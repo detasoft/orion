@@ -8,34 +8,54 @@ import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 import java.io.IOException;
+import java.io.PrintStream;
 
 @Slf4j
 public class App {
     public static void main(String[] args) throws IOException {
-        AppOptions options = parseOptions(args);
-        if (options.helpRequested()) {
-            System.out.print(AppOptions.usage());
-            return;
-        }
-
-        OrionComponent orionComponent = DaggerOrionComponent.builder()
-                .configurationProvider(configurationProvider(options))
-                .build();
-        int exitCode = run(orionComponent.orionApplicationLifecycle(), true);
+        int exitCode = runCommand(args, System.out, System.err, ReleaseVerifier.systemDefault());
         if (exitCode != 0) {
             System.exit(exitCode);
         }
     }
 
-    private static AppOptions parseOptions(String[] args) {
+    static int runCommand(String[] args, PrintStream output, PrintStream errors, ReleaseVerifier verifier)
+            throws IOException {
+        AppOptions options;
         try {
-            return AppOptions.parse(args);
+            options = AppOptions.parse(args);
         } catch (IllegalArgumentException e) {
-            System.err.println(e.getMessage());
-            System.err.print(AppOptions.usage());
-            System.exit(2);
-            throw e;
+            errors.println(e.getMessage());
+            errors.print(usageFor(args));
+            return 2;
         }
+
+        if (options.helpRequested()) {
+            output.print(options.command() == AppOptions.Command.VERIFY
+                    ? AppOptions.verifyUsage()
+                    : AppOptions.usage());
+            return 0;
+        }
+
+        if (options.command() == AppOptions.Command.VERIFY) {
+            return verifier.verify(options, output, errors);
+        }
+
+        return runApplication(options);
+    }
+
+    private static int runApplication(AppOptions options) {
+        OrionComponent orionComponent = DaggerOrionComponent.builder()
+                .configurationProvider(configurationProvider(options))
+                .build();
+        return run(orionComponent.orionApplicationLifecycle(), true);
+    }
+
+    private static String usageFor(String[] args) {
+        if (args.length > 0 && "verify".equals(args[0])) {
+            return AppOptions.verifyUsage();
+        }
+        return AppOptions.usage();
     }
 
     static ConfigurationProvider configurationProvider(AppOptions options) {
