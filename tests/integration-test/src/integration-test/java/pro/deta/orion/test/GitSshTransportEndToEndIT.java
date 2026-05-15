@@ -30,7 +30,6 @@ import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.acl.schema.AccessControlDraft;
-import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.schema.OrionConfiguration;
@@ -53,7 +52,6 @@ import java.nio.file.StandardCopyOption;
 import java.security.KeyPair;
 import java.security.PublicKey;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -230,8 +228,10 @@ class GitSshTransportEndToEndIT {
         KeyPair clientKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Client SSH key should be generated");
 
         startedOrion = startFreshOrion(orionRoot);
-        String rootPassword = String.valueOf(startedOrion.plainRootToken());
-        String rootToken = issueAdminToken(startedOrion, "root", rootPassword, 3_600);
+        String rootToken = TestBearerTokens.issueRootToken(
+                startedOrion.accessControlService(),
+                startedOrion.httpUrl("/api/admin/token"),
+                3_600);
         createManagedUser(startedOrion, rootToken, clientKey, repositoryName);
         createManagedRepository(startedOrion, rootToken, repositoryName);
 
@@ -399,33 +399,11 @@ class GitSshTransportEndToEndIT {
                 OBJECT_MAPPER.writeValueAsString(Map.of("name", repositoryName)));
     }
 
-    private static String issueAdminToken(StartedOrion orion, String username, String password, long expiresInSeconds) throws Exception {
-        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl("/api/admin/token").openConnection();
-        connection.setRequestMethod("POST");
-        connection.setDoOutput(true);
-        connection.setRequestProperty("Authorization", basicAuth(username, password));
-        connection.setRequestProperty("Content-Type", "application/json");
-        byte[] body = OBJECT_MAPPER.writeValueAsBytes(Map.of("expiresInSeconds", expiresInSeconds));
-        connection.setFixedLengthStreamingMode(body.length);
-        try (var output = connection.getOutputStream()) {
-            output.write(body);
-        }
-
-        assertThat(connection.getResponseCode())
-                .as("admin token issue")
-                .isEqualTo(HttpURLConnection.HTTP_OK);
-        try (InputStream input = connection.getInputStream()) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = OBJECT_MAPPER.readValue(input, Map.class);
-            return (String) response.get("token");
-        }
-    }
-
     private static void postAdmin(StartedOrion orion, String rootToken, String path, String payload) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) orion.httpUrl(path).openConnection();
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
-        connection.setRequestProperty("Authorization", bearerAuth(rootToken));
+        connection.setRequestProperty("Authorization", TestBearerTokens.bearer(rootToken));
         connection.setRequestProperty("Content-Type", "application/json");
         byte[] body = payload.getBytes(StandardCharsets.UTF_8);
         connection.setFixedLengthStreamingMode(body.length);
@@ -436,14 +414,6 @@ class GitSshTransportEndToEndIT {
         assertThat(connection.getResponseCode())
                 .as("admin POST %s", path)
                 .isEqualTo(HttpURLConnection.HTTP_CREATED);
-    }
-
-    private static String bearerAuth(String token) {
-        return "Bearer " + token;
-    }
-
-    private static String basicAuth(String username, String password) {
-        return "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
     }
 
     private static String issueTokenOverSsh(StartedOrion orion, KeyPair keyPair, long expiresInSeconds) throws Exception {
@@ -791,10 +761,6 @@ class GitSshTransportEndToEndIT {
                     configuration.getTransport().getHttp().getAddress(),
                     configuration.getTransport().getHttp().getPort(),
                     path);
-        }
-
-        private char[] plainRootToken() {
-            return accessControlService.plainRootToken(PlainRootTokenAccessForTests.create());
         }
 
         private void stopSynchronously() {

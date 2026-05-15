@@ -17,8 +17,6 @@ import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
 import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.auth.PlainRootTokenAccessForTests;
-import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.schema.OrionConfiguration;
@@ -35,7 +33,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -167,7 +164,10 @@ class OrionStartupIT {
         Path orionRoot = tempDir.resolve("orion");
 
         try (StartedOrion orion = startServerWithConfig(serverConfiguration(orionRoot))) {
-            String token = issueRootToken(orion);
+            String token = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"),
+                    600);
 
             long startedAtNanos = System.nanoTime();
             int responseCode = postShutdown(orion, token);
@@ -304,29 +304,12 @@ class OrionStartupIT {
         }
     }
 
-    private static String issueRootToken(StartedOrion orion) {
-        char[] rootToken = orion.accessControlService().plainRootToken(PlainRootTokenAccessForTests.create());
-        try {
-            TokenIssueResult issueResult = orion.accessControlService().authenticateUserAndIssueToken(
-                    "root",
-                    String.valueOf(rootToken).getBytes(StandardCharsets.UTF_8),
-                    600);
-            return switch (issueResult) {
-                case TokenIssueResult.Success(var token, var expiresAtEpochSecond) -> token;
-                case TokenIssueResult.Failure(var reason, var throwable) ->
-                        throw new AssertionError("Failed to issue root token: " + reason, throwable);
-            };
-        } finally {
-            Arrays.fill(rootToken, '\0');
-        }
-    }
-
     private static int postShutdown(StartedOrion orion, String token) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) orion.httpUrl("/api/admin/shutdown")
                 .openConnection();
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
-        connection.setRequestProperty("Authorization", "Bearer " + token);
+        connection.setRequestProperty("Authorization", TestBearerTokens.bearer(token));
         connection.setFixedLengthStreamingMode(0);
         try (var output = connection.getOutputStream()) {
             // Send an explicit empty POST body.
