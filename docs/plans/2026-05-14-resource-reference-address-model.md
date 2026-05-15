@@ -15,6 +15,131 @@ The new model should distinguish:
 - a resolved concrete address that can be passed to a backend;
 - the normalized scheme used for backend selection.
 
+## Current Discussion Status - 2026-05-15
+
+The design has moved away from colon-only nested references such as
+`file:env:ORION_CONFIG` as the primary syntax. That form is hard to read once
+defaults, paths, document dereferencing, and nested sources are combined. The
+sections below still describe the earlier direction and should be treated as
+historical context until this plan is rewritten.
+
+The current preferred direction is shell-style interpolation:
+
+```text
+$ORION_ROOT
+${ORION_ROOT}
+${ORION_ROOT:-orion_root}
+$ORION_ROOT/orion.xml
+$ORION_ROOT/$PATH_TO_CONFIG
+${ORION_ROOT:-orion_root}/orion.xml
+${bootstrap.baseDir}/orion.xml
+```
+
+Rules currently agreed:
+
+- `$NAME` and `${NAME}` read an immutable scalar value.
+- Four Bash-compatible default/required operators are supported for every
+  reference type, not only environment variables:
+  - `${NAME:-default}` uses `default` when `NAME` is unset or blank.
+  - `${NAME-default}` uses `default` only when `NAME` is unset; blank is a valid
+    value.
+  - `${NAME:?message}` fails with `message` when `NAME` is unset or blank.
+  - `${NAME?message}` fails with `message` only when `NAME` is unset; blank is a
+    valid value.
+- Blank means `String.isBlank()` after the referenced value has been converted
+  to a string.
+- Assignment-style operators such as `${NAME:=default}` and `${NAME=default}`
+  are intentionally not supported because resolution is immutable.
+- `$NAME` is only a shorthand for simple names matching
+  `[A-Za-z_][A-Za-z0-9_]*`. It has no defaults, no dotted names, and no nested
+  syntax. Use `${...}` for every complex reference.
+- Names without dots are environment references by default.
+- Dotted names such as `${bootstrap.baseDir}` refer to the current resolution
+  context or configuration model.
+- References may point back into the same configuration model, so resolution
+  must detect direct and indirect cycles.
+- Interpolation itself is read-only and immutable. Writable capabilities are
+  selected later by the call site.
+
+The call site should ask for a capability, not always for a low-level Java type.
+Examples:
+
+```java
+resolver.resolve(value, ResourceContent.class)
+resolver.resolve(value, Path.class)
+resolver.resolve(value, ExternalDirectory.class)
+resolver.resolve(value, RepositoryStorage.class)
+```
+
+This keeps address schemes from encoding operations. For example, `file:` should
+mean "local file resource", not always "read file now". If the call site asks for
+`Path`, it receives a path. If it asks for `ResourceContent`, the file resource
+is read as an immutable content snapshot. If the call site does not yet know the
+capability, it should first resolve to a neutral resolved reference/address and
+then dispatch by scheme and usage.
+
+Inline Kubernetes-style config data should be expressible explicitly. The
+current candidate is `content:` for literal content, while address schemes such
+as `file:`, `s3:`, and `git+...` still identify resources that can produce
+content:
+
+```text
+content:${ORION_CONFIG_DATA}
+file:${ORION_CONFIG_PATH:-config.yml}
+s3://${CONFIG_BUCKET}/orion.yml
+```
+
+Document dereferencing is still open. The requirement is to parse YAML, TOML, or
+XML content and read a property/path from it. Current examples:
+
+```text
+${yaml:${ORION_CONFIG_DATA}/bootstrap/baseDir}
+${yaml:$ORION_CONFIG_DATA/bootstrap/baseDir}
+${yaml:$ORION_CONFIG_PATH/bootstrap/baseDir}
+${yaml:${ORION_CONFIG_PATH:-config.yml}/bootstrap/baseDir}
+${yaml:${bootstrap.configPath}/bootstrap/baseDir}
+${xml:${ORION_ACL_PATH:-orion.xml}/accessControl/users/root}
+```
+
+The earlier `#` separator idea, for example
+`${xml:file:${ORION_ACL_PATH:-orion.xml}#/accessControl/users/root}`, is not
+settled. The current preference is to rely on nested `${...}` boundaries where
+needed instead of adding another separator. One unresolved point is how a schema
+reference such as `yaml:` or `xml:` decides whether its source is inline content,
+a local path, or another URL/address. The likely direction is:
+
+- parse inline content directly when the source is known content;
+- read `file:`, `s3:`, `git+...`, and similar address schemes as
+  `ResourceContent`;
+- allow `$NAME`, `${NAME}`, `${NAME:-default}`, and `${context.name}` as schema
+  sources, but parse them as AST nodes rather than concatenating strings first;
+- require a schema source to be either a nested `$...`/`${...}` reference or an
+  explicit address scheme. Plain inline text in `yaml:`/`xml:` without a nested
+  reference is not part of the current design;
+- after resolving the schema source, parse it directly if it resolves to
+  `ResourceContent` or obvious inline scalar content;
+- if the source resolves to `Path` or a valid address/URI, read it as
+  `ResourceContent` and then parse it;
+- if a source looks like a path or URI but cannot be read, fail rather than
+  silently treating the path string as inline document content.
+
+The schema reference must therefore be parsed as a structured node, for example:
+
+```text
+DocumentReference(
+  schema = yaml,
+  source = $ORION_CONFIG_PATH,
+  pointer = /bootstrap/baseDir
+)
+```
+
+The resolver should not first interpolate everything into one flat string and
+then try to rediscover where the document source ended and the document pointer
+began.
+
+Before implementation, this section should be turned into a revised syntax
+specification and test matrix for the `core/resource-addressing` module.
+
 ## Naming
 
 Use these names:
