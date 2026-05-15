@@ -1,5 +1,5 @@
 [bootstrap]
-baseDir = "target/orion_root"
+baseDir = "orion_root"
 workDir = "work"
 threadPoolSize = 10
 
@@ -10,7 +10,7 @@ paths = ["orion.xml"]
 createDefaultIfMissing = true
 
 [storage]
-location = "file:target/orion_root/repos"
+location = "repos"
 createOnPush = true
 
 [transport]

@@ -36,10 +36,11 @@ The equivalent Maven command is:
 mvn -pl core/bootstrap -am -Prun-server process-classes
 ```
 
-By default the server uses `target/orion_root` as its base directory and
-`target/orion_root/repos` as repository storage. On first startup it creates a
-default ACL in the `orion` repository and prints the generated `root` password
-once to stdout:
+By default the server uses `orion_root` as its base directory and
+`orion_root/repos` as repository storage. This directory is outside Maven's
+`target` tree, so `mvn clean` does not remove generated keys or the local ACL.
+On first startup it creates a default ACL in the `orion` repository and prints
+the generated `root` password once to stdout:
 
 ```text
 ---ROOT PASSWORD: <generated-password>
@@ -55,6 +56,11 @@ Default local listeners:
 
 The HTTPS listener uses a self-signed certificate unless
 `transport.https.ksystore` is configured.
+
+Use `--config <location>` to point Orion at a different YAML or TOML
+configuration. Configuration paths can use `env:NAME`, for example
+`bootstrap.baseDir: env:ORION_ROOT`, to resolve a runtime directory from an
+environment variable.
 
 ## Distribution
 

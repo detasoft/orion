@@ -1,6 +1,7 @@
 .idea
 target
 build
+/orion_root/
 # Ignore Gradle project-specific cache directory
 .gradle
 /orion

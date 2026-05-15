@@ -6,6 +6,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,6 +57,39 @@ class ConfigurationContextTest {
         assertThatThrownBy(() -> new ConfigurationContext(configuration).getFileGitStoragePath())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported repository storage location");
+    }
+
+    @Test
+    void resolvesEnvBaseDir() {
+        OrionConfiguration configuration = configuration(Path.of("unused"));
+        configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
+
+        Path baseDir = new ConfigurationContext(configuration, Map.of("ORION_ROOT", tempDir.toString()))
+                .getBaseDir();
+
+        assertThat(baseDir).isEqualTo(tempDir.toAbsolutePath());
+    }
+
+    @Test
+    void resolvesStorageLocationRelativeToEnvBaseDir() {
+        OrionConfiguration configuration = configuration(Path.of("unused"));
+        configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
+        configuration.getStorage().setLocation("repos");
+
+        Path storagePath = new ConfigurationContext(configuration, Map.of("ORION_ROOT", tempDir.toString()))
+                .getFileGitStoragePath();
+
+        assertThat(storagePath).isEqualTo(tempDir.resolve("repos").toAbsolutePath());
+    }
+
+    @Test
+    void rejectsMissingEnvBaseDir() {
+        OrionConfiguration configuration = configuration(Path.of("unused"));
+        configuration.getBootstrap().setBaseDir("env:ORION_ROOT");
+
+        assertThatThrownBy(() -> new ConfigurationContext(configuration, Map.of()).getBaseDir())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Environment variable ORION_ROOT is not set");
     }
 
     private OrionConfiguration configuration(Path baseDir) {
