@@ -52,6 +52,41 @@ class AppOptionsTest {
 
         assertEquals(AppOptions.Command.RUN, options.command());
         assertEquals("config.yml", options.configurationLocation());
+        assertEquals(java.util.List.of("--config", "config.yml"), options.applicationArguments());
+    }
+
+    @Test
+    void parsesStartCommandWithApplicationOptions() {
+        AppOptions options = AppOptions.parse(new String[]{"start", "--config", "config.yml"});
+
+        assertEquals(AppOptions.Command.START, options.command());
+        assertEquals("config.yml", options.configurationLocation());
+        assertEquals(java.util.List.of("--config", "config.yml"), options.applicationArguments());
+    }
+
+    @Test
+    void parsesRestartCommandWithApplicationOptions() {
+        AppOptions options = AppOptions.parse(new String[]{"restart", "--config=config.yml"});
+
+        assertEquals(AppOptions.Command.RESTART, options.command());
+        assertEquals("config.yml", options.configurationLocation());
+        assertEquals(java.util.List.of("--config", "config.yml"), options.applicationArguments());
+    }
+
+    @Test
+    void parsesStopCommand() {
+        AppOptions options = AppOptions.parse(new String[]{"stop"});
+
+        assertEquals(AppOptions.Command.STOP, options.command());
+        assertTrue(options.applicationArguments().isEmpty());
+    }
+
+    @Test
+    void parsesStatusCommand() {
+        AppOptions options = AppOptions.parse(new String[]{"status"});
+
+        assertEquals(AppOptions.Command.STATUS, options.command());
+        assertTrue(options.applicationArguments().isEmpty());
     }
 
     @Test
@@ -110,6 +145,19 @@ class AppOptionsTest {
 
         assertEquals(AppOptions.Command.VERIFY, options.command());
         assertTrue(options.helpRequested());
+    }
+
+    @Test
+    void rootUsageShowsSingleCommandOverview() {
+        String usage = AppOptions.usage();
+
+        assertTrue(usage.contains("Usage: orion [command] [options]"));
+        assertTrue(usage.contains("Commands:"));
+        assertTrue(usage.contains("run"));
+        assertTrue(usage.contains("start"));
+        assertTrue(usage.contains("restart"));
+        assertTrue(usage.contains("verify"));
+        assertFalse(usage.contains("Usage: orion verify [options]"));
     }
 
     @Test

@@ -56,11 +56,15 @@ URL.
 
 ## Runtime Behavior
 
-The POSIX launcher should only dispatch `verify` into Java:
+The POSIX launcher should keep LSB metadata, resolve the current artifact path,
+and pass all command line arguments into Java:
 
 ```sh
-java -jar orion.jar verify "$@"
+exec "$java" $JAVA_OPTS -jar "$SELF" "$@"
 ```
+
+Service process management and release verification both live in Java, not in
+the shell launcher.
 
 The Java command should:
 

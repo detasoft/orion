@@ -4,7 +4,7 @@
 
 **Goal:** Build Orion as a single self-executable jar without Spring Boot.
 
-**Architecture:** Package `core/bootstrap` as a shaded runnable jar, then prepend a small POSIX launcher script to create an executable jar that can run directly or act as an init.d service target. Keep the normal shaded jar available for `java -jar` use.
+**Architecture:** Package `core/bootstrap` as a shaded runnable jar, then prepend a small POSIX/LSB launcher script to create one executable jar that can run directly or act as an init.d service target. Keep the normal shaded jar available for `java -jar` use. The launcher only resolves the current artifact and passes arguments to the JVM; Java owns `start`, `stop`, `status`, and `restart`.
 
 **Tech Stack:** Maven, `maven-shade-plugin`, `maven-antrun-plugin`, Java 21, POSIX shell, existing `pro.deta.orion.App` entry point.
 
@@ -21,8 +21,8 @@ Add a JUnit test that reads `src/main/launcher/orion-launcher.sh` and checks:
 
 - it starts with `#!/bin/sh`;
 - it declares LSB init metadata;
-- it supports `run`, `start`, `stop`, `status`, and `restart`;
-- it delegates to `java -jar "$SELF"`.
+- it delegates to `java -jar "$SELF" "$@"`;
+- it does not implement `start`, `stop`, `status`, or `restart` in shell.
 
 **Step 2: Run the focused test**
 
@@ -101,6 +101,7 @@ Document:
 - `bootstrap-1.0-SNAPSHOT-all.jar` for `java -jar`;
 - `bootstrap-1.0-SNAPSHOT-executable.jar` for direct execution;
 - direct commands: `run`, `start`, `status`, `stop`, `restart`;
+- service commands are handled by Java, not the launcher script;
 - init.d symlink installation.
 
 **Step 2: Check formatting**

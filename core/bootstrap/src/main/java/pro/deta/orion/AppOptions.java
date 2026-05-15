@@ -2,6 +2,8 @@ package pro.deta.orion;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -10,6 +12,7 @@ record AppOptions(
         Command command,
         String configurationLocation,
         boolean helpRequested,
+        List<String> applicationArguments,
         Path verificationArtifact,
         Path releasePublicKey,
         URI releasePublicKeyUrl,
@@ -34,24 +37,45 @@ record AppOptions(
                 return parseVerify(args, 1, environment);
             }
             if ("run".equals(args[0])) {
-                return parseRun(args, 1);
+                return parseRun(Command.RUN, args, 1);
+            }
+            if ("start".equals(args[0])) {
+                return parseRun(Command.START, args, 1);
+            }
+            if ("restart".equals(args[0])) {
+                return parseRun(Command.RESTART, args, 1);
+            }
+            if ("stop".equals(args[0])) {
+                return parseServiceCommand(Command.STOP, args, 1);
+            }
+            if ("status".equals(args[0])) {
+                return parseServiceCommand(Command.STATUS, args, 1);
             }
             if ("help".equals(args[0])) {
-                return runOptions(null, true);
+                return commandOptions(Command.RUN, null, true);
             }
         }
 
-        return parseRun(args, 0);
+        return parseRun(Command.RUN, args, 0);
     }
 
     static String usage() {
         return """
-                Usage: orion [run] [options]
-                       orion verify [verify-options]
+                Usage: orion [command] [options]
 
-                Options:
+                Commands:
+                  run       Start Orion in the current JVM (default).
+                  start     Start Orion as a background service.
+                  stop      Stop the background service.
+                  status    Show background service status.
+                  restart   Restart the background service.
+                  verify    Verify the release artifact signature.
+
+                Options for run, start, and restart:
                   -c, --config <location>  Read configuration from a file path or classpath:// resource.
                   -h, --help               Show this help.
+
+                Use "orion verify --help" for signature verification options.
                 """;
     }
 
@@ -82,7 +106,7 @@ record AppOptions(
         return value.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
     }
 
-    private static AppOptions parseRun(String[] args, int startIndex) {
+    private static AppOptions parseRun(Command command, String[] args, int startIndex) {
         String configurationLocation = null;
         boolean helpRequested = false;
 
@@ -109,7 +133,21 @@ record AppOptions(
             }
         }
 
-        return runOptions(configurationLocation, helpRequested);
+        return commandOptions(command, configurationLocation, helpRequested);
+    }
+
+    private static AppOptions parseServiceCommand(Command command, String[] args, int startIndex) {
+        boolean helpRequested = false;
+
+        for (int i = startIndex; i < args.length; i++) {
+            String arg = args[i];
+            switch (arg) {
+                case "--help", "-h" -> helpRequested = true;
+                default -> throw new IllegalArgumentException("Unknown option: " + arg);
+            }
+        }
+
+        return commandOptions(command, null, helpRequested);
     }
 
     private static AppOptions parseVerify(String[] args, int startIndex, Map<String, String> environment) {
@@ -141,6 +179,7 @@ record AppOptions(
                 Command.VERIFY,
                 null,
                 helpRequested,
+                List.of(),
                 artifact,
                 publicKey,
                 publicKeyUrl,
@@ -151,11 +190,12 @@ record AppOptions(
         );
     }
 
-    private static AppOptions runOptions(String configurationLocation, boolean helpRequested) {
+    private static AppOptions commandOptions(Command command, String configurationLocation, boolean helpRequested) {
         return new AppOptions(
-                Command.RUN,
+                command,
                 configurationLocation,
                 helpRequested,
+                applicationArguments(configurationLocation),
                 null,
                 null,
                 null,
@@ -164,6 +204,17 @@ record AppOptions(
                 null,
                 null
         );
+    }
+
+    private static List<String> applicationArguments(String configurationLocation) {
+        if (configurationLocation == null) {
+            return List.of();
+        }
+
+        List<String> arguments = new ArrayList<>();
+        arguments.add("--config");
+        arguments.add(configurationLocation);
+        return List.copyOf(arguments);
     }
 
     private static String setConfigurationLocation(String currentValue, String nextValue) {
@@ -208,6 +259,10 @@ record AppOptions(
 
     enum Command {
         RUN,
+        START,
+        STOP,
+        STATUS,
+        RESTART,
         VERIFY
     }
 }

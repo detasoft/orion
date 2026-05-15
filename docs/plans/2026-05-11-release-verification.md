@@ -4,7 +4,7 @@
 
 **Goal:** Add a standard GPG-based verification path for Orion self-executable jar releases.
 
-**Architecture:** Keep detached GPG signatures as the independent source of truth. The POSIX launcher remains a thin process manager and dispatches `verify` into Java. The existing `AppOptions` parser owns both normal application options and `verify` options. `ReleaseVerifier` only executes key download, fingerprint checks, temporary GPG home setup, and invocation of external `gpg`. Maven creates a checksum for the executable artifact, while private-key signing remains a release step outside normal local builds.
+**Architecture:** Keep detached GPG signatures as the independent source of truth. The POSIX launcher remains a thin JVM handoff with LSB metadata. The existing `AppOptions` parser owns normal application options, service commands, and `verify` options. `ReleaseVerifier` only executes key download, fingerprint checks, temporary GPG home setup, and invocation of external `gpg`. Maven creates a checksum for the executable artifact, while private-key signing remains a release step outside normal local builds.
 
 **Tech Stack:** Java 21, GPG, POSIX shell, Maven Antrun, JUnit 5.
 
@@ -27,7 +27,7 @@ Cover:
 - verify options parse from CLI and environment;
 - verification fails closed when no fingerprint is supplied;
 - verification succeeds when the public key fingerprint matches;
-- the launcher dispatches `verify` to Java instead of implementing GPG logic in shell.
+- the launcher passes `verify` to Java instead of implementing GPG logic in shell.
 
 **Step 2: Run focused tests**
 
@@ -96,13 +96,15 @@ The verifier should:
 **Files:**
 - Modify: `core/bootstrap/src/main/launcher/orion-launcher.sh`
 
-Update the `verify)` case to call:
+Keep the LSB header, resolve the current artifact path, and pass all arguments
+to Java:
 
 ```sh
-run_app verify "$@"
+exec "$java" $JAVA_OPTS -jar "$SELF" "$@"
 ```
 
-Do not keep download, fingerprint, or GPG verification logic in shell.
+Do not keep service process management, download, fingerprint, or GPG
+verification logic in shell.
 
 ### Task 4: Generate Checksum Artifact
 

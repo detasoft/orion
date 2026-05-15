@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutableLauncherScriptTest {
@@ -23,13 +24,9 @@ class ExecutableLauncherScriptTest {
         assertTrue(script.contains("Default-Start:"));
         assertTrue(script.contains("Default-Stop:"));
         assertTrue(script.contains("java\" $JAVA_OPTS -jar \"$SELF\""));
-        assertTrue(script.contains("run_app verify \"$@\""));
-
-        assertTrue(script.contains("run)"));
-        assertTrue(script.contains("start)"));
-        assertTrue(script.contains("stop)"));
-        assertTrue(script.contains("status)"));
-        assertTrue(script.contains("restart)"));
-        assertTrue(script.contains("verify)"));
+        assertTrue(script.contains("exec \"$java\" $JAVA_OPTS -jar \"$SELF\" \"$@\""));
+        assertFalse(script.contains("start_app()"));
+        assertFalse(script.contains("stop_app()"));
+        assertFalse(script.contains("case \"$command\" in"));
     }
 }

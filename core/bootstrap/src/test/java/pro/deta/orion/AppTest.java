@@ -1,6 +1,7 @@
 package pro.deta.orion;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
@@ -11,6 +12,13 @@ import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.task.LifecycleTaskId;
 import pro.deta.orion.util.OrionProvider;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
@@ -20,6 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class AppTest {
+    @TempDir
+    private Path tempDir;
+
     @Test
     void runWaitsUntilLifecycleShutdown() throws Exception {
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of())) {
@@ -46,6 +57,68 @@ class AppTest {
         try (TestLifecycleContext context = new TestLifecycleContext(Set.of(failingInit))) {
             assertEquals(1, App.run(context.lifecycle(), false));
         }
+    }
+
+    @Test
+    void runCommandDelegatesStartToServiceManager() throws Exception {
+        RecordingLauncher launcher = new RecordingLauncher(new RecordingProcess(42));
+        OrionServiceManager manager = new OrionServiceManager(
+                new OrionServiceManager.Settings(
+                        "orion",
+                        tempDir,
+                        tempDir.resolve("orion.pid"),
+                        tempDir.resolve("orion.log"),
+                        Duration.ofSeconds(1),
+                        "java",
+                        "-Xmx256m",
+                        tempDir.resolve("orion.jar")
+                ),
+                launcher,
+                pid -> Optional.empty()
+        );
+
+        int exitCode = App.runCommand(
+                new String[]{"start", "--config", "config.yml"},
+                output(),
+                output(),
+                unusedVerifier(),
+                () -> manager
+        );
+
+        assertEquals(0, exitCode);
+        assertEquals(
+                List.of("java", "-Xmx256m", "-jar", tempDir.resolve("orion.jar").toString(), "run", "--config", "config.yml"),
+                launcher.command
+        );
+    }
+
+    @Test
+    void helpDoesNotCreateServiceManager() throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+        int exitCode = App.runCommand(
+                new String[]{"--help"},
+                new PrintStream(out, true, StandardCharsets.UTF_8),
+                output(),
+                unusedVerifier(),
+                () -> {
+                    throw new AssertionError("service manager should not be created for help");
+                }
+        );
+
+        assertEquals(0, exitCode);
+    }
+
+    private static PrintStream output() {
+        return new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8);
+    }
+
+    private static ReleaseVerifier unusedVerifier() {
+        return new ReleaseVerifier(command -> {
+            throw new AssertionError("verification should not be called");
+        }, (uri, destination) -> {
+            throw new AssertionError("download should not be called");
+        });
     }
 
     private static final class TestLifecycleContext implements AutoCloseable {
@@ -75,6 +148,54 @@ class AppTest {
         @Override
         public void close() {
             executor.shutdownNow();
+        }
+    }
+
+    private static final class RecordingLauncher implements OrionServiceManager.ProcessLauncher {
+        private final OrionServiceManager.ManagedProcess process;
+        private List<String> command;
+
+        private RecordingLauncher(OrionServiceManager.ManagedProcess process) {
+            this.process = process;
+        }
+
+        @Override
+        public OrionServiceManager.ManagedProcess start(List<String> command) {
+            this.command = command;
+            return process;
+        }
+    }
+
+    private static final class RecordingProcess implements OrionServiceManager.ManagedProcess {
+        private final long pid;
+
+        private RecordingProcess(long pid) {
+            this.pid = pid;
+        }
+
+        @Override
+        public long pid() {
+            return pid;
+        }
+
+        @Override
+        public boolean isAlive() {
+            return true;
+        }
+
+        @Override
+        public boolean destroy() {
+            return true;
+        }
+
+        @Override
+        public boolean destroyForcibly() {
+            return true;
+        }
+
+        @Override
+        public boolean waitFor(Duration timeout) {
+            return true;
         }
     }
 }

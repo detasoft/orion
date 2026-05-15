@@ -69,8 +69,8 @@ The build attaches two single-file jars:
 - `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-all.jar` - a regular shaded
   `java -jar` artifact.
 - `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar` - the same
-  application with Orion's POSIX launcher prepended for direct execution and
-  init.d-compatible commands.
+  application with Orion's POSIX/LSB launcher prepended for direct execution
+  and init.d service installation.
 
 The executable jar also gets a convenience checksum:
 
@@ -91,6 +91,10 @@ core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar status
 core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar stop
 core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar restart
 ```
+
+The launcher keeps the LSB metadata required by init.d, then passes the command
+line to the JVM. Service commands such as `start`, `stop`, `status`, and
+`restart` are handled by Orion's Java entry point.
 
 For a Linux service-style installation, copy the executable artifact to the
 target host and register it under `/etc/init.d`:

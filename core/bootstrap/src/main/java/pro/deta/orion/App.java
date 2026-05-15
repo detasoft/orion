@@ -9,18 +9,29 @@ import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 import java.io.IOException;
 import java.io.PrintStream;
+import java.util.function.Supplier;
 
 @Slf4j
 public class App {
     public static void main(String[] args) throws IOException {
-        int exitCode = runCommand(args, System.out, System.err, ReleaseVerifier.systemDefault());
+        int exitCode = runCommand(
+                args,
+                System.out,
+                System.err,
+                ReleaseVerifier.systemDefault(),
+                OrionServiceManager::systemDefault);
         if (exitCode != 0) {
             System.exit(exitCode);
         }
     }
 
-    static int runCommand(String[] args, PrintStream output, PrintStream errors, ReleaseVerifier verifier)
-            throws IOException {
+    static int runCommand(
+            String[] args,
+            PrintStream output,
+            PrintStream errors,
+            ReleaseVerifier verifier,
+            Supplier<OrionServiceManager> serviceManagerSupplier
+    ) throws IOException {
         AppOptions options;
         try {
             options = AppOptions.parse(args);
@@ -41,7 +52,14 @@ public class App {
             return verifier.verify(options, output, errors);
         }
 
-        return runApplication(options);
+        return switch (options.command()) {
+            case RUN -> runApplication(options);
+            case START -> serviceManagerSupplier.get().start(options.applicationArguments(), output, errors);
+            case STOP -> serviceManagerSupplier.get().stop(output, errors);
+            case STATUS -> serviceManagerSupplier.get().status(output, errors);
+            case RESTART -> serviceManagerSupplier.get().restart(options.applicationArguments(), output, errors);
+            case VERIFY -> throw new IllegalStateException("Verify command should be handled earlier");
+        };
     }
 
     private static int runApplication(AppOptions options) {
