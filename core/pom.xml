@@ -24,6 +24,7 @@
         <module>bootstrap</module>
         <module>configuration</module>
         <module>common</module>
+        <module>lifecycle-state-machine</module>
         <module>git-common</module>
         <module>git-storage</module>
         <module>authorization</module>
