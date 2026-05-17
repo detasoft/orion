@@ -26,6 +26,11 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.core</groupId>
+                <artifactId>resource-addressing-resolvers</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.core</groupId>
                 <artifactId>acl</artifactId>
                 <version>${project.version}</version>
             </dependency>

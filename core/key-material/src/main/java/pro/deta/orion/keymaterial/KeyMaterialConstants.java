@@ -19,9 +19,6 @@ public final class KeyMaterialConstants {
     public static final Duration DEFAULT_STORAGE_CERTIFICATE_VALIDITY = Duration.ofDays(3650);
     public static final Duration STORAGE_CERTIFICATE_NOT_BEFORE_SKEW = Duration.ofMinutes(1);
     public static final int STORAGE_CERTIFICATE_SERIAL_BITS = 159;
-    public static final String HIDDEN_FILE_PREFIX = ".";
-    public static final String TEMP_FILE_EXTENSION = ".tmp";
-    public static final String LOCK_FILE_EXTENSION = ".lock";
 
     private KeyMaterialConstants() {
     }

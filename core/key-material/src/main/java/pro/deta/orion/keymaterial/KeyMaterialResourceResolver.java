@@ -1,9 +1,10 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.resource.address.ResourceContent;
+import pro.deta.orion.resource.address.ImmutableReference;
 import pro.deta.orion.resource.address.ResourceExpression;
 import pro.deta.orion.resource.address.ResourceResolver;
 import pro.deta.orion.resource.address.ResourceScheme;
+import pro.deta.orion.resource.address.ReferenceResolver;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -14,12 +15,14 @@ import java.util.Map;
 
 public final class KeyMaterialResourceResolver {
     private final ResourceResolver resolver;
+    private final ReferenceResolver referenceResolver;
 
     public KeyMaterialResourceResolver(ResourceResolver resolver) {
         if (resolver == null) {
             throw new IllegalArgumentException("Resource resolver must not be null");
         }
         this.resolver = resolver;
+        this.referenceResolver = new ReferenceResolver(resolver);
     }
 
     public static KeyMaterialResourceResolver standard() {
@@ -31,19 +34,10 @@ public final class KeyMaterialResourceResolver {
     }
 
     public KeyMaterialContentStore resolveStore(String locationReference) {
-        ResourceExpression expression = parse(locationReference, "Key material location reference must not be empty");
-        if (expression.hasScheme(ResourceScheme.ENV) && !expression.hasNested()) {
-            return resolveStore(resolver.resolve(expression, String.class));
-        }
-        if (expression.hasScheme(ResourceScheme.CONTENT)) {
-            ResourceContent content = resolver.resolve(expression, ResourceContent.class);
-            return new ReadOnlyKeyMaterialContentStore(content.bytes(), content.sourceName());
-        }
-        if (expression.hasEmptyScheme() || expression.hasScheme(ResourceScheme.FILE)) {
-            Path path = resolver.resolve(expression, Path.class);
-            return new LocalKeyMaterialContentStore(path);
-        }
-        throw new IllegalArgumentException("Unsupported key material location reference: " + locationReference);
+        ImmutableReference reference = referenceResolver.resolveLocation(
+                locationReference,
+                "Key material location reference must not be empty");
+        return new ReferenceKeyMaterialContentStore(reference);
     }
 
     public KeyMaterialOptions pkcs12Options(String passwordReference, boolean createIfMissing) throws IOException {
@@ -58,10 +52,12 @@ public final class KeyMaterialResourceResolver {
     public char[] resolvePassword(String passwordReference) throws IOException {
         ResourceExpression expression = parse(passwordReference, "Key material password reference must not be empty");
         String password;
-        if (expression.hasEmptyScheme()) {
-            password = expression.directValue();
-        } else if (expression.hasScheme(ResourceScheme.ENV) || expression.hasScheme(ResourceScheme.CONTENT)) {
-            password = resolver.resolve(expression, String.class);
+        if (expression.hasEmptyScheme()
+                || expression.hasScheme(ResourceScheme.ENV)
+                || expression.hasScheme(ResourceScheme.CONTENT)) {
+            ImmutableReference reference = resolver.resolve(expression, ImmutableReference.class);
+            password = reference.readString()
+                    .orElseThrow(() -> new IOException("Key material password reference did not resolve to content"));
         } else if (expression.hasScheme(ResourceScheme.FILE)) {
             Path path = resolver.resolve(expression, Path.class);
             password = removeSingleTrailingLineBreak(Files.readString(path, StandardCharsets.UTF_8));

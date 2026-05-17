@@ -101,6 +101,18 @@ class ResourceResolverTest {
     }
 
     @Test
+    void exposesStandardTargetTypes() {
+        assertThat(ResourceAddressTargetType.values()).containsExactly(
+                ResourceAddressTargetType.IMMUTABLE_REFERENCE,
+                ResourceAddressTargetType.MUTABLE_REFERENCE);
+        assertThat(ResourceResolver.standardTargetTypes()).containsExactly(
+                ImmutableReference.class,
+                MutableReference.class);
+        assertThat(ResourceAddressTargetType.IMMUTABLE_REFERENCE.kind()).isEqualTo(ResourceAddressTargetType.Kind.VALUE);
+        assertThat(ResourceAddressTargetType.MUTABLE_REFERENCE.kind()).isEqualTo(ResourceAddressTargetType.Kind.REFERENCE);
+    }
+
+    @Test
     void allowsDomainResolversForNewSchemesWithoutChangingRegistryCode() {
         ResourceResolver resolver = new ResourceResolver(List.of(new VaultSecretResolver()));
 

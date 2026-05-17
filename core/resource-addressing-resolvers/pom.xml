@@ -5,26 +5,28 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion.core</groupId>
-        <artifactId>core</artifactId>
+        <groupId>pro.deta.orion</groupId>
+        <artifactId>orion</artifactId>
         <version>${revision}</version>
-        <relativePath>../pom.xml</relativePath>
+        <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <artifactId>key-material</artifactId>
+    <groupId>pro.deta.orion.core</groupId>
+    <artifactId>resource-addressing-resolvers</artifactId>
 
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>bc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>resource-addressing-resolvers</artifactId>
+            <artifactId>resource-addressing</artifactId>
         </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

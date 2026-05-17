@@ -17,6 +17,7 @@
     <modules>
         <module>acl-model</module>
         <module>resource-addressing</module>
+        <module>resource-addressing-resolvers</module>
         <module>acl</module>
         <module>bc</module>
         <module>key-material</module>
