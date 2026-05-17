@@ -80,7 +80,8 @@ Phase 3: Admin token API.
 
 Add endpoints to create, list, revoke, and rotate application tokens. The create
 response returns the token once. List responses never include token secret
-material.
+material. The detailed admin API and usage-accounting design lives in
+`docs/plans/2026-05-17-application-token-admin-api-usage.md`.
 
 Phase 4: JWT improvements.
 

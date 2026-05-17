@@ -194,17 +194,9 @@ a later user-state model, the token must stop authenticating.
 
 ## Admin API Follow-Up
 
-This plan does not need to implement admin routes, but the model should support
-the next API shape:
-
-- `POST /api/admin/application-tokens`;
-- `GET /api/admin/application-tokens`;
-- `GET /api/admin/application-tokens/{id}`;
-- `POST /api/admin/application-tokens/{id}/revoke`;
-- `POST /api/admin/application-tokens/{id}/rotate`.
-
-Responses must never include `verifierHash` or raw token secrets except the
-single successful create or rotate response.
+This plan does not need to implement admin routes. The detailed route,
+authorization, redaction, rotation, and last-used accounting design now lives in
+`docs/plans/2026-05-17-application-token-admin-api-usage.md`.
 
 ## Open Questions
 
