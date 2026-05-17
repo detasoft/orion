@@ -17,6 +17,7 @@ public final class StateMachineDefinition {
 
     private final Map<StateActionKey, StateTransition<?>> transitions;
     private final Set<State> terminalStates;
+    private final Set<State> states;
 
     private StateMachineDefinition(
             Map<StateActionKey, StateTransition<?>> transitions,
@@ -26,6 +27,7 @@ public final class StateMachineDefinition {
         allTerminalStates.add(FIN);
         allTerminalStates.addAll(terminalStates);
         this.terminalStates = Collections.unmodifiableSet(allTerminalStates);
+        this.states = collectStates(this.transitions, allTerminalStates);
     }
 
     public static State state(String name) {
@@ -51,12 +53,28 @@ public final class StateMachineDefinition {
         return terminalStates.contains(state);
     }
 
+    public Set<State> states() {
+        return states;
+    }
+
     public <A> Optional<StateTransition<A>> transition(State state, ActionBinding<A> action) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(action, "action");
         @SuppressWarnings("unchecked")
         StateTransition<A> transition = (StateTransition<A>) transitions.get(new StateActionKey(state, action));
         return Optional.ofNullable(transition);
+    }
+
+    public Optional<StateTransition<?>> transition(State state, ActionId actionId) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(actionId, "actionId");
+        for (Map.Entry<StateActionKey, StateTransition<?>> entry : transitions.entrySet()) {
+            if (Objects.equals(state, entry.getKey().state())
+                    && Objects.equals(actionId, entry.getKey().action().id())) {
+                return Optional.of(entry.getValue());
+            }
+        }
+        return Optional.empty();
     }
 
     public List<StateTransition<?>> transitionsFrom(State state) {
@@ -96,6 +114,20 @@ public final class StateMachineDefinition {
         return StateMachine.create(this);
     }
 
+    private static Set<State> collectStates(
+            Map<StateActionKey, StateTransition<?>> transitions,
+            Set<State> terminalStates) {
+        LinkedHashSet<State> result = new LinkedHashSet<>();
+        result.add(NEW);
+        for (StateTransition<?> transition : transitions.values()) {
+            result.add(transition.from());
+            result.add(transition.to());
+            result.add(transition.failureState());
+        }
+        result.addAll(terminalStates);
+        return Collections.unmodifiableSet(result);
+    }
+
     public static final class Builder {
         private final Map<StateActionKey, StateTransition<?>> transitions = new LinkedHashMap<>();
         private final Set<State> terminalStates = new LinkedHashSet<>();
@@ -126,8 +158,19 @@ public final class StateMachineDefinition {
             if (transitions.containsKey(key)) {
                 throw new IllegalArgumentException("Duplicate transition for state " + from + " and action " + action);
             }
+            rejectDuplicateActionId(from, action);
             transitions.put(key, transition);
             return this;
+        }
+
+        private void rejectDuplicateActionId(State from, ActionBinding<?> action) {
+            for (StateActionKey existing : transitions.keySet()) {
+                if (Objects.equals(existing.state(), from)
+                        && Objects.equals(existing.action().id(), action.id())) {
+                    throw new IllegalArgumentException(
+                            "Duplicate transition action id " + action.id() + " for state " + from);
+                }
+            }
         }
 
         public StateMachineDefinition build() {

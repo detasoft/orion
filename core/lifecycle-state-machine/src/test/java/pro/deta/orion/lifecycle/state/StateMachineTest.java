@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static java.lang.Thread.sleep;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
@@ -45,8 +46,29 @@ class StateMachineTest {
         assertThat(definition.newStateMachine().currentState()).isSameAs(NEW);
         assertThat(definition.isTerminalState(FIN)).isTrue();
         assertThat(definition.isTerminalState(NEW)).isFalse();
+        assertThat(definition.states()).containsExactly(NEW, FIN);
+        assertThat(definition.newStateMachine().states()).containsExactly(NEW, FIN);
         assertThat(state("NEW")).isSameAs(NEW);
         assertThat(state("FIN")).isSameAs(FIN);
+    }
+
+    @Test
+    void definitionExposesStatesUsedByTransitionsAndTerminalDeclarations() {
+        TestActions actions = new TestActions();
+        StateMachineDefinition definition = StateMachineDefinition.define()
+                .from(NEW)
+                .on(actions.start())
+                .to(RUNNING)
+                .failTo(FAILED)
+                .from(RUNNING)
+                .on(actions.stop())
+                .to(STOPPED)
+                .failTo(FAILED)
+                .terminal(STOPPED)
+                .build();
+
+        assertThat(definition.states()).containsExactly(NEW, RUNNING, FAILED, STOPPED, FIN);
+        assertThat(definition.newStateMachine().states()).containsExactly(NEW, RUNNING, FAILED, STOPPED, FIN);
     }
 
     @Test
@@ -77,6 +99,126 @@ class StateMachineTest {
         assertThat(event.failed()).isFalse();
         assertThat(machine.currentState()).isEqualTo(RUNNING);
         assertThat(machine.availableActions()).containsExactly(actions.stop());
+    }
+
+    @Test
+    void actionIdExecutionCascadesAcrossBindingsAvailableFromSuccessiveStates() {
+        State initReady = state("INIT_READY");
+        State aclReady = state("ACL_READY");
+        List<String> calls = new ArrayList<>();
+        ActionBinding<Void> startInit = ActionBinding.of(ActionId.START, ignored -> calls.add("init"));
+        ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> calls.add("acl"));
+        ActionBinding<Void> startTransports = ActionBinding.of(ActionId.START, ignored -> calls.add("transports"));
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(startInit)
+                .to(initReady)
+                .failTo(FAILED)
+
+                .from(initReady)
+                .on(startAcl)
+                .to(aclReady)
+                .failTo(FAILED)
+
+                .from(aclReady)
+                .on(startTransports)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+
+        List<StateTransitionEvent> events = machine.execute(ActionId.START, Void.EMPTY);
+
+        assertThat(calls).containsExactly("init", "acl", "transports");
+        assertThat(events)
+                .extracting(
+                        StateTransitionEvent::from,
+                        StateTransitionEvent::action,
+                        StateTransitionEvent::to)
+                .containsExactly(
+                        tuple(NEW, startInit, initReady),
+                        tuple(initReady, startAcl, aclReady),
+                        tuple(aclReady, startTransports, RUNNING));
+        assertThat(machine.currentState()).isEqualTo(RUNNING);
+    }
+
+    @Test
+    void actionIdExecutionStopsWhenNextStateHasNoSameActionId() {
+        TestActions actions = new TestActions();
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(actions.start())
+                .to(RUNNING)
+                .failTo(FAILED)
+
+                .from(RUNNING)
+                .on(actions.stop())
+                .to(FIN)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+
+        List<StateTransitionEvent> events = machine.execute(actions.start().id(), new StartAction("by id"));
+
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.action()).isSameAs(actions.start());
+            assertThat(event.to()).isEqualTo(RUNNING);
+        });
+        assertThat(machine.currentState()).isEqualTo(RUNNING);
+    }
+
+    @Test
+    void actionIdExecutionFailsWhenActionIdIsNotAvailableFromCurrentState() {
+        TestActions actions = new TestActions();
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(actions.start())
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+
+        assertThatThrownBy(() -> machine.execute(ActionId.STOP, Void.EMPTY))
+                .isInstanceOf(InvalidStateTransitionException.class)
+                .hasMessageContaining("Action STOP is not available from state NEW");
+        assertThat(machine.currentState()).isSameAs(NEW);
+    }
+
+    @Test
+    void actionIdExecutionStopsOnFailedLayer() {
+        State initReady = state("INIT_READY");
+        IllegalStateException failure = new IllegalStateException("acl failed");
+        List<String> calls = new ArrayList<>();
+        ActionBinding<Void> startInit = ActionBinding.of(ActionId.START, ignored -> calls.add("init"));
+        ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> {
+            calls.add("acl");
+            throw failure;
+        });
+        ActionBinding<Void> startTransports = ActionBinding.of(ActionId.START, ignored -> calls.add("transports"));
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(startInit)
+                .to(initReady)
+                .failTo(FAILED)
+
+                .from(initReady)
+                .on(startAcl)
+                .to(RUNNING)
+                .failTo(FAILED)
+
+                .from(RUNNING)
+                .on(startTransports)
+                .to(FIN)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+
+        assertThatThrownBy(() -> machine.execute(ActionId.START, Void.EMPTY))
+                .isInstanceOf(StateTransitionFailedException.class)
+                .hasCause(failure);
+
+        assertThat(calls).containsExactly("init", "acl");
+        assertThat(machine.currentState()).isEqualTo(FAILED);
     }
 
     @Test
@@ -130,6 +272,27 @@ class StateMachineTest {
                 .to(STOPPED)
                 .failTo(FAILED))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void duplicateActionIdFromSameStateIsRejected() {
+        ActionBinding<Void> firstStart = ActionBinding.of(ActionId.START, action -> {
+        });
+        ActionBinding<Void> secondStart = ActionBinding.of(ActionId.START, action -> {
+        });
+        StateMachineDefinition.Builder builder = StateMachineDefinition.define()
+                .from(NEW)
+                .on(firstStart)
+                .to(RUNNING)
+                .failTo(FAILED);
+
+        assertThatThrownBy(() -> builder
+                .from(NEW)
+                .on(secondStart)
+                .to(STOPPED)
+                .failTo(FAILED))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Duplicate transition action id START for state NEW");
     }
 
     @Test
@@ -510,6 +673,32 @@ class StateMachineTest {
         assertThat(machine.currentState()).isEqualTo(RUNNING);
         assertThat(event.payload()).isSameAs(Void.EMPTY);
         assertThat(calls).containsExactly(Void.EMPTY);
+    }
+
+    @Test
+    void transitionEventToStringOmitsEmptyPayloadAndMissingFailure() {
+        ActionBinding<Void> action = ActionBinding.of("test.empty", ignored -> {
+        });
+        StateTransitionEvent event = new StateTransitionEvent(NEW, action, Void.EMPTY, RUNNING, null);
+
+        assertThat(event.toString()).isEqualTo("StateTransitionEvent[from=NEW, action=test.empty, to=RUNNING]");
+    }
+
+    @Test
+    void transitionEventToStringIncludesNonEmptyPayloadAndFailure() {
+        ActionBinding<StartAction> action = ActionBinding.of("test.start", ignored -> {
+        });
+        IllegalStateException failure = new IllegalStateException("boom");
+        StateTransitionEvent event = new StateTransitionEvent(
+                NEW,
+                action,
+                new StartAction("request"),
+                FAILED,
+                failure);
+
+        assertThat(event.toString()).isEqualTo(
+                "StateTransitionEvent[from=NEW, action=test.start, payload=StartAction[request=request], "
+                        + "to=FAILED, failure=java.lang.IllegalStateException: boom]");
     }
 
     @Test

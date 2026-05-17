@@ -2,11 +2,20 @@ package pro.deta.orion.lifecycle.state;
 
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+/**
+ * Runtime instance of a {@link StateMachineDefinition}.
+ *
+ * <p>Executing by {@link ActionBinding} performs exactly one concrete transition. Executing by {@link ActionId} is the
+ * default high-level mode: the machine selects the currently available binding with that id, executes it, and keeps
+ * going while the same id remains available from the next state. Transitions are serialized per machine instance, and
+ * observer failures are logged without changing lifecycle behavior.</p>
+ */
 @Slf4j
 public final class StateMachine {
     private final StateMachineDefinition definition;
@@ -30,6 +39,10 @@ public final class StateMachine {
 
     public synchronized Set<ActionBinding<?>> availableActions() {
         return definition.availableActions(currentState);
+    }
+
+    public Set<StateMachineDefinition.State> states() {
+        return definition.states();
     }
 
     public synchronized List<StateTransition<?>> availableTransitions() {
@@ -71,6 +84,28 @@ public final class StateMachine {
     public <A> StateTransitionEvent execute(ActionBinding<A> action, A payload) {
         Objects.requireNonNull(action, "action");
         return executeTransition(action, payload);
+    }
+
+    public <A> List<StateTransitionEvent> execute(ActionId actionId, A payload) {
+        Objects.requireNonNull(actionId, "actionId");
+        return executeTransitionSequence(actionId, payload);
+    }
+
+    private synchronized <A> List<StateTransitionEvent> executeTransitionSequence(ActionId actionId, A payload) {
+        List<StateTransitionEvent> events = new ArrayList<>();
+        while (true) {
+            StateTransition<?> transition = definition.transition(currentState, actionId)
+                    .orElse(null);
+            if (transition == null) {
+                if (events.isEmpty()) {
+                    throw new InvalidStateTransitionException(currentState, actionId);
+                }
+                return List.copyOf(events);
+            }
+            @SuppressWarnings("unchecked")
+            ActionBinding<A> action = (ActionBinding<A>) transition.action();
+            events.add(executeTransition(action, payload));
+        }
     }
 
     private synchronized <A> StateTransitionEvent executeTransition(ActionBinding<A> action, A payload) {

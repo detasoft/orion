@@ -22,4 +22,19 @@ public record StateTransitionEvent(
     public boolean failed() {
         return failure != null;
     }
+
+    @Override
+    public String toString() {
+        StringBuilder builder = new StringBuilder("StateTransitionEvent[");
+        builder.append("from=").append(from);
+        builder.append(", action=").append(action);
+        if (payload != Void.EMPTY) {
+            builder.append(", payload=").append(payload);
+        }
+        builder.append(", to=").append(to);
+        if (failure != null) {
+            builder.append(", failure=").append(failure);
+        }
+        return builder.append(']').toString();
+    }
 }
