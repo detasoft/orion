@@ -1,11 +1,13 @@
 package pro.deta.orion.lifecycle.state;
 
-import java.time.Instant;
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+@Slf4j
 public final class StateMachine {
     private final StateMachineDefinition definition;
     private final List<StateMachineListener> listeners = new CopyOnWriteArrayList<>();
@@ -32,10 +34,6 @@ public final class StateMachine {
 
     public synchronized List<StateTransition<?>> availableTransitions() {
         return definition.transitionsFrom(currentState);
-    }
-
-    public synchronized List<StateTransition<?>> transitionsFrom(StateMachineDefinition.State state) {
-        return definition.transitionsFrom(state);
     }
 
     public synchronized StateMachineSnapshot snapshot() {
@@ -70,61 +68,48 @@ public final class StateMachine {
         return () -> subscribers.remove(subscriber);
     }
 
-    public <A> StateMachineEvent execute(ActionBinding<A> action, A payload) {
+    public <A> StateTransitionEvent execute(ActionBinding<A> action, A payload) {
         Objects.requireNonNull(action, "action");
         return executeTransition(action, payload);
     }
 
-    public <A> StateMachineEvent execute(StateTransition<A> transition, A payload) {
-        Objects.requireNonNull(transition, "transition");
-        return executeTransition(transition.action(), payload);
-    }
-
-    private synchronized <A> StateMachineEvent executeTransition(ActionBinding<A> action, A payload) {
+    private synchronized <A> StateTransitionEvent executeTransition(ActionBinding<A> action, A payload) {
         StateTransition<A> transition = definition.transition(currentState, action)
                 .orElseThrow(() -> new InvalidStateTransitionException(currentState, action.id()));
         StateMachineDefinition.State oldState = currentState;
-        Instant transitionStartedAt = Instant.now();
         transitionInProgress = transition;
         try {
-            notifySubscribers(new StateMachineEventPoint(
-                    StateMachineEventPointType.TRANSITION_STARTED,
+            notifySubscribers(new StateMachineEvent(
+                    StateMachineEventType.TRANSITION_STARTED,
                     oldState,
                     action,
                     payload,
                     transition.to(),
                     oldState,
-                    null,
-                    transitionStartedAt));
-            Instant functionStartedAt = Instant.now();
-            notifySubscribers(new StateMachineEventPoint(
-                    StateMachineEventPointType.TRANSITION_FUNCTION_STARTED,
+                    null));
+            notifySubscribers(new StateMachineEvent(
+                    StateMachineEventType.TRANSITION_FUNCTION_STARTED,
                     oldState,
                     action,
                     payload,
                     transition.to(),
                     currentState,
-                    null,
-                    functionStartedAt));
+                    null));
             Exception failure = null;
-            Instant functionFinishedAt;
             try {
                 transition.execute(payload);
             } catch (Exception e) {
                 failure = e;
-            } finally {
-                functionFinishedAt = Instant.now();
             }
 
-            notifySubscribers(new StateMachineEventPoint(
-                    StateMachineEventPointType.TRANSITION_FUNCTION_FINISHED,
+            notifySubscribers(new StateMachineEvent(
+                    StateMachineEventType.TRANSITION_FUNCTION_FINISHED,
                     oldState,
                     action,
                     payload,
                     transition.to(),
                     currentState,
-                    failure,
-                    functionFinishedAt));
+                    failure));
             StateMachineDefinition.State nextState;
             if (failure == null) {
                 nextState = transition.to();
@@ -132,18 +117,15 @@ public final class StateMachine {
                 nextState = transition.failureState();
             }
             currentState = nextState;
-            Instant stateEnteredAt = Instant.now();
-            notifySubscribers(new StateMachineEventPoint(
-                    StateMachineEventPointType.STATE_ENTERED,
+            notifySubscribers(new StateMachineEvent(
+                    StateMachineEventType.STATE_ENTERED,
                     oldState,
                     action,
                     payload,
                     transition.to(),
                     currentState,
-                    failure,
-                    stateEnteredAt));
-            Instant transitionFinishedAt = Instant.now();
-            StateMachineEvent event = new StateMachineEvent(
+                    failure));
+            StateTransitionEvent event = new StateTransitionEvent(
                     oldState,
                     action,
                     payload,
@@ -151,44 +133,46 @@ public final class StateMachine {
                     failure);
             notifyListeners(event);
             if (failure == null) {
-                notifySubscribers(new StateMachineEventPoint(
-                        StateMachineEventPointType.TRANSITION_FINISHED,
+                notifySubscribers(new StateMachineEvent(
+                        StateMachineEventType.TRANSITION_FINISHED,
                         oldState,
                         action,
                         payload,
                         transition.to(),
                         currentState,
-                        null,
-                        transitionFinishedAt));
+                        null));
                 return event;
             }
-            notifySubscribers(new StateMachineEventPoint(
-                    StateMachineEventPointType.TRANSITION_FAILED,
+            notifySubscribers(new StateMachineEvent(
+                    StateMachineEventType.TRANSITION_FAILED,
                     oldState,
                     action,
                     payload,
                     transition.to(),
                     currentState,
-                    failure,
-                    transitionFinishedAt));
+                    failure));
             throw new StateTransitionFailedException(oldState, action.id(), transition.to(), currentState, failure);
         } finally {
             transitionInProgress = null;
         }
     }
 
-    private void notifyListeners(StateMachineEvent event) {
+    private void notifyListeners(StateTransitionEvent event) {
         for (StateMachineListener listener : listeners) {
-            listener.onTransition(event);
+            try {
+                listener.onTransition(event);
+            } catch (RuntimeException e) {
+                log.warn("State machine listener failed while observing transition {}", event, e);
+            }
         }
     }
 
-    private void notifySubscribers(StateMachineEventPoint event) {
+    private void notifySubscribers(StateMachineEvent event) {
         for (StateMachineEventSubscriber subscriber : subscribers) {
             try {
                 subscriber.onEvent(event);
-            } catch (RuntimeException ignored) {
-                // Subscribers observe diagnostics and must not change transition behavior.
+            } catch (RuntimeException e) {
+                log.warn("State machine subscriber failed while observing event {}", event, e);
             }
         }
     }

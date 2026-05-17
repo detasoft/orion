@@ -4,7 +4,7 @@ import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
-import pro.deta.orion.lifecycle.state.StateMachineEvent;
+import pro.deta.orion.lifecycle.state.StateTransitionEvent;
 import pro.deta.orion.lifecycle.state.StateMachineEventSubscriber;
 import pro.deta.orion.lifecycle.state.StateMachineSnapshot;
 import pro.deta.orion.lifecycle.state.StateMachineSubscription;
@@ -91,11 +91,11 @@ public final class GitNativeTransportStateMachine {
         return stateMachine.subscribe(subscriber);
     }
 
-    public StateMachineEvent start() {
+    public StateTransitionEvent start() {
         return stateMachine.execute(start, Void.EMPTY);
     }
 
-    public StateMachineEvent stop() {
+    public StateTransitionEvent stop() {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 

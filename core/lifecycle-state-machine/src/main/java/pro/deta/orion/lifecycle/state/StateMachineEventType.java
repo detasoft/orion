@@ -1,6 +1,6 @@
 package pro.deta.orion.lifecycle.state;
 
-public enum StateMachineEventPointType {
+public enum StateMachineEventType {
     TRANSITION_STARTED,
     TRANSITION_FUNCTION_STARTED,
     TRANSITION_FUNCTION_FINISHED,

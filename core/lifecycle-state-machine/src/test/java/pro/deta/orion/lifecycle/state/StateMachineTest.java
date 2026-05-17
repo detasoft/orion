@@ -1,6 +1,12 @@
 package pro.deta.orion.lifecycle.state;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
+import org.slf4j.LoggerFactory;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 
 import java.util.ArrayList;
@@ -13,17 +19,18 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static java.lang.Thread.sleep;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.STATE_ENTERED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FAILED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FINISHED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_STARTED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_FINISHED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_STARTED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.STATE_ENTERED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FAILED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_STARTED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_STARTED;
 
 class StateMachineTest {
     private static final State RUNNING = state("RUNNING");
@@ -61,7 +68,7 @@ class StateMachineTest {
         assertThat(machine.currentState()).isSameAs(NEW);
         assertThat(machine.availableActions()).containsExactly(actions.start());
 
-        StateMachineEvent event = machine.execute(actions.start(), new StartAction("first"));
+        StateTransitionEvent event = machine.execute(actions.start(), new StartAction("first"));
 
         assertThat(event.from()).isSameAs(NEW);
         assertThat(event.action()).isSameAs(actions.start());
@@ -138,7 +145,7 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        List<StateMachineEvent> events = new ArrayList<>();
+        List<StateTransitionEvent> events = new ArrayList<>();
         machine.addListener(events::add);
 
         StartAction payload = new StartAction("broken");
@@ -148,11 +155,12 @@ class StateMachineTest {
 
         assertThat(machine.currentState()).isEqualTo(FAILED);
         assertThat(events).hasSize(1);
-        assertThat(events.getFirst().from()).isSameAs(NEW);
-        assertThat(events.getFirst().action()).isSameAs(actions.start());
-        assertThat(events.getFirst().payload()).isSameAs(payload);
-        assertThat(events.getFirst().to()).isEqualTo(FAILED);
-        assertThat(events.getFirst().failure()).isSameAs(failure);
+        StateTransitionEvent firstEvent = events.getFirst();
+        assertThat(firstEvent.from()).isSameAs(NEW);
+        assertThat(firstEvent.action()).isSameAs(actions.start());
+        assertThat(firstEvent.payload()).isSameAs(payload);
+        assertThat(firstEvent.to()).isEqualTo(FAILED);
+        assertThat(firstEvent.failure()).isSameAs(failure);
     }
 
     @Test
@@ -165,7 +173,7 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        List<StateMachineEvent> events = new ArrayList<>();
+        List<StateTransitionEvent> events = new ArrayList<>();
         machine.addListener(events::add);
 
         machine.execute(actions.start(), new StartAction("ok"));
@@ -179,7 +187,49 @@ class StateMachineTest {
     }
 
     @Test
-    void subscriptionReceivesTransitionPointsThatSubscribersCanUseForTiming() {
+    void listenerFailureDoesNotAffectTransitionOrOtherObservers() {
+        TestActions actions = new TestActions();
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(actions.start())
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        IllegalStateException listenerFailure = new IllegalStateException("listener failed");
+        List<StateTransitionEvent> transitionEvents = new ArrayList<>();
+        List<StateMachineEvent> machineEvents = new ArrayList<>();
+        machine.addListener(event -> {
+            throw listenerFailure;
+        });
+        machine.addListener(transitionEvents::add);
+        machine.subscribe(machineEvents::add);
+
+        try (LogCapture logs = captureStateMachineLogs()) {
+            StateTransitionEvent event = machine.execute(actions.start(), new StartAction("ok"));
+
+            assertThat(event.to()).isEqualTo(RUNNING);
+            assertThat(machine.currentState()).isEqualTo(RUNNING);
+            assertThat(transitionEvents).singleElement().satisfies(observed -> assertThat(observed.to()).isEqualTo(RUNNING));
+            assertThat(machineEvents)
+                    .extracting(StateMachineEvent::type)
+                    .containsExactly(
+                            TRANSITION_STARTED,
+                            TRANSITION_FUNCTION_STARTED,
+                            TRANSITION_FUNCTION_FINISHED,
+                            STATE_ENTERED,
+                            TRANSITION_FINISHED);
+            assertThat(logs.events()).anySatisfy(record -> {
+                assertThat(record.getLevel()).isEqualTo(Level.WARN);
+                assertThat(record.getFormattedMessage())
+                        .contains("State machine listener failed while observing transition");
+                assertThat(record.getThrowableProxy().getMessage()).isEqualTo(listenerFailure.getMessage());
+            });
+        }
+    }
+
+    @Test
+    void subscriptionReceivesTransitionEventsThatSubscribersCanUseForTiming() {
         ActionBinding<Void> start = ActionBinding.of("timed-start", action -> {
         });
         StateMachine machine = StateMachineDefinition.define()
@@ -189,26 +239,22 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        List<StateMachineEventPoint> points = new ArrayList<>();
+        List<StateMachineEvent> events = new ArrayList<>();
 
-        machine.subscribe(points::add);
-        StateMachineEvent event = machine.execute(start, Void.EMPTY);
+        machine.subscribe(events::add);
+        StateTransitionEvent event = machine.execute(start, Void.EMPTY);
 
-        assertThat(points)
-                .extracting(StateMachineEventPoint::type)
+        assertThat(events)
+                .extracting(StateMachineEvent::type)
                 .containsExactly(
                         TRANSITION_STARTED,
                         TRANSITION_FUNCTION_STARTED,
                         TRANSITION_FUNCTION_FINISHED,
                         STATE_ENTERED,
                         TRANSITION_FINISHED);
-        assertThat(points.getFirst().currentState()).isSameAs(NEW);
-        assertThat(points.getFirst().targetState()).isEqualTo(RUNNING);
-        assertThat(points.get(3).currentState()).isEqualTo(RUNNING);
-        assertThat(points.get(1).occurredAt()).isAfterOrEqualTo(points.get(0).occurredAt());
-        assertThat(points.get(2).occurredAt()).isAfterOrEqualTo(points.get(1).occurredAt());
-        assertThat(points.get(3).occurredAt()).isAfterOrEqualTo(points.get(2).occurredAt());
-        assertThat(points.get(4).occurredAt()).isAfterOrEqualTo(points.get(3).occurredAt());
+        assertThat(events.getFirst().currentState()).isSameAs(NEW);
+        assertThat(events.getFirst().targetState()).isEqualTo(RUNNING);
+        assertThat(events.get(3).currentState()).isEqualTo(RUNNING);
         assertThat(event.to()).isEqualTo(RUNNING);
     }
 
@@ -227,28 +273,28 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        List<StateMachineEventPoint> points = new CopyOnWriteArrayList<>();
-        machine.subscribe(points::add);
+        List<StateMachineEvent> events = new CopyOnWriteArrayList<>();
+        machine.subscribe(events::add);
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
-            Future<StateMachineEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
+            Future<StateTransitionEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
             assertThat(handlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
 
-            assertThat(points)
-                    .extracting(StateMachineEventPoint::type)
+            assertThat(events)
+                    .extracting(StateMachineEvent::type)
                     .containsExactly(TRANSITION_STARTED, TRANSITION_FUNCTION_STARTED);
-            assertThat(points.getFirst().from()).isSameAs(NEW);
-            assertThat(points.getFirst().targetState()).isEqualTo(RUNNING);
-            assertThat(points.getFirst().currentState()).isSameAs(NEW);
-            assertThat(points.get(1).currentState()).isSameAs(NEW);
+            assertThat(events.getFirst().from()).isSameAs(NEW);
+            assertThat(events.getFirst().targetState()).isEqualTo(RUNNING);
+            assertThat(events.getFirst().currentState()).isSameAs(NEW);
+            assertThat(events.get(1).currentState()).isSameAs(NEW);
 
             releaseHandler.countDown();
-            StateMachineEvent event = future.get(2, TimeUnit.SECONDS);
+            StateTransitionEvent event = future.get(2, TimeUnit.SECONDS);
 
             assertThat(event.to()).isEqualTo(RUNNING);
-            assertThat(points)
-                    .extracting(StateMachineEventPoint::type)
+            assertThat(events)
+                    .extracting(StateMachineEvent::type)
                     .containsExactly(
                             TRANSITION_STARTED,
                             TRANSITION_FUNCTION_STARTED,
@@ -273,26 +319,26 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        List<StateMachineEventPoint> points = new ArrayList<>();
-        List<StateMachineEvent> completedEvents = new ArrayList<>();
-        machine.subscribe(points::add);
+        List<StateMachineEvent> events = new ArrayList<>();
+        List<StateTransitionEvent> completedEvents = new ArrayList<>();
+        machine.subscribe(events::add);
         machine.addListener(completedEvents::add);
 
         assertThatThrownBy(() -> machine.execute(start, Void.EMPTY))
                 .isInstanceOf(StateTransitionFailedException.class)
                 .hasCause(failure);
 
-        assertThat(points)
-                .extracting(StateMachineEventPoint::type)
+        assertThat(events)
+                .extracting(StateMachineEvent::type)
                 .containsExactly(
                         TRANSITION_STARTED,
                         TRANSITION_FUNCTION_STARTED,
                         TRANSITION_FUNCTION_FINISHED,
                         STATE_ENTERED,
                         TRANSITION_FAILED);
-        assertThat(points.get(2).failure()).isSameAs(failure);
-        assertThat(points.get(3).currentState()).isEqualTo(FAILED);
-        assertThat(points.get(4).failure()).isSameAs(failure);
+        assertThat(events.get(2).failure()).isSameAs(failure);
+        assertThat(events.get(3).currentState()).isEqualTo(FAILED);
+        assertThat(events.get(4).failure()).isSameAs(failure);
         assertThat(completedEvents).singleElement().satisfies(event -> {
             assertThat(event.failed()).isTrue();
             assertThat(event.failure()).isSameAs(failure);
@@ -310,13 +356,13 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        List<StateMachineEventPoint> points = new ArrayList<>();
+        List<StateMachineEvent> events = new ArrayList<>();
 
-        StateMachineSubscription subscription = machine.subscribe(points::add);
+        StateMachineSubscription subscription = machine.subscribe(events::add);
         subscription.close();
         machine.execute(start, Void.EMPTY);
 
-        assertThat(points).isEmpty();
+        assertThat(events).isEmpty();
     }
 
     @Test
@@ -330,20 +376,30 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
+        IllegalStateException subscriberFailure = new IllegalStateException("subscriber failed");
         machine.subscribe(event -> {
-            throw new IllegalStateException("subscriber failed");
+            throw subscriberFailure;
         });
 
-        StateMachineEvent event = machine.execute(start, Void.EMPTY);
+        try (LogCapture logs = captureStateMachineLogs()) {
+            StateTransitionEvent event = machine.execute(start, Void.EMPTY);
 
-        assertThat(event.to()).isEqualTo(RUNNING);
-        assertThat(event.failed()).isFalse();
-        assertThat(machine.currentState()).isEqualTo(RUNNING);
+            assertThat(event.to()).isEqualTo(RUNNING);
+            assertThat(event.failed()).isFalse();
+            assertThat(machine.currentState()).isEqualTo(RUNNING);
+            assertThat(logs.events()).anySatisfy(record -> {
+                assertThat(record.getLevel()).isEqualTo(Level.WARN);
+                assertThat(record.getFormattedMessage())
+                        .contains("State machine subscriber failed while observing event");
+                assertThat(record.getThrowableProxy().getMessage()).isEqualTo(subscriberFailure.getMessage());
+            });
+        }
     }
 
     @Test
-    void loggingSubscriberUsesOwnerClassAndLogsTransitionTimingPoints() {
+    void loggingSubscriberUsesOwnerClassAndLogsTransitionTimingEvents(TestInfo testInfo) {
         ActionBinding<Void> start = ActionBinding.of("logged-start", action -> {
+            sleep(100);
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
@@ -353,16 +409,17 @@ class StateMachineTest {
                 .build()
                 .newStateMachine();
         List<String> messages = new ArrayList<>();
-        machine.subscribe(new StateMachineLoggingSubscriber(StateMachineTest.class, messages::add));
-
-        machine.execute(start, Void.EMPTY);
+        String displayName = testInfo.getDisplayName();
+        try (StateMachineSubscription ignored = machine.subscribe(new StateMachineLoggingSubscriber(displayName, messages::add))) {
+            machine.execute(start, Void.EMPTY);
+        }
 
         assertThat(messages).hasSize(5);
-        assertThat(messages.get(0)).contains(StateMachineTest.class.getName(), "transition started: NEW --logged-start--> RUNNING");
-        assertThat(messages.get(1)).contains(StateMachineTest.class.getName(), "transition function started: NEW --logged-start--> RUNNING");
-        assertThat(messages.get(2)).contains(StateMachineTest.class.getName(), "transition function finished: NEW --logged-start--> RUNNING in PT");
-        assertThat(messages.get(3)).contains(StateMachineTest.class.getName(), "state entered: RUNNING");
-        assertThat(messages.get(4)).contains(StateMachineTest.class.getName(), "transition finished: NEW --logged-start--> RUNNING in PT");
+        assertThat(messages.get(0)).contains(displayName, "transition started: NEW --logged-start--> RUNNING");
+        assertThat(messages.get(1)).contains(displayName, "transition function started: NEW --logged-start--> RUNNING");
+        assertThat(messages.get(2)).contains(displayName, "transition function finished: NEW --logged-start--> RUNNING in PT");
+        assertThat(messages.get(3)).contains(displayName, "state entered: RUNNING in PT");
+        assertThat(messages.get(4)).contains(displayName, "transition finished: NEW --logged-start--> RUNNING in PT");
     }
 
     @Test
@@ -448,7 +505,7 @@ class StateMachineTest {
                 .build()
                 .newStateMachine();
 
-        StateMachineEvent event = machine.execute(action, Void.EMPTY);
+        StateTransitionEvent event = machine.execute(action, Void.EMPTY);
 
         assertThat(machine.currentState()).isEqualTo(RUNNING);
         assertThat(event.payload()).isSameAs(Void.EMPTY);
@@ -509,7 +566,7 @@ class StateMachineTest {
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
-            Future<StateMachineEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
+            Future<StateTransitionEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
             assertThat(handlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
 
             assertThat(machine.describe()).isEqualTo("""
@@ -552,7 +609,7 @@ class StateMachineTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         String transitioning;
         try {
-            Future<StateMachineEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
+            Future<StateTransitionEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
             assertThat(handlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
             transitioning = machine.describe();
             releaseHandler.countDown();
@@ -606,13 +663,13 @@ class StateMachineTest {
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<StateMachineEvent> startFuture =
+            Future<StateTransitionEvent> startFuture =
                     executor.submit(() -> machine.execute(actions.start(), new StartAction("slow")));
             assertThat(firstHandlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
-            Future<StateMachineEvent> stopFuture =
+            Future<StateTransitionEvent> stopFuture =
                     executor.submit(() -> machine.execute(actions.stop(), new StopAction("after start")));
 
-            Thread.sleep(100);
+            sleep(100);
             assertThat(stopFuture.isDone()).isFalse();
             releaseFirstHandler.countDown();
 
@@ -630,7 +687,39 @@ class StateMachineTest {
             StateMachine machine,
             StateTransition<?> transition,
             Object payload) {
-        machine.execute((StateTransition) transition, payload);
+        machine.execute(((StateTransition) transition).action(), payload);
+    }
+
+    private static LogCapture captureStateMachineLogs() {
+        return new LogCapture();
+    }
+
+    private static final class LogCapture implements AutoCloseable {
+        private final Logger logger = (Logger) LoggerFactory.getLogger(StateMachine.class);
+        private final Level previousLevel;
+        private final boolean previousAdditive;
+        private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+        private LogCapture() {
+            previousLevel = logger.getLevel();
+            previousAdditive = logger.isAdditive();
+            logger.setLevel(Level.WARN);
+            logger.setAdditive(false);
+            appender.start();
+            logger.addAppender(appender);
+        }
+
+        private List<ILoggingEvent> events() {
+            return appender.list;
+        }
+
+        @Override
+        public void close() {
+            logger.detachAppender(appender);
+            appender.stop();
+            logger.setLevel(previousLevel);
+            logger.setAdditive(previousAdditive);
+        }
     }
 
     private record StartAction(String request) {

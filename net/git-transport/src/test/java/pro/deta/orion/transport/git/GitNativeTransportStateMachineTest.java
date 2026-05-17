@@ -2,7 +2,7 @@ package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.lifecycle.state.InvalidStateTransitionException;
-import pro.deta.orion.lifecycle.state.StateMachineEventPoint;
+import pro.deta.orion.lifecycle.state.StateMachineEvent;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.state.Void;
 
@@ -15,11 +15,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.STATE_ENTERED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FINISHED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_STARTED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_FINISHED;
-import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_STARTED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.STATE_ENTERED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_STARTED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_STARTED;
 import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNING;
 
 class GitNativeTransportStateMachineTest {
@@ -123,9 +123,9 @@ class GitNativeTransportStateMachineTest {
     void subscriptionCanBeAttachedToWrapper() {
         GitNativeTransportStateMachine machine =
                 new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
-        List<StateMachineEventPoint> points = new ArrayList<>();
+        List<StateMachineEvent> events = new ArrayList<>();
 
-        machine.subscribe(points::add);
+        machine.subscribe(events::add);
         machine.start();
 
         assertEquals(
@@ -135,7 +135,7 @@ class GitNativeTransportStateMachineTest {
                         TRANSITION_FUNCTION_FINISHED,
                         STATE_ENTERED,
                         TRANSITION_FINISHED),
-                points.stream().map(StateMachineEventPoint::type).toList());
-        assertEquals(RUNNING, points.get(3).currentState());
+                events.stream().map(StateMachineEvent::type).toList());
+        assertEquals(RUNNING, events.get(3).currentState());
     }
 }
