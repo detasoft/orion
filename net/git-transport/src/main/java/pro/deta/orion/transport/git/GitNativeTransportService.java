@@ -29,16 +29,29 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 @Slf4j
 @Singleton
 public class GitNativeTransportService implements OrionApplicationStageEventListener {
+    private static final int DEFAULT_SOCKET_TIMEOUT_MILLIS = 5 * 1000;
+
     private final GitTransportConfig config;
     private final GitInternalService gitInternalService;
     private final OrionExecutor orionExecutor;
-    private ServerSocket listenSock;
+    private final int socketTimeoutMillis;
+    private volatile ServerSocket listenSock;
+    private volatile boolean stopRequested;
 
     @Inject
     public GitNativeTransportService(ConfigurationContext configurationContext, GitInternalService gitInternalService, OrionExecutor orionExecutor) {
-        this.config = configurationContext.getConfiguration().getTransport().getGit();
+        this(configurationContext.getConfiguration().getTransport().getGit(), gitInternalService, orionExecutor, DEFAULT_SOCKET_TIMEOUT_MILLIS);
+    }
+
+    GitNativeTransportService(
+            GitTransportConfig config,
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor,
+            int socketTimeoutMillis) {
+        this.config = config;
         this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;
+        this.socketTimeoutMillis = socketTimeoutMillis;
     }
 
     @Override
@@ -51,6 +64,7 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
 
     public OrionStageCallResult onStart() {
         if (config.isEnabled()) {
+            stopRequested = false;
             OrionStageCallResult callResult = new OrionStageCallResult(0);
             callResult.submit(orionExecutor, () -> listenService());
             return callResult;
@@ -61,19 +75,24 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
     private void listenService() {
         try {
             InetAddress serverSocketAddress = InetAddress.getByName(config.getAddress());
-            listenSock = new ServerSocket(config.getPort(), config.getBacklog(), serverSocketAddress);
+            ServerSocket serverSocket = new ServerSocket(config.getPort(), config.getBacklog(), serverSocketAddress);
+            listenSock = serverSocket;
+            if (stopRequested) {
+                serverSocket.close();
+                return;
+            }
             log.warn("Listening on {}:{} [{}]", config.getAddress(), config.getPort(), serverSocketAddress);
             orionExecutor.newDedicatedThread(() -> {
                 try {
                     Socket socket;
-                    while ((socket = listenSock.accept()) != null) {
+                    while (!stopRequested && (socket = serverSocket.accept()) != null) {
                         Socket finalSocket = socket;
                         orionExecutor.submit(() -> {
                             newConnectionInternal(finalSocket);
                         });
                     }
                 } catch (SocketException e) {
-                    if (!e.getMessage().equals("Socket closed")) {
+                    if (!"Socket closed".equals(e.getMessage())) {
                         log.error("Socket exception: ", e);
                         throw new RuntimeException(e);
                     } else {
@@ -99,7 +118,7 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
                     ClientConnectionResource.of(finalSocket.getRemoteSocketAddress()),
                     ConnectionAccessRules.localOnly());
             log.debug("Client connected {} via {}", requestId, config);
-            finalSocket.setSoTimeout(5 * 1000);
+            finalSocket.setSoTimeout(socketTimeoutMillis);
             try (StandardStreams streams = StreamUtils.newInstance(finalSocket.getInputStream(), finalSocket.getOutputStream(), NullOutputStream.INSTANCE)) {
                 gitInternalService.service(securityContext, finalSocket.getRemoteSocketAddress().toString(), streams, requestId, GitInternalService::parse);
             }
@@ -116,12 +135,23 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
     }
 
     public OrionStageCallResult onStop() {
+        stopRequested = true;
         try {
             if (listenSock != null)
                 listenSock.close();
         } catch (IOException e) {
             log.error("Error while closing socket.", e);
+        } finally {
+            listenSock = null;
         }
         return null;
+    }
+
+    InetSocketAddress boundAddress() {
+        ServerSocket socket = listenSock;
+        if (socket == null || !socket.isBound() || socket.isClosed()) {
+            return null;
+        }
+        return (InetSocketAddress) socket.getLocalSocketAddress();
     }
 }
