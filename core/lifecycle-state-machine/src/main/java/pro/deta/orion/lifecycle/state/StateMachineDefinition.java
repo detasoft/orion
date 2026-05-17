@@ -10,44 +10,59 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-public final class StateMachineDefinition<S> {
-    private final S initialState;
-    private final Map<StateActionKey<S>, StateTransition<S, ?>> transitions;
-    private final Set<S> terminalStates;
+public final class StateMachineDefinition {
+    public static final State NEW = new State("NEW");
+    public static final State FIN = new State("FIN");
+    public static final State ERR = state("ERR");
+
+    private final Map<StateActionKey, StateTransition<?>> transitions;
+    private final Set<State> terminalStates;
 
     private StateMachineDefinition(
-            S initialState,
-            Map<StateActionKey<S>, StateTransition<S, ?>> transitions,
-            Set<S> terminalStates) {
-        this.initialState = Objects.requireNonNull(initialState, "initialState");
+            Map<StateActionKey, StateTransition<?>> transitions,
+            Set<State> terminalStates) {
         this.transitions = Collections.unmodifiableMap(new LinkedHashMap<>(transitions));
-        this.terminalStates = Collections.unmodifiableSet(new LinkedHashSet<>(terminalStates));
+        LinkedHashSet<State> allTerminalStates = new LinkedHashSet<>();
+        allTerminalStates.add(FIN);
+        allTerminalStates.addAll(terminalStates);
+        this.terminalStates = Collections.unmodifiableSet(allTerminalStates);
     }
 
-    public static <S> Builder<S> startingAt(S initialState) {
-        return new Builder<>(initialState);
+    public static State state(String name) {
+        State state = new State(name);
+        if (NEW.equals(state)) {
+            return NEW;
+        }
+        if (FIN.equals(state)) {
+            return FIN;
+        }
+        return state;
     }
 
-    public S initialState() {
-        return initialState;
+    public static Builder define() {
+        return new Builder();
     }
 
-    public boolean isTerminalState(S state) {
+    public State initialState() {
+        return NEW;
+    }
+
+    public boolean isTerminalState(State state) {
         return terminalStates.contains(state);
     }
 
-    public <A> Optional<StateTransition<S, A>> transition(S state, ActionBinding<A> action) {
+    public <A> Optional<StateTransition<A>> transition(State state, ActionBinding<A> action) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(action, "action");
         @SuppressWarnings("unchecked")
-        StateTransition<S, A> transition = (StateTransition<S, A>) transitions.get(new StateActionKey<>(state, action));
+        StateTransition<A> transition = (StateTransition<A>) transitions.get(new StateActionKey(state, action));
         return Optional.ofNullable(transition);
     }
 
-    public List<StateTransition<S, ?>> transitionsFrom(S state) {
+    public List<StateTransition<?>> transitionsFrom(State state) {
         Objects.requireNonNull(state, "state");
-        List<StateTransition<S, ?>> result = new ArrayList<>();
-        for (Map.Entry<StateActionKey<S>, StateTransition<S, ?>> entry : transitions.entrySet()) {
+        List<StateTransition<?>> result = new ArrayList<>();
+        for (Map.Entry<StateActionKey, StateTransition<?>> entry : transitions.entrySet()) {
             if (Objects.equals(state, entry.getKey().state())) {
                 result.add(entry.getValue());
             }
@@ -55,48 +70,59 @@ public final class StateMachineDefinition<S> {
         return List.copyOf(result);
     }
 
-    public Set<ActionBinding<?>> availableActions(S state) {
+    public Set<ActionBinding<?>> availableActions(State state) {
         Objects.requireNonNull(state, "state");
         Set<ActionBinding<?>> result = new LinkedHashSet<>();
-        for (StateTransition<S, ?> transition : transitionsFrom(state)) {
+        for (StateTransition<?> transition : transitionsFrom(state)) {
             result.add(transition.action());
         }
         return Collections.unmodifiableSet(result);
     }
 
-    public StateMachine<S> newStateMachine() {
+    public String transitionDiagram() {
+        StringBuilder builder = new StringBuilder();
+        builder.append("transitions:");
+        if (transitions.isEmpty()) {
+            builder.append("\n  <none>");
+            return builder.toString();
+        }
+        for (StateTransition<?> transition : transitions.values()) {
+            builder.append("\n  ").append(transition.describe());
+        }
+        return builder.toString();
+    }
+
+    public StateMachine newStateMachine() {
         return StateMachine.create(this);
     }
 
-    public static final class Builder<S> {
-        private final S initialState;
-        private final Map<StateActionKey<S>, StateTransition<S, ?>> transitions = new LinkedHashMap<>();
-        private final Set<S> terminalStates = new LinkedHashSet<>();
+    public static final class Builder {
+        private final Map<StateActionKey, StateTransition<?>> transitions = new LinkedHashMap<>();
+        private final Set<State> terminalStates = new LinkedHashSet<>();
 
-        private Builder(S initialState) {
-            this.initialState = Objects.requireNonNull(initialState, "initialState");
+        private Builder() {
         }
 
-        public Builder<S> terminal(S terminalState) {
+        public Builder terminal(State terminalState) {
             terminalStates.add(Objects.requireNonNull(terminalState, "terminalState"));
             return this;
         }
 
-        public FromRule<S> from(S state) {
-            return new FromRule<>(this, state);
+        public FromRule from(State state) {
+            return new FromRule(this, state);
         }
 
-        private <A> Builder<S> addTransition(
-                S from,
+        private <A> Builder addTransition(
+                State from,
                 ActionBinding<A> action,
-                S to,
-                S failureState) {
-            StateTransition<S, A> transition = new StateTransition<>(
+                State to,
+                State failureState) {
+            StateTransition<A> transition = new StateTransition<>(
                     Objects.requireNonNull(from, "from"),
                     Objects.requireNonNull(action, "action"),
                     Objects.requireNonNull(to, "to"),
                     Objects.requireNonNull(failureState, "failureState"));
-            StateActionKey<S> key = new StateActionKey<>(from, action);
+            StateActionKey key = new StateActionKey(from, action);
             if (transitions.containsKey(key)) {
                 throw new IllegalArgumentException("Duplicate transition for state " + from + " and action " + action);
             }
@@ -104,67 +130,102 @@ public final class StateMachineDefinition<S> {
             return this;
         }
 
-        public StateMachineDefinition<S> build() {
-            return new StateMachineDefinition<>(
-                    initialState,
+        public StateMachineDefinition build() {
+            return new StateMachineDefinition(
                     new LinkedHashMap<>(transitions),
                     new LinkedHashSet<>(terminalStates));
         }
     }
 
-    public static final class FromRule<S> {
-        private final Builder<S> builder;
-        private final S state;
+    public static final class FromRule {
+        private final Builder builder;
+        private final State state;
 
-        private FromRule(Builder<S> builder, S state) {
+        private FromRule(Builder builder, State state) {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.state = Objects.requireNonNull(state, "state");
         }
 
-        public <A> ActionRule<S, A> on(ActionBinding<A> action) {
+        public <A> ActionRule<A> on(ActionBinding<A> action) {
             return new ActionRule<>(builder, state, action);
         }
     }
 
-    public static final class ActionRule<S, A> {
-        private final Builder<S> builder;
-        private final S from;
+    public static final class ActionRule<A> {
+        private final Builder builder;
+        private final State from;
         private final ActionBinding<A> action;
 
-        private ActionRule(Builder<S> builder, S from, ActionBinding<A> action) {
+        private ActionRule(Builder builder, State from, ActionBinding<A> action) {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.from = Objects.requireNonNull(from, "from");
             this.action = Objects.requireNonNull(action, "action");
         }
 
-        public TargetRule<S, A> to(S to) {
+        public TargetRule<A> to(State to) {
             return new TargetRule<>(builder, from, action, to);
         }
 
-        public TargetRule<S, A> stay() {
+        public TargetRule<A> stay() {
             return to(from);
         }
     }
 
-    public static final class TargetRule<S, A> {
-        private final Builder<S> builder;
-        private final S from;
+    public static final class TargetRule<A> {
+        private final Builder builder;
+        private final State from;
         private final ActionBinding<A> action;
-        private final S to;
+        private final State to;
 
-        private TargetRule(Builder<S> builder, S from, ActionBinding<A> action, S to) {
+        private TargetRule(Builder builder, State from, ActionBinding<A> action, State to) {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.from = Objects.requireNonNull(from, "from");
             this.action = Objects.requireNonNull(action, "action");
             this.to = Objects.requireNonNull(to, "to");
         }
 
-        public Builder<S> failTo(S failureState) {
+        public Builder failTo(State failureState) {
             return builder.addTransition(from, action, to, failureState);
         }
     }
 
-    private record StateActionKey<S>(S state, ActionBinding<?> action) {
+    public static final class State {
+        private final String name;
+
+        private State(String name) {
+            this.name = Objects.requireNonNull(name, "name");
+            if (name.isBlank()) {
+                throw new IllegalArgumentException("State name must not be blank");
+            }
+        }
+
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof State state)) {
+                return false;
+            }
+            return name.equals(state.name);
+        }
+
+        @Override
+        public int hashCode() {
+            return name.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return name;
+        }
+    }
+
+    private record StateActionKey(State state, ActionBinding<?> action) {
         private StateActionKey {
             Objects.requireNonNull(state, "state");
             Objects.requireNonNull(action, "action");

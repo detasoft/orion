@@ -1,35 +1,36 @@
 package pro.deta.orion.transport.git;
 
 import pro.deta.orion.lifecycle.state.ActionBinding;
-import pro.deta.orion.lifecycle.state.ServiceLifecycleState;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.StateMachineEvent;
 import pro.deta.orion.lifecycle.state.StateMachineSnapshot;
 import pro.deta.orion.lifecycle.state.Void;
 
 import java.util.Objects;
 
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.ERR;
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.FIN;
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.NEW;
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.RUNNING;
+import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
 
 public final class GitNativeTransportStateMachine {
+    public static final State RUNNING = state("RUNNING");
+
     private final GitNativeTransportService service;
     private final ActionBinding<Void> start;
     private final ActionBinding<Void> stop;
-    private final StateMachine<ServiceLifecycleState> stateMachine;
+    private final StateMachineDefinition definition;
+    private final StateMachine stateMachine;
 
     public GitNativeTransportStateMachine(GitNativeTransportService service) {
         this.service = Objects.requireNonNull(service, "service");
         start = ActionBinding.of("git-native-transport.start", Void.class, this::startGitTransport);
         stop = ActionBinding.of("git-native-transport.stop", Void.class, this::stopGitTransport);
-        stateMachine = definition().newStateMachine();
+        definition = defineStateMachine();
+        stateMachine = definition.newStateMachine();
     }
 
-    public StateMachineDefinition<ServiceLifecycleState> definition() {
-        return StateMachineDefinition.startingAt(NEW)
+    private StateMachineDefinition defineStateMachine() {
+        return StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
                 .to(RUNNING)
@@ -49,9 +50,11 @@ public final class GitNativeTransportStateMachine {
                 .on(stop)
                 .to(FIN)
                 .failTo(ERR)
-
-                .terminal(FIN)
                 .build();
+    }
+
+    public StateMachineDefinition definition() {
+        return definition;
     }
 
     public GitNativeTransportService service() {
@@ -66,23 +69,27 @@ public final class GitNativeTransportStateMachine {
         return stop;
     }
 
-    public StateMachine<ServiceLifecycleState> stateMachine() {
+    public StateMachine stateMachine() {
         return stateMachine;
     }
 
-    public ServiceLifecycleState currentState() {
+    public State currentState() {
         return stateMachine.currentState();
     }
 
-    public StateMachineSnapshot<ServiceLifecycleState> snapshot() {
+    public StateMachineSnapshot snapshot() {
         return stateMachine.snapshot();
     }
 
-    public StateMachineEvent<ServiceLifecycleState> start() {
+    public String describe() {
+        return stateMachine.describe();
+    }
+
+    public StateMachineEvent start() {
         return stateMachine.execute(start, Void.EMPTY);
     }
 
-    public StateMachineEvent<ServiceLifecycleState> stop() {
+    public StateMachineEvent stop() {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 

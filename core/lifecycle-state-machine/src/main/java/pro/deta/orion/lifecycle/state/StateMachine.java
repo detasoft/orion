@@ -5,21 +5,22 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-public final class StateMachine<S> {
-    private final StateMachineDefinition<S> definition;
-    private final List<StateMachineListener<S>> listeners = new CopyOnWriteArrayList<>();
-    private S currentState;
+public final class StateMachine {
+    private final StateMachineDefinition definition;
+    private final List<StateMachineListener> listeners = new CopyOnWriteArrayList<>();
+    private volatile StateMachineDefinition.State currentState;
+    private volatile StateTransition<?> transitionInProgress;
 
-    public StateMachine(StateMachineDefinition<S> definition) {
+    public StateMachine(StateMachineDefinition definition) {
         this.definition = Objects.requireNonNull(definition, "definition");
         currentState = definition.initialState();
     }
 
-    public static <S> StateMachine<S> create(StateMachineDefinition<S> definition) {
-        return new StateMachine<>(definition);
+    public static StateMachine create(StateMachineDefinition definition) {
+        return new StateMachine(definition);
     }
 
-    public synchronized S currentState() {
+    public synchronized StateMachineDefinition.State currentState() {
         return currentState;
     }
 
@@ -27,55 +28,73 @@ public final class StateMachine<S> {
         return definition.availableActions(currentState);
     }
 
-    public synchronized List<StateTransition<S, ?>> availableTransitions() {
+    public synchronized List<StateTransition<?>> availableTransitions() {
         return definition.transitionsFrom(currentState);
     }
 
-    public synchronized List<StateTransition<S, ?>> transitionsFrom(S state) {
+    public synchronized List<StateTransition<?>> transitionsFrom(StateMachineDefinition.State state) {
         return definition.transitionsFrom(state);
     }
 
-    public synchronized StateMachineSnapshot<S> snapshot() {
-        return new StateMachineSnapshot<>(
+    public synchronized StateMachineSnapshot snapshot() {
+        return new StateMachineSnapshot(
                 currentState,
                 definition.availableActions(currentState),
                 definition.isTerminalState(currentState));
     }
 
-    public void addListener(StateMachineListener<S> listener) {
+    public String describe() {
+        StateMachineDefinition.State state = currentState;
+        StateTransition<?> activeTransition = transitionInProgress;
+        StringBuilder builder = new StringBuilder();
+        builder.append("state: ").append(state);
+        builder.append("\nin progress: ");
+        if (activeTransition == null) {
+            builder.append("<none>");
+        } else {
+            builder.append(activeTransition.describe());
+        }
+        builder.append("\n").append(definition.transitionDiagram());
+        return builder.toString();
+    }
+
+    public void addListener(StateMachineListener listener) {
         listeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
-    public <A> StateMachineEvent<S> execute(ActionBinding<A> action, A payload) {
+    public <A> StateMachineEvent execute(ActionBinding<A> action, A payload) {
         Objects.requireNonNull(action, "action");
         return executeTransition(action, payload);
     }
 
-    public <A> StateMachineEvent<S> execute(StateTransition<S, A> transition, A payload) {
+    public <A> StateMachineEvent execute(StateTransition<A> transition, A payload) {
         Objects.requireNonNull(transition, "transition");
         return executeTransition(transition.action(), payload);
     }
 
-    private synchronized <A> StateMachineEvent<S> executeTransition(ActionBinding<A> action, A payload) {
-        StateTransition<S, A> transition = definition.transition(currentState, action)
+    private synchronized <A> StateMachineEvent executeTransition(ActionBinding<A> action, A payload) {
+        StateTransition<A> transition = definition.transition(currentState, action)
                 .orElseThrow(() -> new InvalidStateTransitionException(currentState, action.id()));
-        S oldState = currentState;
+        StateMachineDefinition.State oldState = currentState;
+        transitionInProgress = transition;
         try {
             transition.execute(payload);
+            currentState = transition.to();
+            StateMachineEvent event = new StateMachineEvent(oldState, action, payload, currentState, null);
+            notifyListeners(event);
+            return event;
         } catch (Exception e) {
             currentState = transition.failureState();
-            StateMachineEvent<S> event = new StateMachineEvent<>(oldState, action, payload, currentState, e);
+            StateMachineEvent event = new StateMachineEvent(oldState, action, payload, currentState, e);
             notifyListeners(event);
             throw new StateTransitionFailedException(oldState, action.id(), transition.to(), currentState, e);
+        } finally {
+            transitionInProgress = null;
         }
-        currentState = transition.to();
-        StateMachineEvent<S> event = new StateMachineEvent<>(oldState, action, payload, currentState, null);
-        notifyListeners(event);
-        return event;
     }
 
-    private void notifyListeners(StateMachineEvent<S> event) {
-        for (StateMachineListener<S> listener : listeners) {
+    private void notifyListeners(StateMachineEvent event) {
+        for (StateMachineListener listener : listeners) {
             listener.onTransition(event);
         }
     }

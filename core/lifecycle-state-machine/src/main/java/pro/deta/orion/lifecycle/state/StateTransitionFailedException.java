@@ -1,16 +1,16 @@
 package pro.deta.orion.lifecycle.state;
 
 public class StateTransitionFailedException extends RuntimeException {
-    private final Object from;
+    private final StateMachineDefinition.State from;
     private final ActionId action;
-    private final Object intendedState;
-    private final Object currentState;
+    private final StateMachineDefinition.State intendedState;
+    private final StateMachineDefinition.State currentState;
 
     public StateTransitionFailedException(
-            Object from,
+            StateMachineDefinition.State from,
             ActionId action,
-            Object intendedState,
-            Object currentState,
+            StateMachineDefinition.State intendedState,
+            StateMachineDefinition.State currentState,
             Throwable cause) {
         super("Action " + action + " failed while moving from " + from + " to " + intendedState, cause);
         this.from = from;
@@ -19,7 +19,7 @@ public class StateTransitionFailedException extends RuntimeException {
         this.currentState = currentState;
     }
 
-    public Object from() {
+    public StateMachineDefinition.State from() {
         return from;
     }
 
@@ -27,11 +27,11 @@ public class StateTransitionFailedException extends RuntimeException {
         return action;
     }
 
-    public Object intendedState() {
+    public StateMachineDefinition.State intendedState() {
         return intendedState;
     }
 
-    public Object currentState() {
+    public StateMachineDefinition.State currentState() {
         return currentState;
     }
 }

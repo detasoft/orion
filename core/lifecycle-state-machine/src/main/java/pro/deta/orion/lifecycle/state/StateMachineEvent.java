@@ -2,11 +2,11 @@ package pro.deta.orion.lifecycle.state;
 
 import java.util.Objects;
 
-public record StateMachineEvent<S>(
-        S from,
+public record StateMachineEvent(
+        StateMachineDefinition.State from,
         ActionBinding<?> action,
         Object payload,
-        S to,
+        StateMachineDefinition.State to,
         Throwable failure) {
     public StateMachineEvent {
         Objects.requireNonNull(from, "from");

@@ -2,11 +2,11 @@ package pro.deta.orion.lifecycle.state;
 
 import java.util.Objects;
 
-public record StateTransition<S, A>(
-        S from,
+public record StateTransition<A>(
+        StateMachineDefinition.State from,
         ActionBinding<A> action,
-        S to,
-        S failureState) {
+        StateMachineDefinition.State to,
+        StateMachineDefinition.State failureState) {
     public StateTransition {
         Objects.requireNonNull(from, "from");
         Objects.requireNonNull(action, "action");
@@ -16,5 +16,9 @@ public record StateTransition<S, A>(
 
     void execute(A payload) throws Exception {
         action.execute(payload);
+    }
+
+    public String describe() {
+        return from + " --" + action.id() + "--> " + to + " (fail -> " + failureState + ")";
     }
 }

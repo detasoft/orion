@@ -11,10 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.ERR;
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.FIN;
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.NEW;
-import static pro.deta.orion.lifecycle.state.ServiceLifecycleState.RUNNING;
+import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
+import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNING;
 
 class GitNativeTransportStateMachineTest {
     @Test
@@ -100,5 +98,16 @@ class GitNativeTransportStateMachineTest {
         assertEquals(Set.of(machine.stopAction()), machine.definition().availableActions(ERR));
         assertTrue(machine.definition().availableActions(FIN).isEmpty());
         assertEquals(NEW, machine.definition().newStateMachine().currentState());
+    }
+
+    @Test
+    void describeIncludesCurrentStateAndNativeTransportDiagram() {
+        GitNativeTransportStateMachine machine =
+                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
+
+        assertTrue(machine.describe().contains("state: NEW"));
+        assertTrue(machine.describe().contains("in progress: <none>"));
+        assertTrue(machine.describe().contains("NEW --git-native-transport.start--> RUNNING (fail -> ERR)"));
+        assertTrue(machine.describe().contains("RUNNING --git-native-transport.stop--> FIN (fail -> ERR)"));
     }
 }
