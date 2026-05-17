@@ -1,6 +1,8 @@
 package pro.deta.orion.test;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.TransportConfigCallback;
+import org.eclipse.jgit.api.errors.TransportException;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevWalk;
@@ -8,20 +10,34 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
+import org.eclipse.jgit.transport.TransportHttp;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.acl.schema.ACLUtil;
+import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.crypto.OrionPasswordHashingService;
 
+import java.io.ByteArrayOutputStream;
+import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RuntimeHttpGitRouteIT {
     private static final String BRANCH = "master";
+    private static final String TEST_PASSWORD = "password";
+    private static final String USERNAME = "http-git-user";
+    private static final String TEST_PASSWORD_HASH = new OrionPasswordHashingService()
+            .calculateHash(pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1, TEST_PASSWORD.toCharArray());
 
     @TempDir
     Path tempDir;
@@ -29,19 +45,46 @@ class RuntimeHttpGitRouteIT {
     @Test
     void jgitClientCanPushCloneAndFetchThroughHttpGitRoute() throws Exception {
         Path orionRoot = tempDir.resolve("orion-http-git");
-        String repositoryName = "http-project.git";
-        Path serverRepository = createHttpWritableRepository(orionRoot, repositoryName);
+        String repositoryName = "http-project";
+        Path serverRepository = orionRoot.resolve("repos").resolve(repositoryName);
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
-            String remoteUrl = orion.httpUrl("/r/" + repositoryName).toString();
+            String remoteUrl = orion.httpUrl("/r/" + repositoryName + ".git").toString();
             Path sourceDirectory = tempDir.resolve("http-source");
             Path cloneDirectory = tempDir.resolve("http-clone");
 
             try (Git source = initRepository(sourceDirectory)) {
                 ObjectId initialCommit = createCommit(source, "README.md", "hello over http\n", "initial http commit");
+                assertThatThrownBy(() -> source.push()
+                        .setRemote(remoteUrl)
+                        .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                        .call())
+                        .isInstanceOf(TransportException.class);
+                assertThat(serverRepository).doesNotExist();
+
+                String rootToken = TestBearerTokens.issueRootToken(
+                        orion.accessControlService(),
+                        orion.httpUrl("/api/admin/token"),
+                        600);
+                RuntimeHttpTestSupport.HttpResponse updateAcl = RuntimeHttpTestSupport.request(
+                        "POST",
+                        orion.httpUrl("/api/admin/acl"),
+                        TestBearerTokens.bearer(rootToken),
+                        "application/xml",
+                        serialize(accessControlForHttpGitUser(repositoryName)));
+                assertThat(updateAcl.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+
+                String userToken = TestBearerTokens.issueToken(
+                        orion.httpUrl("/api/admin/token"),
+                        USERNAME,
+                        TEST_PASSWORD.toCharArray(),
+                        600);
+                TransportConfigCallback authorization = bearerAuthorization(userToken);
+
                 Iterable<PushResult> pushResults = source.push()
                         .setRemote(remoteUrl)
+                        .setTransportConfigCallback(authorization)
                         .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
                         .call();
 
@@ -55,18 +98,21 @@ class RuntimeHttpGitRouteIT {
                         .setURI(remoteUrl)
                         .setDirectory(cloneDirectory.toFile())
                         .setBranch(BRANCH)
+                        .setTransportConfigCallback(authorization)
                         .call()) {
                     assertThat(Files.readString(cloneDirectory.resolve("README.md"))).isEqualTo("hello over http\n");
 
                     ObjectId updatedCommit = createCommit(source, "README.md", "updated over http\n", "update http commit");
                     source.push()
                             .setRemote(remoteUrl)
+                            .setTransportConfigCallback(authorization)
                             .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
                             .call();
                     assertRepositoryContains(serverRepository, updatedCommit, "README.md", "updated over http\n");
 
                     clone.fetch()
                             .setRemote("origin")
+                            .setTransportConfigCallback(authorization)
                             .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/remotes/origin/" + BRANCH))
                             .call();
                     assertThat(clone.getRepository().resolve("refs/remotes/origin/" + BRANCH)).isEqualTo(updatedCommit);
@@ -74,24 +120,38 @@ class RuntimeHttpGitRouteIT {
             }
         }
 
-        assertThat(orionRoot.resolve("repos").resolve("r").resolve(repositoryName)).doesNotExist();
+        assertThat(orionRoot.resolve("repos").resolve("r").resolve(repositoryName + ".git")).doesNotExist();
     }
 
-    private static Path createHttpWritableRepository(Path orionRoot, String repositoryName) throws Exception {
-        Path repositoryPath = orionRoot.resolve("repos").resolve(repositoryName);
-        Files.createDirectories(repositoryPath);
-        try (Git ignored = Git.init()
-                .setBare(true)
-                .setGitDir(repositoryPath.toFile())
-                .setInitialBranch(BRANCH)
-                .call()) {
-            // The bare repository is served through /r/<repository>.git.
+    private static AccessControl accessControlForHttpGitUser(String repositoryName) {
+        AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(
+                TEST_PASSWORD_HASH,
+                AccessControl.CredentialType.SHA1).toDraft();
+        AccessControlDraft.User user = ACLUtil.createUser(USERNAME, USERNAME + "@example.test")
+                .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH);
+        user.addGrant("REPOSITORY_" + repositoryName)
+                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
+                .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
+                .addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING)
+                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
+                .addKey(AccessControl.GrantKey.BRANCH, "*");
+        draft.getUsers().add(user);
+        return draft.toAccessControl();
+    }
+
+    private static byte[] serialize(AccessControl accessControl) throws Exception {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            new XmlService().serialize(accessControl, output);
+            return output.toByteArray();
         }
-        try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile())) {
-            repository.getConfig().setBoolean("http", null, "receivepack", true);
-            repository.getConfig().save();
-        }
-        return repositoryPath;
+    }
+
+    private static TransportConfigCallback bearerAuthorization(String token) {
+        return transport -> {
+            if (transport instanceof TransportHttp http) {
+                http.setAdditionalHeaders(Map.of("Authorization", TestBearerTokens.bearer(token)));
+            }
+        };
     }
 
     private static Git initRepository(Path directory) throws Exception {

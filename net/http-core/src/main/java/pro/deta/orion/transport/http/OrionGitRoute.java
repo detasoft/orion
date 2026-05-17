@@ -7,9 +7,21 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jgit.errors.RepositoryNotFoundException;
 import org.eclipse.jgit.http.server.GitFilter;
 import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.transport.ReceivePack;
+import org.eclipse.jgit.transport.ServiceMayNotContinueException;
+import org.eclipse.jgit.transport.UploadPack;
+import org.eclipse.jgit.transport.resolver.ServiceNotAuthorizedException;
 import pro.deta.orion.GitRepositoryProvider;
+import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.resource.RepositoryResource;
+import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
+import pro.deta.orion.auth.check.rule.SubjectAccessRules;
+import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -19,6 +31,7 @@ import java.util.Locale;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
+import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 public class OrionGitRoute implements OrionHttpRoute {
     public static final String URL_PATTERN = "/r/*";
@@ -28,10 +41,12 @@ public class OrionGitRoute implements OrionHttpRoute {
 
     @Inject
     public OrionGitRoute(GitRepositoryProvider gitRepositoryProvider) {
-        gitFilter.setRepositoryResolver((request, repositoryName) -> gitRepositoryProvider
-                .findOrCreate(repositoryName)
-                .valueOrFailure("Failed to open repository " + repositoryName)
-                .unwrapOrThrow(Repository.class));
+        gitFilter.setRepositoryResolver((request, repositoryName) -> openRepository(
+                gitRepositoryProvider,
+                request,
+                repositoryName));
+        gitFilter.setUploadPackFactory((request, repository) -> new UploadPack(repository));
+        gitFilter.setReceivePackFactory((request, repository) -> new ReceivePack(repository));
         try {
             gitFilter.init(new NoOpFilterConfig());
         } catch (ServletException e) {
@@ -63,6 +78,82 @@ public class OrionGitRoute implements OrionHttpRoute {
             return;
         }
         gitFilter.doFilter(gitRequest(req), resp, (request, response) -> ((HttpServletResponse) response).sendError(SC_NOT_FOUND));
+    }
+
+    static Repository openRepository(
+            GitRepositoryProvider gitRepositoryProvider,
+            HttpServletRequest request,
+            String rawRepositoryName)
+            throws RepositoryNotFoundException, ServiceNotAuthorizedException, ServiceMayNotContinueException {
+        String repositoryName = normalizeRepositoryName(rawRepositoryName);
+        GitOperation operation = operationFor(request);
+        SecurityContext securityContext = securityContextFrom(request);
+        RepositoryResource resource = RepositoryResource.of(repositoryName);
+        try {
+            accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
+            boolean repositoryExists = gitRepositoryProvider.exists(repositoryName);
+            if (operation == GitOperation.WRITE) {
+                if (repositoryExists) {
+                    accessEnforcer().require(securityContext, resource, RepositoryAccessRules.write());
+                    return repositoryFrom(gitRepositoryProvider.find(repositoryName), repositoryName);
+                }
+                accessEnforcer().require(securityContext, resource, RepositoryAccessRules.create());
+                return repositoryFrom(gitRepositoryProvider.findOrCreate(repositoryName), repositoryName);
+            }
+            if (!repositoryExists) {
+                throw new RepositoryNotFoundException(repositoryName);
+            }
+            accessEnforcer().require(securityContext, resource, RepositoryAccessRules.read());
+            return repositoryFrom(gitRepositoryProvider.find(repositoryName), repositoryName);
+        } catch (OrionSecurityException e) {
+            throw new ServiceNotAuthorizedException(e.getMessage());
+        }
+    }
+
+    private static Repository repositoryFrom(Result<GitRepository> result, String repositoryName)
+            throws RepositoryNotFoundException, ServiceMayNotContinueException {
+        return switch (result) {
+            case Result.Success<GitRepository>(var repository) -> repository.unwrapOrThrow(Repository.class);
+            case Result.Failure<GitRepository>(var code, var message, var throwable) -> {
+                if (code == Result.FailureCode.NOT_FOUND) {
+                    throw new RepositoryNotFoundException(repositoryName);
+                }
+                throw new ServiceMayNotContinueException("Cannot open repository " + repositoryName, throwable);
+            }
+            default -> throw new ServiceMayNotContinueException("Cannot open repository " + repositoryName);
+        };
+    }
+
+    private static SecurityContext securityContextFrom(HttpServletRequest req) {
+        Object attribute = req.getAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
+        if (attribute instanceof SecurityContext securityContext) {
+            return securityContext;
+        }
+        return SecurityContext.createContext().withRequestId(req.toString());
+    }
+
+    private static GitOperation operationFor(HttpServletRequest request) {
+        String service = request.getParameter("service");
+        if ("git-receive-pack".equals(service)) {
+            return GitOperation.WRITE;
+        }
+        String pathInfo = request.getPathInfo();
+        if (pathInfo != null && pathInfo.endsWith("/git-receive-pack")) {
+            return GitOperation.WRITE;
+        }
+        return GitOperation.READ;
+    }
+
+    private static String normalizeRepositoryName(String rawRepositoryName) throws RepositoryNotFoundException {
+        String repositoryName = rawRepositoryName == null ? "" : rawRepositoryName;
+        while (repositoryName.startsWith("/")) {
+            repositoryName = repositoryName.substring(1);
+        }
+        repositoryName = repositoryName.replaceFirst("\\.git$", "");
+        if (repositoryName.isBlank()) {
+            throw new RepositoryNotFoundException(rawRepositoryName);
+        }
+        return repositoryName;
     }
 
     private static HttpServletRequest gitRequest(HttpServletRequest req) {
@@ -116,6 +207,11 @@ public class OrionGitRoute implements OrionHttpRoute {
             return path.substring("/r".length());
         }
         return path;
+    }
+
+    private enum GitOperation {
+        READ,
+        WRITE
     }
 
     private static final class NoOpFilterConfig implements FilterConfig {

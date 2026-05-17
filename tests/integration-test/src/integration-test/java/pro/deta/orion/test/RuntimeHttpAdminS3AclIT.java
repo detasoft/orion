@@ -1,7 +1,5 @@
 package pro.deta.orion.test;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.XmlService;
@@ -11,27 +9,23 @@ import pro.deta.orion.acl.schema.AccessControlDraft;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.InetSocketAddress;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RuntimeHttpAdminS3AclIT {
     private static final String ACL_FILE = "orion.xml";
-    private static final String BUCKET = "orion-acl";
     private static final String TEST_PASSWORD = "password";
     private static final String TEST_PASSWORD_HASH = new OrionPasswordHashingService()
             .calculateHash(pro.deta.orion.crypto.PasswordHashingAlgorithm.SHA1, TEST_PASSWORD.toCharArray());
@@ -43,17 +37,17 @@ class RuntimeHttpAdminS3AclIT {
     void postAccessControlUpdatesS3StorageAndSurvivesRestart() throws Exception {
         Path orionRoot = tempDir.resolve("orion-s3");
         Path secretFile = tempDir.resolve("s3-secret.txt");
-        Files.writeString(secretFile, "fake-s3-secret");
+        String bucketName = "orion-acl-" + UUID.randomUUID().toString().replace("-", "");
 
-        TestPorts.Batch s3Ports = TestPorts.nextBatch();
-        try (FakeS3Server s3 = FakeS3Server.start(s3Ports.http())) {
-            s3.putObject(BUCKET, "bootstrap/" + ACL_FILE, serialize(defaultAccessControlWithUsers("s3-bootstrap-user")));
+        try (MinioS3TestServer s3 = MinioS3TestServer.start(bucketName)) {
+            Files.writeString(secretFile, s3.secretAccessKey());
+            s3.putObject("bootstrap/" + ACL_FILE, serialize(defaultAccessControlWithUsers("s3-bootstrap-user")));
             OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot, config -> {
-                config.getBootstrap().getAccessControl().setLocation("s3://" + BUCKET + "/bootstrap");
+                config.getBootstrap().getAccessControl().setLocation("s3://" + s3.bucketName() + "/bootstrap");
                 config.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
                 config.getBootstrap().getAccessControl().getAuth().put("endpoint", s3.endpoint());
                 config.getBootstrap().getAccessControl().getAuth().put("region", "us-east-1");
-                config.getBootstrap().getAccessControl().getAuth().put("accessKeyId", "fake-s3-access");
+                config.getBootstrap().getAccessControl().getAuth().put("accessKeyId", s3.accessKeyId());
                 config.getBootstrap().getAccessControl().getAuth().put("secretAccessKey", secretFile.toUri().toString());
             });
 
@@ -78,7 +72,7 @@ class RuntimeHttpAdminS3AclIT {
                 assertUserAuthenticates(orion, "s3-updated-user");
             }
 
-            AccessControl savedAcl = deserialize(s3.getObject(BUCKET, "bootstrap/" + ACL_FILE));
+            AccessControl savedAcl = deserialize(s3.getObject("bootstrap/" + ACL_FILE));
             assertThat(userIds(savedAcl)).contains("root", "s3-updated-user");
             assertThat(userIds(savedAcl)).doesNotContain("s3-bootstrap-user");
 
@@ -141,89 +135,5 @@ class RuntimeHttpAdminS3AclIT {
                 userId,
                 TEST_PASSWORD.getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(AuthenticationResult.Success.class);
-    }
-
-    private static final class FakeS3Server implements AutoCloseable {
-        private final HttpServer server;
-        private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
-
-        private FakeS3Server(HttpServer server) {
-            this.server = server;
-        }
-
-        private static FakeS3Server start(int port) throws IOException {
-            HttpServer server = HttpServer.create(new InetSocketAddress("localhost", port), 0);
-            FakeS3Server fakeS3 = new FakeS3Server(server);
-            server.createContext("/", fakeS3::handle);
-            server.start();
-            return fakeS3;
-        }
-
-        private String endpoint() {
-            return "http://localhost:" + server.getAddress().getPort();
-        }
-
-        private void putObject(String bucket, String key, byte[] content) {
-            objects.put(objectId(bucket, key), content.clone());
-        }
-
-        private byte[] getObject(String bucket, String key) {
-            byte[] content = objects.get(objectId(bucket, key));
-            assertThat(content).as("S3 object %s/%s", bucket, key).isNotNull();
-            return content.clone();
-        }
-
-        private void handle(HttpExchange exchange) throws IOException {
-            String objectId = objectId(exchange.getRequestURI().getPath());
-            if ("GET".equals(exchange.getRequestMethod())) {
-                byte[] content = objects.get(objectId);
-                if (content == null) {
-                    writeXml(exchange, HttpURLConnection.HTTP_NOT_FOUND, """
-                            <Error><Code>NoSuchKey</Code><Message>Not found</Message></Error>
-                            """);
-                    return;
-                }
-                exchange.sendResponseHeaders(HttpURLConnection.HTTP_OK, content.length);
-                try (OutputStream output = exchange.getResponseBody()) {
-                    output.write(content);
-                }
-                return;
-            }
-            if ("PUT".equals(exchange.getRequestMethod())) {
-                byte[] content = exchange.getRequestBody().readAllBytes();
-                objects.put(objectId, content);
-                writeXml(exchange, HttpURLConnection.HTTP_OK, "<PutObjectResult/>");
-                return;
-            }
-            writeXml(exchange, HttpURLConnection.HTTP_BAD_METHOD, """
-                    <Error><Code>MethodNotAllowed</Code></Error>
-                    """);
-        }
-
-        private static String objectId(String bucket, String key) {
-            return bucket + "/" + key;
-        }
-
-        private static String objectId(String requestPath) {
-            String path = URLDecoder.decode(requestPath, StandardCharsets.UTF_8);
-            while (path.startsWith("/")) {
-                path = path.substring(1);
-            }
-            return path;
-        }
-
-        private static void writeXml(HttpExchange exchange, int status, String content) throws IOException {
-            byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/xml");
-            exchange.sendResponseHeaders(status, bytes.length);
-            try (OutputStream output = exchange.getResponseBody()) {
-                output.write(bytes);
-            }
-        }
-
-        @Override
-        public void close() {
-            server.stop(0);
-        }
     }
 }

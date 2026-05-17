@@ -6,6 +6,10 @@ import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jgit.internal.storage.dfs.DfsRepositoryDescription;
+import org.eclipse.jgit.internal.storage.dfs.InMemoryRepository;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.transport.resolver.ServiceNotAuthorizedException;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.OrionAccessControlService;
@@ -23,12 +27,18 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 import pro.deta.orion.event.type.OrionEvent;
+import pro.deta.orion.git.common.GitFetchAccessRequest;
+import pro.deta.orion.git.common.GitOperationException;
+import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.InvocationHandler;
@@ -40,9 +50,12 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionHttpRouteServletTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -308,6 +321,52 @@ class OrionHttpRouteServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
         assertThat(response.headers).containsEntry("Allow", "GET, POST");
         assertThat(gitRepositoryProvider.lastCreatedRepository).isNull();
+    }
+
+    @Test
+    void gitHttpRepositoryResolverRejectsAnonymousWrite() {
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+
+        assertThatThrownBy(() -> OrionGitRoute.openRepository(
+                gitRepositoryProvider,
+                gitOperationRequest("GET", "/project.git/info/refs", "git-receive-pack", SecurityContext.createContext()),
+                "project.git"))
+                .isInstanceOf(ServiceNotAuthorizedException.class);
+
+        assertThat(gitRepositoryProvider.lastCreatedRepository).isNull();
+    }
+
+    @Test
+    void gitHttpRepositoryResolverRejectsExistingRepositoryWriteWithoutWriteGrant() {
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        gitRepositoryProvider.repositoryExists = true;
+
+        assertThatThrownBy(() -> OrionGitRoute.openRepository(
+                gitRepositoryProvider,
+                gitOperationRequest("POST", "/project.git/git-receive-pack", null, repositorySecurityContext("project", false, false)),
+                "project.git"))
+                .isInstanceOf(ServiceNotAuthorizedException.class);
+
+        assertThat(gitRepositoryProvider.lastFoundRepository).isNull();
+    }
+
+    @Test
+    void gitHttpRepositoryResolverCreatesWithCreateGrantAndReadsWithRepositoryGrant() throws Exception {
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+
+        Repository created = OrionGitRoute.openRepository(
+                gitRepositoryProvider,
+                gitOperationRequest("GET", "/project.git/info/refs", "git-receive-pack", repositorySecurityContext("project", true, true)),
+                "/project.git");
+        assertThat(created).isSameAs(gitRepositoryProvider.jgitRepository());
+        assertThat(gitRepositoryProvider.lastCreatedRepository).isEqualTo("project");
+
+        Repository found = OrionGitRoute.openRepository(
+                gitRepositoryProvider,
+                gitOperationRequest("GET", "/project.git/info/refs", "git-upload-pack", repositorySecurityContext("project", false, false)),
+                "project.git");
+        assertThat(found).isSameAs(gitRepositoryProvider.jgitRepository());
+        assertThat(gitRepositoryProvider.lastFoundRepository).isEqualTo("project");
     }
 
     @Test
@@ -653,6 +712,28 @@ class OrionHttpRouteServletTest {
         });
     }
 
+    private static HttpServletRequest gitOperationRequest(
+            String method,
+            String pathInfo,
+            String service,
+            SecurityContext securityContext) {
+        return stub(HttpServletRequest.class, (proxy, invokedMethod, args) -> switch (invokedMethod.getName()) {
+            case "getMethod" -> method;
+            case "getPathInfo" -> pathInfo;
+            case "getParameter" -> "service".equals(args[0]) ? service : null;
+            case "getAttribute" -> {
+                if (OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE.equals(args[0])) {
+                    yield securityContext;
+                }
+                yield null;
+            }
+            case "toString" -> "HttpServletRequest[pathInfo=" + pathInfo + "]";
+            case "hashCode" -> System.identityHashCode(proxy);
+            case "equals" -> proxy == args[0];
+            default -> throw new UnsupportedOperationException(invokedMethod.toString());
+        });
+    }
+
     private static <T> T stub(Class<T> type, InvocationHandler handler) {
         return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[]{type}, handler));
     }
@@ -666,6 +747,19 @@ class OrionHttpRouteServletTest {
 
     private static SecurityContext regularSecurityContext() {
         return SecurityContext.createContext().withUserIdentity(new InternalUserImpl("regular", List.of()));
+    }
+
+    private static SecurityContext repositorySecurityContext(String repositoryName, boolean write, boolean create) {
+        AccessControlDraft.Grant grant = new AccessControlDraft.Grant("repository", new ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName);
+        if (write) {
+            grant.addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING);
+        }
+        if (create) {
+            grant.addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+        }
+        return SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl("git-user", List.of(grant.toAccessControl())));
     }
 
     private static final class RecordingAccessControlService implements OrionAccessControlService {
@@ -724,22 +818,90 @@ class OrionHttpRouteServletTest {
     }
 
     private static final class RecordingGitRepositoryProvider implements GitRepositoryProvider {
+        private final StubGitRepository repository = new StubGitRepository("project");
+        private boolean repositoryExists;
         private String lastCreatedRepository;
+        private String lastFoundRepository;
 
         @Override
         public boolean exists(String repositoryName) {
-            return false;
+            return repositoryExists;
         }
 
         @Override
         public Result<GitRepository> find(String repositoryName) {
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+            lastFoundRepository = repositoryName;
+            if (!repositoryExists) {
+                return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+            }
+            return new Result.Success<>(repository);
         }
 
         @Override
         public Result<GitRepository> findOrCreate(String repositoryName) {
             lastCreatedRepository = repositoryName;
-            return new Result.Success<>(null);
+            repositoryExists = true;
+            return new Result.Success<>(repository);
+        }
+
+        private Repository jgitRepository() {
+            return repository.repository;
+        }
+    }
+
+    private static final class StubGitRepository implements GitRepository {
+        private final String name;
+        private final Repository repository;
+
+        private StubGitRepository(String name) {
+            this.name = name;
+            try {
+                repository = new InMemoryRepository.Builder()
+                        .setRepositoryDescription(new DfsRepositoryDescription(name))
+                        .build();
+            } catch (IOException e) {
+                throw new IllegalStateException("Cannot create test repository", e);
+            }
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public String description() {
+            return repository.getIdentifier();
+        }
+
+        @Override
+        public GitRepository withFetchAccessCheck(Consumer<GitFetchAccessRequest> fetchAccessCheck) {
+            return this;
+        }
+
+        @Override
+        public void upload(GitUploadRequest request, InputStream input, OutputStream output, OutputStream error)
+                throws IOException, GitOperationException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void receive(GitReceiveRequest request, InputStream input, OutputStream output, OutputStream error)
+                throws IOException, GitOperationException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public <T> Optional<T> unwrap(Class<T> repositoryType) {
+            if (repositoryType.isInstance(repository)) {
+                return Optional.of(repositoryType.cast(repository));
+            }
+            return Optional.empty();
+        }
+
+        @Override
+        public void close() {
+            repository.close();
         }
     }
 
