@@ -240,20 +240,8 @@ are atomic across all configured paths.
 
 ## Batch Follow-Up
 
-Add a batch API after the single-file path works:
-
-```text
-saveFiles(remote, ref, changes) -> RemoteGitFilePushResult
-```
-
-The batch operation should:
-
-- resolve the base commit once;
-- rebuild the root tree once;
-- create one commit for all file changes;
-- push one pack and one ref update;
-- reject overlapping paths such as `a` and `a/b`;
-- keep all configured ACL files atomic in one commit.
+The detailed batch push design now lives in
+`docs/plans/2026-05-17-native-remote-git-batch-file-push.md`.
 
 ## Phased Plan
 
