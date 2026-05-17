@@ -7,6 +7,10 @@ The model parses user/config input into an immutable AST and resolves it to
 caller-requested capabilities such as `String`, `Path`, `ResourceContent`, or a
 type supplied by an extension resolver.
 
+Concrete storage or transport capabilities are intentionally outside this module.
+For example, `core/resource-addressing-resolvers` supplies optional Git and S3
+capability resolvers on top of this AST and registry API.
+
 ## Parser Source
 
 The grammar source is:
@@ -95,12 +99,12 @@ Current built-in capability behavior:
 
 - resolving to `String` returns the resolved scalar/address text;
 - resolving to `Path` treats plain or `file:` values as local paths;
-- resolving to `ResourceContent` reads local files when the value is a readable
-  path, otherwise obvious inline content is returned as bytes.
+- resolving to `ResourceContent` reads local files and `http:`/`https:` URLs,
+  otherwise obvious inline content is returned as bytes.
 
-`http:`, `https:`, `s3:`, and Git schemes are part of the address syntax and
-registry design. Runtime-heavy transport/storage implementations should stay
-outside this module; plug them in through `ResourceCapabilityResolver`.
+`s3:` and Git schemes are part of the address syntax and registry design. Their
+location and content readers should stay outside this module; plug them in
+through `ResourceCapabilityResolver`.
 
 ## Document References
 

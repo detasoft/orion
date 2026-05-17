@@ -71,10 +71,6 @@ public final class ResourceReferenceResolver {
             value = evaluator.path(reference.root());
         } else if (ResourceContent.class.equals(targetType)) {
             value = evaluator.content(reference.root(), reference.raw());
-        } else if (S3ObjectLocation.class.equals(targetType)) {
-            value = evaluator.s3ObjectLocation(reference.root());
-        } else if (GitRepositoryLocation.class.equals(targetType)) {
-            value = evaluator.gitRepositoryLocation(reference.root());
         } else {
             value = evaluator.capability(reference.root(), targetType);
         }
@@ -128,6 +124,12 @@ public final class ResourceReferenceResolver {
 
         private ResourceContent content(ReferenceNode node, String sourceName) {
             if (node instanceof AddressReferenceNode address) {
+                Optional<ResourceContent> extensionContent = capabilityIfAvailable(
+                        ResourceAddress.parse(addressText(address)),
+                        ResourceContent.class);
+                if (extensionContent.isPresent()) {
+                    return extensionContent.get();
+                }
                 if (address.scheme().equals(ResourceScheme.CONTENT)) {
                     return new ResourceContent(sourceName, partsToString(address.body()).getBytes(StandardCharsets.UTF_8));
                 }
@@ -139,6 +141,12 @@ public final class ResourceReferenceResolver {
                 }
             }
             String value = string(node);
+            Optional<ResourceContent> extensionContent = capabilityIfAvailable(
+                    ResourceAddress.parse(value),
+                    ResourceContent.class);
+            if (extensionContent.isPresent()) {
+                return extensionContent.get();
+            }
             if (value.startsWith("http://") || value.startsWith("https://")) {
                 return readHttp(value, sourceName);
             }
@@ -155,67 +163,17 @@ public final class ResourceReferenceResolver {
             return new ResourceContent(sourceName, value.getBytes(StandardCharsets.UTF_8));
         }
 
-        private S3ObjectLocation s3ObjectLocation(ReferenceNode node) {
-            ResourceAddress address = ResourceAddress.parse(string(node));
-            if (!address.hasScheme(ResourceScheme.S3)) {
-                throw new ResourceReferenceResolutionException("S3 resource reference must use s3 scheme: "
-                        + address.raw());
-            }
-            String object = stripSchemeSlashes(address.body());
-            if (object.isBlank()) {
-                throw new ResourceReferenceResolutionException("S3 resource reference must contain a bucket: "
-                        + address.raw());
-            }
-            int slash = object.indexOf('/');
-            String bucket = slash < 0 ? object : object.substring(0, slash);
-            String key = slash < 0 ? "" : object.substring(slash + 1);
-            return new S3ObjectLocation(bucket, key, address.parameters());
-        }
-
-        private GitRepositoryLocation gitRepositoryLocation(ReferenceNode node) {
-            ResourceAddress address = ResourceAddress.parse(string(node));
-            GitRepositoryLocation.Kind kind = gitKind(address.scheme());
-            String location = gitLocation(address, kind);
-            return new GitRepositoryLocation(kind, location, address.parameters());
-        }
-
-        private GitRepositoryLocation.Kind gitKind(ResourceScheme scheme) {
-            if (scheme.isEmpty() || scheme.equals(ResourceScheme.FILE) || scheme.equals(ResourceScheme.GIT_FILE)) {
-                return GitRepositoryLocation.Kind.LOCAL;
-            }
-            if (scheme.equals(ResourceScheme.SSH) || scheme.equals(ResourceScheme.GIT_SSH)) {
-                return GitRepositoryLocation.Kind.SSH;
-            }
-            if (scheme.equals(ResourceScheme.HTTP) || scheme.equals(ResourceScheme.GIT_HTTP)) {
-                return GitRepositoryLocation.Kind.HTTP;
-            }
-            if (scheme.equals(ResourceScheme.HTTPS) || scheme.equals(ResourceScheme.GIT_HTTPS)) {
-                return GitRepositoryLocation.Kind.HTTPS;
-            }
-            if (scheme.equals(ResourceScheme.S3)) {
-                return GitRepositoryLocation.Kind.S3;
-            }
-            return GitRepositoryLocation.Kind.UNKNOWN;
-        }
-
-        private String gitLocation(ResourceAddress address, GitRepositoryLocation.Kind kind) {
-            if (address.scheme().equals(ResourceScheme.GIT_SSH)) {
-                return "ssh:" + address.body();
-            }
-            if (address.scheme().equals(ResourceScheme.GIT_HTTP)) {
-                return "http:" + address.body();
-            }
-            if (address.scheme().equals(ResourceScheme.GIT_HTTPS)) {
-                return "https:" + address.body();
-            }
-            if (kind == GitRepositoryLocation.Kind.LOCAL || address.scheme().value().startsWith("git+")) {
-                return address.body();
-            }
-            return address.addressWithoutParameters();
-        }
-
         private Object capability(ReferenceNode node, Class<?> targetType) {
             ResourceAddress address = ResourceAddress.parse(string(node));
+            Optional<?> resolved = capabilityIfAvailable(address, targetType);
+            if (resolved.isPresent()) {
+                return resolved.get();
+            }
+            throw new ResourceReferenceResolutionException(
+                    "No resource capability resolver for " + targetType.getName() + ": " + address.raw());
+        }
+
+        private <T> Optional<T> capabilityIfAvailable(ResourceAddress address, Class<T> targetType) {
             ResourceCapabilityResolver<?> matchingResolver = null;
             for (ResourceCapabilityResolver<?> capabilityResolver : registry.resolvers()) {
                 if (!targetType.equals(capabilityResolver.targetType())
@@ -230,13 +188,12 @@ public final class ResourceReferenceResolver {
                 matchingResolver = capabilityResolver;
             }
             if (matchingResolver != null) {
-                return resolveCapability(matchingResolver, address);
+                return Optional.of(targetType.cast(resolveCapability(matchingResolver, address)));
             }
-            throw new ResourceReferenceResolutionException(
-                    "No resource capability resolver for " + targetType.getName() + ": " + address.raw());
+            return Optional.empty();
         }
 
-        private <T> T resolveCapability(ResourceCapabilityResolver<T> capabilityResolver, ResourceAddress address) {
+        private Object resolveCapability(ResourceCapabilityResolver<?> capabilityResolver, ResourceAddress address) {
             return capabilityResolver.resolve(address, scope);
         }
 
@@ -528,13 +485,6 @@ public final class ResourceReferenceResolver {
                 || trimmed.startsWith("{")
                 || trimmed.startsWith("[")
                 || trimmed.startsWith("<");
-    }
-
-    private static String stripSchemeSlashes(String value) {
-        while (value.startsWith("/")) {
-            value = value.substring(1);
-        }
-        return value;
     }
 
     private static boolean looksLikePathOrUri(String value) {

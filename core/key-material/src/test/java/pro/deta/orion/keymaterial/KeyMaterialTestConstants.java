@@ -1,8 +1,5 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.resource.address.ResourceAddressConstants;
-import pro.deta.orion.resource.address.ResourceScheme;
-
 import java.nio.file.Path;
 import java.util.Base64;
 
@@ -47,17 +44,15 @@ final class KeyMaterialTestConstants {
     }
 
     static String envReference(String environmentVariableName) {
-        return ResourceScheme.ENV.value() + ":" + environmentVariableName;
+        return "env:" + environmentVariableName;
     }
 
     static String fileReference(Path path) {
-        return ResourceScheme.FILE.value() + ":" + path;
+        return "file:" + path;
     }
 
     static String contentBase64Reference(byte[] bytes) {
-        return ResourceScheme.CONTENT.value()
-                + ":"
-                + ResourceAddressConstants.BASE64_CONTENT_PREFIX
+        return "content:base64,"
                 + Base64.getEncoder().encodeToString(bytes);
     }
 }

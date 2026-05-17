@@ -1,43 +1,57 @@
 package pro.deta.orion.keymaterial;
 
-import pro.deta.orion.resource.address.ImmutableReference;
-import pro.deta.orion.resource.address.ResourceExpression;
-import pro.deta.orion.resource.address.ResourceResolver;
-import pro.deta.orion.resource.address.ResourceScheme;
-import pro.deta.orion.resource.address.ReferenceResolver;
+import pro.deta.orion.resource.reference.ResourceAddress;
+import pro.deta.orion.resource.reference.ResourceReferenceResolver;
+import pro.deta.orion.resource.reference.ResourceReferenceScope;
+import pro.deta.orion.resource.reference.ResourceScheme;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Map;
 
 public final class KeyMaterialResourceResolver {
-    private final ResourceResolver resolver;
-    private final ReferenceResolver referenceResolver;
+    private static final ResourceScheme ENV = ResourceScheme.of("env");
+    private static final String BASE64_CONTENT_PREFIX = "base64,";
 
-    public KeyMaterialResourceResolver(ResourceResolver resolver) {
-        if (resolver == null) {
-            throw new IllegalArgumentException("Resource resolver must not be null");
+    private final ResourceReferenceScope scope;
+    private final ResourceReferenceResolver resolver;
+
+    public KeyMaterialResourceResolver(ResourceReferenceScope scope) {
+        if (scope == null) {
+            throw new IllegalArgumentException("Resource resolver scope must not be null");
         }
-        this.resolver = resolver;
-        this.referenceResolver = new ReferenceResolver(resolver);
+        this.scope = scope;
+        this.resolver = ResourceReferenceResolver.standard(scope);
     }
 
     public static KeyMaterialResourceResolver standard() {
-        return new KeyMaterialResourceResolver(ResourceResolver.standard());
+        return new KeyMaterialResourceResolver(ResourceReferenceScope.empty());
     }
 
     public static KeyMaterialResourceResolver standard(Map<String, String> environment) {
-        return new KeyMaterialResourceResolver(ResourceResolver.standard(environment));
+        return new KeyMaterialResourceResolver(ResourceReferenceScope.builder()
+                .environment(environment)
+                .build());
     }
 
     public KeyMaterialContentStore resolveStore(String locationReference) {
-        ImmutableReference reference = referenceResolver.resolveLocation(
+        ResourceAddress address = resolveAddress(
                 locationReference,
                 "Key material location reference must not be empty");
-        return new ReferenceKeyMaterialContentStore(reference);
+        if (address.scheme().isEmpty() || address.hasScheme(ResourceScheme.FILE)) {
+            return new LocalKeyMaterialContentStore(Path.of(address.body()));
+        }
+        if (address.hasScheme(ENV)) {
+            return resolveStore(resolveEnvironment(address.body()));
+        }
+        if (address.hasScheme(ResourceScheme.CONTENT)) {
+            return new ReadOnlyKeyMaterialContentStore(contentBytes(address.body()), locationReference);
+        }
+        throw new IllegalArgumentException("Unsupported key material location reference: " + locationReference);
     }
 
     public KeyMaterialOptions pkcs12Options(String passwordReference, boolean createIfMissing) throws IOException {
@@ -50,28 +64,42 @@ public final class KeyMaterialResourceResolver {
     }
 
     public char[] resolvePassword(String passwordReference) throws IOException {
-        ResourceExpression expression = parse(passwordReference, "Key material password reference must not be empty");
+        ResourceAddress address = resolveAddress(passwordReference, "Key material password reference must not be empty");
         String password;
-        if (expression.hasEmptyScheme()
-                || expression.hasScheme(ResourceScheme.ENV)
-                || expression.hasScheme(ResourceScheme.CONTENT)) {
-            ImmutableReference reference = resolver.resolve(expression, ImmutableReference.class);
-            password = reference.readString()
-                    .orElseThrow(() -> new IOException("Key material password reference did not resolve to content"));
-        } else if (expression.hasScheme(ResourceScheme.FILE)) {
-            Path path = resolver.resolve(expression, Path.class);
-            password = removeSingleTrailingLineBreak(Files.readString(path, StandardCharsets.UTF_8));
+        if (address.scheme().isEmpty()) {
+            password = address.body();
+        } else if (address.hasScheme(ENV)) {
+            password = resolveEnvironment(address.body());
+        } else if (address.hasScheme(ResourceScheme.CONTENT)) {
+            password = new String(contentBytes(address.body()), StandardCharsets.UTF_8);
+        } else if (address.hasScheme(ResourceScheme.FILE)) {
+            password = removeSingleTrailingLineBreak(Files.readString(Path.of(address.body()), StandardCharsets.UTF_8));
         } else {
             throw new IllegalArgumentException("Unsupported key material password reference: " + passwordReference);
         }
         return password.toCharArray();
     }
 
-    private static ResourceExpression parse(String reference, String emptyMessage) {
+    private ResourceAddress resolveAddress(String reference, String emptyMessage) {
         if (reference == null || reference.isBlank()) {
             throw new IllegalArgumentException(emptyMessage);
         }
-        return ResourceExpression.parse(reference);
+        return ResourceAddress.parse(resolver.resolve(reference, String.class));
+    }
+
+    private String resolveEnvironment(String name) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Environment reference must include a variable name");
+        }
+        return scope.variable(name)
+                .orElseThrow(() -> new IllegalArgumentException("Environment variable is not set: " + name));
+    }
+
+    private static byte[] contentBytes(String value) {
+        if (value.startsWith(BASE64_CONTENT_PREFIX)) {
+            return Base64.getDecoder().decode(value.substring(BASE64_CONTENT_PREFIX.length()));
+        }
+        return value.getBytes(StandardCharsets.UTF_8);
     }
 
     private static String removeSingleTrailingLineBreak(String value) {

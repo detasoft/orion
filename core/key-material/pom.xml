@@ -20,7 +20,7 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>resource-addressing-resolvers</artifactId>
+            <artifactId>resource-addressing</artifactId>
         </dependency>
         <dependency>
             <groupId>org.assertj</groupId>

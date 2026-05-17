@@ -1,4 +1,4 @@
-package pro.deta.orion.resource.address;
+package pro.deta.orion.resource.reference.resolver;
 
 import java.util.Optional;
 

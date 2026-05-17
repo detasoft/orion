@@ -46,8 +46,7 @@ class ResourceReferenceScenarioTest {
                 "failure-cycle.txt",
                 "failure-document-source.txt",
                 "failure-missing-document-path.txt",
-                "failure-unreadable-path.txt",
-                "failure-s3.txt")) {
+                "failure-unreadable-path.txt")) {
             Scenario scenario = Scenario.load(resourceName);
 
             for (ExpectedCheck expected : scenario.expected()) {
@@ -225,8 +224,6 @@ class ResourceReferenceScenarioTest {
             case "String" -> resolver.resolve(rawValue, String.class);
             case "Path" -> resolver.resolve(rawValue, Path.class);
             case "ResourceContent" -> contentFields(resolver.resolve(rawValue, ResourceContent.class));
-            case "S3ObjectLocation" -> s3Fields(resolver.resolve(rawValue, S3ObjectLocation.class));
-            case "GitRepositoryLocation" -> gitFields(resolver.resolve(rawValue, GitRepositoryLocation.class));
             case "RemoteGitRepository" -> remoteGitFields(resolver.resolve(rawValue, RemoteGitRepository.class));
             default -> throw new IllegalArgumentException("Unsupported expected type: " + type);
         };
@@ -235,22 +232,6 @@ class ResourceReferenceScenarioTest {
     private static Map<String, String> contentFields(ResourceContent content) {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("text", content.asUtf8String());
-        return fields;
-    }
-
-    private static Map<String, String> s3Fields(S3ObjectLocation location) {
-        Map<String, String> fields = new LinkedHashMap<>();
-        fields.put("bucket", location.bucket());
-        fields.put("key", location.key());
-        location.region().ifPresent(region -> fields.put("region", region));
-        return fields;
-    }
-
-    private static Map<String, String> gitFields(GitRepositoryLocation location) {
-        Map<String, String> fields = new LinkedHashMap<>();
-        fields.put("kind", location.kind().name());
-        fields.put("location", location.location());
-        location.ref().ifPresent(ref -> fields.put("ref", ref));
         return fields;
     }
 

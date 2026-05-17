@@ -151,36 +151,6 @@ class ResourceReferenceResolverTest {
     }
 
     @Test
-    void resolvesS3ObjectLocationFromInterpolatedAddress() {
-        ResourceReferenceResolver resolver = standardResolver(
-                Map.of("CONFIG_BUCKET", "orion-configs"),
-                Map.of());
-
-        S3ObjectLocation location = resolver.resolve(
-                "s3://$CONFIG_BUCKET/prod/orion.yml?region=us-east-1",
-                S3ObjectLocation.class);
-
-        assertThat(location.bucket()).isEqualTo("orion-configs");
-        assertThat(location.key()).isEqualTo("prod/orion.yml");
-        assertThat(location.region()).contains("us-east-1");
-    }
-
-    @Test
-    void resolvesRemoteGitLocationFromInterpolatedAddress() {
-        ResourceReferenceResolver resolver = standardResolver(
-                Map.of("GIT_HOST", "git.example.test"),
-                Map.of());
-
-        GitRepositoryLocation location = resolver.resolve(
-                "git+https://$GIT_HOST/team/config.git?ref=main",
-                GitRepositoryLocation.class);
-
-        assertThat(location.kind()).isEqualTo(GitRepositoryLocation.Kind.HTTPS);
-        assertThat(location.location()).contains("git.example.test");
-        assertThat(location.ref()).contains("main");
-    }
-
-    @Test
     void readsHttpResourceContent() throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         byte[] response = "bootstrap:\n  baseDir: /http/orion\n".getBytes(StandardCharsets.UTF_8);

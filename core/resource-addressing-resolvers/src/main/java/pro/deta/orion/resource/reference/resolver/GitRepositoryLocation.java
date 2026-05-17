@@ -1,4 +1,4 @@
-package pro.deta.orion.resource.reference;
+package pro.deta.orion.resource.reference.resolver;
 
 import java.nio.file.Path;
 import java.util.Map;

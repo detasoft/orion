@@ -18,6 +18,4 @@ String bootstrap.baseDir=/srv/orion
 Path bootstrap.runtimeConfig=/srv/orion/config/orion.yml
 String bootstrap.aclPath=/srv/orion/orion.xml
 String repositories.s3Config=s3://orion-configs/prod/orion.yml?region=eu-west-1
-S3ObjectLocation repositories.s3Config bucket=orion-configs key=prod/orion.yml region=eu-west-1
 String repositories.gitConfig=git+https://git.example.test/team/config.git?ref=main
-GitRepositoryLocation repositories.gitConfig kind=HTTPS location=https://git.example.test/team/config.git ref=main
