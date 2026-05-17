@@ -261,7 +261,7 @@ whether secrets may be revealed
 Example:
 
 ```java
-record ResourceResolutionContext(
+record ResourceReferenceResolutionScope(
         BootstrapPhase phase,
         ResourceUsage usage,
         Set<ResourceCapability> requiredCapabilities,

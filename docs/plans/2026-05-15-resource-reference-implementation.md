@@ -4,7 +4,7 @@
 
 **Goal:** Replace the current resource expression prototype with a named, AST-based resource reference model that supports shell-style variables, defaults, required references, document dereferencing, capability-based resolution, and extension resolvers.
 
-**Architecture:** Keep `core/resource-addressing` as the implementation module, but introduce the new model in `pro.deta.orion.resource.reference` so the old `pro.deta.orion.resource.address.ResourceExpression` API can be migrated deliberately. The parser builds a typed AST and the resolver evaluates that AST against an immutable scope and an explicit resolver registry; it must not flatten the input into one string and then rediscover boundaries.
+**Architecture:** Keep `core/resource-addressing` as the implementation module and expose the model from `pro.deta.orion.resource.reference`. The parser builds a typed AST and the resolver evaluates that AST against an immutable scope and an explicit resolver registry; it must not flatten the input into one string and then rediscover boundaries.
 
 **Tech Stack:** Java 21, Maven, ANTLR4-generated parser classes, JUnit 5, AssertJ, Jackson YAML/XML, toml4j, Java `HttpClient`, lightweight reader interfaces for S3 and Git.
 
@@ -72,7 +72,7 @@ Use these names unless implementation proves a concrete problem:
 | Public resolver facade | `ResourceReferenceResolver` | Distinguishes reference evaluation from low-level address/capability conversion. |
 | Resolver input values | `ResourceReferenceScope` | "Scope" is clearer than "context" for environment and configuration variables. |
 | Extension registry | `ResourceResolverRegistry` | Explicitly owns resolver selection and ambiguity checks. |
-| Extension point for target types | `ResourceCapabilityResolver<T>` | Call sites ask for capabilities, not always addresses. This replaces the too-narrow `ResourceAddressResolver<T>` name. |
+| Extension point for target types | `ResourceCapabilityResolver<T>` | Call sites ask for capabilities, not always addresses. |
 | Detailed result with diagnostics | `ResourceResolution<T>` | Carries original reference, resolved value, and safe display text. |
 | Internal AST root | `ReferenceNode` | Internal/parser-level name; avoids leaking "expression" into the public API. |
 | Literal AST node | `LiteralReferenceNode` | Plain text segment or complete literal. |
@@ -84,14 +84,7 @@ Use these names unless implementation proves a concrete problem:
 | Document format enum | `DocumentFormat` | Values: `YAML`, `TOML`, `XML`. |
 | Path inside a parsed document | `DocumentPath` | Avoids promising exact JSON Pointer semantics. |
 
-Names to retire or avoid in the new API:
-
-- `ResourceExpression`: too generic and now overloaded with the old colon/wrapped syntax.
-- `ResourceAddressResolver<T>`: too narrow because the resolver may return `Path`, `ResourceContent`, `ExternalDirectory`, repository handles, or domain-specific capabilities.
-- `EnvironmentStringResolver`: use `EnvironmentVariableResolver` if a named class is still needed.
-- `ContentStringResolver`: use `InlineContentResolver` or `ContentResourceResolver`, depending on target capability.
-
-Keep old classes temporarily as adapters where needed, but all new tests should target the names above.
+All new tests should target the names above.
 
 ## Syntax Baseline
 
@@ -503,7 +496,7 @@ package pro.deta.orion.resource.reference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.resource.address.ResourceContent;
+import pro.deta.orion.resource.reference.ResourceContent;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -1009,23 +1002,18 @@ git commit -m "docs: document resource reference syntax"
 ### Task 10: Compatibility Cleanup Inside Resource Addressing
 
 **Files:**
-- Modify: `core/resource-addressing/src/main/java/pro/deta/orion/resource/address/ResourceExpression.java`
-- Modify: `core/resource-addressing/src/main/java/pro/deta/orion/resource/address/ResourceResolver.java`
-- Modify: `core/resource-addressing/src/main/java/pro/deta/orion/resource/address/ResourceAddressResolver.java`
-- Modify: existing tests under `core/resource-addressing/src/test/java/pro/deta/orion/resource/address`
+- Modify: `core/resource-addressing/src/main/java/pro/deta/orion/resource/reference`
+- Modify: `core/resource-addressing/src/test/java/pro/deta/orion/resource/reference`
 
-**Step 1: Decide adapter direction**
+**Step 1: Keep the public boundary narrow**
 
-Keep one of these temporary adapters:
-
-- `ResourceResolver` delegates to `ResourceReferenceResolver`; or
-- old tests remain as legacy tests and new code uses only `ResourceReferenceResolver`.
-
-Prefer delegation if it is small. Do not preserve old parser behavior at the cost of complicating the new parser.
+New code should use `ResourceReferenceResolver` directly and register optional
+capabilities through `ResourceResolverRegistry`.
 
 **Step 2: Rename only when safe**
 
-Do not mechanically rename old classes until the new tests are green. If renaming causes broad churn, leave deprecated wrappers:
+Do not mechanically rename public classes until the new tests are green. If a
+rename causes broad churn, leave a small compatibility wrapper:
 
 ```java
 @Deprecated(forRemoval = true)
