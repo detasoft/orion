@@ -206,14 +206,8 @@ It should not fall back to JGit when configured for native-only operation.
 ## Batching Follow-Up
 
 Although the first API can load one file, ACL configuration often contains more
-than one path. Add a follow-up batch operation after the single-file path works:
-
-```text
-loadFiles(remote, ref, paths) -> RemoteGitFileSnapshotSet
-```
-
-The batch operation should resolve the commit and relevant tree objects once,
-then fetch only the missing blobs for the requested paths.
+than one path. The detailed batch design now lives in
+`docs/plans/2026-05-16-native-remote-git-batch-file-fetch.md`.
 
 ## Phased Plan
 
