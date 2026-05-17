@@ -308,6 +308,7 @@ public class RemoteGitAccessControlStorage implements AccessControlStorage {
         Path privateKey = AccessControlStorageSecret.fileReference("auth.privateKey", auth.get("privateKey"));
         Path sshDirectory = worktree.resolve(".ssh").toAbsolutePath().normalize();
         SshdSessionFactoryBuilder builder = new SshdSessionFactoryBuilder()
+                .setHomeDirectory(worktree.toFile())
                 .setSshDirectory(sshDirectory.toFile())
                 .setDefaultIdentities(ignored -> List.of(privateKey));
         if (auth.containsKey("knownHosts")) {

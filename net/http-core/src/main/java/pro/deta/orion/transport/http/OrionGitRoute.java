@@ -1,14 +1,19 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
+import jakarta.servlet.FilterConfig;
+import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jgit.http.server.GitFilter;
 import org.eclipse.jgit.lib.Repository;
 import pro.deta.orion.GitRepositoryProvider;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 
@@ -27,6 +32,11 @@ public class OrionGitRoute implements OrionHttpRoute {
                 .findOrCreate(repositoryName)
                 .valueOrFailure("Failed to open repository " + repositoryName)
                 .unwrapOrThrow(Repository.class));
+        try {
+            gitFilter.init(new NoOpFilterConfig());
+        } catch (ServletException e) {
+            throw new IllegalStateException("Cannot initialize Git HTTP filter", e);
+        }
     }
 
     @Override
@@ -52,6 +62,81 @@ public class OrionGitRoute implements OrionHttpRoute {
             resp.setStatus(SC_METHOD_NOT_ALLOWED);
             return;
         }
-        gitFilter.doFilter(req, resp, (request, response) -> ((HttpServletResponse) response).sendError(SC_NOT_FOUND));
+        gitFilter.doFilter(gitRequest(req), resp, (request, response) -> ((HttpServletResponse) response).sendError(SC_NOT_FOUND));
+    }
+
+    private static HttpServletRequest gitRequest(HttpServletRequest req) {
+        String pathInfo = stripRoutePrefix(routePath(req));
+        return new HttpServletRequestWrapper(req) {
+            @Override
+            public String getPathInfo() {
+                return pathInfo;
+            }
+
+            @Override
+            public String getServletPath() {
+                return "";
+            }
+
+            @Override
+            public String getRequestURI() {
+                String contextPath = super.getContextPath();
+                if (contextPath == null) {
+                    contextPath = "";
+                }
+                return contextPath + pathInfo;
+            }
+        };
+    }
+
+    private static String routePath(HttpServletRequest req) {
+        String path = req.getPathInfo();
+        if (path != null && !path.isBlank()) {
+            return path;
+        }
+        path = req.getRequestURI();
+        String contextPath = req.getContextPath();
+        if (path != null && contextPath != null && !contextPath.isBlank() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        if (path != null && !path.isBlank()) {
+            return path;
+        }
+        return "/";
+    }
+
+    private static String stripRoutePrefix(String path) {
+        if (path == null) {
+            return null;
+        }
+        if ("/r".equals(path)) {
+            return "/";
+        }
+        if (path.startsWith("/r/")) {
+            return path.substring("/r".length());
+        }
+        return path;
+    }
+
+    private static final class NoOpFilterConfig implements FilterConfig {
+        @Override
+        public String getFilterName() {
+            return OrionGitRoute.class.getSimpleName();
+        }
+
+        @Override
+        public ServletContext getServletContext() {
+            return null;
+        }
+
+        @Override
+        public String getInitParameter(String name) {
+            return null;
+        }
+
+        @Override
+        public Enumeration<String> getInitParameterNames() {
+            return Collections.emptyEnumeration();
+        }
     }
 }

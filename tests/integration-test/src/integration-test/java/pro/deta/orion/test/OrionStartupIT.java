@@ -23,7 +23,6 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
-import pro.deta.orion.util.NetworkUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -33,10 +32,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -345,35 +342,14 @@ class OrionStartupIT {
     }
 
     private static OrionConfiguration serverConfiguration(Path orionRoot) throws IOException {
-        Set<Integer> ports = new LinkedHashSet<>();
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().setBaseDir(orionRoot.toString());
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
 
-        configuration.getTransport().getGit().setAddress("localhost");
-        configuration.getTransport().getGit().setPort(freePort(ports));
-
-        configuration.getTransport().getSsh().setAddress("localhost");
-        configuration.getTransport().getSsh().setPort(freePort(ports));
-
-        configuration.getTransport().getHttp().setAddress("localhost");
-        configuration.getTransport().getHttp().setPort(freePort(ports));
-
+        TestPorts.nextBatch().configure(configuration);
         configuration.getTransport().getHttps().setEnabled(false);
-        configuration.getTransport().getHttps().setAddress("localhost");
-        configuration.getTransport().getHttps().setPort(freePort(ports));
         return configuration;
-    }
-
-    private static int freePort(Set<Integer> reservedPorts) throws IOException {
-        for (int i = 0; i < 50; i++) {
-            int port = NetworkUtils.findAvailablePort();
-            if (reservedPorts.add(port)) {
-                return port;
-            }
-        }
-        throw new IOException("Failed to find an unused port for test configuration");
     }
 
     private static void pushToBareRepository(Path root) throws Exception {

@@ -11,6 +11,7 @@ import org.apache.sshd.server.command.CommandFactory;
 import org.eclipse.jgit.errors.RepositoryNotFoundException;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.transport.ReceivePack;
 import org.eclipse.jgit.transport.UploadPack;
 
 import java.io.InputStream;
@@ -39,11 +40,20 @@ public final class GitSshTestServer implements AutoCloseable {
             String username,
             KeyPair hostKey,
             PublicKey authorizedKey) throws Exception {
+        return start(repositoriesRoot, username, hostKey, authorizedKey, 0);
+    }
+
+    public static GitSshTestServer start(
+            Path repositoriesRoot,
+            String username,
+            KeyPair hostKey,
+            PublicKey authorizedKey,
+            int port) throws Exception {
         Files.createDirectories(repositoriesRoot);
 
         SshServer sshd = SshServer.setUpDefaultServer();
         sshd.setHost("localhost");
-        sshd.setPort(0);
+        sshd.setPort(port);
         sshd.setKeyPairProvider(KeyPairProvider.wrap(hostKey));
         sshd.setPublickeyAuthenticator((user, key, session) ->
                 username.equals(user)
@@ -71,13 +81,17 @@ public final class GitSshTestServer implements AutoCloseable {
 
     private Command command(String commandLine) throws java.io.IOException {
         List<String> parts = CommandFactory.split(commandLine);
-        if (parts.size() != 2 || !"git-upload-pack".equals(parts.get(0))) {
+        if (parts.size() != 2) {
             throw new java.io.IOException("Unsupported Git SSH command: " + commandLine);
         }
-        return new UploadPackCommand(repositoriesRoot, parts.get(1));
+        return switch (parts.get(0)) {
+            case "git-upload-pack" -> new UploadPackCommand(repositoriesRoot, parts.get(1));
+            case "git-receive-pack" -> new ReceivePackCommand(repositoriesRoot, parts.get(1));
+            default -> throw new java.io.IOException("Unsupported Git SSH command: " + commandLine);
+        };
     }
 
-    private static final class UploadPackCommand implements Command, Runnable {
+    private abstract static class GitPackCommand implements Command, Runnable {
         private final Path repositoriesRoot;
         private final String repositoryName;
         private InputStream input;
@@ -86,7 +100,7 @@ public final class GitSshTestServer implements AutoCloseable {
         private ExitCallback callback;
         private Thread thread;
 
-        private UploadPackCommand(Path repositoriesRoot, String repositoryName) {
+        private GitPackCommand(Path repositoriesRoot, String repositoryName) {
             this.repositoriesRoot = repositoriesRoot;
             this.repositoryName = repositoryName;
         }
@@ -113,7 +127,7 @@ public final class GitSshTestServer implements AutoCloseable {
 
         @Override
         public void start(ChannelSession channel, Environment env) {
-            thread = new Thread(this, "orion-test-git-upload-pack");
+            thread = new Thread(this, threadName());
             thread.start();
         }
 
@@ -127,12 +141,17 @@ public final class GitSshTestServer implements AutoCloseable {
         @Override
         public void run() {
             try (Repository repository = openRepository()) {
-                new UploadPack(repository).upload(input, output, error);
+                runPack(repository, input, output, error);
                 exit(0, "");
             } catch (Exception e) {
                 exit(1, e.getMessage());
             }
         }
+
+        protected abstract String threadName();
+
+        protected abstract void runPack(Repository repository, InputStream input, OutputStream output, OutputStream error)
+                throws Exception;
 
         private Repository openRepository() throws java.io.IOException {
             Path repositoryPath = repositoriesRoot.resolve(stripLeadingSlash(repositoryName)).normalize();
@@ -155,6 +174,40 @@ public final class GitSshTestServer implements AutoCloseable {
                 value = value.substring(1);
             }
             return value;
+        }
+    }
+
+    private static final class UploadPackCommand extends GitPackCommand {
+        private UploadPackCommand(Path repositoriesRoot, String repositoryName) {
+            super(repositoriesRoot, repositoryName);
+        }
+
+        @Override
+        protected String threadName() {
+            return "orion-test-git-upload-pack";
+        }
+
+        @Override
+        protected void runPack(Repository repository, InputStream input, OutputStream output, OutputStream error)
+                throws Exception {
+            new UploadPack(repository).upload(input, output, error);
+        }
+    }
+
+    private static final class ReceivePackCommand extends GitPackCommand {
+        private ReceivePackCommand(Path repositoriesRoot, String repositoryName) {
+            super(repositoriesRoot, repositoryName);
+        }
+
+        @Override
+        protected String threadName() {
+            return "orion-test-git-receive-pack";
+        }
+
+        @Override
+        protected void runPack(Repository repository, InputStream input, OutputStream output, OutputStream error)
+                throws Exception {
+            new ReceivePack(repository).receive(input, output, error);
         }
     }
 }

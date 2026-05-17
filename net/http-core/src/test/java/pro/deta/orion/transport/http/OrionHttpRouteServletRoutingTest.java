@@ -75,6 +75,17 @@ class OrionHttpRouteServletRoutingTest {
     }
 
     @Test
+    void returnsNotFoundForUnknownRoute() throws Exception {
+        OrionHttpRouteServlet servlet = servlet(new TestRoute("/api/items/*", "pattern"));
+        ResponseRecorder response = new ResponseRecorder();
+
+        servlet.service(request("GET", "/api/unknown"), response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_NOT_FOUND);
+        assertThat(response.body.toString()).isEmpty();
+    }
+
+    @Test
     void letsRouteRejectRequestUsingItsOwnAuthorizationLogic() throws Exception {
         OrionHttpRouteServlet servlet = servlet(new DeniedRoute("/api/items/*"));
         ResponseRecorder response = new ResponseRecorder();

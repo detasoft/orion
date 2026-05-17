@@ -37,7 +37,6 @@ import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.KeyUtils;
-import pro.deta.orion.util.NetworkUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -215,6 +214,40 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void authenticatedReadOnlyUserCanCloneButCannotPushOverSsh() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        String repositoryName = "read-only-project";
+        FileUtils.wipeDirectory(orionRoot);
+        seedServerKeys(orionRoot);
+        seedAclRepository(orionRoot, accessControlForReadOnlyRepository(TRUSTED_USER_KEY.getPublic(), repositoryName));
+        seedProjectRepository(orionRoot, repositoryName, "read-only seed\n");
+        startedOrion = startExistingOrion(orionRoot);
+
+        Path cloneDirectory = tempDir.resolve("read-only-clone");
+        String remoteUrl = startedOrion.sshUrl(repositoryName + ".git");
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("read-only-ssh-home"), TRUSTED_USER_KEY);
+             Git clone = Git.cloneRepository()
+                     .setURI(remoteUrl)
+                     .setDirectory(cloneDirectory.toFile())
+                     .setBranch(BRANCH)
+                     .setTransportConfigCallback(sshCallback(ssh))
+                     .call()) {
+            assertThat(Files.readString(cloneDirectory.resolve("README.md"))).isEqualTo("read-only seed\n");
+
+            createCommit(clone, "README.md", "read-only update\n", "try read-only update");
+            assertThatThrownBy(() -> clone.push()
+                    .setRemote(remoteUrl)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call())
+                    .isInstanceOf(TransportException.class);
+        }
+
+        assertThat(Files.readString(cloneDirectory.resolve("README.md"))).isEqualTo("read-only update\n");
+        assertRepositoryContains(repositoryName, seededProjectHead(orionRoot, repositoryName), "README.md", "read-only seed\n");
+    }
+
+    @Test
     void managedUserCanPushAndCloneRepositoryAfterServerRestart() throws Exception {
         /*
          * This scenario starts from a clean local runtime configuration rather than pre-seeding ACL fixtures:
@@ -286,6 +319,9 @@ class GitSshTransportEndToEndIT {
         assertThat(token).isNotBlank();
         assertThat(startedOrion.accessControlService().authenticateToken(token.getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+        HttpResponse response = getAdminAclWithBearerToken(startedOrion, token);
+        assertThat(response.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+        assertThat(response.contentType()).startsWith("application/xml");
     }
 
     @Test
@@ -486,20 +522,12 @@ class GitSshTransportEndToEndIT {
 
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
 
+        TestPorts.nextBatch().configure(configuration);
         configuration.getTransport().getGit().setEnabled(false);
-        configuration.getTransport().getGit().setAddress("localhost");
-        configuration.getTransport().getGit().setPort(NetworkUtils.findAvailablePort());
 
         configuration.getTransport().getSsh().setEnabled(true);
-        configuration.getTransport().getSsh().setAddress("localhost");
-        configuration.getTransport().getSsh().setPort(NetworkUtils.findAvailablePort());
-
-        configuration.getTransport().getHttp().setAddress("localhost");
-        configuration.getTransport().getHttp().setPort(NetworkUtils.findAvailablePort());
 
         configuration.getTransport().getHttps().setEnabled(false);
-        configuration.getTransport().getHttps().setAddress("localhost");
-        configuration.getTransport().getHttps().setPort(NetworkUtils.findAvailablePort());
         return configuration;
     }
 
@@ -599,6 +627,10 @@ class GitSshTransportEndToEndIT {
     }
 
     private static void seedAclRepository(Path orionRoot, KeyPair userKey) throws Exception {
+        seedAclRepository(orionRoot, accessControlFor(userKey.getPublic()));
+    }
+
+    private static void seedAclRepository(Path orionRoot, AccessControl accessControl) throws Exception {
         /*
          * ACL storage reads ACL from a normal Orion repository named "orion".
          * This helper creates that bare repository, writes orion.xml in a temporary worktree, commits it,
@@ -619,7 +651,7 @@ class GitSshTransportEndToEndIT {
         Path seedWorktree = orionRoot.resolve("acl-seed-worktree");
         try (Git seed = initRepository(seedWorktree)) {
             try (var output = Files.newOutputStream(seedWorktree.resolve("orion.xml"))) {
-                new XmlService().serialize(accessControlFor(userKey.getPublic()), output);
+                new XmlService().serialize(accessControl, output);
             }
             seed.add().addFilepattern("orion.xml").call();
             seed.commit()
@@ -645,6 +677,18 @@ class GitSshTransportEndToEndIT {
                 .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(userPublicKey));
         allowRepository(user, "project");
         allowRepository(user, "fetch-project");
+        draft.getUsers().add(user);
+        return draft.toAccessControl();
+    }
+
+    private static AccessControl accessControlForReadOnlyRepository(PublicKey userPublicKey, String repositoryName) {
+        AccessControlDraft draft = new AccessControlDraft();
+        AccessControlDraft.User user = ACLUtil.createUser(USERNAME, "e2e@example.test")
+                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(userPublicKey));
+        user.addGrant("REPOSITORY_" + repositoryName)
+                .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
+                .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
+                .addKey(AccessControl.GrantKey.BRANCH, "*");
         draft.getUsers().add(user);
         return draft.toAccessControl();
     }
@@ -682,6 +726,41 @@ class GitSshTransportEndToEndIT {
                 throw new IllegalStateException("Missing test resource: " + resourceName);
             }
             Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void seedProjectRepository(Path orionRoot, String repositoryName, String content) throws Exception {
+        Path bareRepository = orionRoot.resolve("repos").resolve(repositoryName);
+        Files.createDirectories(bareRepository);
+        try (Git ignored = Git.init()
+                .setBare(true)
+                .setGitDir(bareRepository.toFile())
+                .setInitialBranch(BRANCH)
+                .call()) {
+            // Repository is intentionally created empty before seeding it from a normal worktree.
+        }
+
+        Path seedWorktree = orionRoot.resolve(repositoryName + "-seed-worktree");
+        try (Git seed = initRepository(seedWorktree)) {
+            Files.writeString(seedWorktree.resolve("README.md"), content);
+            seed.add().addFilepattern("README.md").call();
+            seed.commit()
+                    .setAuthor("E2E Test", "e2e@example.test")
+                    .setCommitter("E2E Test", "e2e@example.test")
+                    .setMessage("seed " + repositoryName)
+                    .call();
+            seed.push()
+                    .setRemote(bareRepository.toUri().toString())
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+        }
+    }
+
+    private static ObjectId seededProjectHead(Path orionRoot, String repositoryName) throws Exception {
+        try (Repository repository = FileRepositoryBuilder.create(orionRoot.resolve("repos").resolve(repositoryName).toFile())) {
+            ObjectId head = repository.resolve("refs/heads/" + BRANCH);
+            assertThat(head).isNotNull();
+            return head;
         }
     }
 
@@ -738,6 +817,18 @@ class GitSshTransportEndToEndIT {
 
     private static TransportConfigCallback sshCallback(SshdSessionFactory ssh) {
         return transport -> ((SshTransport) transport).setSshSessionFactory(ssh);
+    }
+
+    private static HttpResponse getAdminAclWithBearerToken(StartedOrion orion, String token) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl("/api/admin/acl").openConnection();
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Authorization", TestBearerTokens.bearer(token));
+        int status = connection.getResponseCode();
+        String contentType = connection.getContentType();
+        return new HttpResponse(status, contentType);
+    }
+
+    private record HttpResponse(int status, String contentType) {
     }
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,

@@ -189,6 +189,26 @@ class RemoteGitAccessControlStorageTest {
     }
 
     @Test
+    void acceptsSshPrivateKeyAuthConfig() throws Exception {
+        Path privateKey = tempDir.resolve("id_rsa");
+        Path knownHosts = tempDir.resolve("known_hosts");
+        Files.writeString(privateKey, "not parsed until transport connects");
+        Files.writeString(knownHosts, "localhost ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtest\n");
+
+        OrionConfiguration.BootstrapAccessControlConfig config = new OrionConfiguration.BootstrapAccessControlConfig();
+        config.setLocation("git+ssh://git@example.test/acl.git");
+        config.setPaths(List.of(ACL_FILE));
+        config.getAuth().put("privateKey", privateKey.toUri().toString());
+        config.getAuth().put("knownHosts", knownHosts.toUri().toString());
+
+        RemoteGitAccessControlStorage storage = new RemoteGitAccessControlStorage(
+                tempDir.resolve("ssh-auth-worktree"),
+                config);
+
+        assertThat(storage.primaryPath()).isEqualTo(ACL_FILE);
+    }
+
+    @Test
     void resolverUsesRemoteStorageForGitPlusLocation() throws Exception {
         Path repositoryPath = createBareRepository("resolver-remote-acl.git");
         OrionConfiguration configuration = new OrionConfiguration();
