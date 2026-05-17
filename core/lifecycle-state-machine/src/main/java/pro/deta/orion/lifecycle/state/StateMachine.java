@@ -118,7 +118,7 @@ public final class StateMachine {
             }
             currentState = nextState;
             notifySubscribers(new StateMachineEvent(
-                    StateMachineEventType.STATE_ENTERED,
+                    StateMachineEventType.AFTER_STATE_ENTERED,
                     oldState,
                     action,
                     payload,

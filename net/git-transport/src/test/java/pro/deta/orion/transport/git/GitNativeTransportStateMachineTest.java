@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
-import static pro.deta.orion.lifecycle.state.StateMachineEventType.STATE_ENTERED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.AFTER_STATE_ENTERED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FINISHED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_STARTED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_FINISHED;
@@ -133,7 +133,7 @@ class GitNativeTransportStateMachineTest {
                         TRANSITION_STARTED,
                         TRANSITION_FUNCTION_STARTED,
                         TRANSITION_FUNCTION_FINISHED,
-                        STATE_ENTERED,
+                        AFTER_STATE_ENTERED,
                         TRANSITION_FINISHED),
                 events.stream().map(StateMachineEvent::type).toList());
         assertEquals(RUNNING, events.get(3).currentState());

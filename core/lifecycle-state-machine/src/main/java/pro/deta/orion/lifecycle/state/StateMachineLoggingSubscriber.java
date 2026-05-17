@@ -25,7 +25,7 @@ public final class StateMachineLoggingSubscriber implements StateMachineEventSub
             case TRANSITION_STARTED -> onTransitionStarted(event, observedAt);
             case TRANSITION_FUNCTION_STARTED -> onFunctionStarted(event, observedAt);
             case TRANSITION_FUNCTION_FINISHED -> onFunctionFinished(event, observedAt);
-            case STATE_ENTERED -> onStateEntered(event, observedAt);
+            case AFTER_STATE_ENTERED -> onStateEntered(event, observedAt);
             case TRANSITION_FINISHED -> onTransitionFinished(event, observedAt);
             case TRANSITION_FAILED -> onTransitionFailed(event, observedAt);
         }

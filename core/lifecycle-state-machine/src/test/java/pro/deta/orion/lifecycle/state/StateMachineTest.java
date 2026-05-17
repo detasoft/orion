@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
-import static pro.deta.orion.lifecycle.state.StateMachineEventType.STATE_ENTERED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventType.AFTER_STATE_ENTERED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FAILED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FINISHED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_STARTED;
@@ -217,7 +217,7 @@ class StateMachineTest {
                             TRANSITION_STARTED,
                             TRANSITION_FUNCTION_STARTED,
                             TRANSITION_FUNCTION_FINISHED,
-                            STATE_ENTERED,
+                            AFTER_STATE_ENTERED,
                             TRANSITION_FINISHED);
             assertThat(logs.events()).anySatisfy(record -> {
                 assertThat(record.getLevel()).isEqualTo(Level.WARN);
@@ -250,7 +250,7 @@ class StateMachineTest {
                         TRANSITION_STARTED,
                         TRANSITION_FUNCTION_STARTED,
                         TRANSITION_FUNCTION_FINISHED,
-                        STATE_ENTERED,
+                        AFTER_STATE_ENTERED,
                         TRANSITION_FINISHED);
         assertThat(events.getFirst().currentState()).isSameAs(NEW);
         assertThat(events.getFirst().targetState()).isEqualTo(RUNNING);
@@ -299,7 +299,7 @@ class StateMachineTest {
                             TRANSITION_STARTED,
                             TRANSITION_FUNCTION_STARTED,
                             TRANSITION_FUNCTION_FINISHED,
-                            STATE_ENTERED,
+                            AFTER_STATE_ENTERED,
                             TRANSITION_FINISHED);
         } finally {
             executor.shutdownNow();
@@ -334,7 +334,7 @@ class StateMachineTest {
                         TRANSITION_STARTED,
                         TRANSITION_FUNCTION_STARTED,
                         TRANSITION_FUNCTION_FINISHED,
-                        STATE_ENTERED,
+                        AFTER_STATE_ENTERED,
                         TRANSITION_FAILED);
         assertThat(events.get(2).failure()).isSameAs(failure);
         assertThat(events.get(3).currentState()).isEqualTo(FAILED);
