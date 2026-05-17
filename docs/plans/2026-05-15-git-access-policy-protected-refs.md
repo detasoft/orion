@@ -599,6 +599,8 @@ tag policy, force policy, and limits.
 Phase 8: Token/scope integration.
 
 Map application token scopes or future OAuth scopes into Git policy decisions.
+The detailed application-token scope enforcement design lives in
+`docs/plans/2026-05-17-application-token-scoped-authorization.md`.
 
 Phase 9: Mirror and migration integration.
 

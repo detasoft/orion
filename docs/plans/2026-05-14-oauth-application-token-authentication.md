@@ -74,7 +74,9 @@ Phase 2: Scoped token authorization.
 
 Decide whether token scopes are independent permissions or a restriction on the
 user's ACL grants. Prefer a restrictive model where the final permission is the
-intersection of user grants and token scopes.
+intersection of user grants and token scopes. The detailed scoped authorization
+design lives in
+`docs/plans/2026-05-17-application-token-scoped-authorization.md`.
 
 Phase 3: Admin token API.
 

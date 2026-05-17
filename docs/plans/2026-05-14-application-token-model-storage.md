@@ -198,6 +198,9 @@ This plan does not need to implement admin routes. The detailed route,
 authorization, redaction, rotation, and last-used accounting design now lives in
 `docs/plans/2026-05-17-application-token-admin-api-usage.md`.
 
+Token-scope enforcement is tracked separately in
+`docs/plans/2026-05-17-application-token-scoped-authorization.md`.
+
 ## Open Questions
 
 Should application tokens be valid Bearer values directly, or should clients
@@ -210,9 +213,6 @@ Should tokens have an absolute maximum lifetime enforced by configuration?
 
 Should token storage live only in local files first, or should it immediately
 support repository-backed configuration storage?
-
-Should scopes be stored as ACL grant expressions from the beginning, even if
-enforcement comes later?
 
 How should token records behave when the subject user is renamed, removed, or
 loses grants?

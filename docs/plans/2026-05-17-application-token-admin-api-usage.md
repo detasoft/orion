@@ -28,6 +28,8 @@ one-time only and keeping last-used updates safe under regular request traffic.
 - Do not redesign ACL grants or user storage.
 - Do not require application tokens to exchange for JWTs before use.
 - Do not enforce fine-grained token scopes beyond validation and persistence.
+  Scope enforcement is covered by
+  `docs/plans/2026-05-17-application-token-scoped-authorization.md`.
 - Do not expose raw token secrets after create or rotate responses.
 - Do not add a database requirement.
 - Do not add Git protocol-specific token policy in this step.
