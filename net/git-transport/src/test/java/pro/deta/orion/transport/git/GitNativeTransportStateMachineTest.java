@@ -2,9 +2,12 @@ package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.lifecycle.state.InvalidStateTransitionException;
+import pro.deta.orion.lifecycle.state.StateMachineEventPoint;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.state.Void;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,6 +15,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.STATE_ENTERED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_STARTED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_STARTED;
 import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNING;
 
 class GitNativeTransportStateMachineTest {
@@ -109,5 +117,25 @@ class GitNativeTransportStateMachineTest {
         assertTrue(machine.describe().contains("in progress: <none>"));
         assertTrue(machine.describe().contains("NEW --git-native-transport.start--> RUNNING (fail -> ERR)"));
         assertTrue(machine.describe().contains("RUNNING --git-native-transport.stop--> FIN (fail -> ERR)"));
+    }
+
+    @Test
+    void subscriptionCanBeAttachedToWrapper() {
+        GitNativeTransportStateMachine machine =
+                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
+        List<StateMachineEventPoint> points = new ArrayList<>();
+
+        machine.subscribe(points::add);
+        machine.start();
+
+        assertEquals(
+                List.of(
+                        TRANSITION_STARTED,
+                        TRANSITION_FUNCTION_STARTED,
+                        TRANSITION_FUNCTION_FINISHED,
+                        STATE_ENTERED,
+                        TRANSITION_FINISHED),
+                points.stream().map(StateMachineEventPoint::type).toList());
+        assertEquals(RUNNING, points.get(3).currentState());
     }
 }

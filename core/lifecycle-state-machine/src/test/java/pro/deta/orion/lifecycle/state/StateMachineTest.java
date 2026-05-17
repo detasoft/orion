@@ -6,6 +6,7 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -17,6 +18,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.STATE_ENTERED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FAILED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_STARTED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_FUNCTION_FINISHED;
+import static pro.deta.orion.lifecycle.state.StateMachineEventPointType.TRANSITION_STARTED;
 
 class StateMachineTest {
     private static final State RUNNING = state("RUNNING");
@@ -86,7 +93,6 @@ class StateMachineTest {
         TestActions actions = new TestActions();
         ActionBinding<StartAction> otherStart = ActionBinding.of(
                 actions.start().id(),
-                StartAction.class,
                 action -> {
                 });
         StateMachine machine = StateMachineDefinition.define()
@@ -173,6 +179,193 @@ class StateMachineTest {
     }
 
     @Test
+    void subscriptionReceivesTransitionPointsThatSubscribersCanUseForTiming() {
+        ActionBinding<Void> start = ActionBinding.of("timed-start", action -> {
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        List<StateMachineEventPoint> points = new ArrayList<>();
+
+        machine.subscribe(points::add);
+        StateMachineEvent event = machine.execute(start, Void.EMPTY);
+
+        assertThat(points)
+                .extracting(StateMachineEventPoint::type)
+                .containsExactly(
+                        TRANSITION_STARTED,
+                        TRANSITION_FUNCTION_STARTED,
+                        TRANSITION_FUNCTION_FINISHED,
+                        STATE_ENTERED,
+                        TRANSITION_FINISHED);
+        assertThat(points.getFirst().currentState()).isSameAs(NEW);
+        assertThat(points.getFirst().targetState()).isEqualTo(RUNNING);
+        assertThat(points.get(3).currentState()).isEqualTo(RUNNING);
+        assertThat(points.get(1).occurredAt()).isAfterOrEqualTo(points.get(0).occurredAt());
+        assertThat(points.get(2).occurredAt()).isAfterOrEqualTo(points.get(1).occurredAt());
+        assertThat(points.get(3).occurredAt()).isAfterOrEqualTo(points.get(2).occurredAt());
+        assertThat(points.get(4).occurredAt()).isAfterOrEqualTo(points.get(3).occurredAt());
+        assertThat(event.to()).isEqualTo(RUNNING);
+    }
+
+    @Test
+    void subscriptionShowsTransitionStartedWhileFunctionIsStillRunning() throws Exception {
+        CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch releaseHandler = new CountDownLatch(1);
+        ActionBinding<Void> start = ActionBinding.of("observable-start", action -> {
+            handlerEntered.countDown();
+            assertThat(releaseHandler.await(2, TimeUnit.SECONDS)).isTrue();
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        List<StateMachineEventPoint> points = new CopyOnWriteArrayList<>();
+        machine.subscribe(points::add);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<StateMachineEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
+            assertThat(handlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(points)
+                    .extracting(StateMachineEventPoint::type)
+                    .containsExactly(TRANSITION_STARTED, TRANSITION_FUNCTION_STARTED);
+            assertThat(points.getFirst().from()).isSameAs(NEW);
+            assertThat(points.getFirst().targetState()).isEqualTo(RUNNING);
+            assertThat(points.getFirst().currentState()).isSameAs(NEW);
+            assertThat(points.get(1).currentState()).isSameAs(NEW);
+
+            releaseHandler.countDown();
+            StateMachineEvent event = future.get(2, TimeUnit.SECONDS);
+
+            assertThat(event.to()).isEqualTo(RUNNING);
+            assertThat(points)
+                    .extracting(StateMachineEventPoint::type)
+                    .containsExactly(
+                            TRANSITION_STARTED,
+                            TRANSITION_FUNCTION_STARTED,
+                            TRANSITION_FUNCTION_FINISHED,
+                            STATE_ENTERED,
+                            TRANSITION_FINISHED);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void subscriptionReceivesFailureTimingAndFailureStateEntry() {
+        IllegalStateException failure = new IllegalStateException("boom");
+        ActionBinding<Void> start = ActionBinding.of("failing-start", action -> {
+            throw failure;
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        List<StateMachineEventPoint> points = new ArrayList<>();
+        List<StateMachineEvent> completedEvents = new ArrayList<>();
+        machine.subscribe(points::add);
+        machine.addListener(completedEvents::add);
+
+        assertThatThrownBy(() -> machine.execute(start, Void.EMPTY))
+                .isInstanceOf(StateTransitionFailedException.class)
+                .hasCause(failure);
+
+        assertThat(points)
+                .extracting(StateMachineEventPoint::type)
+                .containsExactly(
+                        TRANSITION_STARTED,
+                        TRANSITION_FUNCTION_STARTED,
+                        TRANSITION_FUNCTION_FINISHED,
+                        STATE_ENTERED,
+                        TRANSITION_FAILED);
+        assertThat(points.get(2).failure()).isSameAs(failure);
+        assertThat(points.get(3).currentState()).isEqualTo(FAILED);
+        assertThat(points.get(4).failure()).isSameAs(failure);
+        assertThat(completedEvents).singleElement().satisfies(event -> {
+            assertThat(event.failed()).isTrue();
+            assertThat(event.failure()).isSameAs(failure);
+        });
+    }
+
+    @Test
+    void subscriptionCanBeClosed() {
+        ActionBinding<Void> start = ActionBinding.of("start-after-close", action -> {
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        List<StateMachineEventPoint> points = new ArrayList<>();
+
+        StateMachineSubscription subscription = machine.subscribe(points::add);
+        subscription.close();
+        machine.execute(start, Void.EMPTY);
+
+        assertThat(points).isEmpty();
+    }
+
+    @Test
+    void subscriberFailureDoesNotAffectTransition() {
+        ActionBinding<Void> start = ActionBinding.of("start-with-broken-subscriber", action -> {
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        machine.subscribe(event -> {
+            throw new IllegalStateException("subscriber failed");
+        });
+
+        StateMachineEvent event = machine.execute(start, Void.EMPTY);
+
+        assertThat(event.to()).isEqualTo(RUNNING);
+        assertThat(event.failed()).isFalse();
+        assertThat(machine.currentState()).isEqualTo(RUNNING);
+    }
+
+    @Test
+    void loggingSubscriberUsesOwnerClassAndLogsTransitionTimingPoints() {
+        ActionBinding<Void> start = ActionBinding.of("logged-start", action -> {
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        List<String> messages = new ArrayList<>();
+        machine.subscribe(new StateMachineLoggingSubscriber(StateMachineTest.class, messages::add));
+
+        machine.execute(start, Void.EMPTY);
+
+        assertThat(messages).hasSize(5);
+        assertThat(messages.get(0)).contains(StateMachineTest.class.getName(), "transition started: NEW --logged-start--> RUNNING");
+        assertThat(messages.get(1)).contains(StateMachineTest.class.getName(), "transition function started: NEW --logged-start--> RUNNING");
+        assertThat(messages.get(2)).contains(StateMachineTest.class.getName(), "transition function finished: NEW --logged-start--> RUNNING in PT");
+        assertThat(messages.get(3)).contains(StateMachineTest.class.getName(), "state entered: RUNNING");
+        assertThat(messages.get(4)).contains(StateMachineTest.class.getName(), "transition finished: NEW --logged-start--> RUNNING in PT");
+    }
+
+    @Test
     void fixedFinStateHasNoActionsUnlessTransitionIsExplicitlyConfigured() {
         TestActions actions = new TestActions();
         StateMachine terminal = StateMachineDefinition.define()
@@ -246,7 +439,7 @@ class StateMachineTest {
     @Test
     void emptyVoidPayloadCanBeUsedForParameterlessAction() {
         List<Void> calls = new ArrayList<>();
-        ActionBinding<Void> action = ActionBinding.of("test.empty", Void.class, calls::add);
+        ActionBinding<Void> action = ActionBinding.of("test.empty", calls::add);
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(action)
@@ -264,9 +457,9 @@ class StateMachineTest {
 
     @Test
     void describeIncludesCurrentStateAndTransitionDiagram() {
-        ActionBinding<Void> start = ActionBinding.of("start", Void.class, action -> {
+        ActionBinding<Void> start = ActionBinding.of("start", action -> {
         });
-        ActionBinding<Void> stop = ActionBinding.of("stop", Void.class, action -> {
+        ActionBinding<Void> stop = ActionBinding.of("stop", action -> {
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
@@ -302,7 +495,7 @@ class StateMachineTest {
     void describeShowsTransitionInProgress() throws Exception {
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch releaseHandler = new CountDownLatch(1);
-        ActionBinding<Void> start = ActionBinding.of("slow-start", Void.class, action -> {
+        ActionBinding<Void> start = ActionBinding.of("slow-start", action -> {
             handlerEntered.countDown();
             assertThat(releaseHandler.await(2, TimeUnit.SECONDS)).isTrue();
         });
@@ -342,7 +535,7 @@ class StateMachineTest {
     void describeCanBePrintedBeforeStartWhileTransitioningAndWhenRunning() throws Exception {
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch releaseHandler = new CountDownLatch(1);
-        ActionBinding<Void> start = ActionBinding.of("start-service", Void.class, action -> {
+        ActionBinding<Void> start = ActionBinding.of("start-service", action -> {
             handlerEntered.countDown();
             assertThat(releaseHandler.await(2, TimeUnit.SECONDS)).isTrue();
         });
@@ -464,8 +657,8 @@ class StateMachineTest {
         private TestActions(
                 LifecycleActionHandler<StartAction> startHandler,
                 LifecycleActionHandler<StopAction> stopHandler) {
-            start = ActionBinding.of(StartAction.class, startHandler);
-            stop = ActionBinding.of(StopAction.class, stopHandler);
+            start = ActionBinding.of("test.start", startHandler);
+            stop = ActionBinding.of("test.stop", stopHandler);
         }
 
         private ActionBinding<StartAction> start() {

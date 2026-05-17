@@ -5,7 +5,9 @@ import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.StateMachineEvent;
+import pro.deta.orion.lifecycle.state.StateMachineEventSubscriber;
 import pro.deta.orion.lifecycle.state.StateMachineSnapshot;
+import pro.deta.orion.lifecycle.state.StateMachineSubscription;
 import pro.deta.orion.lifecycle.state.Void;
 
 import java.util.Objects;
@@ -23,8 +25,8 @@ public final class GitNativeTransportStateMachine {
 
     public GitNativeTransportStateMachine(GitNativeTransportService service) {
         this.service = Objects.requireNonNull(service, "service");
-        start = ActionBinding.of("git-native-transport.start", Void.class, this::startGitTransport);
-        stop = ActionBinding.of("git-native-transport.stop", Void.class, this::stopGitTransport);
+        start = ActionBinding.of("git-native-transport.start", this::startGitTransport);
+        stop = ActionBinding.of("git-native-transport.stop", this::stopGitTransport);
         definition = defineStateMachine();
         stateMachine = definition.newStateMachine();
     }
@@ -83,6 +85,10 @@ public final class GitNativeTransportStateMachine {
 
     public String describe() {
         return stateMachine.describe();
+    }
+
+    public StateMachineSubscription subscribe(StateMachineEventSubscriber subscriber) {
+        return stateMachine.subscribe(subscriber);
     }
 
     public StateMachineEvent start() {

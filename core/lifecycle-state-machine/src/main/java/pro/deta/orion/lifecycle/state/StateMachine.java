@@ -1,5 +1,6 @@
 package pro.deta.orion.lifecycle.state;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -8,6 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class StateMachine {
     private final StateMachineDefinition definition;
     private final List<StateMachineListener> listeners = new CopyOnWriteArrayList<>();
+    private final List<StateMachineEventSubscriber> subscribers = new CopyOnWriteArrayList<>();
     private volatile StateMachineDefinition.State currentState;
     private volatile StateTransition<?> transitionInProgress;
 
@@ -62,6 +64,12 @@ public final class StateMachine {
         listeners.add(Objects.requireNonNull(listener, "listener"));
     }
 
+    public StateMachineSubscription subscribe(StateMachineEventSubscriber subscriber) {
+        Objects.requireNonNull(subscriber, "subscriber");
+        subscribers.add(subscriber);
+        return () -> subscribers.remove(subscriber);
+    }
+
     public <A> StateMachineEvent execute(ActionBinding<A> action, A payload) {
         Objects.requireNonNull(action, "action");
         return executeTransition(action, payload);
@@ -76,18 +84,94 @@ public final class StateMachine {
         StateTransition<A> transition = definition.transition(currentState, action)
                 .orElseThrow(() -> new InvalidStateTransitionException(currentState, action.id()));
         StateMachineDefinition.State oldState = currentState;
+        Instant transitionStartedAt = Instant.now();
         transitionInProgress = transition;
         try {
-            transition.execute(payload);
-            currentState = transition.to();
-            StateMachineEvent event = new StateMachineEvent(oldState, action, payload, currentState, null);
+            notifySubscribers(new StateMachineEventPoint(
+                    StateMachineEventPointType.TRANSITION_STARTED,
+                    oldState,
+                    action,
+                    payload,
+                    transition.to(),
+                    oldState,
+                    null,
+                    transitionStartedAt));
+            Instant functionStartedAt = Instant.now();
+            notifySubscribers(new StateMachineEventPoint(
+                    StateMachineEventPointType.TRANSITION_FUNCTION_STARTED,
+                    oldState,
+                    action,
+                    payload,
+                    transition.to(),
+                    currentState,
+                    null,
+                    functionStartedAt));
+            Exception failure = null;
+            Instant functionFinishedAt;
+            try {
+                transition.execute(payload);
+            } catch (Exception e) {
+                failure = e;
+            } finally {
+                functionFinishedAt = Instant.now();
+            }
+
+            notifySubscribers(new StateMachineEventPoint(
+                    StateMachineEventPointType.TRANSITION_FUNCTION_FINISHED,
+                    oldState,
+                    action,
+                    payload,
+                    transition.to(),
+                    currentState,
+                    failure,
+                    functionFinishedAt));
+            StateMachineDefinition.State nextState;
+            if (failure == null) {
+                nextState = transition.to();
+            } else {
+                nextState = transition.failureState();
+            }
+            currentState = nextState;
+            Instant stateEnteredAt = Instant.now();
+            notifySubscribers(new StateMachineEventPoint(
+                    StateMachineEventPointType.STATE_ENTERED,
+                    oldState,
+                    action,
+                    payload,
+                    transition.to(),
+                    currentState,
+                    failure,
+                    stateEnteredAt));
+            Instant transitionFinishedAt = Instant.now();
+            StateMachineEvent event = new StateMachineEvent(
+                    oldState,
+                    action,
+                    payload,
+                    currentState,
+                    failure);
             notifyListeners(event);
-            return event;
-        } catch (Exception e) {
-            currentState = transition.failureState();
-            StateMachineEvent event = new StateMachineEvent(oldState, action, payload, currentState, e);
-            notifyListeners(event);
-            throw new StateTransitionFailedException(oldState, action.id(), transition.to(), currentState, e);
+            if (failure == null) {
+                notifySubscribers(new StateMachineEventPoint(
+                        StateMachineEventPointType.TRANSITION_FINISHED,
+                        oldState,
+                        action,
+                        payload,
+                        transition.to(),
+                        currentState,
+                        null,
+                        transitionFinishedAt));
+                return event;
+            }
+            notifySubscribers(new StateMachineEventPoint(
+                    StateMachineEventPointType.TRANSITION_FAILED,
+                    oldState,
+                    action,
+                    payload,
+                    transition.to(),
+                    currentState,
+                    failure,
+                    transitionFinishedAt));
+            throw new StateTransitionFailedException(oldState, action.id(), transition.to(), currentState, failure);
         } finally {
             transitionInProgress = null;
         }
@@ -96,6 +180,16 @@ public final class StateMachine {
     private void notifyListeners(StateMachineEvent event) {
         for (StateMachineListener listener : listeners) {
             listener.onTransition(event);
+        }
+    }
+
+    private void notifySubscribers(StateMachineEventPoint event) {
+        for (StateMachineEventSubscriber subscriber : subscribers) {
+            try {
+                subscriber.onEvent(event);
+            } catch (RuntimeException ignored) {
+                // Subscribers observe diagnostics and must not change transition behavior.
+            }
         }
     }
 }

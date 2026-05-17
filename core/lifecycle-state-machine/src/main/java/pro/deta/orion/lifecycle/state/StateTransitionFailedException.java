@@ -2,13 +2,13 @@ package pro.deta.orion.lifecycle.state;
 
 public class StateTransitionFailedException extends RuntimeException {
     private final StateMachineDefinition.State from;
-    private final ActionId action;
+    private final String action;
     private final StateMachineDefinition.State intendedState;
     private final StateMachineDefinition.State currentState;
 
     public StateTransitionFailedException(
             StateMachineDefinition.State from,
-            ActionId action,
+            String action,
             StateMachineDefinition.State intendedState,
             StateMachineDefinition.State currentState,
             Throwable cause) {
@@ -23,7 +23,7 @@ public class StateTransitionFailedException extends RuntimeException {
         return from;
     }
 
-    public ActionId action() {
+    public String action() {
         return action;
     }
 
