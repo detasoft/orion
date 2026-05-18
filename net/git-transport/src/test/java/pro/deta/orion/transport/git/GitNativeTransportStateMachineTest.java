@@ -30,7 +30,7 @@ class GitNativeTransportStateMachineTest {
 
         assertEquals(NEW, machine.currentState());
         assertSame(service, machine.service());
-        assertEquals(Set.of(machine.startAction(), machine.stopAction()), machine.stateMachine().availableActions());
+        assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.stateMachine().availableActions());
 
         machine.start();
         assertEquals(RUNNING, machine.currentState());
@@ -101,9 +101,9 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportStateMachine machine =
                 new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
 
-        assertEquals(Set.of(machine.startAction(), machine.stopAction()), machine.definition().availableActions(NEW));
-        assertEquals(Set.of(machine.stopAction()), machine.definition().availableActions(RUNNING));
-        assertEquals(Set.of(machine.stopAction()), machine.definition().availableActions(ERR));
+        assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.definition().availableActions(NEW));
+        assertEquals(Set.of(machine.stopAction().id()), machine.definition().availableActions(RUNNING));
+        assertEquals(Set.of(machine.stopAction().id()), machine.definition().availableActions(ERR));
         assertTrue(machine.definition().availableActions(FIN).isEmpty());
         assertEquals(NEW, machine.definition().newStateMachine().currentState());
     }

@@ -5,9 +5,8 @@ import java.util.Objects;
 /**
  * Typed executable binding for one lifecycle action in one machine state.
  *
- * <p>The binding instance is the precise transition key for low-level execution, so
- * {@link StateMachine#execute(ActionBinding, Object)} runs one concrete transition. The binding id is the semantic
- * action key used by {@link StateMachine#execute(ActionId, Object)} to select and continue transitions across states.</p>
+ * <p>The binding instance is the precise transition key for low-level execution. The binding id is the semantic action
+ * key used by {@link StateMachine#execute(ActionId, Object)} to select and continue transitions across states.</p>
  */
 public final class ActionBinding<A> {
     private final ActionId id;

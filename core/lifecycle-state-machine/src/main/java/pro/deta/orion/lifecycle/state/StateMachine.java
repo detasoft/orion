@@ -3,30 +3,49 @@ package pro.deta.orion.lifecycle.state;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 /**
  * Runtime instance of a {@link StateMachineDefinition}.
  *
  * <p>Executing by {@link ActionBinding} performs exactly one concrete transition. Executing by {@link ActionId} is the
  * default high-level mode: the machine selects the currently available binding with that id, executes it, and keeps
- * going while the same id remains available from the next state. Transitions are serialized per machine instance, and
+ * going while the same id remains available from the next state. If a selected transition is a propagation transition,
+ * the parent machine executes matching child actions with the same id. Transitions are serialized per machine instance, and
  * observer failures are logged without changing lifecycle behavior.</p>
  */
 @Slf4j
-public final class StateMachine {
+public final class StateMachine implements AutoCloseable {
     private final StateMachineDefinition definition;
     private final List<StateMachineListener> listeners = new CopyOnWriteArrayList<>();
     private final List<StateMachineEventSubscriber> subscribers = new CopyOnWriteArrayList<>();
+    private final Map<String, StateMachine> children;
+    private final Map<String, StateMachineDefinition.State> childStates = new ConcurrentHashMap<>();
+    private final List<StateMachineSubscription> childSubscriptions = new CopyOnWriteArrayList<>();
     private volatile StateMachineDefinition.State currentState;
+    private volatile StateMachineDefinition.State computedState;
     private volatile StateTransition<?> transitionInProgress;
 
     public StateMachine(StateMachineDefinition definition) {
         this.definition = Objects.requireNonNull(definition, "definition");
+        children = definition.children();
         currentState = definition.initialState();
+        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
+            childStates.put(child.getKey(), child.getValue().currentState());
+            childSubscriptions.add(child.getValue().subscribe(event -> onChildEvent(child.getKey(), event)));
+        }
+        computedState = resolveComputedState();
     }
 
     public static StateMachine create(StateMachineDefinition definition) {
@@ -37,7 +56,19 @@ public final class StateMachine {
         return currentState;
     }
 
-    public synchronized Set<ActionBinding<?>> availableActions() {
+    public StateMachineDefinition.State computedState() {
+        return computedState;
+    }
+
+    public Map<String, StateMachineDefinition.State> childStates() {
+        Map<String, StateMachineDefinition.State> snapshot = new LinkedHashMap<>();
+        for (String child : children.keySet()) {
+            snapshot.put(child, childStates.get(child));
+        }
+        return Collections.unmodifiableMap(snapshot);
+    }
+
+    public synchronized Set<ActionId> availableActions() {
         return definition.availableActions(currentState);
     }
 
@@ -52,6 +83,8 @@ public final class StateMachine {
     public synchronized StateMachineSnapshot snapshot() {
         return new StateMachineSnapshot(
                 currentState,
+                computedState,
+                childStates(),
                 definition.availableActions(currentState),
                 definition.isTerminalState(currentState));
     }
@@ -81,14 +114,41 @@ public final class StateMachine {
         return () -> subscribers.remove(subscriber);
     }
 
-    public <A> StateTransitionEvent execute(ActionBinding<A> action, A payload) {
+    public synchronized <A> StateTransitionEvent execute(ActionBinding<A> action, A payload) {
         Objects.requireNonNull(action, "action");
-        return executeTransition(action, payload);
+        StateTransition<A> transition = definition.transition(currentState, action)
+                .orElseThrow(() -> new InvalidStateTransitionException(currentState, action.id()));
+        return executeTransition(transition, payload);
     }
 
     public <A> List<StateTransitionEvent> execute(ActionId actionId, A payload) {
         Objects.requireNonNull(actionId, "actionId");
         return executeTransitionSequence(actionId, payload);
+    }
+
+    public <A> List<StateTransitionEvent> executeChildren(ActionId actionId, A payload) {
+        return executeChildren(actionId, payload, StateTransitionAction.PROPAGATE_PARALLEL);
+    }
+
+    private <A> List<StateTransitionEvent> executeChildren(
+            ActionId actionId,
+            A payload,
+            StateTransitionAction transitionAction) {
+        Objects.requireNonNull(actionId, "actionId");
+        List<ChildAction<A>> actions = availableChildActions(actionId, payload);
+        if (actions.isEmpty()) {
+            return List.of();
+        }
+
+        if (transitionAction == StateTransitionAction.PROPAGATE_SEQUENTIAL) {
+            return executeChildActionsSequentially(actions);
+        }
+
+        ExecutorService executor = definition.childExecutor();
+        if (executor == null) {
+            throw new IllegalStateException("Parallel child action " + actionId + " requires childExecutor");
+        }
+        return executeChildActionsInParallel(actionId, actions, executor);
     }
 
     private synchronized <A> List<StateTransitionEvent> executeTransitionSequence(ActionId actionId, A payload) {
@@ -103,21 +163,19 @@ public final class StateMachine {
                 return List.copyOf(events);
             }
             @SuppressWarnings("unchecked")
-            ActionBinding<A> action = (ActionBinding<A>) transition.action();
-            events.add(executeTransition(action, payload));
+            StateTransition<A> typedTransition = (StateTransition<A>) transition;
+            events.add(executeTransition(typedTransition, payload));
         }
     }
 
-    private synchronized <A> StateTransitionEvent executeTransition(ActionBinding<A> action, A payload) {
-        StateTransition<A> transition = definition.transition(currentState, action)
-                .orElseThrow(() -> new InvalidStateTransitionException(currentState, action.id()));
+    private synchronized <A> StateTransitionEvent executeTransition(StateTransition<A> transition, A payload) {
         StateMachineDefinition.State oldState = currentState;
         transitionInProgress = transition;
         try {
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.TRANSITION_STARTED,
                     oldState,
-                    action,
+                    transition.actionId(),
                     payload,
                     transition.to(),
                     oldState,
@@ -125,14 +183,14 @@ public final class StateMachine {
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.TRANSITION_FUNCTION_STARTED,
                     oldState,
-                    action,
+                    transition.actionId(),
                     payload,
                     transition.to(),
                     currentState,
                     null));
             Exception failure = null;
             try {
-                transition.execute(payload);
+                executeTransitionAction(transition, payload);
             } catch (Exception e) {
                 failure = e;
             }
@@ -140,7 +198,7 @@ public final class StateMachine {
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.TRANSITION_FUNCTION_FINISHED,
                     oldState,
-                    action,
+                    transition.actionId(),
                     payload,
                     transition.to(),
                     currentState,
@@ -152,17 +210,18 @@ public final class StateMachine {
                 nextState = transition.failureState();
             }
             currentState = nextState;
+            computedState = resolveComputedState();
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.AFTER_STATE_ENTERED,
                     oldState,
-                    action,
+                    transition.actionId(),
                     payload,
                     transition.to(),
                     currentState,
                     failure));
             StateTransitionEvent event = new StateTransitionEvent(
                     oldState,
-                    action,
+                    transition.actionId(),
                     payload,
                     currentState,
                     failure);
@@ -171,7 +230,7 @@ public final class StateMachine {
                 notifySubscribers(new StateMachineEvent(
                         StateMachineEventType.TRANSITION_FINISHED,
                         oldState,
-                        action,
+                        transition.actionId(),
                         payload,
                         transition.to(),
                         currentState,
@@ -181,15 +240,90 @@ public final class StateMachine {
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.TRANSITION_FAILED,
                     oldState,
-                    action,
+                    transition.actionId(),
                     payload,
                     transition.to(),
                     currentState,
                     failure));
-            throw new StateTransitionFailedException(oldState, action.id(), transition.to(), currentState, failure);
+            throw new StateTransitionFailedException(oldState, transition.actionId(), transition.to(), currentState, failure);
         } finally {
             transitionInProgress = null;
         }
+    }
+
+    private <A> void executeTransitionAction(StateTransition<A> transition, A payload) throws Exception {
+        if (transition.transitionAction() == StateTransitionAction.EXECUTE) {
+            transition.execute(payload);
+            return;
+        }
+        executeChildren(transition.actionId(), payload, transition.transitionAction());
+    }
+
+    private <A> List<ChildAction<A>> availableChildActions(ActionId actionId, A payload) {
+        List<ChildAction<A>> actions = new ArrayList<>();
+        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
+            if (child.getValue().definition.transition(child.getValue().currentState(), actionId).isPresent()) {
+                actions.add(new ChildAction<>(child.getKey(), child.getValue(), actionId, payload));
+            }
+        }
+        return actions;
+    }
+
+    private <A> List<StateTransitionEvent> executeChildActionsSequentially(List<ChildAction<A>> actions) {
+        List<StateTransitionEvent> events = new ArrayList<>();
+        for (ChildAction<A> action : actions) {
+            events.addAll(action.execute());
+        }
+        return List.copyOf(events);
+    }
+
+    private <A> List<StateTransitionEvent> executeChildActionsInParallel(
+            ActionId actionId,
+            List<ChildAction<A>> actions,
+            ExecutorService executor) {
+        List<Callable<List<StateTransitionEvent>>> tasks = new ArrayList<>();
+        for (ChildAction<A> action : actions) {
+            tasks.add(action::execute);
+        }
+
+        List<StateTransitionEvent> events = new ArrayList<>();
+        List<Throwable> failures = new ArrayList<>();
+        try {
+            List<Future<List<StateTransitionEvent>>> futures = executor.invokeAll(tasks);
+            for (Future<List<StateTransitionEvent>> future : futures) {
+                try {
+                    events.addAll(future.get());
+                } catch (ExecutionException e) {
+                    failures.add(e.getCause());
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while executing child action " + actionId, e);
+        }
+
+        if (!failures.isEmpty()) {
+            IllegalStateException failure = new IllegalStateException(
+                    "Child action " + actionId + " failed",
+                    failures.getFirst());
+            for (int i = 1; i < failures.size(); i++) {
+                failure.addSuppressed(failures.get(i));
+            }
+            throw failure;
+        }
+        return List.copyOf(events);
+    }
+
+    private void onChildEvent(String child, StateMachineEvent event) {
+        if (event.type() != StateMachineEventType.AFTER_STATE_ENTERED) {
+            return;
+        }
+        childStates.put(child, event.currentState());
+        computedState = resolveComputedState();
+    }
+
+    private StateMachineDefinition.State resolveComputedState() {
+        return definition.computedStateResolver().resolve(currentState, childStates());
     }
 
     private void notifyListeners(StateTransitionEvent event) {
@@ -209,6 +343,30 @@ public final class StateMachine {
             } catch (RuntimeException e) {
                 log.warn("State machine subscriber failed while observing event {}", event, e);
             }
+        }
+    }
+
+    @Override
+    public void close() {
+        for (StateMachineSubscription subscription : childSubscriptions) {
+            subscription.close();
+        }
+        childSubscriptions.clear();
+    }
+
+    private record ChildAction<A>(
+            String name,
+            StateMachine machine,
+            ActionId actionId,
+            A payload) {
+        private ChildAction {
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(machine, "machine");
+            Objects.requireNonNull(actionId, "actionId");
+        }
+
+        private List<StateTransitionEvent> execute() {
+            return machine.execute(actionId, payload);
         }
     }
 }

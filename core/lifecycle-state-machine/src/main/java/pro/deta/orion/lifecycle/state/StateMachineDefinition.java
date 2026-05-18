@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 
 public final class StateMachineDefinition {
     public static final State NEW = new State("NEW");
@@ -18,16 +19,26 @@ public final class StateMachineDefinition {
     private final Map<StateActionKey, StateTransition<?>> transitions;
     private final Set<State> terminalStates;
     private final Set<State> states;
+    private final Map<String, StateMachine> children;
+    private final ComputedStateResolver computedStateResolver;
+    private final ExecutorService childExecutor;
 
     private StateMachineDefinition(
             Map<StateActionKey, StateTransition<?>> transitions,
-            Set<State> terminalStates) {
+            Set<State> terminalStates,
+            Map<String, StateMachine> children,
+            ComputedStateResolver computedStateResolver,
+            ExecutorService childExecutor) {
         this.transitions = Collections.unmodifiableMap(new LinkedHashMap<>(transitions));
         LinkedHashSet<State> allTerminalStates = new LinkedHashSet<>();
         allTerminalStates.add(FIN);
         allTerminalStates.addAll(terminalStates);
         this.terminalStates = Collections.unmodifiableSet(allTerminalStates);
         this.states = collectStates(this.transitions, allTerminalStates);
+        this.children = Collections.unmodifiableMap(new LinkedHashMap<>(
+                Objects.requireNonNull(children, "children")));
+        this.computedStateResolver = Objects.requireNonNull(computedStateResolver, "computedStateResolver");
+        this.childExecutor = childExecutor;
     }
 
     public static State state(String name) {
@@ -57,24 +68,33 @@ public final class StateMachineDefinition {
         return states;
     }
 
+    public Map<String, StateMachine> children() {
+        return children;
+    }
+
+    public ComputedStateResolver computedStateResolver() {
+        return computedStateResolver;
+    }
+
+    ExecutorService childExecutor() {
+        return childExecutor;
+    }
+
     public <A> Optional<StateTransition<A>> transition(State state, ActionBinding<A> action) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(action, "action");
         @SuppressWarnings("unchecked")
-        StateTransition<A> transition = (StateTransition<A>) transitions.get(new StateActionKey(state, action));
+        StateTransition<A> transition = (StateTransition<A>) transitions.get(new StateActionKey(state, action.id()));
+        if (transition != null && transition.action() != action) {
+            return Optional.empty();
+        }
         return Optional.ofNullable(transition);
     }
 
     public Optional<StateTransition<?>> transition(State state, ActionId actionId) {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(actionId, "actionId");
-        for (Map.Entry<StateActionKey, StateTransition<?>> entry : transitions.entrySet()) {
-            if (Objects.equals(state, entry.getKey().state())
-                    && Objects.equals(actionId, entry.getKey().action().id())) {
-                return Optional.of(entry.getValue());
-            }
-        }
-        return Optional.empty();
+        return Optional.ofNullable(transitions.get(new StateActionKey(state, actionId)));
     }
 
     public List<StateTransition<?>> transitionsFrom(State state) {
@@ -88,11 +108,11 @@ public final class StateMachineDefinition {
         return List.copyOf(result);
     }
 
-    public Set<ActionBinding<?>> availableActions(State state) {
+    public Set<ActionId> availableActions(State state) {
         Objects.requireNonNull(state, "state");
-        Set<ActionBinding<?>> result = new LinkedHashSet<>();
+        Set<ActionId> result = new LinkedHashSet<>();
         for (StateTransition<?> transition : transitionsFrom(state)) {
-            result.add(transition.action());
+            result.add(transition.actionId());
         }
         return Collections.unmodifiableSet(result);
     }
@@ -131,6 +151,9 @@ public final class StateMachineDefinition {
     public static final class Builder {
         private final Map<StateActionKey, StateTransition<?>> transitions = new LinkedHashMap<>();
         private final Set<State> terminalStates = new LinkedHashSet<>();
+        private final Map<String, StateMachine> children = new LinkedHashMap<>();
+        private ComputedStateResolver computedStateResolver = (physicalState, childStates) -> physicalState;
+        private ExecutorService childExecutor;
 
         private Builder() {
         }
@@ -140,43 +163,59 @@ public final class StateMachineDefinition {
             return this;
         }
 
+        public Builder child(String name, StateMachine child) {
+            requireName(name, "name");
+            Objects.requireNonNull(child, "child");
+            if (children.containsKey(name)) {
+                throw new IllegalArgumentException("Duplicate child state machine " + name);
+            }
+            children.put(name, child);
+            return this;
+        }
+
+        public Builder computedState(ComputedStateResolver computedStateResolver) {
+            this.computedStateResolver = Objects.requireNonNull(computedStateResolver, "computedStateResolver");
+            return this;
+        }
+
+        public Builder childExecutor(ExecutorService childExecutor) {
+            this.childExecutor = Objects.requireNonNull(childExecutor, "childExecutor");
+            return this;
+        }
+
         public FromRule from(State state) {
             return new FromRule(this, state);
         }
 
         private <A> Builder addTransition(
                 State from,
+                ActionId actionId,
                 ActionBinding<A> action,
                 State to,
-                State failureState) {
+                State failureState,
+                StateTransitionAction transitionAction) {
             StateTransition<A> transition = new StateTransition<>(
                     Objects.requireNonNull(from, "from"),
-                    Objects.requireNonNull(action, "action"),
+                    Objects.requireNonNull(actionId, "actionId"),
+                    action,
                     Objects.requireNonNull(to, "to"),
-                    Objects.requireNonNull(failureState, "failureState"));
-            StateActionKey key = new StateActionKey(from, action);
+                    Objects.requireNonNull(failureState, "failureState"),
+                    Objects.requireNonNull(transitionAction, "transitionAction"));
+            StateActionKey key = new StateActionKey(from, actionId);
             if (transitions.containsKey(key)) {
-                throw new IllegalArgumentException("Duplicate transition for state " + from + " and action " + action);
+                throw new IllegalArgumentException("Duplicate transition action id " + actionId + " for state " + from);
             }
-            rejectDuplicateActionId(from, action);
             transitions.put(key, transition);
             return this;
-        }
-
-        private void rejectDuplicateActionId(State from, ActionBinding<?> action) {
-            for (StateActionKey existing : transitions.keySet()) {
-                if (Objects.equals(existing.state(), from)
-                        && Objects.equals(existing.action().id(), action.id())) {
-                    throw new IllegalArgumentException(
-                            "Duplicate transition action id " + action.id() + " for state " + from);
-                }
-            }
         }
 
         public StateMachineDefinition build() {
             return new StateMachineDefinition(
                     new LinkedHashMap<>(transitions),
-                    new LinkedHashSet<>(terminalStates));
+                    new LinkedHashSet<>(terminalStates),
+                    new LinkedHashMap<>(children),
+                    computedStateResolver,
+                    childExecutor);
         }
     }
 
@@ -190,23 +229,36 @@ public final class StateMachineDefinition {
         }
 
         public <A> ActionRule<A> on(ActionBinding<A> action) {
-            return new ActionRule<>(builder, state, action);
+            return new ActionRule<>(builder, state, action.id(), action, StateTransitionAction.EXECUTE);
+        }
+
+        public PropagationRule on(ActionId actionId) {
+            return new PropagationRule(builder, state, actionId);
         }
     }
 
     public static final class ActionRule<A> {
         private final Builder builder;
         private final State from;
+        private final ActionId actionId;
         private final ActionBinding<A> action;
+        private final StateTransitionAction transitionAction;
 
-        private ActionRule(Builder builder, State from, ActionBinding<A> action) {
+        private ActionRule(
+                Builder builder,
+                State from,
+                ActionId actionId,
+                ActionBinding<A> action,
+                StateTransitionAction transitionAction) {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.from = Objects.requireNonNull(from, "from");
-            this.action = Objects.requireNonNull(action, "action");
+            this.actionId = Objects.requireNonNull(actionId, "actionId");
+            this.action = action;
+            this.transitionAction = Objects.requireNonNull(transitionAction, "transitionAction");
         }
 
         public TargetRule<A> to(State to) {
-            return new TargetRule<>(builder, from, action, to);
+            return new TargetRule<>(builder, from, actionId, action, to, transitionAction);
         }
 
         public TargetRule<A> stay() {
@@ -217,18 +269,57 @@ public final class StateMachineDefinition {
     public static final class TargetRule<A> {
         private final Builder builder;
         private final State from;
+        private final ActionId actionId;
         private final ActionBinding<A> action;
         private final State to;
+        private final StateTransitionAction transitionAction;
 
-        private TargetRule(Builder builder, State from, ActionBinding<A> action, State to) {
+        private TargetRule(
+                Builder builder,
+                State from,
+                ActionId actionId,
+                ActionBinding<A> action,
+                State to,
+                StateTransitionAction transitionAction) {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.from = Objects.requireNonNull(from, "from");
-            this.action = Objects.requireNonNull(action, "action");
+            this.actionId = Objects.requireNonNull(actionId, "actionId");
+            this.action = action;
             this.to = Objects.requireNonNull(to, "to");
+            this.transitionAction = Objects.requireNonNull(transitionAction, "transitionAction");
         }
 
         public Builder failTo(State failureState) {
-            return builder.addTransition(from, action, to, failureState);
+            return builder.addTransition(from, actionId, action, to, failureState, transitionAction);
+        }
+    }
+
+    public static final class PropagationRule {
+        private final Builder builder;
+        private final State from;
+        private final ActionId actionId;
+
+        private PropagationRule(Builder builder, State from, ActionId actionId) {
+            this.builder = Objects.requireNonNull(builder, "builder");
+            this.from = Objects.requireNonNull(from, "from");
+            this.actionId = Objects.requireNonNull(actionId, "actionId");
+        }
+
+        public ActionRule<Void> propagateSequential() {
+            return propagate(StateTransitionAction.PROPAGATE_SEQUENTIAL);
+        }
+
+        public ActionRule<Void> propagateParallel() {
+            return propagate(StateTransitionAction.PROPAGATE_PARALLEL);
+        }
+
+        private ActionRule<Void> propagate(StateTransitionAction transitionAction) {
+            return new ActionRule<>(
+                    builder,
+                    from,
+                    actionId,
+                    null,
+                    transitionAction);
         }
     }
 
@@ -268,10 +359,18 @@ public final class StateMachineDefinition {
         }
     }
 
-    private record StateActionKey(State state, ActionBinding<?> action) {
+    private record StateActionKey(State state, ActionId actionId) {
         private StateActionKey {
             Objects.requireNonNull(state, "state");
-            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(actionId, "actionId");
         }
+    }
+
+    private static String requireName(String value, String name) {
+        Objects.requireNonNull(value, name);
+        if (value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be blank");
+        }
+        return value;
     }
 }

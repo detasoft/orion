@@ -9,7 +9,7 @@ import java.util.Objects;
  */
 public record StateTransitionEvent(
         StateMachineDefinition.State from,
-        ActionBinding<?> action,
+        ActionId action,
         Object payload,
         StateMachineDefinition.State to,
         Throwable failure) {

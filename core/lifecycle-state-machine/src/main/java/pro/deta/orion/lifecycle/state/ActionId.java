@@ -8,7 +8,8 @@ import java.util.Objects;
  * <p>Different states may expose different {@link ActionBinding} instances with the same id. Executing a machine by
  * {@code ActionId} follows the currently available binding and then continues while the same id is available from the
  * next state. This makes ids suitable for high-level actions such as {@code START} and {@code STOP}, while each binding
- * still owns the concrete typed handler for one state transition.</p>
+ * still owns the concrete typed handler for one state transition. Parent propagation transitions also use this id to
+ * find matching child actions.</p>
  */
 public final class ActionId {
     public static final ActionId START = new ActionId("START");

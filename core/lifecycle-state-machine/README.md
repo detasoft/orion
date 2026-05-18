@@ -137,10 +137,91 @@ the same action id is available after each successful layer. Calling
 `machine.execute(startInit, Void.EMPTY)` would run only the first concrete
 transition.
 
-Adapters may use their own executor or thread pool inside a layer when several
-child services should start in parallel. The state machine itself remains
-synchronous: the action handler decides what work to perform and returns only
-when that layer is complete.
+Adapters may use their own executor or thread pool inside a normal handler when
+they need custom parallel work. Built-in child propagation is configured on the
+parent transition instead.
+
+## Child Machines
+
+A machine may register child machines in its definition:
+
+```java
+StateMachine parent = StateMachineDefinition.define()
+        .child("storage", storageMachine)
+        .child("acl", aclMachine)
+        .childExecutor(executor)
+        .from(NEW)
+        .on(ActionId.START)
+        .propagateParallel()
+        .to(RUNNING)
+        .failTo(ERR)
+        .build()
+        .newStateMachine();
+```
+
+The parent subscribes to each child and keeps a snapshot of child states:
+
+```java
+parent.childStates(); // storage=NEW, acl=NEW
+```
+
+When the parent executes a transition marked as propagation, it looks at all
+registered children. Children that currently expose the same `ActionId` are
+executed by the selected propagation mode.
+
+Parallel propagation requires `childExecutor(...)`:
+
+```java
+.from(NEW)
+.on(ActionId.START)
+.propagateParallel()
+.to(RUNNING)
+.failTo(ERR)
+```
+
+Sequential propagation does not need an executor and runs children in
+registration order:
+
+```java
+.from(NEW)
+.on(ActionId.STOP)
+.propagateSequential()
+.to(FIN)
+.failTo(ERR)
+```
+
+The parent waits for every selected child to finish. If any child fails, the
+parent transition fails and moves to its configured `failTo(...)` state.
+
+Child listeners only update the parent's observed child snapshot. They do not
+start follow-up actions by themselves. Follow-up layers are still driven by the
+parent's own `execute(actionId, payload)` cascade.
+
+## Computed State
+
+Every machine has a physical state: `currentState()`. A parent may also expose a
+computed state derived from its physical state and observed child states:
+
+```java
+StateMachine parent = StateMachineDefinition.define()
+        .child("storage", storageMachine)
+        .child("acl", aclMachine)
+        .computedState((physicalState, childStates) -> {
+            if (childStates.values().contains(ERR)) {
+                return ERR;
+            }
+            if (childStates.get("storage") == RUNNING && childStates.get("acl") == RUNNING) {
+                return RUNTIME_READY;
+            }
+            return physicalState;
+        })
+        .build()
+        .newStateMachine();
+```
+
+`computedState()` is for monitoring and diagnostics. It does not replace the
+physical state used to validate transitions. This keeps command availability
+deterministic while still giving the parent a place to publish aggregate status.
 
 ## Observability
 

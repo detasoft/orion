@@ -10,7 +10,7 @@ import java.util.Objects;
 public record StateMachineEvent(
         StateMachineEventType type,
         StateMachineDefinition.State from,
-        ActionBinding<?> action,
+        ActionId action,
         Object payload,
         StateMachineDefinition.State targetState,
         StateMachineDefinition.State currentState,

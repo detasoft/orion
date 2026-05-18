@@ -87,7 +87,7 @@ public final class StateMachineLoggingSubscriber implements StateMachineEventSub
         if (source == null) {
             source = event;
         }
-        return source.from() + " --" + source.action().id() + "--> " + source.targetState();
+        return source.from() + " --" + source.action() + "--> " + source.targetState();
     }
 
     private void log(Instant observedAt, String message) {

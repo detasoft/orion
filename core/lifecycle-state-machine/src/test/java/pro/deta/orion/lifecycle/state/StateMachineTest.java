@@ -88,17 +88,17 @@ class StateMachineTest {
                 .newStateMachine();
 
         assertThat(machine.currentState()).isSameAs(NEW);
-        assertThat(machine.availableActions()).containsExactly(actions.start());
+        assertThat(machine.availableActions()).containsExactly(actions.start().id());
 
         StateTransitionEvent event = machine.execute(actions.start(), new StartAction("first"));
 
         assertThat(event.from()).isSameAs(NEW);
-        assertThat(event.action()).isSameAs(actions.start());
+        assertThat(event.action()).isEqualTo(actions.start().id());
         assertThat(event.payload()).isEqualTo(new StartAction("first"));
         assertThat(event.to()).isEqualTo(RUNNING);
         assertThat(event.failed()).isFalse();
         assertThat(machine.currentState()).isEqualTo(RUNNING);
-        assertThat(machine.availableActions()).containsExactly(actions.stop());
+        assertThat(machine.availableActions()).containsExactly(actions.stop().id());
     }
 
     @Test
@@ -136,9 +136,9 @@ class StateMachineTest {
                         StateTransitionEvent::action,
                         StateTransitionEvent::to)
                 .containsExactly(
-                        tuple(NEW, startInit, initReady),
-                        tuple(initReady, startAcl, aclReady),
-                        tuple(aclReady, startTransports, RUNNING));
+                        tuple(NEW, ActionId.START, initReady),
+                        tuple(initReady, ActionId.START, aclReady),
+                        tuple(aclReady, ActionId.START, RUNNING));
         assertThat(machine.currentState()).isEqualTo(RUNNING);
     }
 
@@ -161,7 +161,7 @@ class StateMachineTest {
         List<StateTransitionEvent> events = machine.execute(actions.start().id(), new StartAction("by id"));
 
         assertThat(events).singleElement().satisfies(event -> {
-            assertThat(event.action()).isSameAs(actions.start());
+            assertThat(event.action()).isEqualTo(actions.start().id());
             assertThat(event.to()).isEqualTo(RUNNING);
         });
         assertThat(machine.currentState()).isEqualTo(RUNNING);
@@ -219,6 +219,160 @@ class StateMachineTest {
 
         assertThat(calls).containsExactly("init", "acl");
         assertThat(machine.currentState()).isEqualTo(FAILED);
+    }
+
+    @Test
+    void actionIdLayerCanPropagateToChildMachinesInParallelAndUpdateComputedState() throws Exception {
+        State initReady = state("INIT_READY");
+        State childrenRunning = state("CHILDREN_RUNNING");
+        CountDownLatch childHandlersEntered = new CountDownLatch(2);
+        ActionBinding<Void> firstChildStart = ActionBinding.of(ActionId.START, ignored -> {
+            childHandlersEntered.countDown();
+            assertThat(childHandlersEntered.await(5, TimeUnit.SECONDS)).isTrue();
+        });
+        ActionBinding<Void> secondChildStart = ActionBinding.of(ActionId.START, ignored -> {
+            childHandlersEntered.countDown();
+            assertThat(childHandlersEntered.await(5, TimeUnit.SECONDS)).isTrue();
+        });
+        StateMachine firstChild = StateMachineDefinition.define()
+                .from(NEW)
+                .on(firstChildStart)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        StateMachine secondChild = StateMachineDefinition.define()
+                .from(NEW)
+                .on(secondChildStart)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        ExecutorService adapterExecutor = Executors.newFixedThreadPool(2);
+        try {
+            ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> {
+            });
+            StateMachine parent = StateMachineDefinition.define()
+                    .child("first", firstChild)
+                    .child("second", secondChild)
+                    .childExecutor(adapterExecutor)
+                    .computedState((physicalState, childStates) -> {
+                        if (childStates.values().contains(RUNNING)) {
+                            return childrenRunning;
+                        }
+                        return physicalState;
+                    })
+                    .from(NEW)
+                    .on(ActionId.START)
+                    .propagateParallel()
+                    .to(initReady)
+                    .failTo(FAILED)
+
+                    .from(initReady)
+                    .on(startAcl)
+                    .to(RUNNING)
+                    .failTo(FAILED)
+                    .build()
+                    .newStateMachine();
+
+            assertThat(parent.childStates())
+                    .containsEntry("first", NEW)
+                    .containsEntry("second", NEW);
+            assertThat(parent.computedState()).isSameAs(NEW);
+
+            List<StateTransitionEvent> events = parent.execute(ActionId.START, Void.EMPTY);
+
+            assertThat(firstChild.currentState()).isEqualTo(RUNNING);
+            assertThat(secondChild.currentState()).isEqualTo(RUNNING);
+            assertThat(parent.currentState()).isEqualTo(RUNNING);
+            assertThat(parent.childStates())
+                    .containsEntry("first", RUNNING)
+                    .containsEntry("second", RUNNING);
+            assertThat(parent.computedState()).isEqualTo(childrenRunning);
+            assertThat(parent.snapshot().computedState()).isEqualTo(childrenRunning);
+            assertThat(events)
+                    .extracting(StateTransitionEvent::from, StateTransitionEvent::action, StateTransitionEvent::to)
+                    .containsExactly(
+                            tuple(NEW, ActionId.START, initReady),
+                            tuple(initReady, ActionId.START, RUNNING));
+            parent.close();
+        } finally {
+            adapterExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void actionIdLayerCanPropagateToChildMachinesSequentiallyWithoutExecutor() {
+        List<String> calls = new ArrayList<>();
+        ActionBinding<Void> firstChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("first"));
+        ActionBinding<Void> secondChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("second"));
+        StateMachine firstChild = StateMachineDefinition.define()
+                .from(NEW)
+                .on(firstChildStart)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        StateMachine secondChild = StateMachineDefinition.define()
+                .from(NEW)
+                .on(secondChildStart)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        StateMachine parent = StateMachineDefinition.define()
+                .child("first", firstChild)
+                .child("second", secondChild)
+                .from(NEW)
+                .on(ActionId.START)
+                .propagateSequential()
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+
+        List<StateTransitionEvent> events = parent.execute(ActionId.START, Void.EMPTY);
+
+        assertThat(calls).containsExactly("first", "second");
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.from()).isSameAs(NEW);
+            assertThat(event.action()).isEqualTo(ActionId.START);
+            assertThat(event.to()).isEqualTo(RUNNING);
+        });
+        assertThat(firstChild.currentState()).isEqualTo(RUNNING);
+        assertThat(secondChild.currentState()).isEqualTo(RUNNING);
+        assertThat(parent.childStates())
+                .containsEntry("first", RUNNING)
+                .containsEntry("second", RUNNING);
+        parent.close();
+    }
+
+    @Test
+    void parallelPropagationRequiresChildExecutor() {
+        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+        });
+        StateMachine child = StateMachineDefinition.define()
+                .from(NEW)
+                .on(childStart)
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+        StateMachine parent = StateMachineDefinition.define()
+                .child("child", child)
+                .from(NEW)
+                .on(ActionId.START)
+                .propagateParallel()
+                .to(RUNNING)
+                .failTo(FAILED)
+                .build()
+                .newStateMachine();
+
+        assertThatThrownBy(() -> parent.execute(ActionId.START, Void.EMPTY))
+                .isInstanceOf(StateTransitionFailedException.class)
+                .hasCauseInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage("Parallel child action START requires childExecutor");
+        assertThat(parent.currentState()).isEqualTo(FAILED);
     }
 
     @Test
@@ -320,7 +474,7 @@ class StateMachineTest {
         assertThat(events).hasSize(1);
         StateTransitionEvent firstEvent = events.getFirst();
         assertThat(firstEvent.from()).isSameAs(NEW);
-        assertThat(firstEvent.action()).isSameAs(actions.start());
+        assertThat(firstEvent.action()).isEqualTo(actions.start().id());
         assertThat(firstEvent.payload()).isSameAs(payload);
         assertThat(firstEvent.to()).isEqualTo(FAILED);
         assertThat(firstEvent.failure()).isSameAs(failure);
@@ -343,7 +497,7 @@ class StateMachineTest {
 
         assertThat(events).singleElement().satisfies(event -> {
             assertThat(event.from()).isSameAs(NEW);
-            assertThat(event.action()).isSameAs(actions.start());
+            assertThat(event.action()).isEqualTo(actions.start().id());
             assertThat(event.to()).isEqualTo(RUNNING);
             assertThat(event.failure()).isNull();
         });
@@ -617,7 +771,7 @@ class StateMachineTest {
         restartable.execute(actions.start(), new StartAction("restartable"));
 
         assertThat(restartable.snapshot().terminal()).isTrue();
-        assertThat(restartable.availableActions()).containsExactly(actions.start());
+        assertThat(restartable.availableActions()).containsExactly(actions.start().id());
     }
 
     @Test
@@ -679,7 +833,7 @@ class StateMachineTest {
     void transitionEventToStringOmitsEmptyPayloadAndMissingFailure() {
         ActionBinding<Void> action = ActionBinding.of("test.empty", ignored -> {
         });
-        StateTransitionEvent event = new StateTransitionEvent(NEW, action, Void.EMPTY, RUNNING, null);
+        StateTransitionEvent event = new StateTransitionEvent(NEW, action.id(), Void.EMPTY, RUNNING, null);
 
         assertThat(event.toString()).isEqualTo("StateTransitionEvent[from=NEW, action=test.empty, to=RUNNING]");
     }
@@ -691,7 +845,7 @@ class StateMachineTest {
         IllegalStateException failure = new IllegalStateException("boom");
         StateTransitionEvent event = new StateTransitionEvent(
                 NEW,
-                action,
+                action.id(),
                 new StartAction("request"),
                 FAILED,
                 failure);
