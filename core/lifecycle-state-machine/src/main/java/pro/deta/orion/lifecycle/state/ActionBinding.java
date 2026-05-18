@@ -11,6 +11,7 @@ import java.util.Objects;
 public final class ActionBinding<A> {
     private final ActionId id;
     private final LifecycleActionHandler<A> handler;
+    private volatile StateMachine stateMachine;
 
     private ActionBinding(ActionId id, LifecycleActionHandler<A> handler) {
         this.id = Objects.requireNonNull(id, "id");
@@ -27,6 +28,25 @@ public final class ActionBinding<A> {
 
     public ActionId id() {
         return id;
+    }
+
+    public StateMachine stateMachine() {
+        StateMachine registered = stateMachine;
+        if (registered == null) {
+            throw new IllegalStateException("Action " + id + " is not registered in a state machine");
+        }
+        return registered;
+    }
+
+    void register(StateMachine stateMachine) {
+        Objects.requireNonNull(stateMachine, "stateMachine");
+        if (this.stateMachine == null) {
+            this.stateMachine = stateMachine;
+            return;
+        }
+        if (this.stateMachine != stateMachine) {
+            throw new IllegalStateException("Action " + id + " is already registered in another state machine");
+        }
     }
 
     void execute(A payload) throws Exception {

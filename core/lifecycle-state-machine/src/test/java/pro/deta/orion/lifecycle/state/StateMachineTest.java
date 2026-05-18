@@ -11,7 +11,6 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -252,7 +251,7 @@ class StateMachineTest {
                 .newStateMachine();
         ExecutorService adapterExecutor = Executors.newFixedThreadPool(2);
         try {
-            ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+            ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
             ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> {
             });
             StateMachine parent = StateMachineDefinition.define()
@@ -266,7 +265,7 @@ class StateMachineTest {
                         return physicalState;
                     })
                     .from(NEW)
-                    .on(parentActions.propagateParallel())
+                    .on(propagateStart)
                     .to(initReady)
                     .failTo(FAILED)
 
@@ -276,7 +275,6 @@ class StateMachineTest {
                     .failTo(FAILED)
                     .build()
                     .newStateMachine();
-            parentActions.bind(parent);
 
             assertThat(parent.childStates())
                     .containsEntry("first", NEW)
@@ -323,17 +321,16 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
         StateMachine parent = StateMachineDefinition.define()
                 .child("first", firstChild)
                 .child("second", secondChild)
                 .from(NEW)
-                .on(parentActions.propagateSequential())
+                .on(propagateStart)
                 .to(RUNNING)
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        parentActions.bind(parent);
 
         List<StateTransitionEvent> events = parent.execute(ActionId.START, Void.EMPTY);
 
@@ -356,21 +353,15 @@ class StateMachineTest {
         List<String> calls = new ArrayList<>();
         ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> calls.add("child"));
         StateMachine child = childMachine(childStart);
-        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
-        ActionBinding<Void> parentStart = ActionBinding.of(ActionId.START, ignored -> {
-            calls.add("parent-before");
-            parentActions.propagateSequential(ignored);
-            calls.add("parent-after");
-        });
+        OrderedParentAction parentAction = new OrderedParentAction(calls);
         StateMachine parent = StateMachineDefinition.define()
                 .child("child", child)
                 .from(NEW)
-                .on(parentStart)
+                .on(parentAction.start())
                 .to(RUNNING)
                 .failTo(ERR)
                 .build()
                 .newStateMachine();
-        parentActions.bind(parent);
 
         parent.execute(ActionId.START, Void.EMPTY);
 
@@ -394,19 +385,18 @@ class StateMachineTest {
         StateMachine thirdChild = childMachine(thirdChildStart);
         ExecutorService adapterExecutor = Executors.newFixedThreadPool(3);
         try {
-            ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+            ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
             StateMachine parent = StateMachineDefinition.define()
                     .child("first", firstChild)
                     .child("second", secondChild)
                     .child("third", thirdChild)
                     .childExecutor(adapterExecutor)
                     .from(NEW)
-                    .on(parentActions.propagateParallel())
+                    .on(propagateStart)
                     .to(RUNNING)
                     .failTo(ERR)
                     .build()
                     .newStateMachine();
-            parentActions.bind(parent);
 
             assertThatThrownBy(() -> parent.execute(ActionId.START, Void.EMPTY))
                     .isInstanceOf(StateTransitionFailedException.class)
@@ -439,18 +429,17 @@ class StateMachineTest {
         StateMachine firstChild = childMachine(firstChildStart);
         StateMachine secondChild = childMachine(failingChildStart);
         StateMachine thirdChild = childMachine(thirdChildStart);
-        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
         StateMachine parent = StateMachineDefinition.define()
                 .child("first", firstChild)
                 .child("second", secondChild)
                 .child("third", thirdChild)
                 .from(NEW)
-                .on(parentActions.propagateSequential())
+                .on(propagateStart)
                 .to(RUNNING)
                 .failTo(ERR)
                 .build()
                 .newStateMachine();
-        parentActions.bind(parent);
 
         assertThatThrownBy(() -> parent.execute(ActionId.START, Void.EMPTY))
                 .isInstanceOf(StateTransitionFailedException.class)
@@ -479,22 +468,65 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
         StateMachine parent = StateMachineDefinition.define()
                 .child("child", child)
                 .from(NEW)
-                .on(parentActions.propagateParallel())
+                .on(propagateStart)
                 .to(RUNNING)
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
-        parentActions.bind(parent);
 
         assertThatThrownBy(() -> parent.execute(ActionId.START, Void.EMPTY))
                 .isInstanceOf(StateTransitionFailedException.class)
                 .hasCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage("Parallel child action START requires childExecutor");
         assertThat(parent.currentState()).isEqualTo(FAILED);
+    }
+
+    @Test
+    void actionBindingExposesRegisteredStateMachine() {
+        ActionBinding<Void> start = ActionBinding.of(ActionId.START, ignored -> {
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+
+        assertThat(start.stateMachine()).isSameAs(machine);
+    }
+
+    @Test
+    void actionBindingCannotBeRegisteredInSeveralStateMachines() {
+        ActionBinding<Void> start = ActionBinding.of(ActionId.START, ignored -> {
+        });
+        StateMachineDefinition definition = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(ERR)
+                .build();
+
+        StateMachine first = definition.newStateMachine();
+
+        assertThat(start.stateMachine()).isSameAs(first);
+        assertThatThrownBy(definition::newStateMachine)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Action START is already registered in another state machine");
+    }
+
+    @Test
+    void unregisteredActionBindingRejectsStateMachineAccess() {
+        ActionBinding<Void> start = ActionBinding.of(ActionId.START, ignored -> {
+        });
+
+        assertThatThrownBy(start::stateMachine)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Action START is not registered in a state machine");
     }
 
     @Test
@@ -877,23 +909,24 @@ class StateMachineTest {
         assertThat(terminal.snapshot().terminal()).isTrue();
         assertThat(terminal.availableActions()).isEmpty();
 
+        TestActions restartableActions = new TestActions();
         StateMachine restartable = StateMachineDefinition.define()
                 .from(NEW)
-                .on(actions.start())
+                .on(restartableActions.start())
                 .to(FIN)
                 .failTo(FAILED)
 
                 .from(FIN)
-                .on(actions.start())
+                .on(restartableActions.start())
                 .to(RUNNING)
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
 
-        restartable.execute(actions.start(), new StartAction("restartable"));
+        restartable.execute(restartableActions.start(), new StartAction("restartable"));
 
         assertThat(restartable.snapshot().terminal()).isTrue();
-        assertThat(restartable.availableActions()).containsExactly(actions.start().id());
+        assertThat(restartable.availableActions()).containsExactly(restartableActions.start().id());
     }
 
     @Test
@@ -1024,16 +1057,15 @@ class StateMachineTest {
                 .failTo(ERR)
                 .build()
                 .newStateMachine();
-        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
         StateMachine parent = StateMachineDefinition.define()
                 .child("transport", child)
                 .from(NEW)
-                .on(parentActions.propagateSequential())
+                .on(propagateStart)
                 .to(RUNNING)
                 .failTo(ERR)
                 .build()
                 .newStateMachine();
-        parentActions.bind(parent);
 
         assertThat(parent.describe()).isEqualTo("""
                 state: NEW
@@ -1236,39 +1268,51 @@ class StateMachineTest {
                 .newStateMachine();
     }
 
-    private static final class ParentActions<A> {
+    private static ActionBinding<Void> propagatingAction(ActionId actionId, boolean parallel) {
+        PropagatingAction action = new PropagatingAction(actionId, parallel);
+        return action.binding();
+    }
+
+    private static final class PropagatingAction {
         private final ActionId actionId;
-        private StateMachine machine;
+        private final boolean parallel;
+        private final ActionBinding<Void> binding;
 
-        private ParentActions(ActionId actionId) {
+        private PropagatingAction(ActionId actionId, boolean parallel) {
             this.actionId = actionId;
+            this.parallel = parallel;
+            binding = actionId.bind(this::propagate);
         }
 
-        private ActionBinding<A> propagateSequential() {
-            return actionId.bind(this::propagateSequential);
+        private ActionBinding<Void> binding() {
+            return binding;
         }
 
-        private ActionBinding<A> propagateParallel() {
-            return actionId.bind(this::propagateParallel);
-        }
-
-        private void bind(StateMachine machine) {
-            this.machine = Objects.requireNonNull(machine, "machine");
-        }
-
-        private void propagateSequential(A payload) {
-            requireMachine().propagateSequential(actionId, payload);
-        }
-
-        private void propagateParallel(A payload) {
-            requireMachine().propagateParallel(actionId, payload);
-        }
-
-        private StateMachine requireMachine() {
-            if (machine == null) {
-                throw new IllegalStateException("Parent state machine is not bound");
+        private void propagate(Void payload) {
+            if (parallel) {
+                binding.stateMachine().propagateParallel(actionId, payload);
+            } else {
+                binding.stateMachine().propagateSequential(actionId, payload);
             }
-            return machine;
+        }
+    }
+
+    private static final class OrderedParentAction {
+        private final List<String> calls;
+        private final ActionBinding<Void> start = ActionId.START.bind(this::start);
+
+        private OrderedParentAction(List<String> calls) {
+            this.calls = calls;
+        }
+
+        private ActionBinding<Void> start() {
+            return start;
+        }
+
+        private void start(Void payload) {
+            calls.add("parent-before");
+            start.stateMachine().propagateSequential(ActionId.START, payload);
+            calls.add("parent-after");
         }
     }
 

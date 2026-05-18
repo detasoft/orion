@@ -41,6 +41,9 @@ public final class StateMachine implements AutoCloseable {
         this.definition = Objects.requireNonNull(definition, "definition");
         children = definition.children();
         currentState = definition.initialState();
+        for (StateTransition<?> transition : definition.transitions()) {
+            transition.register(this);
+        }
         for (Map.Entry<String, StateMachine> child : children.entrySet()) {
             childStates.put(child.getKey(), child.getValue().currentState());
             childSubscriptions.add(child.getValue().subscribe(event -> onChildEvent(child.getKey(), event)));

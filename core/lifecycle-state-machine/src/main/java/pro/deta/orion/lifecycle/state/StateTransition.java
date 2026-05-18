@@ -16,6 +16,10 @@ public record StateTransition<A>(
         Objects.requireNonNull(failureState, "failureState");
     }
 
+    void register(StateMachine machine) {
+        action.register(machine);
+    }
+
     void execute(A payload) throws Exception {
         action.execute(payload);
     }

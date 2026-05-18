@@ -108,6 +108,10 @@ public final class StateMachineDefinition {
         return List.copyOf(result);
     }
 
+    List<StateTransition<?>> transitions() {
+        return List.copyOf(transitions.values());
+    }
+
     public Set<ActionId> availableActions(State state) {
         Objects.requireNonNull(state, "state");
         Set<ActionId> result = new LinkedHashSet<>();

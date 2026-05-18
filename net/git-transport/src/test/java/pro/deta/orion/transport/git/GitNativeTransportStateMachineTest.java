@@ -97,7 +97,7 @@ class GitNativeTransportStateMachineTest {
     }
 
     @Test
-    void definitionUsesTheSameActionBindingInstances() {
+    void definitionReportsAvailableActionsAndRejectsSecondMachine() {
         GitNativeTransportStateMachine machine =
                 new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
 
@@ -105,7 +105,7 @@ class GitNativeTransportStateMachineTest {
         assertEquals(Set.of(machine.stopAction().id()), machine.definition().availableActions(RUNNING));
         assertEquals(Set.of(machine.stopAction().id()), machine.definition().availableActions(ERR));
         assertTrue(machine.definition().availableActions(FIN).isEmpty());
-        assertEquals(NEW, machine.definition().newStateMachine().currentState());
+        assertThrows(IllegalStateException.class, () -> machine.definition().newStateMachine());
     }
 
     @Test

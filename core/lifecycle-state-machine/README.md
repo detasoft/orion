@@ -144,22 +144,24 @@ operations.
 
 ## Child Machines
 
-A machine may register child machines in its definition. An adapter normally
-keeps the parent machine field and lets its action binding call propagation at
-the exact point needed:
+A machine may register child machines in its definition. When the machine is
+created, it registers itself in its action bindings. Handlers can use
+`action.stateMachine()` to call propagation at the exact point needed. An
+`ActionBinding` belongs to one machine; registering the same binding in another
+machine is rejected.
 
 ```java
 final class ParentAdapter {
-    private StateMachine parent;
+    private final ActionBinding<Void> startChildren = ActionId.START.bind(this::startChildren);
 
-    private final ActionBinding<Void> startChildren = ActionId.START.bind(action -> {
+    private void startChildren(Void action) {
         prepare();
-        parent.propagateParallel(ActionId.START, action);
+        startChildren.stateMachine().propagateParallel(ActionId.START, action);
         finish();
-    });
+    }
 
     StateMachine create(StateMachine storageMachine, StateMachine aclMachine, ExecutorService executor) {
-        parent = StateMachineDefinition.define()
+        return StateMachineDefinition.define()
                 .child("storage", storageMachine)
                 .child("acl", aclMachine)
                 .childExecutor(executor)
@@ -169,7 +171,6 @@ final class ParentAdapter {
                 .failTo(ERR)
                 .build()
                 .newStateMachine();
-        return parent;
     }
 }
 ```
