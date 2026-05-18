@@ -21,8 +21,8 @@ import java.util.concurrent.Future;
  *
  * <p>Executing by {@link ActionBinding} performs exactly one concrete transition. Executing by {@link ActionId} is the
  * default high-level mode: the machine selects the currently available binding with that id, executes it, and keeps
- * going while the same id remains available from the next state. If a selected transition is a propagation transition,
- * the parent machine executes matching child actions with the same id. Transitions are serialized per machine instance, and
+ * going while the same id remains available from the next state. A transition handler may explicitly propagate the
+ * same action id to child machines in sequential or parallel mode. Transitions are serialized per machine instance, and
  * observer failures are logged without changing lifecycle behavior.</p>
  */
 @Slf4j
@@ -90,18 +90,37 @@ public final class StateMachine implements AutoCloseable {
     }
 
     public String describe() {
+        StringBuilder builder = new StringBuilder();
+        describeInto(builder, "");
+        return builder.toString();
+    }
+
+    private void describeInto(StringBuilder builder, String indent) {
         StateMachineDefinition.State state = currentState;
         StateTransition<?> activeTransition = transitionInProgress;
-        StringBuilder builder = new StringBuilder();
-        builder.append("state: ").append(state);
-        builder.append("\nin progress: ");
+        builder.append(indent).append("state: ").append(state);
+        builder.append("\n").append(indent).append("in progress: ");
         if (activeTransition == null) {
             builder.append("<none>");
         } else {
             builder.append(activeTransition.describe());
         }
-        builder.append("\n").append(definition.transitionDiagram());
-        return builder.toString();
+        appendIndented(builder, indent, definition.transitionDiagram());
+        if (children.isEmpty()) {
+            return;
+        }
+        builder.append("\n").append(indent).append("children:");
+        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
+            builder.append("\n").append(indent).append("  ").append(child.getKey()).append(":\n");
+            child.getValue().describeInto(builder, indent + "    ");
+        }
+    }
+
+    private static void appendIndented(StringBuilder builder, String indent, String value) {
+        String[] lines = value.split("\n", -1);
+        for (String line : lines) {
+            builder.append("\n").append(indent).append(line);
+        }
     }
 
     public void addListener(StateMachineListener listener) {
@@ -126,24 +145,31 @@ public final class StateMachine implements AutoCloseable {
         return executeTransitionSequence(actionId, payload);
     }
 
-    public <A> List<StateTransitionEvent> executeChildren(ActionId actionId, A payload) {
-        return executeChildren(actionId, payload, StateTransitionAction.PROPAGATE_PARALLEL);
+    public <A> LifecycleActionHandler<A> propagateSequentialHandler(ActionId actionId) {
+        Objects.requireNonNull(actionId, "actionId");
+        return payload -> propagateSequential(actionId, payload);
     }
 
-    private <A> List<StateTransitionEvent> executeChildren(
-            ActionId actionId,
-            A payload,
-            StateTransitionAction transitionAction) {
+    public <A> LifecycleActionHandler<A> propagateParallelHandler(ActionId actionId) {
+        Objects.requireNonNull(actionId, "actionId");
+        return payload -> propagateParallel(actionId, payload);
+    }
+
+    public synchronized <A> List<StateTransitionEvent> propagateSequential(ActionId actionId, A payload) {
         Objects.requireNonNull(actionId, "actionId");
         List<ChildAction<A>> actions = availableChildActions(actionId, payload);
         if (actions.isEmpty()) {
             return List.of();
         }
+        return executeChildActionsSequentially(actionId, actions);
+    }
 
-        if (transitionAction == StateTransitionAction.PROPAGATE_SEQUENTIAL) {
-            return executeChildActionsSequentially(actions);
+    public synchronized <A> List<StateTransitionEvent> propagateParallel(ActionId actionId, A payload) {
+        Objects.requireNonNull(actionId, "actionId");
+        List<ChildAction<A>> actions = availableChildActions(actionId, payload);
+        if (actions.isEmpty()) {
+            return List.of();
         }
-
         ExecutorService executor = definition.childExecutor();
         if (executor == null) {
             throw new IllegalStateException("Parallel child action " + actionId + " requires childExecutor");
@@ -252,11 +278,7 @@ public final class StateMachine implements AutoCloseable {
     }
 
     private <A> void executeTransitionAction(StateTransition<A> transition, A payload) throws Exception {
-        if (transition.transitionAction() == StateTransitionAction.EXECUTE) {
-            transition.execute(payload);
-            return;
-        }
-        executeChildren(transition.actionId(), payload, transition.transitionAction());
+        transition.execute(payload);
     }
 
     private <A> List<ChildAction<A>> availableChildActions(ActionId actionId, A payload) {
@@ -269,11 +291,19 @@ public final class StateMachine implements AutoCloseable {
         return actions;
     }
 
-    private <A> List<StateTransitionEvent> executeChildActionsSequentially(List<ChildAction<A>> actions) {
+    private <A> List<StateTransitionEvent> executeChildActionsSequentially(
+            ActionId actionId,
+            List<ChildAction<A>> actions) {
         List<StateTransitionEvent> events = new ArrayList<>();
+        List<Throwable> failures = new ArrayList<>();
         for (ChildAction<A> action : actions) {
-            events.addAll(action.execute());
+            try {
+                events.addAll(action.execute());
+            } catch (Throwable e) {
+                failures.add(e);
+            }
         }
+        throwFailures("Child action " + actionId + " failed", failures);
         return List.copyOf(events);
     }
 
@@ -285,7 +315,13 @@ public final class StateMachine implements AutoCloseable {
         for (ChildAction<A> action : actions) {
             tasks.add(action::execute);
         }
+        return executeActionsInParallel("Child action " + actionId + " failed", tasks, executor);
+    }
 
+    private static List<StateTransitionEvent> executeActionsInParallel(
+            String failureMessage,
+            List<Callable<List<StateTransitionEvent>>> tasks,
+            ExecutorService executor) {
         List<StateTransitionEvent> events = new ArrayList<>();
         List<Throwable> failures = new ArrayList<>();
         try {
@@ -299,19 +335,22 @@ public final class StateMachine implements AutoCloseable {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while executing child action " + actionId, e);
+            throw new IllegalStateException("Interrupted while executing " + failureMessage, e);
         }
 
-        if (!failures.isEmpty()) {
-            IllegalStateException failure = new IllegalStateException(
-                    "Child action " + actionId + " failed",
-                    failures.getFirst());
-            for (int i = 1; i < failures.size(); i++) {
-                failure.addSuppressed(failures.get(i));
-            }
-            throw failure;
-        }
+        throwFailures(failureMessage, failures);
         return List.copyOf(events);
+    }
+
+    private static void throwFailures(String message, List<Throwable> failures) {
+        if (failures.isEmpty()) {
+            return;
+        }
+        IllegalStateException failure = new IllegalStateException(message, failures.getFirst());
+        for (int i = 1; i < failures.size(); i++) {
+            failure.addSuppressed(failures.get(i));
+        }
+        throw failure;
     }
 
     private void onChildEvent(String child, StateMachineEvent event) {

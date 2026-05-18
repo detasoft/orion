@@ -138,25 +138,40 @@ the same action id is available after each successful layer. Calling
 transition.
 
 Adapters may use their own executor or thread pool inside a normal handler when
-they need custom parallel work. Built-in child propagation is configured on the
-parent transition instead.
+they need custom parallel work. Child propagation is also explicit handler code:
+the handler decides whether propagation happens before, after, or between local
+operations.
 
 ## Child Machines
 
-A machine may register child machines in its definition:
+A machine may register child machines in its definition. An adapter normally
+keeps the parent machine field and lets its action binding call propagation at
+the exact point needed:
 
 ```java
-StateMachine parent = StateMachineDefinition.define()
-        .child("storage", storageMachine)
-        .child("acl", aclMachine)
-        .childExecutor(executor)
-        .from(NEW)
-        .on(ActionId.START)
-        .propagateParallel()
-        .to(RUNNING)
-        .failTo(ERR)
-        .build()
-        .newStateMachine();
+final class ParentAdapter {
+    private StateMachine parent;
+
+    private final ActionBinding<Void> startChildren = ActionId.START.bind(action -> {
+        prepare();
+        parent.propagateParallel(ActionId.START, action);
+        finish();
+    });
+
+    StateMachine create(StateMachine storageMachine, StateMachine aclMachine, ExecutorService executor) {
+        parent = StateMachineDefinition.define()
+                .child("storage", storageMachine)
+                .child("acl", aclMachine)
+                .childExecutor(executor)
+                .from(NEW)
+                .on(startChildren)
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+        return parent;
+    }
+}
 ```
 
 The parent subscribes to each child and keeps a snapshot of child states:
@@ -165,33 +180,31 @@ The parent subscribes to each child and keeps a snapshot of child states:
 parent.childStates(); // storage=NEW, acl=NEW
 ```
 
-When the parent executes a transition marked as propagation, it looks at all
-registered children. Children that currently expose the same `ActionId` are
-executed by the selected propagation mode.
+When a parent action handler calls `propagateSequential(actionId, payload)` or
+`propagateParallel(actionId, payload)`, the parent looks at all registered
+children. Children that currently expose the same `ActionId` are executed by the
+selected propagation mode.
 
 Parallel propagation requires `childExecutor(...)`:
 
 ```java
-.from(NEW)
-.on(ActionId.START)
-.propagateParallel()
-.to(RUNNING)
-.failTo(ERR)
+parent.propagateParallel(ActionId.START, action);
 ```
 
 Sequential propagation does not need an executor and runs children in
 registration order:
 
 ```java
-.from(NEW)
-.on(ActionId.STOP)
-.propagateSequential()
-.to(FIN)
-.failTo(ERR)
+parent.propagateSequential(ActionId.STOP, action);
 ```
 
 The parent waits for every selected child to finish. If any child fails, the
 parent transition fails and moves to its configured `failTo(...)` state.
+
+A created machine also exposes bound propagation handlers:
+`propagateSequentialHandler(actionId)` and `propagateParallelHandler(actionId)`.
+Use them when an adapter needs a plain `LifecycleActionHandler` and does not
+need extra local code around propagation.
 
 Child listeners only update the parent's observed child snapshot. They do not
 start follow-up actions by themselves. Follow-up layers are still driven by the
@@ -240,7 +253,8 @@ Use observers for different levels of detail:
   concrete service.
 
 `describe()` returns the current state, an in-progress transition if there is
-one, and the configured transition diagram.
+one, the configured transition diagram, and nested descriptions of child
+machines when the machine has registered children.
 
 ## Service Adapters
 

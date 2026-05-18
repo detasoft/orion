@@ -11,6 +11,7 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -23,6 +24,7 @@ import static java.lang.Thread.sleep;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static pro.deta.orion.lifecycle.state.StateMachineDefinition.ERR;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
@@ -250,6 +252,7 @@ class StateMachineTest {
                 .newStateMachine();
         ExecutorService adapterExecutor = Executors.newFixedThreadPool(2);
         try {
+            ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
             ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> {
             });
             StateMachine parent = StateMachineDefinition.define()
@@ -263,8 +266,7 @@ class StateMachineTest {
                         return physicalState;
                     })
                     .from(NEW)
-                    .on(ActionId.START)
-                    .propagateParallel()
+                    .on(parentActions.propagateParallel())
                     .to(initReady)
                     .failTo(FAILED)
 
@@ -274,6 +276,7 @@ class StateMachineTest {
                     .failTo(FAILED)
                     .build()
                     .newStateMachine();
+            parentActions.bind(parent);
 
             assertThat(parent.childStates())
                     .containsEntry("first", NEW)
@@ -320,16 +323,17 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
+        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
         StateMachine parent = StateMachineDefinition.define()
                 .child("first", firstChild)
                 .child("second", secondChild)
                 .from(NEW)
-                .on(ActionId.START)
-                .propagateSequential()
+                .on(parentActions.propagateSequential())
                 .to(RUNNING)
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
+        parentActions.bind(parent);
 
         List<StateTransitionEvent> events = parent.execute(ActionId.START, Void.EMPTY);
 
@@ -348,6 +352,123 @@ class StateMachineTest {
     }
 
     @Test
+    void actionBindingControlsPropagationOrder() {
+        List<String> calls = new ArrayList<>();
+        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> calls.add("child"));
+        StateMachine child = childMachine(childStart);
+        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+        ActionBinding<Void> parentStart = ActionBinding.of(ActionId.START, ignored -> {
+            calls.add("parent-before");
+            parentActions.propagateSequential(ignored);
+            calls.add("parent-after");
+        });
+        StateMachine parent = StateMachineDefinition.define()
+                .child("child", child)
+                .from(NEW)
+                .on(parentStart)
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+        parentActions.bind(parent);
+
+        parent.execute(ActionId.START, Void.EMPTY);
+
+        assertThat(calls).containsExactly("parent-before", "child", "parent-after");
+        assertThat(child.currentState()).isEqualTo(RUNNING);
+        assertThat(parent.currentState()).isEqualTo(RUNNING);
+        parent.close();
+    }
+
+    @Test
+    void failedParallelChildPropagationMovesParentToFailureState() {
+        CountDownLatch childHandlersEntered = new CountDownLatch(3);
+        List<String> calls = new CopyOnWriteArrayList<>();
+        ActionBinding<Void> firstChildStart = childStart("first", calls, childHandlersEntered);
+        ActionBinding<Void> failingChildStart = childStart("second", calls, childHandlersEntered, () -> {
+            throw new IllegalStateException("second child failed");
+        });
+        ActionBinding<Void> thirdChildStart = childStart("third", calls, childHandlersEntered);
+        StateMachine firstChild = childMachine(firstChildStart);
+        StateMachine secondChild = childMachine(failingChildStart);
+        StateMachine thirdChild = childMachine(thirdChildStart);
+        ExecutorService adapterExecutor = Executors.newFixedThreadPool(3);
+        try {
+            ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+            StateMachine parent = StateMachineDefinition.define()
+                    .child("first", firstChild)
+                    .child("second", secondChild)
+                    .child("third", thirdChild)
+                    .childExecutor(adapterExecutor)
+                    .from(NEW)
+                    .on(parentActions.propagateParallel())
+                    .to(RUNNING)
+                    .failTo(ERR)
+                    .build()
+                    .newStateMachine();
+            parentActions.bind(parent);
+
+            assertThatThrownBy(() -> parent.execute(ActionId.START, Void.EMPTY))
+                    .isInstanceOf(StateTransitionFailedException.class)
+                    .hasRootCauseMessage("second child failed");
+
+            assertThat(calls).containsExactlyInAnyOrder("first", "second", "third");
+            assertThat(firstChild.currentState()).isEqualTo(RUNNING);
+            assertThat(secondChild.currentState()).isEqualTo(ERR);
+            assertThat(thirdChild.currentState()).isEqualTo(RUNNING);
+            assertThat(parent.currentState()).isEqualTo(ERR);
+            assertThat(parent.childStates())
+                    .containsEntry("first", RUNNING)
+                    .containsEntry("second", ERR)
+                    .containsEntry("third", RUNNING);
+            parent.close();
+        } finally {
+            adapterExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void failedSequentialChildPropagationMovesParentToFailureStateAfterAllChildrenFinish() {
+        List<String> calls = new ArrayList<>();
+        ActionBinding<Void> firstChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("first"));
+        ActionBinding<Void> failingChildStart = ActionBinding.of(ActionId.START, ignored -> {
+            calls.add("second");
+            throw new IllegalStateException("second child failed");
+        });
+        ActionBinding<Void> thirdChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("third"));
+        StateMachine firstChild = childMachine(firstChildStart);
+        StateMachine secondChild = childMachine(failingChildStart);
+        StateMachine thirdChild = childMachine(thirdChildStart);
+        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+        StateMachine parent = StateMachineDefinition.define()
+                .child("first", firstChild)
+                .child("second", secondChild)
+                .child("third", thirdChild)
+                .from(NEW)
+                .on(parentActions.propagateSequential())
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+        parentActions.bind(parent);
+
+        assertThatThrownBy(() -> parent.execute(ActionId.START, Void.EMPTY))
+                .isInstanceOf(StateTransitionFailedException.class)
+                .hasRootCauseMessage("second child failed");
+
+        assertThat(calls).containsExactly("first", "second", "third");
+        assertThat(firstChild.currentState()).isEqualTo(RUNNING);
+        assertThat(secondChild.currentState()).isEqualTo(ERR);
+        assertThat(thirdChild.currentState()).isEqualTo(RUNNING);
+        assertThat(parent.currentState()).isEqualTo(ERR);
+        assertThat(parent.childStates())
+                .containsEntry("first", RUNNING)
+                .containsEntry("second", ERR)
+                .containsEntry("third", RUNNING);
+        parent.close();
+    }
+
+    @Test
     void parallelPropagationRequiresChildExecutor() {
         ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
         });
@@ -358,15 +479,16 @@ class StateMachineTest {
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
+        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
         StateMachine parent = StateMachineDefinition.define()
                 .child("child", child)
                 .from(NEW)
-                .on(ActionId.START)
-                .propagateParallel()
+                .on(parentActions.propagateParallel())
                 .to(RUNNING)
                 .failTo(FAILED)
                 .build()
                 .newStateMachine();
+        parentActions.bind(parent);
 
         assertThatThrownBy(() -> parent.execute(ActionId.START, Void.EMPTY))
                 .isInstanceOf(StateTransitionFailedException.class)
@@ -892,6 +1014,56 @@ class StateMachineTest {
     }
 
     @Test
+    void describeIncludesChildMachines() {
+        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+        });
+        StateMachine child = StateMachineDefinition.define()
+                .from(NEW)
+                .on(childStart)
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+        ParentActions<Void> parentActions = new ParentActions<>(ActionId.START);
+        StateMachine parent = StateMachineDefinition.define()
+                .child("transport", child)
+                .from(NEW)
+                .on(parentActions.propagateSequential())
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+        parentActions.bind(parent);
+
+        assertThat(parent.describe()).isEqualTo("""
+                state: NEW
+                in progress: <none>
+                transitions:
+                  NEW --START--> RUNNING (fail -> ERR)
+                children:
+                  transport:
+                    state: NEW
+                    in progress: <none>
+                    transitions:
+                      NEW --START--> RUNNING (fail -> ERR)""");
+
+        parent.execute(ActionId.START, Void.EMPTY);
+
+        assertThat(parent.describe()).isEqualTo("""
+                state: RUNNING
+                in progress: <none>
+                transitions:
+                  NEW --START--> RUNNING (fail -> ERR)
+                children:
+                  transport:
+                    state: RUNNING
+                    in progress: <none>
+                    transitions:
+                      NEW --START--> RUNNING (fail -> ERR)""");
+        parent.close();
+    }
+
+    @Test
     void describeShowsTransitionInProgress() throws Exception {
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch releaseHandler = new CountDownLatch(1);
@@ -1033,8 +1205,80 @@ class StateMachineTest {
         machine.execute(((StateTransition) transition).action(), payload);
     }
 
+    private static ActionBinding<Void> childStart(
+            String name,
+            List<String> calls,
+            CountDownLatch childHandlersEntered) {
+        return childStart(name, calls, childHandlersEntered, () -> {
+        });
+    }
+
+    private static ActionBinding<Void> childStart(
+            String name,
+            List<String> calls,
+            CountDownLatch childHandlersEntered,
+            ThrowingRunnable afterAllHandlersEntered) {
+        return ActionBinding.of(ActionId.START, ignored -> {
+            calls.add(name);
+            childHandlersEntered.countDown();
+            assertThat(childHandlersEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            afterAllHandlersEntered.run();
+        });
+    }
+
+    private static StateMachine childMachine(ActionBinding<Void> start) {
+        return StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+    }
+
+    private static final class ParentActions<A> {
+        private final ActionId actionId;
+        private StateMachine machine;
+
+        private ParentActions(ActionId actionId) {
+            this.actionId = actionId;
+        }
+
+        private ActionBinding<A> propagateSequential() {
+            return actionId.bind(this::propagateSequential);
+        }
+
+        private ActionBinding<A> propagateParallel() {
+            return actionId.bind(this::propagateParallel);
+        }
+
+        private void bind(StateMachine machine) {
+            this.machine = Objects.requireNonNull(machine, "machine");
+        }
+
+        private void propagateSequential(A payload) {
+            requireMachine().propagateSequential(actionId, payload);
+        }
+
+        private void propagateParallel(A payload) {
+            requireMachine().propagateParallel(actionId, payload);
+        }
+
+        private StateMachine requireMachine() {
+            if (machine == null) {
+                throw new IllegalStateException("Parent state machine is not bound");
+            }
+            return machine;
+        }
+    }
+
     private static LogCapture captureStateMachineLogs() {
         return new LogCapture();
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     private static final class LogCapture implements AutoCloseable {

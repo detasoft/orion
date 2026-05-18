@@ -192,15 +192,13 @@ public final class StateMachineDefinition {
                 ActionId actionId,
                 ActionBinding<A> action,
                 State to,
-                State failureState,
-                StateTransitionAction transitionAction) {
+                State failureState) {
             StateTransition<A> transition = new StateTransition<>(
                     Objects.requireNonNull(from, "from"),
                     Objects.requireNonNull(actionId, "actionId"),
                     action,
                     Objects.requireNonNull(to, "to"),
-                    Objects.requireNonNull(failureState, "failureState"),
-                    Objects.requireNonNull(transitionAction, "transitionAction"));
+                    Objects.requireNonNull(failureState, "failureState"));
             StateActionKey key = new StateActionKey(from, actionId);
             if (transitions.containsKey(key)) {
                 throw new IllegalArgumentException("Duplicate transition action id " + actionId + " for state " + from);
@@ -229,11 +227,7 @@ public final class StateMachineDefinition {
         }
 
         public <A> ActionRule<A> on(ActionBinding<A> action) {
-            return new ActionRule<>(builder, state, action.id(), action, StateTransitionAction.EXECUTE);
-        }
-
-        public PropagationRule on(ActionId actionId) {
-            return new PropagationRule(builder, state, actionId);
+            return new ActionRule<>(builder, state, action.id(), action);
         }
     }
 
@@ -242,23 +236,20 @@ public final class StateMachineDefinition {
         private final State from;
         private final ActionId actionId;
         private final ActionBinding<A> action;
-        private final StateTransitionAction transitionAction;
 
         private ActionRule(
                 Builder builder,
                 State from,
                 ActionId actionId,
-                ActionBinding<A> action,
-                StateTransitionAction transitionAction) {
+                ActionBinding<A> action) {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.from = Objects.requireNonNull(from, "from");
             this.actionId = Objects.requireNonNull(actionId, "actionId");
-            this.action = action;
-            this.transitionAction = Objects.requireNonNull(transitionAction, "transitionAction");
+            this.action = Objects.requireNonNull(action, "action");
         }
 
         public TargetRule<A> to(State to) {
-            return new TargetRule<>(builder, from, actionId, action, to, transitionAction);
+            return new TargetRule<>(builder, from, actionId, action, to);
         }
 
         public TargetRule<A> stay() {
@@ -272,54 +263,22 @@ public final class StateMachineDefinition {
         private final ActionId actionId;
         private final ActionBinding<A> action;
         private final State to;
-        private final StateTransitionAction transitionAction;
 
         private TargetRule(
                 Builder builder,
                 State from,
                 ActionId actionId,
                 ActionBinding<A> action,
-                State to,
-                StateTransitionAction transitionAction) {
+                State to) {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.from = Objects.requireNonNull(from, "from");
             this.actionId = Objects.requireNonNull(actionId, "actionId");
-            this.action = action;
+            this.action = Objects.requireNonNull(action, "action");
             this.to = Objects.requireNonNull(to, "to");
-            this.transitionAction = Objects.requireNonNull(transitionAction, "transitionAction");
         }
 
         public Builder failTo(State failureState) {
-            return builder.addTransition(from, actionId, action, to, failureState, transitionAction);
-        }
-    }
-
-    public static final class PropagationRule {
-        private final Builder builder;
-        private final State from;
-        private final ActionId actionId;
-
-        private PropagationRule(Builder builder, State from, ActionId actionId) {
-            this.builder = Objects.requireNonNull(builder, "builder");
-            this.from = Objects.requireNonNull(from, "from");
-            this.actionId = Objects.requireNonNull(actionId, "actionId");
-        }
-
-        public ActionRule<Void> propagateSequential() {
-            return propagate(StateTransitionAction.PROPAGATE_SEQUENTIAL);
-        }
-
-        public ActionRule<Void> propagateParallel() {
-            return propagate(StateTransitionAction.PROPAGATE_PARALLEL);
-        }
-
-        private ActionRule<Void> propagate(StateTransitionAction transitionAction) {
-            return new ActionRule<>(
-                    builder,
-                    from,
-                    actionId,
-                    null,
-                    transitionAction);
+            return builder.addTransition(from, actionId, action, to, failureState);
         }
     }
 
