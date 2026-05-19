@@ -19,6 +19,36 @@ machine through adapters instead of hardcoding lifecycle transitions inside
 `onStart()` and `onStop()`. This allows multiple runtime resources, such as two
 native Git listener ports, to share one centralized management model.
 
+## Progress Update 2026-05-19
+
+The generic utility now lives in `core/lifecycle-state-machine` instead of
+`core/common`. Its current model uses:
+
+- fixed `StateMachineDefinition.State` values, with `NEW`, `FIN`, and `ERR`
+  conventions;
+- stable `ActionId` values such as `START` and `STOP`;
+- typed `ActionBinding<A>` handlers for payload-specific side effects;
+- synchronous serialized transition execution;
+- state-machine events, transition listeners, snapshots, diagnostics, and child
+  propagation.
+
+`GitNativeTransportStateMachine` is now the runtime lifecycle service for the
+native Git transport. Dagger registers this state-machine service when native
+Git transport is enabled. `GitNativeTransportService` is no longer registered
+directly as an `OrionApplicationStageEventListener`; it is the lower-level
+socket endpoint implementation called by the state-machine actions.
+
+`OrionStageCallResult` is not part of the state-machine concept. It remains an
+application lifecycle API detail. The native Git state-machine lifecycle
+registration adapts `START` and `STOP` transition execution to lifecycle tasks
+and returns no lifecycle wait result.
+
+The old `NativeGitListenerEndpoint` name should be read as a future extraction
+of the socket listener currently inside `GitNativeTransportService`. It is not a
+required extra abstraction for the current single-listener runtime wiring. It
+becomes useful only when the service needs multiple listener endpoints or a
+classic-socket/NIO engine boundary.
+
 ## Current State
 
 Orion already has an application-level lifecycle:
@@ -246,18 +276,29 @@ Cover:
 Add an adapter that converts application lifecycle tasks into state machine
 actions.
 
+Current status: a generic adapter is deferred. The native Git transport now has
+a narrow adapter inside `GitNativeTransportStateMachine`, which registers the
+existing `GIT_TRANSPORT_START` and `GIT_TRANSPORT_STOP` lifecycle task ids and
+executes `ActionId.START` / `ActionId.STOP` transitions.
+
 Cover:
 
 - `ApplicationState.STARTING` can execute `START`;
 - `ApplicationState.STOPPING` can execute `STOP`;
 - task ids and dependencies remain visible in `describeTaskPlan`;
 - invalid machine transition makes the lifecycle task fail;
-- successful actions return `OrionStageCallResult`.
+- successful lifecycle tasks can execute transitions without adding
+  `OrionStageCallResult` to the state-machine model.
 
 ### Phase 4: Native Git Listener Endpoint
 
 Extract socket-specific behavior from `GitNativeTransportService` into
 `NativeGitListenerEndpoint`.
+
+Current status: do not introduce a new class only for naming. In the current
+runtime shape, `GitNativeTransportService` is already the socket endpoint
+implementation. Extract `NativeGitListenerEndpoint` later only if the native Git
+transport needs more than one listener or selectable listener engines.
 
 The endpoint should be testable without the application lifecycle and should
 support port `0` for tests. It should expose the bound address after start.

@@ -4,7 +4,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.output.NullOutputStream;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ClientConnectionResource;
@@ -12,10 +11,7 @@ import pro.deta.orion.auth.check.rule.ConnectionAccessRules;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
@@ -28,7 +24,7 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 @Slf4j
 @Singleton
-public class GitNativeTransportService implements OrionApplicationStageEventListener {
+public class GitNativeTransportService {
     private static final int DEFAULT_SOCKET_TIMEOUT_MILLIS = 5 * 1000;
 
     private final GitTransportConfig config;
@@ -54,14 +50,6 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
         this.socketTimeoutMillis = socketTimeoutMillis;
     }
 
-    @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, this::onStart)
-                .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.GIT_TRANSPORT_STOP, this::onStop);
-    }
-
-
     public OrionStageCallResult onStart() {
         if (config.isEnabled()) {
             stopRequested = false;
@@ -70,6 +58,10 @@ public class GitNativeTransportService implements OrionApplicationStageEventList
             return callResult;
         }
         return null;
+    }
+
+    boolean isEnabled() {
+        return config.isEnabled();
     }
 
     private void listenService() {

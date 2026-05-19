@@ -21,14 +21,17 @@ import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -139,6 +142,7 @@ class OrionRuntimeModuleTest {
         assertTrue(serviceMap.contains("OrionJGitRuntime: JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertFalse(serviceMap.contains("JettyHTTPServer: HTTP_TRANSPORT_START"));
         assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_START"));
+        assertFalse(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_START"));
         assertFalse(serviceMap.contains("GitSshTransportService: SSH_TRANSPORT_START"));
     }
 
@@ -151,6 +155,21 @@ class OrionRuntimeModuleTest {
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
         assertTrue(serviceMap.contains(
                 "TransportLifecycleBarrier: TRANSPORTS_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
+        assertTrue(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_START after TRANSPORTS_START"));
+        assertTrue(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_STOP"));
+        assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_START"));
+        assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_STOP"));
+    }
+
+    @Test
+    void runtimeModuleCollectsStateMachinesThroughMarkerSet() {
+        List<String> parameterTypes = Arrays.stream(OrionRuntimeModule.class.getDeclaredMethods())
+                .flatMap(method -> Arrays.stream(method.getGenericParameterTypes()))
+                .map(Type::getTypeName)
+                .toList();
+
+        assertTrue(parameterTypes.stream().anyMatch(type -> type.contains(OrionLifecycleStateMachine.class.getName())));
+        assertFalse(parameterTypes.stream().anyMatch(type -> type.contains("GitNativeTransportStateMachine")));
     }
 
     @Test

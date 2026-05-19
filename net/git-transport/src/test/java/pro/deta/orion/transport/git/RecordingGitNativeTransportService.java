@@ -9,7 +9,17 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
     private RuntimeException startFailure;
 
     RecordingGitNativeTransportService() {
-        super(new GitTransportConfig("127.0.0.1", 0), null, null, 5_000);
+        this(true);
+    }
+
+    RecordingGitNativeTransportService(boolean enabled) {
+        super(config(enabled), null, null, 5_000);
+    }
+
+    private static GitTransportConfig config(boolean enabled) {
+        GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
+        config.setEnabled(enabled);
+        return config;
     }
 
     @Override

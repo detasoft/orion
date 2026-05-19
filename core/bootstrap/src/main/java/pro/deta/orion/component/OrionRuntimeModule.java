@@ -19,10 +19,10 @@ import pro.deta.orion.crypto.ServerKeySigner;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.OrionJGitRuntime;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
+import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 
 import javax.inject.Provider;
 import java.security.PublicKey;
@@ -44,18 +44,23 @@ public class OrionRuntimeModule {
     static Set<OrionApplicationStageEventListener> transportServices(
             OrionConfiguration configuration,
             Provider<JettyHTTPServer> jettyHttpServer,
-            Provider<GitNativeTransportService> gitNativeTransportService,
             Provider<GitSshTransportService> gitSshTransportService) {
         Set<OrionApplicationStageEventListener> services = new LinkedHashSet<>();
         if (TransportRuntimeConfig.isHttpTransportEnabled(configuration)) {
             services.add(jettyHttpServer.get());
         }
-        if (TransportRuntimeConfig.isGitTransportEnabled(configuration)) {
-            services.add(gitNativeTransportService.get());
-        }
         if (TransportRuntimeConfig.isSshTransportEnabled(configuration)) {
             services.add(gitSshTransportService.get());
         }
+        return services;
+    }
+
+    @Provides
+    @ElementsIntoSet
+    static Set<OrionApplicationStageEventListener> lifecycleStateMachines(
+            Set<OrionLifecycleStateMachine> stateMachines) {
+        Set<OrionApplicationStageEventListener> services = new LinkedHashSet<>();
+        services.addAll(stateMachines);
         return services;
     }
 

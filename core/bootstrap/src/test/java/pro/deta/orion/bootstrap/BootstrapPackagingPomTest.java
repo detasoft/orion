@@ -12,7 +12,7 @@ class BootstrapPackagingPomTest {
 
     @Test
     void attachesSingleExecutableArtifact() throws IOException {
-        Path pom = Path.of("core", "bootstrap", "pom.xml");
+        Path pom = bootstrapPom();
         String xml = Files.readString(pom);
 
         assertTrue(xml.contains("${project.build.finalName}-executable.jar"));
@@ -20,5 +20,13 @@ class BootstrapPackagingPomTest {
         assertTrue(xml.contains("${project.build.finalName}-executable.jar.sha256"));
         assertFalse(xml.contains("${project.build.finalName}-initd.jar"));
         assertFalse(xml.contains("<classifier>initd</classifier>"));
+    }
+
+    private static Path bootstrapPom() {
+        Path reactorRelativePom = Path.of("core", "bootstrap", "pom.xml");
+        if (Files.exists(reactorRelativePom)) {
+            return reactorRelativePom;
+        }
+        return Path.of("pom.xml");
     }
 }

@@ -1,6 +1,12 @@
 package pro.deta.orion.transport.git;
 
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
+import pro.deta.orion.ApplicationState;
+import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
+import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.lifecycle.state.ActionBinding;
+import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
@@ -9,12 +15,14 @@ import pro.deta.orion.lifecycle.state.StateMachineEventSubscriber;
 import pro.deta.orion.lifecycle.state.StateMachineSnapshot;
 import pro.deta.orion.lifecycle.state.StateMachineSubscription;
 import pro.deta.orion.lifecycle.state.Void;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 
 import java.util.Objects;
 
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
 
-public final class GitNativeTransportStateMachine {
+@Singleton
+public final class GitNativeTransportStateMachine implements OrionLifecycleStateMachine {
     public static final State RUNNING = state("RUNNING");
 
     private final GitNativeTransportService service;
@@ -23,12 +31,29 @@ public final class GitNativeTransportStateMachine {
     private final StateMachineDefinition definition;
     private final StateMachine stateMachine;
 
+    @Inject
     public GitNativeTransportStateMachine(GitNativeTransportService service) {
         this.service = Objects.requireNonNull(service, "service");
-        start = ActionBinding.of("git-native-transport.start", this::startGitTransport);
-        stop = ActionBinding.of("git-native-transport.stop", this::stopGitTransport);
+        start = ActionId.START.bind(this::startGitTransport);
+        stop = ActionId.STOP.bind(this::stopGitTransport);
         definition = defineStateMachine();
         stateMachine = definition.newStateMachine();
+    }
+
+    @Override
+    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
+        if (!service.isEnabled()) {
+            return;
+        }
+        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, () -> {
+                    start();
+                    return null;
+                })
+                .after(OrionLifecycleTasks.TRANSPORTS_START);
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.GIT_TRANSPORT_STOP, () -> {
+            stop();
+            return null;
+        });
     }
 
     private StateMachineDefinition defineStateMachine() {

@@ -118,6 +118,24 @@ class GitNativeTransportServiceTest {
     }
 
     @Test
+    void malformedInitialCommandDoesNotStopListener() throws Exception {
+        RecordingGitRepositoryProvider repositoryProvider = new RecordingGitRepositoryProvider();
+        GitInternalService gitService = new GitInternalService(repositoryProvider, new OrionEventManager());
+        InetSocketAddress address = startService(gitService, 5_000);
+
+        byte[] malformedResponse = request(address, pktLine("not-a-git-command\0host=localhost\0"));
+        assertArrayEquals(new byte[0], malformedResponse);
+        assertNull(repositoryProvider.lastExistsRepository);
+        assertNull(repositoryProvider.lastCreatedRepository);
+
+        byte[] validResponse = request(address, pktLine("git-upload-pack /missing.git\0host=localhost\0"));
+
+        assertArrayEquals(new byte[0], validResponse);
+        assertEquals("missing", repositoryProvider.lastExistsRepository);
+        assertNull(repositoryProvider.lastCreatedRepository);
+    }
+
+    @Test
     void idleClientIsClosedBySocketTimeout() throws Exception {
         RecordingGitInternalService gitService = new RecordingGitInternalService();
         gitService.readBeforeResponding();
@@ -194,6 +212,19 @@ class GitNativeTransportServiceTest {
         byte[] response = request(address, pktLine("git-upload-pack /missing.git\0host=localhost\0"));
 
         assertArrayEquals(new byte[0], response);
+        assertEquals("missing", repositoryProvider.lastExistsRepository);
+        assertNull(repositoryProvider.lastCreatedRepository);
+    }
+
+    @Test
+    void receivePackForMissingRepositoryRequiresAuthorizationBeforeCreatingRepository() throws Exception {
+        RecordingGitRepositoryProvider repositoryProvider = new RecordingGitRepositoryProvider();
+        GitInternalService gitService = new GitInternalService(repositoryProvider, new OrionEventManager());
+        InetSocketAddress address = startService(gitService, 5_000);
+
+        byte[] response = request(address, pktLine("git-receive-pack /missing.git\0host=localhost\0"));
+
+        assertEquals("0015ERR ACCESS_DENIED0000", new String(response, StandardCharsets.UTF_8));
         assertEquals("missing", repositoryProvider.lastExistsRepository);
         assertNull(repositoryProvider.lastCreatedRepository);
     }

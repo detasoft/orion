@@ -1,16 +1,25 @@
 package pro.deta.orion.transport.git;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.ApplicationState;
+import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
+import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.lifecycle.state.InvalidStateTransitionException;
 import pro.deta.orion.lifecycle.state.StateMachineEvent;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.state.Void;
+import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
+import pro.deta.orion.lifecycle.task.LifecycleTaskId;
+import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
+import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,6 +32,45 @@ import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_ST
 import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNING;
 
 class GitNativeTransportStateMachineTest {
+    @Test
+    void registersNativeGitLifecycleTasksAsStateMachineService() throws Exception {
+        RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
+        GitNativeTransportStateMachine machine = new GitNativeTransportStateMachine(service);
+        RecordingRegistrar registrar = new RecordingRegistrar();
+
+        assertInstanceOf(OrionLifecycleStateMachine.class, machine);
+        machine.registerToStage(registrar);
+
+        LifecycleTaskDefinition start = registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_START);
+        assertEquals(ApplicationState.STARTING, start.phase());
+        assertEquals("GitNativeTransportStateMachine", start.serviceName());
+        assertEquals(List.of(OrionLifecycleTasks.TRANSPORTS_START), start.after());
+
+        LifecycleTaskDefinition stop = registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_STOP);
+        assertEquals(ApplicationState.STOPPING, stop.phase());
+        assertEquals("GitNativeTransportStateMachine", stop.serviceName());
+        assertTrue(stop.after().isEmpty());
+
+        assertNull(start.call().call());
+        assertEquals(RUNNING, machine.currentState());
+        assertEquals(1, service.startCalls());
+
+        assertNull(stop.call().call());
+        assertEquals(FIN, machine.currentState());
+        assertEquals(1, service.stopCalls());
+    }
+
+    @Test
+    void disabledNativeGitTransportDoesNotRegisterLifecycleTasks() {
+        GitNativeTransportStateMachine machine =
+                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService(false));
+        RecordingRegistrar registrar = new RecordingRegistrar();
+
+        machine.registerToStage(registrar);
+
+        assertTrue(registrar.registrations.isEmpty());
+    }
+
     @Test
     void startThenStopReachesFinishedState() {
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
@@ -115,8 +163,8 @@ class GitNativeTransportStateMachineTest {
 
         assertTrue(machine.describe().contains("state: NEW"));
         assertTrue(machine.describe().contains("in progress: <none>"));
-        assertTrue(machine.describe().contains("NEW --git-native-transport.start--> RUNNING (fail -> ERR)"));
-        assertTrue(machine.describe().contains("RUNNING --git-native-transport.stop--> FIN (fail -> ERR)"));
+        assertTrue(machine.describe().contains("NEW --START--> RUNNING (fail -> ERR)"));
+        assertTrue(machine.describe().contains("RUNNING --STOP--> FIN (fail -> ERR)"));
     }
 
     @Test
@@ -137,5 +185,25 @@ class GitNativeTransportStateMachineTest {
                         TRANSITION_FINISHED),
                 events.stream().map(StateMachineEvent::type).toList());
         assertEquals(RUNNING, events.get(3).currentState());
+    }
+
+    private static final class RecordingRegistrar implements ApplicationStateListenerRegistrar {
+        private final List<LifecycleTaskRegistration> registrations = new ArrayList<>();
+
+        @Override
+        public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
+            registrations.add(registration);
+            return registration;
+        }
+
+        private LifecycleTaskDefinition definition(LifecycleTaskId id) {
+            for (LifecycleTaskRegistration registration : registrations) {
+                LifecycleTaskDefinition definition = registration.definition();
+                if (definition.id().equals(id)) {
+                    return definition;
+                }
+            }
+            throw new AssertionError("Missing lifecycle task " + id);
+        }
     }
 }
