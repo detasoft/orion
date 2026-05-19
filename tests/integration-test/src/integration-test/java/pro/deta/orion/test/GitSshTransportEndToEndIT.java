@@ -261,10 +261,9 @@ class GitSshTransportEndToEndIT {
         KeyPair clientKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Client SSH key should be generated");
 
         startedOrion = startFreshOrion(orionRoot);
-        String rootToken = TestBearerTokens.issueRootToken(
-                startedOrion.accessControlService(),
-                startedOrion.httpUrl("/api/admin/token"),
-                3_600);
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
+                .valueOrFailure("Server identity key should be available after startup");
+        String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
         createManagedUser(startedOrion, rootToken, clientKey, repositoryName);
         createManagedRepository(startedOrion, rootToken, repositoryName);
 
@@ -303,6 +302,50 @@ class GitSshTransportEndToEndIT {
                      .setTransportConfigCallback(sshCallback(ssh))
                      .call()) {
             assertThat(Files.readString(cloneDirectory.resolve("state.txt"))).isEqualTo("survived restart\n");
+        }
+    }
+
+    @Test
+    void managedUserCanCreateOwnRepositoryByFirstPushOverSsh() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        Path sourceDirectory = tempDir.resolve("self-service-source");
+        Path cloneDirectory = tempDir.resolve("self-service-clone");
+        String repositoryName = USERNAME;
+        KeyPair clientKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Client SSH key should be generated");
+
+        startedOrion = startFreshOrion(orionRoot);
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
+                .valueOrFailure("Server identity key should be available after startup");
+        String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
+        createManagedUser(startedOrion, rootToken, clientKey, repositoryName);
+
+        String remoteUrl = startedOrion.sshUrl(repositoryName + ".git");
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("self-service-ssh-home"), clientKey);
+             Git source = initRepository(sourceDirectory)) {
+            assertThat(startedOrion.repositoryPath(repositoryName)).doesNotExist();
+
+            ObjectId initialCommit = createCommit(source, "README.md", "created by " + USERNAME + "\n", "self-service create");
+            Iterable<PushResult> pushResults = source.push()
+                    .setRemote(remoteUrl)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+
+            assertThat(pushResults)
+                    .flatExtracting(PushResult::getRemoteUpdates)
+                    .extracting(RemoteRefUpdate::getStatus)
+                    .containsExactly(RemoteRefUpdate.Status.OK);
+            assertRepositoryContains(repositoryName, initialCommit, "README.md", "created by " + USERNAME + "\n");
+
+            try (Git ignored = Git.cloneRepository()
+                    .setURI(remoteUrl)
+                    .setDirectory(cloneDirectory.toFile())
+                    .setBranch(BRANCH)
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .call()) {
+                assertThat(Files.readString(cloneDirectory.resolve("README.md")))
+                        .isEqualTo("created by " + USERNAME + "\n");
+            }
         }
     }
 
