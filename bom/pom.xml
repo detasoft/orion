@@ -20,13 +20,8 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion.core</groupId>
-                <artifactId>resource-addressing</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.core</groupId>
-                <artifactId>resource-addressing-resolvers</artifactId>
+                <groupId>pro.deta.orion.core.ref</groupId>
+                <artifactId>reference</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

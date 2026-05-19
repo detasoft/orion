@@ -1,28 +1,32 @@
-# Resource Addressing
+# Resource Reference
 
-`core/resource-addressing` contains the AST-based resource reference model in
-`pro.deta.orion.resource.reference`.
+`core/resource-reference` groups the resource reference modules:
+
+- `reference-api` contains the AST-based resource reference model in
+  `pro.deta.orion.resource.reference`;
+- `antlr-parser` builds the ANTLR parser classes used by `reference-api`;
+- `reference-resolvers` contains optional Git and S3 capability resolvers.
 
 The model parses user/config input into an immutable AST and resolves it to
 caller-requested capabilities such as `String`, `Path`, `ResourceContent`, or a
 type supplied by an extension resolver.
 
-Concrete storage or transport capabilities are intentionally outside this module.
-For example, `core/resource-addressing-resolvers` supplies optional Git and S3
-capability resolvers on top of this AST and registry API.
+Concrete storage or transport capabilities are intentionally outside the
+`reference-api` module. The `reference-resolvers` module supplies optional Git
+and S3 capability resolvers on top of this AST and registry API.
 
 ## Parser Source
 
 The grammar source is:
 
 ```text
-src/main/resources/pro/deta/orion/resource/reference/ResourceReference.g4
+antlr-parser/src/main/resources/pro/deta/orion/resource/reference/ResourceReference.g4
 ```
 
 Maven generates ANTLR classes under:
 
 ```text
-target/generated-sources/resource-reference
+antlr-parser/target/generated-sources/resource-reference
 ```
 
 Generated classes are internal to `ResourceReferenceParser` and are not part of

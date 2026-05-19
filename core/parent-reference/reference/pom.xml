@@ -5,19 +5,32 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>orion</artifactId>
+        <groupId>pro.deta.orion.core.ref</groupId>
+        <artifactId>parent-reference</artifactId>
         <version>${revision}</version>
-        <relativePath>../../pom.xml</relativePath>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <groupId>pro.deta.orion.core</groupId>
-    <artifactId>resource-addressing-resolvers</artifactId>
+    <artifactId>reference</artifactId>
+
+    <properties>
+        <antlr4.version>4.13.2</antlr4.version>
+    </properties>
 
     <dependencies>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>resource-addressing</artifactId>
+            <groupId>pro.deta.orion.core.ref</groupId>
+            <artifactId>antlr-parser</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>2.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.moandjiezana.toml</groupId>
+            <artifactId>toml4j</artifactId>
+            <version>0.7.2</version>
         </dependency>
         <dependency>
             <groupId>org.assertj</groupId>
@@ -30,4 +43,5 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
 </project>
