@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.git;
 
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -19,6 +20,7 @@ import pro.deta.orion.util.stream.StandardStreams;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Constructor;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -63,6 +65,13 @@ class GitNativeTransportServiceTest {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
         }
+    }
+
+    @Test
+    void injectConstructorDependsOnGitTransportConfigOnly() {
+        Constructor<?> injectConstructor = injectConstructor();
+
+        assertEquals(GitTransportConfig.class, injectConstructor.getParameterTypes()[0]);
     }
 
     @Test
@@ -244,6 +253,15 @@ class GitNativeTransportServiceTest {
         config.setEnabled(enabled);
         executor = new OrionExecutor(4, new OrionThreadFactory());
         return new GitNativeTransportService(config, gitService, executor, socketTimeoutMillis);
+    }
+
+    private static Constructor<?> injectConstructor() {
+        for (Constructor<?> constructor : GitNativeTransportService.class.getDeclaredConstructors()) {
+            if (constructor.isAnnotationPresent(Inject.class)) {
+                return constructor;
+            }
+        }
+        throw new AssertionError("Missing @Inject constructor");
     }
 
     private static InetSocketAddress awaitBoundAddress(GitNativeTransportService service) throws InterruptedException {

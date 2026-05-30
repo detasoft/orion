@@ -9,11 +9,10 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.transport.git.OrionGitTransportModule;
 import pro.deta.orion.transport.http.OrionHttpModule;
 
 @Singleton
-@Component(modules = {OrionRuntimeModule.class, OrionHttpModule.class, OrionGitTransportModule.class})
+@Component(modules = {OrionRuntimeModule.class, OrionHttpModule.class})
 public interface OrionComponent {
 
     OrionApplicationLifecycle orionApplicationLifecycle();

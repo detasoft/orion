@@ -32,16 +32,35 @@ The generic utility now lives in `core/lifecycle-state-machine` instead of
 - state-machine events, transition listeners, snapshots, diagnostics, and child
   propagation.
 
-`GitNativeTransportStateMachine` is now the runtime lifecycle service for the
-native Git transport. Dagger registers this state-machine service when native
-Git transport is enabled. `GitNativeTransportService` is no longer registered
-directly as an `OrionApplicationStageEventListener`; it is the lower-level
-socket endpoint implementation called by the state-machine actions.
+`GitNativeTransportStateMachine` now models only the native Git transport's
+local `START` / `STOP` transitions. It is marked with `OrionLifecycleStateMachine`
+but is no longer an `OrionApplicationStageEventListener`.
+
+`TransportLifecycleStateMachine` is the temporary aggregate bridge from the
+application lifecycle to transport-local state machines. It explicitly wires the
+native Git state machine as an always-present child. The child owns the native
+Git enabled check and lazily resolves `Provider<GitNativeTransportService>` only
+when an enabled `START` or `STOP` action needs the service. Both the child state
+machine and the low-level native Git service depend on `GitTransportConfig`
+instead of the full runtime configuration object. Dagger owns both
+`GitNativeTransportStateMachine` and `GitNativeTransportService`; the important
+boundary is that only `TransportLifecycleStateMachine` is registered as an
+application lifecycle listener. The aggregate owns the legacy
+`GIT_TRANSPORT_START` and `GIT_TRANSPORT_STOP` task registration but asks the
+child whether native Git is enabled before registering those tasks.
+`OrionRuntimeModule` registers only this aggregate bridge; it no longer collects
+a Dagger set of abstract state machines. `OrionGitTransportModule` was removed
+because no extra multibinding module is needed for native Git state-machine
+wiring.
+
+`GitNativeTransportService` is no longer registered directly as an
+`OrionApplicationStageEventListener`; it is the lower-level socket endpoint
+implementation called by the state-machine actions.
 
 `OrionStageCallResult` is not part of the state-machine concept. It remains an
-application lifecycle API detail. The native Git state-machine lifecycle
-registration adapts `START` and `STOP` transition execution to lifecycle tasks
-and returns no lifecycle wait result.
+application lifecycle API detail. The transport aggregate lifecycle registration
+adapts `START` and `STOP` transition execution to lifecycle tasks and returns no
+lifecycle wait result.
 
 The old `NativeGitListenerEndpoint` name should be read as a future extraction
 of the socket listener currently inside `GitNativeTransportService`. It is not a
@@ -276,10 +295,12 @@ Cover:
 Add an adapter that converts application lifecycle tasks into state machine
 actions.
 
-Current status: a generic adapter is deferred. The native Git transport now has
-a narrow adapter inside `GitNativeTransportStateMachine`, which registers the
+Current status: a generic adapter is deferred. The transport aggregate now has a
+narrow adapter inside `TransportLifecycleStateMachine`, which registers the
 existing `GIT_TRANSPORT_START` and `GIT_TRANSPORT_STOP` lifecycle task ids and
-executes `ActionId.START` / `ActionId.STOP` transitions.
+executes aggregate `ActionId.START` / `ActionId.STOP` transitions. Those
+aggregate actions propagate to the explicitly listed child state machines, which
+currently means `GitNativeTransportStateMachine`.
 
 Cover:
 

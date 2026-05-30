@@ -12,7 +12,6 @@ import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
 
@@ -35,8 +34,11 @@ public class GitNativeTransportService {
     private volatile boolean stopRequested;
 
     @Inject
-    public GitNativeTransportService(ConfigurationContext configurationContext, GitInternalService gitInternalService, OrionExecutor orionExecutor) {
-        this(configurationContext.getConfiguration().getTransport().getGit(), gitInternalService, orionExecutor, DEFAULT_SOCKET_TIMEOUT_MILLIS);
+    public GitNativeTransportService(
+            GitTransportConfig config,
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor) {
+        this(config, gitInternalService, orionExecutor, DEFAULT_SOCKET_TIMEOUT_MILLIS);
     }
 
     GitNativeTransportService(
@@ -58,10 +60,6 @@ public class GitNativeTransportService {
             return callResult;
         }
         return null;
-    }
-
-    boolean isEnabled() {
-        return config.isEnabled();
     }
 
     private void listenService() {

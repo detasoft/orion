@@ -12,6 +12,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.config.ConfigurationProvider;
+import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.crypto.ServerIdentityKeyService;
@@ -22,7 +23,6 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.transport.git.GitSshTransportService;
 import pro.deta.orion.transport.http.JettyHTTPServer;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 
 import javax.inject.Provider;
 import java.security.PublicKey;
@@ -37,6 +37,18 @@ public class OrionRuntimeModule {
     @Singleton
     static OrionConfiguration orionConfiguration(ConfigurationProvider configurationProvider) {
         return configurationProvider.readConfiguration();
+    }
+
+    @Provides
+    @Singleton
+    static GitTransportConfig gitTransportConfig(OrionConfiguration configuration) {
+        OrionConfiguration.AppTransport transport = configuration.getTransport();
+        if (transport == null || transport.getGit() == null) {
+            GitTransportConfig disabled = new GitTransportConfig(null, 9418);
+            disabled.setEnabled(false);
+            return disabled;
+        }
+        return transport.getGit();
     }
 
     @Provides
@@ -56,12 +68,9 @@ public class OrionRuntimeModule {
     }
 
     @Provides
-    @ElementsIntoSet
-    static Set<OrionApplicationStageEventListener> lifecycleStateMachines(
-            Set<OrionLifecycleStateMachine> stateMachines) {
-        Set<OrionApplicationStageEventListener> services = new LinkedHashSet<>();
-        services.addAll(stateMachines);
-        return services;
+    @IntoSet
+    static OrionApplicationStageEventListener transportLifecycleStateMachine(TransportLifecycleStateMachine stateMachine) {
+        return stateMachine;
     }
 
     @Provides

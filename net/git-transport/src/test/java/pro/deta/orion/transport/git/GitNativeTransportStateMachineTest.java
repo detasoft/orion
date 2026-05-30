@@ -1,25 +1,25 @@
 package pro.deta.orion.transport.git;
 
+import jakarta.inject.Inject;
+import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.ApplicationState;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
+import pro.deta.orion.config.schema.GitTransportConfig;
+import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.lifecycle.state.InvalidStateTransitionException;
 import pro.deta.orion.lifecycle.state.StateMachineEvent;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.state.Void;
-import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
-import pro.deta.orion.lifecycle.task.LifecycleTaskId;
-import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 
+import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,50 +33,27 @@ import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNIN
 
 class GitNativeTransportStateMachineTest {
     @Test
-    void registersNativeGitLifecycleTasksAsStateMachineService() throws Exception {
-        RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
-        GitNativeTransportStateMachine machine = new GitNativeTransportStateMachine(service);
-        RecordingRegistrar registrar = new RecordingRegistrar();
+    void nativeGitStateMachineIsOnlyAStateMachineMarker() {
+        GitNativeTransportStateMachine machine =
+                machine(new RecordingGitNativeTransportService());
 
         assertInstanceOf(OrionLifecycleStateMachine.class, machine);
-        machine.registerToStage(registrar);
-
-        LifecycleTaskDefinition start = registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_START);
-        assertEquals(ApplicationState.STARTING, start.phase());
-        assertEquals("GitNativeTransportStateMachine", start.serviceName());
-        assertEquals(List.of(OrionLifecycleTasks.TRANSPORTS_START), start.after());
-
-        LifecycleTaskDefinition stop = registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_STOP);
-        assertEquals(ApplicationState.STOPPING, stop.phase());
-        assertEquals("GitNativeTransportStateMachine", stop.serviceName());
-        assertTrue(stop.after().isEmpty());
-
-        assertNull(start.call().call());
-        assertEquals(RUNNING, machine.currentState());
-        assertEquals(1, service.startCalls());
-
-        assertNull(stop.call().call());
-        assertEquals(FIN, machine.currentState());
-        assertEquals(1, service.stopCalls());
+        assertFalse(OrionApplicationStageEventListener.class.isAssignableFrom(GitNativeTransportStateMachine.class));
     }
 
     @Test
-    void disabledNativeGitTransportDoesNotRegisterLifecycleTasks() {
-        GitNativeTransportStateMachine machine =
-                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService(false));
-        RecordingRegistrar registrar = new RecordingRegistrar();
-
-        machine.registerToStage(registrar);
-
-        assertTrue(registrar.registrations.isEmpty());
+    void nativeGitStateMachineIsDaggerManagedButNotAnApplicationListener() {
+        assertTrue(GitNativeTransportStateMachine.class.isAnnotationPresent(Singleton.class));
+        assertEquals(GitTransportConfig.class, injectConstructor().getParameterTypes()[0]);
     }
 
     @Test
     void startThenStopReachesFinishedState() {
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
-        GitNativeTransportStateMachine machine = new GitNativeTransportStateMachine(service);
+        GitNativeTransportStateMachine machine = machine(service);
 
         assertEquals(NEW, machine.currentState());
+        assertTrue(machine.isEnabled());
         assertSame(service, machine.service());
         assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.stateMachine().availableActions());
 
@@ -95,7 +72,7 @@ class GitNativeTransportStateMachineTest {
     @Test
     void stopBeforeStartReachesFinishedStateWithoutStartingService() {
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
-        GitNativeTransportStateMachine machine = new GitNativeTransportStateMachine(service);
+        GitNativeTransportStateMachine machine = machine(service);
 
         machine.stop();
 
@@ -109,7 +86,7 @@ class GitNativeTransportStateMachineTest {
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
         RuntimeException failure = new RuntimeException("start failed");
         service.failStartWith(failure);
-        GitNativeTransportStateMachine machine = new GitNativeTransportStateMachine(service);
+        GitNativeTransportStateMachine machine = machine(service);
 
         StateTransitionFailedException exception = assertThrows(StateTransitionFailedException.class, machine::start);
         assertSame(failure, exception.getCause());
@@ -125,7 +102,7 @@ class GitNativeTransportStateMachineTest {
     @Test
     void finishedStateRejectsFurtherActions() {
         GitNativeTransportStateMachine machine =
-                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
+                machine(new RecordingGitNativeTransportService());
 
         machine.stop();
 
@@ -136,7 +113,7 @@ class GitNativeTransportStateMachineTest {
     @Test
     void exposedActionBindingCanBeExecutedDirectly() {
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
-        GitNativeTransportStateMachine machine = new GitNativeTransportStateMachine(service);
+        GitNativeTransportStateMachine machine = machine(service);
 
         machine.stateMachine().execute(machine.startAction(), Void.EMPTY);
 
@@ -147,7 +124,7 @@ class GitNativeTransportStateMachineTest {
     @Test
     void definitionReportsAvailableActionsAndRejectsSecondMachine() {
         GitNativeTransportStateMachine machine =
-                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
+                machine(new RecordingGitNativeTransportService());
 
         assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.definition().availableActions(NEW));
         assertEquals(Set.of(machine.stopAction().id()), machine.definition().availableActions(RUNNING));
@@ -159,7 +136,7 @@ class GitNativeTransportStateMachineTest {
     @Test
     void describeIncludesCurrentStateAndNativeTransportDiagram() {
         GitNativeTransportStateMachine machine =
-                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
+                machine(new RecordingGitNativeTransportService());
 
         assertTrue(machine.describe().contains("state: NEW"));
         assertTrue(machine.describe().contains("in progress: <none>"));
@@ -170,7 +147,7 @@ class GitNativeTransportStateMachineTest {
     @Test
     void subscriptionCanBeAttachedToWrapper() {
         GitNativeTransportStateMachine machine =
-                new GitNativeTransportStateMachine(new RecordingGitNativeTransportService());
+                machine(new RecordingGitNativeTransportService());
         List<StateMachineEvent> events = new ArrayList<>();
 
         machine.subscribe(events::add);
@@ -187,23 +164,41 @@ class GitNativeTransportStateMachineTest {
         assertEquals(RUNNING, events.get(3).currentState());
     }
 
-    private static final class RecordingRegistrar implements ApplicationStateListenerRegistrar {
-        private final List<LifecycleTaskRegistration> registrations = new ArrayList<>();
+    @Test
+    void disabledMachineKeepsStateMachineButDoesNotResolveServiceProvider() {
+        AtomicBoolean serviceResolved = new AtomicBoolean(false);
+        GitNativeTransportStateMachine machine = new GitNativeTransportStateMachine(config(false), () -> {
+            serviceResolved.set(true);
+            return new RecordingGitNativeTransportService(false);
+        });
 
-        @Override
-        public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
-            registrations.add(registration);
-            return registration;
-        }
+        assertFalse(machine.isEnabled());
+        assertEquals(NEW, machine.currentState());
 
-        private LifecycleTaskDefinition definition(LifecycleTaskId id) {
-            for (LifecycleTaskRegistration registration : registrations) {
-                LifecycleTaskDefinition definition = registration.definition();
-                if (definition.id().equals(id)) {
-                    return definition;
-                }
-            }
-            throw new AssertionError("Missing lifecycle task " + id);
-        }
+        machine.start();
+        machine.stop();
+
+        assertFalse(serviceResolved.get());
+        assertEquals(FIN, machine.currentState());
     }
+
+    private static GitNativeTransportStateMachine machine(RecordingGitNativeTransportService service) {
+        return new GitNativeTransportStateMachine(config(true), () -> service);
+    }
+
+    private static Constructor<?> injectConstructor() {
+        for (Constructor<?> constructor : GitNativeTransportStateMachine.class.getDeclaredConstructors()) {
+            if (constructor.isAnnotationPresent(Inject.class)) {
+                return constructor;
+            }
+        }
+        throw new AssertionError("Missing @Inject constructor");
+    }
+
+    private static GitTransportConfig config(boolean enabled) {
+        GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
+        config.setEnabled(enabled);
+        return config;
+    }
+
 }
