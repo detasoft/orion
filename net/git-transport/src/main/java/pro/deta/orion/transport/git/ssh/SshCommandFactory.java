@@ -9,6 +9,7 @@ import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -217,9 +218,14 @@ public class SshCommandFactory implements CommandFactory {
         }
     }
 
-    private static SecurityContext securityContextFor(ChannelSession channelSession) {
+    private SecurityContext securityContextFor(ChannelSession channelSession) {
+        UserIdentity userIdentity = channelSession.getSession().getAttribute(SSH_AUTHENTICATED_USER);
+        if (userIdentity == null) {
+            log.warn("SSH session has no authenticated user attribute, treating as anonymous: {}",
+                    channelSession.getSession());
+        }
         return SecurityContext.createContext()
-                .withUserIdentity(channelSession.getSession().getAttribute(SSH_AUTHENTICATED_USER))
+                .withUserIdentity(userIdentity)
                 .withRequestId(channelSession.getSession().toString());
     }
 
