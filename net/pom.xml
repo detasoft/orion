@@ -17,6 +17,7 @@
     <modules>
         <module>git-transport</module>
         <module>http-core</module>
+        <module>transport</module>
     </modules>
 
     <dependencies>

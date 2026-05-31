@@ -129,6 +129,11 @@
                 <artifactId>http-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.net</groupId>
+                <artifactId>transport</artifactId>
+                <version>${project.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

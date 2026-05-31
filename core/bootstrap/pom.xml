@@ -16,15 +16,11 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.net</groupId>
-            <artifactId>git-transport</artifactId>
+            <artifactId>transport</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>acl</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.net</groupId>
-            <artifactId>http-core</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>

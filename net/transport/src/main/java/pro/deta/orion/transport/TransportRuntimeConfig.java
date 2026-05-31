@@ -1,4 +1,4 @@
-package pro.deta.orion.component;
+package pro.deta.orion.transport;
 
 import pro.deta.orion.config.schema.OrionConfiguration;
 

@@ -1,5 +1,6 @@
 package pro.deta.orion.component;
 
+import dagger.Component;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
@@ -16,12 +17,12 @@ import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.acl.storage.VersionedAccessControlStorage;
-import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.transport.OrionTransportModule;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.Result;
 
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -163,32 +165,6 @@ class OrionRuntimeModuleTest {
         assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_STOP"));
         assertFalse(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_START"));
         assertFalse(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_STOP"));
-    }
-
-    @Test
-    void runtimeModuleRegistersTransportAggregateWithoutStateMachineSet() {
-        List<String> parameterTypes = new ArrayList<>();
-        for (Method method : OrionRuntimeModule.class.getDeclaredMethods()) {
-            for (Type parameterType : method.getGenericParameterTypes()) {
-                parameterTypes.add(parameterType.getTypeName());
-            }
-        }
-
-        assertTrue(containsType(parameterTypes, TransportLifecycleStateMachine.class.getName()));
-        assertFalse(containsType(parameterTypes, "pro.deta.orion.lifecycle.OrionLifecycleStateMachine"));
-        assertFalse(containsType(parameterTypes, "GitNativeTransportStateMachine"));
-    }
-
-    @Test
-    void runtimeModuleProvidesGitTransportConfigFromRuntimeConfiguration() {
-        OrionConfiguration configuration = defaultRuntimeConfiguration();
-        configuration.getTransport().getGit().setEnabled(true);
-        configuration.getTransport().getGit().setPort(19418);
-
-        GitTransportConfig gitTransportConfig = OrionRuntimeModule.gitTransportConfig(configuration);
-
-        assertTrue(gitTransportConfig.isEnabled());
-        assertEquals(19418, gitTransportConfig.getPort());
     }
 
     @Test
@@ -409,6 +385,14 @@ class OrionRuntimeModuleTest {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .build();
+    }
+
+    private static Path bootstrapPom() {
+        Path reactorRelativePom = Path.of("core", "bootstrap", "pom.xml");
+        if (Files.exists(reactorRelativePom)) {
+            return reactorRelativePom;
+        }
+        return Path.of("pom.xml");
     }
 
     private static boolean containsType(List<String> parameterTypes, String value) {

@@ -1,11 +1,10 @@
-package pro.deta.orion.component;
+package pro.deta.orion.transport;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
@@ -25,8 +24,9 @@ import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
 
 @Singleton
-public final class TransportLifecycleStateMachine implements OrionLifecycleStateMachine, OrionApplicationStageEventListener {
+public final class TransportLifecycleStateMachine implements OrionApplicationStageEventListener {
     public static final State RUNNING = state("RUNNING");
+    public static final State DISABLED = state("DISABLED");
 
     private final GitNativeTransportStateMachine gitNativeTransport;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startTransports);
@@ -37,7 +37,9 @@ public final class TransportLifecycleStateMachine implements OrionLifecycleState
     @Inject
     public TransportLifecycleStateMachine(GitNativeTransportStateMachine gitNativeTransport) {
         this.gitNativeTransport = Objects.requireNonNull(gitNativeTransport, "gitNativeTransport");
-        StateMachineDefinition.Builder builder = StateMachineDefinition.define();
+        StateMachineDefinition.Builder builder = StateMachineDefinition.define()
+                .name("transports")
+                .computedState((physicalState, childStates) -> gitNativeTransport.isEnabled() ? physicalState : DISABLED);
         builder.child("git-native", this.gitNativeTransport.stateMachine());
         definition = defineStateMachine(builder);
         stateMachine = definition.newStateMachine();

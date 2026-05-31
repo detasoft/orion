@@ -1,11 +1,10 @@
-package pro.deta.orion.component;
+package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
 import pro.deta.orion.lifecycle.task.LifecycleTaskId;
@@ -55,7 +54,6 @@ class TransportLifecycleStateMachineTest {
         TransportLifecycleStateMachine machine = new TransportLifecycleStateMachine(child);
         RecordingRegistrar registrar = new RecordingRegistrar();
 
-        assertInstanceOf(OrionLifecycleStateMachine.class, machine);
         assertInstanceOf(OrionApplicationStageEventListener.class, machine);
         machine.registerToStage(registrar);
 
@@ -74,6 +72,9 @@ class TransportLifecycleStateMachineTest {
         assertEquals(RUNNING, child.currentState());
         assertEquals(Map.of("git-native", RUNNING), machine.stateMachine().childStates());
         assertEquals(1, service.startCalls());
+        assertEquals("""
+                transports: RUNNING
+                  git-native: RUNNING""", machine.stateMachine().describeStatus());
 
         assertNull(stop.call().call());
         assertEquals(FIN, machine.currentState());
@@ -100,6 +101,9 @@ class TransportLifecycleStateMachineTest {
         assertEquals(NEW, machine.currentState());
         assertFalse(machine.gitNativeTransport().isEnabled());
         assertEquals(Map.of("git-native", NEW), machine.stateMachine().childStates());
+        assertEquals("""
+                transports: DISABLED (state=NEW)
+                  git-native: DISABLED (state=NEW)""", machine.stateMachine().describeStatus());
     }
 
     @Test
