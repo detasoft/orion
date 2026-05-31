@@ -64,6 +64,16 @@ is the key for high-level action execution.
 For one source state there must be at most one transition with a given
 `ActionId`. This keeps `execute(actionId, payload)` deterministic.
 
+When several states share the same action, list them in one `from(...)` rule:
+
+```java
+StateMachineDefinition.define()
+        .from(NEW, RUNNING)
+        .on(stop)
+        .to(FIN)
+        .failTo(ERR);
+```
+
 Every transition must define `failTo(...)`. If the handler throws, the machine
 moves to that failure state and throws `StateTransitionFailedException` to the
 caller.
