@@ -12,15 +12,11 @@ import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.HttpTransportConfig;
 import pro.deta.orion.config.schema.HttpsTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SSLKeyStoreConfig;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.util.CertUtils;
 import pro.deta.orion.util.OrionUtils;
 
@@ -33,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 @Singleton
 @Getter
-public class JettyHTTPServer implements OrionApplicationStageEventListener {
+public class JettyHTTPServer {
     public static final String ROOT_CONTEXT_PATH = "/";
     private static final long STOP_TIMEOUT_MILLIS = 1_000;
 
@@ -57,13 +53,6 @@ public class JettyHTTPServer implements OrionApplicationStageEventListener {
 
     public JettyHTTPServer(OrionConfiguration orionConfiguration, OrionHttpRouteServlet rootServlet) {
         this(orionConfiguration, rootServlet, null);
-    }
-
-    @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.HTTP_TRANSPORT_START, this::onStart)
-                .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.HTTP_TRANSPORT_STOP, this::onStop);
     }
 
     public OrionStageCallResult onStart() {
