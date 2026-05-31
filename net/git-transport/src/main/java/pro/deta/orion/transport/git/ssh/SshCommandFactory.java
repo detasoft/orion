@@ -40,8 +40,6 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 
 @Slf4j
 public class SshCommandFactory implements CommandFactory {
-    private static final int SET_KEY_READ_TIMEOUT_SECONDS = 30;
-
     public static final String SET_KEY = "set-key";
     public static final String SHUTDOWN = "shutdown";
     public static final String ISSUE_TOKEN = "issue-token";
@@ -53,6 +51,7 @@ public class SshCommandFactory implements CommandFactory {
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
     private final StateMachine transportStateMachine;
+    private final long setKeyReadTimeoutMillis;
 
     @Inject
     public SshCommandFactory(
@@ -61,11 +60,23 @@ public class SshCommandFactory implements CommandFactory {
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
             @Named("transport") StateMachine transportStateMachine) {
+        this(gitInternalService, orionExecutor, orionProvider, accessControlService,
+                transportStateMachine, 30_000);
+    }
+
+    SshCommandFactory(
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor,
+            OrionProvider orionProvider,
+            OrionAccessControlService accessControlService,
+            StateMachine transportStateMachine,
+            long setKeyReadTimeoutMillis) {
         this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;
         this.orionProvider = orionProvider;
         this.accessControlService = accessControlService;
         this.transportStateMachine = transportStateMachine;
+        this.setKeyReadTimeoutMillis = setKeyReadTimeoutMillis;
     }
 
     @Override
@@ -94,25 +105,9 @@ public class SshCommandFactory implements CommandFactory {
                         String command = arguments.getFirst();
 
                         if (SET_KEY.equalsIgnoreCase(command)) {
-                            ByteBuffer bb = ByteBuffer.allocate(256);
                             try {
                                 String username = channel.getSession().getUsername();
-                                StringBuilder publicKeyBuilder = new StringBuilder();
-                                Thread readingThread = Thread.currentThread();
-                                ScheduledFuture<?> watchdog = orionExecutor.schedule(
-                                        readingThread::interrupt,
-                                        SET_KEY_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                                try (ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream)) {
-                                    // for US_ASCII 1-byte encoding we can decode by parts.
-                                    while (readableByteChannel.read(bb.rewind()) >= 0) {
-                                        publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
-                                    }
-                                } finally {
-                                    watchdog.cancel(false);
-                                    // clear interrupt flag set by watchdog before thread returns to pool
-                                    Thread.interrupted();
-                                }
-                                String publicKey = publicKeyBuilder.toString();
+                                String publicKey = readKey(inputStream);
                                 orionExecutor.submit(() -> accessControlService.addKeyToUser(username, publicKey));
                                 outputStream.write(("Public: " + publicKey + " added successfully as authentication method for user " + username).getBytes(StandardCharsets.UTF_8));
                             } catch (IOException e) {
@@ -241,6 +236,25 @@ public class SshCommandFactory implements CommandFactory {
                 exitCallback.onExit(1);
             }
         }
+    }
+
+    String readKey(InputStream inputStream) throws IOException {
+        ByteBuffer bb = ByteBuffer.allocate(256);
+        StringBuilder builder = new StringBuilder();
+        Thread readingThread = Thread.currentThread();
+        ScheduledFuture<?> watchdog = orionExecutor.schedule(
+                readingThread::interrupt, setKeyReadTimeoutMillis, TimeUnit.MILLISECONDS);
+        try (ReadableByteChannel rbc = Channels.newChannel(inputStream)) {
+            // for US_ASCII 1-byte encoding we can decode by parts.
+            while (rbc.read(bb.rewind()) >= 0) {
+                builder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
+            }
+        } finally {
+            watchdog.cancel(false);
+            // clear interrupt flag set by watchdog before thread returns to pool
+            Thread.interrupted();
+        }
+        return builder.toString();
     }
 
     private SecurityContext securityContextFor(ChannelSession channelSession) {
