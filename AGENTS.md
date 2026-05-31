@@ -15,3 +15,4 @@
 - Prefer ordinary loops and straightforward control flow over Java Stream API unless streams make the code noticeably more readable.
 - When asked to add comments or explanations to classes, add class-level comments only. Do not add method or constructor comments unless explicitly requested.
 - Treat class-level comments tagged with `@AiRule` as local implementation rules. When changing a class, read these comments and verify the rules still hold before finishing the change.
+- Commit messages must be a single line. Do not add a body, bullet points, or multi-line descriptions — the entire meaning goes in the subject line.
