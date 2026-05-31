@@ -31,6 +31,7 @@ import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
@@ -78,59 +79,65 @@ public class SshCommandFactory implements CommandFactory {
 
         @Override
         public void start(ChannelSession channel, Environment env) throws IOException {
-            orionExecutor.submit(() -> {
-                int returnCode = 0;
-                SecurityContext securityContext = securityContextFor(channel);
-                try {
-                    accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
+            try {
+                orionExecutor.submit(() -> {
+                    int returnCode = 0;
+                    SecurityContext securityContext = securityContextFor(channel);
+                    try {
+                        accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
 
-                    List<String> arguments = commandArguments(commandLine);
-                    String command = arguments.getFirst();
+                        List<String> arguments = commandArguments(commandLine);
+                        String command = arguments.getFirst();
 
-                    if (SET_KEY.equalsIgnoreCase(command)) {
-                        ByteBuffer bb = ByteBuffer.allocate(256);
-                        try {
-                            String username = channel.getSession().getUsername();
-                            StringBuilder publicKeyBuilder = new StringBuilder();
-                            try (ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream)) {
-                                // for US_ASCII 1-byte encoding we can decode by parts.
-                                while (readableByteChannel.read(bb.rewind()) >= 0) {
-                                    publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
+                        if (SET_KEY.equalsIgnoreCase(command)) {
+                            ByteBuffer bb = ByteBuffer.allocate(256);
+                            try {
+                                String username = channel.getSession().getUsername();
+                                StringBuilder publicKeyBuilder = new StringBuilder();
+                                try (ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream)) {
+                                    // for US_ASCII 1-byte encoding we can decode by parts.
+                                    while (readableByteChannel.read(bb.rewind()) >= 0) {
+                                        publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
+                                    }
                                 }
+                                String publicKey = publicKeyBuilder.toString();
+                                orionExecutor.submit(() -> accessControlService.addKeyToUser(username, publicKey));
+                                outputStream.write(("Public: " + publicKey + " added successfully as authentication method for user " + username).getBytes(StandardCharsets.UTF_8));
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
                             }
-                            String publicKey = publicKeyBuilder.toString();
-                            orionExecutor.submit(() -> accessControlService.addKeyToUser(username, publicKey));
-                            outputStream.write(("Public: " + publicKey + " added successfully as authentication method for user " + username).getBytes(StandardCharsets.UTF_8));
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
+                        } else if (SHUTDOWN.equalsIgnoreCase(command)) {
+                            accessEnforcer().require(
+                                    securityContext,
+                                    ApplicationShutdownResource.applicationShutdown(),
+                                    ApplicationAccessRules.shutdown());
+                            orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
+                        } else if (ISSUE_TOKEN.equalsIgnoreCase(command) || TOKEN.equalsIgnoreCase(command)) {
+                            issueToken(securityContext, arguments);
+                        } else if (STATE.equalsIgnoreCase(command) || STATUS.equalsIgnoreCase(command)) {
+                            writeLifecycleStatus(securityContext);
+                        } else {
+                            log.warn("SSH Transport Unknown command: {}", commandLine);
+                            outputStream.write("Unknown command".getBytes(StandardCharsets.UTF_8));
+                            returnCode = 127;
                         }
-                    } else if (SHUTDOWN.equalsIgnoreCase(command)) {
-                        accessEnforcer().require(
-                                securityContext,
-                                ApplicationShutdownResource.applicationShutdown(),
-                                ApplicationAccessRules.shutdown());
-                        orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
-                    } else if (ISSUE_TOKEN.equalsIgnoreCase(command) || TOKEN.equalsIgnoreCase(command)) {
-                        issueToken(securityContext, arguments);
-                    } else if (STATE.equalsIgnoreCase(command) || STATUS.equalsIgnoreCase(command)) {
-                        writeLifecycleStatus(securityContext);
-                    } else {
-                        log.warn("SSH Transport Unknown command: {}", commandLine);
-                        outputStream.write("Unknown command".getBytes(StandardCharsets.UTF_8));
-                        returnCode = 127;
+                    } catch (OrionSecurityException e) {
+                        log.warn(e.getMessage());
+                        writePlainError("ACCESS_DENIED");
+                        returnCode = 10;
+                    } catch (Exception e) {
+                        log.warn("SSH Transport command failed: {}", commandLine, e);
+                        writePlainError("Command failed");
+                        returnCode = -1;
+                    } finally {
+                        exitCallback.onExit(returnCode);
                     }
-                } catch (OrionSecurityException e) {
-                    log.warn(e.getMessage());
-                    writePlainError("ACCESS_DENIED");
-                    returnCode = 10;
-                } catch (Exception e) {
-                    log.warn("SSH Transport command failed: {}", commandLine, e);
-                    writePlainError("Command failed");
-                    returnCode = -1;
-                } finally {
-                    exitCallback.onExit(returnCode);
-                }
-            });
+                });
+            } catch (RejectedExecutionException e) {
+                log.warn("SSH command rejected, executor saturated: {}", commandLine);
+                writePlainError("Service unavailable");
+                exitCallback.onExit(1);
+            }
         }
 
         private void writePlainError(String message) {
@@ -190,31 +197,37 @@ public class SshCommandFactory implements CommandFactory {
 
         @Override
         public void start(ChannelSession channelSession, Environment environment) {
-            orionExecutor.submit(() -> {
-                int returnCode = 0;
-                SecurityContext securityContext = securityContextFor(channelSession);
-                try {
-                    accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
-                    List<String> envs = gitEnvironmentValues(environment);
-                    try (StandardStreams streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
-                        gitInternalService.service(
-                                securityContext,
-                                channelSession.toString(),
-                                streams,
-                                securityContext.getRequestId(),
-                                inputStream -> GitInternalService.parseGitCommand(commandLine, envs));
+            try {
+                orionExecutor.submit(() -> {
+                    int returnCode = 0;
+                    SecurityContext securityContext = securityContextFor(channelSession);
+                    try {
+                        accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
+                        List<String> envs = gitEnvironmentValues(environment);
+                        try (StandardStreams streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
+                            gitInternalService.service(
+                                    securityContext,
+                                    channelSession.toString(),
+                                    streams,
+                                    securityContext.getRequestId(),
+                                    inputStream -> GitInternalService.parseGitCommand(commandLine, envs));
+                        }
+                    } catch (OrionSecurityException e) {
+                        GitUtils.writeProtocolError(outputStream, "ACCESS_DENIED");
+                        returnCode = 10;
+                    } catch (Exception e) {
+                        log.error("Exception: ", e);
+                        GitUtils.writeProtocolError(outputStream, e.getMessage());
+                        returnCode = -1;
+                    } finally {
+                        exitCallback.onExit(returnCode);
                     }
-                } catch (OrionSecurityException e) {
-                    GitUtils.writeProtocolError(outputStream, "ACCESS_DENIED");
-                    returnCode = 10;
-                } catch (Exception e) {
-                    log.error("Exception: ", e);
-                    GitUtils.writeProtocolError(outputStream, e.getMessage());
-                    returnCode = -1;
-                } finally {
-                    exitCallback.onExit(returnCode);
-                }
-            });
+                });
+            } catch (RejectedExecutionException e) {
+                log.warn("Git SSH command rejected, executor saturated: {}", commandLine);
+                GitUtils.writeProtocolError(outputStream, "Service unavailable");
+                exitCallback.onExit(1);
+            }
         }
     }
 
