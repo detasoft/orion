@@ -59,6 +59,10 @@ public final class StateMachine implements AutoCloseable {
         return currentState;
     }
 
+    public String name() {
+        return definition.name();
+    }
+
     public StateMachineDefinition.State computedState() {
         return computedState;
     }
@@ -98,6 +102,31 @@ public final class StateMachine implements AutoCloseable {
         return builder.toString();
     }
 
+    public String describeStatus() {
+        StringBuilder builder = new StringBuilder();
+        describeStatusInto(builder, "", name());
+        return builder.toString();
+    }
+
+    public String describeStatus(String name) {
+        StringBuilder builder = new StringBuilder();
+        describeStatusInto(builder, "", requireName(name));
+        return builder.toString();
+    }
+
+    private void describeStatusInto(StringBuilder builder, String indent, String name) {
+        StateMachineDefinition.State state = currentState;
+        StateMachineDefinition.State status = computedState;
+        builder.append(indent).append(name).append(": ").append(status);
+        if (!status.equals(state)) {
+            builder.append(" (state=").append(state).append(")");
+        }
+        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
+            builder.append(System.lineSeparator());
+            child.getValue().describeStatusInto(builder, indent + "  ", child.getKey());
+        }
+    }
+
     private void describeInto(StringBuilder builder, String indent) {
         StateMachineDefinition.State state = currentState;
         StateTransition<?> activeTransition = transitionInProgress;
@@ -124,6 +153,14 @@ public final class StateMachine implements AutoCloseable {
         for (String line : lines) {
             builder.append("\n").append(indent).append(line);
         }
+    }
+
+    private static String requireName(String value) {
+        Objects.requireNonNull(value, "name");
+        if (value.isBlank()) {
+            throw new IllegalArgumentException("name must not be blank");
+        }
+        return value;
     }
 
     public void addListener(StateMachineListener listener) {

@@ -369,6 +369,35 @@ class StateMachineTest {
     }
 
     @Test
+    void statusDescriptionRendersComputedStateAndChildTree() {
+        State disabled = state("DISABLED");
+        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+        });
+        StateMachine child = StateMachineDefinition.define()
+                .name("git-native")
+                .computedState((physicalState, childStates) -> disabled)
+                .from(NEW)
+                .on(childStart)
+                .to(RUNNING)
+                .failTo(ERR)
+                .build()
+                .newStateMachine();
+
+        StateMachine parent = StateMachineDefinition.define()
+                .name("transports")
+                .child("git-native", child)
+                .computedState((physicalState, childStates) -> disabled)
+                .build()
+                .newStateMachine();
+
+        assertThat(parent.describeStatus()).isEqualTo("""
+                transports: DISABLED (state=NEW)
+                  git-native: DISABLED (state=NEW)""");
+
+        parent.close();
+    }
+
+    @Test
     void actionBindingControlsPropagationOrder() {
         List<String> calls = new ArrayList<>();
         ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> calls.add("child"));

@@ -16,6 +16,7 @@ public final class StateMachineDefinition {
     public static final State FIN = new State("FIN");
     public static final State ERR = state("ERR");
 
+    private final String name;
     private final Map<StateActionKey, StateTransition<?>> transitions;
     private final Set<State> terminalStates;
     private final Set<State> states;
@@ -24,11 +25,13 @@ public final class StateMachineDefinition {
     private final ExecutorService childExecutor;
 
     private StateMachineDefinition(
+            String name,
             Map<StateActionKey, StateTransition<?>> transitions,
             Set<State> terminalStates,
             Map<String, StateMachine> children,
             ComputedStateResolver computedStateResolver,
             ExecutorService childExecutor) {
+        this.name = requireName(name, "name");
         this.transitions = Collections.unmodifiableMap(new LinkedHashMap<>(transitions));
         LinkedHashSet<State> allTerminalStates = new LinkedHashSet<>();
         allTerminalStates.add(FIN);
@@ -58,6 +61,10 @@ public final class StateMachineDefinition {
 
     public State initialState() {
         return NEW;
+    }
+
+    public String name() {
+        return name;
     }
 
     public boolean isTerminalState(State state) {
@@ -153,6 +160,7 @@ public final class StateMachineDefinition {
     }
 
     public static final class Builder {
+        private String name = "state-machine";
         private final Map<StateActionKey, StateTransition<?>> transitions = new LinkedHashMap<>();
         private final Set<State> terminalStates = new LinkedHashSet<>();
         private final Map<String, StateMachine> children = new LinkedHashMap<>();
@@ -160,6 +168,11 @@ public final class StateMachineDefinition {
         private ExecutorService childExecutor;
 
         private Builder() {
+        }
+
+        public Builder name(String name) {
+            this.name = requireName(name, "name");
+            return this;
         }
 
         public Builder terminal(State terminalState) {
@@ -250,6 +263,7 @@ public final class StateMachineDefinition {
 
         public StateMachineDefinition build() {
             return new StateMachineDefinition(
+                    name,
                     new LinkedHashMap<>(transitions),
                     new LinkedHashSet<>(terminalStates),
                     new LinkedHashMap<>(children),
