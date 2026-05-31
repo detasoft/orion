@@ -18,26 +18,44 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.lang.Thread.sleep;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.ERR;
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.FIN;
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.AFTER_STATE_ENTERED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FAILED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FINISHED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_STARTED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_FINISHED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_STARTED;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.state;
 
 class StateMachineTest {
     private static final State RUNNING = state("RUNNING");
     private static final State STOPPED = state("STOPPED");
-    private static final State FAILED = state("FAILED");
+    private static final State DISABLED = state("DISABLED");
+
+    private enum StartOutcome {
+        STARTED,
+        DISABLED
+    }
+
+    @Test
+    void stateTransitionResultIsNotParameterized() {
+        assertThat(StateTransitionResult.class.getTypeParameters()).isEmpty();
+    }
+
+    @Test
+    void stateTransitionIsNotParameterizedAndDoesNotExecuteActions() {
+        assertThat(StateTransition.class.getTypeParameters()).isEmpty();
+        assertThat(StateTransition.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("execute"));
+    }
 
     @Test
     void newAndFinAreFixedStatesForEveryDefinition() {
@@ -59,17 +77,15 @@ class StateMachineTest {
         StateMachineDefinition definition = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .from(RUNNING)
                 .on(actions.stop())
-                .to(STOPPED)
-                .failTo(FAILED)
+                .to(STOPPED, ERR)
                 .terminal(STOPPED)
                 .build();
 
-        assertThat(definition.states()).containsExactly(NEW, RUNNING, FAILED, STOPPED, FIN);
-        assertThat(definition.newStateMachine().states()).containsExactly(NEW, RUNNING, FAILED, STOPPED, FIN);
+        assertThat(definition.states()).containsExactly(NEW, RUNNING, ERR, STOPPED, FIN);
+        assertThat(definition.newStateMachine().states()).containsExactly(NEW, RUNNING, ERR, STOPPED, FIN);
     }
 
     @Test
@@ -78,20 +94,18 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
 
                 .from(RUNNING)
                 .on(actions.stop())
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
                 .build()
                 .newStateMachine();
 
         assertThat(machine.currentState()).isSameAs(NEW);
         assertThat(machine.availableActions()).containsExactly(actions.start().id());
 
-        StateTransitionEvent event = machine.execute(actions.start(), new StartAction("first"));
+        StateTransitionResult event = machine.execute(actions.start(), new StartAction("first"));
 
         assertThat(event.from()).isSameAs(NEW);
         assertThat(event.action()).isEqualTo(actions.start().id());
@@ -100,6 +114,143 @@ class StateMachineTest {
         assertThat(event.failed()).isFalse();
         assertThat(machine.currentState()).isEqualTo(RUNNING);
         assertThat(machine.availableActions()).containsExactly(actions.stop().id());
+    }
+
+    @Test
+    void customResolverChoosesStateFromAdapterStatusAndStoresLastTransitionResult() {
+        AtomicReference<StartOutcome> lastOutcome = new AtomicReference<>();
+        ActionBinding<Void> start =
+                ActionBinding.of(ActionId.START, ignored -> {
+                    StartOutcome outcome = StartOutcome.DISABLED;
+                    lastOutcome.set(outcome);
+                    return outcome;
+                });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(DISABLED, RUNNING, ERR)
+                .post(result -> result.failed() ? result.defaultState() : resolveStartOutcome(lastOutcome.get()))
+                .build()
+                .newStateMachine();
+
+        StateTransitionResult result = machine.execute(start, Void.EMPTY);
+
+        assertThat(result.from()).isSameAs(NEW);
+        assertThat(result.action()).isEqualTo(ActionId.START);
+        assertThat(result.payload()).isSameAs(Void.EMPTY);
+        assertThat(result.actionResult()).isEqualTo(StartOutcome.DISABLED);
+        assertThat(result.failure()).isNull();
+        assertThat(result.targets()).containsExactly(DISABLED, RUNNING, ERR);
+        assertThat(result.to()).isSameAs(DISABLED);
+        assertThat(machine.currentState()).isSameAs(DISABLED);
+        assertThat(machine.lastTransitionResult()).isSameAs(result);
+        assertThat(machine.snapshot().lastTransitionResult()).isSameAs(result);
+    }
+
+    @Test
+    void defaultResolverRejectsAmbiguousSuccessTargetsWithoutCustomResolver() {
+        ActionBinding<Void> start =
+                ActionBinding.of(ActionId.START, ignored -> StartOutcome.STARTED);
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(DISABLED, RUNNING, ERR)
+                .build()
+                .newStateMachine();
+
+        assertThatThrownBy(() -> machine.execute(start, Void.EMPTY))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("multiple success target states")
+                .hasMessageContaining("START");
+        StateTransitionResult result = machine.lastTransitionResult();
+        assertThat(result.from()).isSameAs(NEW);
+        assertThat(result.targets()).containsExactly(DISABLED, RUNNING, ERR);
+        assertThat(result.actionResult()).isEqualTo(StartOutcome.STARTED);
+        assertThat(result.to()).isNull();
+        assertThat(machine.snapshot().lastTransitionResult()).isSameAs(result);
+    }
+
+    @Test
+    void failureTransitionStoresLastResultAndDescribeShowsFailure() {
+        RuntimeException failure = new RuntimeException("start failed");
+        ActionBinding<Void> start = action(ActionId.START, ignored -> {
+            throw failure;
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(start)
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+
+        assertThatThrownBy(() -> machine.execute(start, Void.EMPTY))
+                .isInstanceOf(StateTransitionFailedException.class)
+                .hasRootCause(failure);
+
+        StateTransitionResult result = machine.lastTransitionResult();
+        assertThat(result.from()).isSameAs(NEW);
+        assertThat(result.to()).isSameAs(ERR);
+        assertThat(result.failure()).isSameAs(failure);
+        assertThat(machine.snapshot().lastTransitionResult()).isSameAs(result);
+        assertThat(machine.describe()).contains("last transition: NEW --START--> ERR");
+        assertThat(machine.describeStatus()).contains("start failed");
+    }
+
+    @Test
+    void propagationExecutesOneChildTransitionFromCurrentState() {
+        AtomicInteger childCalls = new AtomicInteger();
+        AtomicReference<StartOutcome> childOutcome = new AtomicReference<>();
+        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+            childCalls.incrementAndGet();
+            StartOutcome outcome = StartOutcome.DISABLED;
+            childOutcome.set(outcome);
+            return outcome;
+        });
+        StateMachine child = StateMachineDefinition.define()
+                .from(NEW, DISABLED)
+                .on(childStart)
+                .to(DISABLED, RUNNING, ERR)
+                .post(result -> result.failed() ? result.defaultState() : resolveStartOutcome(childOutcome.get()))
+                .build()
+                .newStateMachine();
+        ActionBinding<Void> parentStart = propagatingAction(ActionId.START, false);
+        StateMachine parent = StateMachineDefinition.define()
+                .child("child", child)
+                .from(NEW)
+                .on(parentStart)
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+
+        parent.execute(ActionId.START, Void.EMPTY);
+
+        assertThat(child.currentState()).isSameAs(DISABLED);
+        assertThat(childCalls).hasValue(1);
+    }
+
+    @Test
+    void actionIdExecutionStopsBeforeRepeatingSameBinding() {
+        AtomicInteger calls = new AtomicInteger();
+        AtomicReference<StartOutcome> lastOutcome = new AtomicReference<>();
+        ActionBinding<Void> start = ActionBinding.of(ActionId.START, ignored -> {
+            calls.incrementAndGet();
+            StartOutcome outcome = StartOutcome.DISABLED;
+            lastOutcome.set(outcome);
+            return outcome;
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW, DISABLED)
+                .on(start)
+                .to(DISABLED, RUNNING, ERR)
+                .post(result -> result.failed() ? result.defaultState() : resolveStartOutcome(lastOutcome.get()))
+                .build()
+                .newStateMachine();
+
+        List<StateTransitionResult> results = machine.execute(ActionId.START, Void.EMPTY);
+
+        assertThat(results).hasSize(1);
+        assertThat(machine.currentState()).isSameAs(DISABLED);
+        assertThat(calls).hasValue(1);
     }
 
     @Test
@@ -127,35 +278,32 @@ class StateMachineTest {
         State initReady = state("INIT_READY");
         State aclReady = state("ACL_READY");
         List<String> calls = new ArrayList<>();
-        ActionBinding<Void> startInit = ActionBinding.of(ActionId.START, ignored -> calls.add("init"));
-        ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> calls.add("acl"));
-        ActionBinding<Void> startTransports = ActionBinding.of(ActionId.START, ignored -> calls.add("transports"));
+        ActionBinding<Void> startInit = action(ActionId.START, ignored -> calls.add("init"));
+        ActionBinding<Void> startAcl = action(ActionId.START, ignored -> calls.add("acl"));
+        ActionBinding<Void> startTransports = action(ActionId.START, ignored -> calls.add("transports"));
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(startInit)
-                .to(initReady)
-                .failTo(FAILED)
+                .to(initReady, ERR)
 
                 .from(initReady)
                 .on(startAcl)
-                .to(aclReady)
-                .failTo(FAILED)
+                .to(aclReady, ERR)
 
                 .from(aclReady)
                 .on(startTransports)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
-        List<StateTransitionEvent> events = machine.execute(ActionId.START, Void.EMPTY);
+        List<StateTransitionResult> events = machine.execute(ActionId.START, Void.EMPTY);
 
         assertThat(calls).containsExactly("init", "acl", "transports");
         assertThat(events)
                 .extracting(
-                        StateTransitionEvent::from,
-                        StateTransitionEvent::action,
-                        StateTransitionEvent::to)
+                        StateTransitionResult::from,
+                        StateTransitionResult::action,
+                        StateTransitionResult::to)
                 .containsExactly(
                         tuple(NEW, ActionId.START, initReady),
                         tuple(initReady, ActionId.START, aclReady),
@@ -169,17 +317,15 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
 
                 .from(RUNNING)
                 .on(actions.stop())
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
                 .build()
                 .newStateMachine();
 
-        List<StateTransitionEvent> events = machine.execute(actions.start().id(), new StartAction("by id"));
+        List<StateTransitionResult> events = machine.execute(actions.start().id(), new StartAction("by id"));
 
         assertThat(events).singleElement().satisfies(event -> {
             assertThat(event.action()).isEqualTo(actions.start().id());
@@ -194,8 +340,7 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -210,27 +355,24 @@ class StateMachineTest {
         State initReady = state("INIT_READY");
         IllegalStateException failure = new IllegalStateException("acl failed");
         List<String> calls = new ArrayList<>();
-        ActionBinding<Void> startInit = ActionBinding.of(ActionId.START, ignored -> calls.add("init"));
-        ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> startInit = action(ActionId.START, ignored -> calls.add("init"));
+        ActionBinding<Void> startAcl = action(ActionId.START, ignored -> {
             calls.add("acl");
             throw failure;
         });
-        ActionBinding<Void> startTransports = ActionBinding.of(ActionId.START, ignored -> calls.add("transports"));
+        ActionBinding<Void> startTransports = action(ActionId.START, ignored -> calls.add("transports"));
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(startInit)
-                .to(initReady)
-                .failTo(FAILED)
+                .to(initReady, ERR)
 
                 .from(initReady)
                 .on(startAcl)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
 
                 .from(RUNNING)
                 .on(startTransports)
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
                 .build()
                 .newStateMachine();
 
@@ -239,7 +381,7 @@ class StateMachineTest {
                 .hasCause(failure);
 
         assertThat(calls).containsExactly("init", "acl");
-        assertThat(machine.currentState()).isEqualTo(FAILED);
+        assertThat(machine.currentState()).isEqualTo(ERR);
     }
 
     @Test
@@ -247,32 +389,30 @@ class StateMachineTest {
         State initReady = state("INIT_READY");
         State childrenRunning = state("CHILDREN_RUNNING");
         CountDownLatch childHandlersEntered = new CountDownLatch(2);
-        ActionBinding<Void> firstChildStart = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> firstChildStart = action(ActionId.START, ignored -> {
             childHandlersEntered.countDown();
             assertThat(childHandlersEntered.await(5, TimeUnit.SECONDS)).isTrue();
         });
-        ActionBinding<Void> secondChildStart = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> secondChildStart = action(ActionId.START, ignored -> {
             childHandlersEntered.countDown();
             assertThat(childHandlersEntered.await(5, TimeUnit.SECONDS)).isTrue();
         });
         StateMachine firstChild = StateMachineDefinition.define()
                 .from(NEW)
                 .on(firstChildStart)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         StateMachine secondChild = StateMachineDefinition.define()
                 .from(NEW)
                 .on(secondChildStart)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         ExecutorService adapterExecutor = Executors.newFixedThreadPool(2);
         try {
             ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
-            ActionBinding<Void> startAcl = ActionBinding.of(ActionId.START, ignored -> {
+            ActionBinding<Void> startAcl = action(ActionId.START, ignored -> {
             });
             StateMachine parent = StateMachineDefinition.define()
                     .child("first", firstChild)
@@ -286,13 +426,11 @@ class StateMachineTest {
                     })
                     .from(NEW)
                     .on(propagateStart)
-                    .to(initReady)
-                    .failTo(FAILED)
+                    .to(initReady, ERR)
 
                     .from(initReady)
                     .on(startAcl)
-                    .to(RUNNING)
-                    .failTo(FAILED)
+                    .to(RUNNING, ERR)
                     .build()
                     .newStateMachine();
 
@@ -301,7 +439,7 @@ class StateMachineTest {
                     .containsEntry("second", NEW);
             assertThat(parent.computedState()).isSameAs(NEW);
 
-            List<StateTransitionEvent> events = parent.execute(ActionId.START, Void.EMPTY);
+            List<StateTransitionResult> events = parent.execute(ActionId.START, Void.EMPTY);
 
             assertThat(firstChild.currentState()).isEqualTo(RUNNING);
             assertThat(secondChild.currentState()).isEqualTo(RUNNING);
@@ -312,7 +450,7 @@ class StateMachineTest {
             assertThat(parent.computedState()).isEqualTo(childrenRunning);
             assertThat(parent.snapshot().computedState()).isEqualTo(childrenRunning);
             assertThat(events)
-                    .extracting(StateTransitionEvent::from, StateTransitionEvent::action, StateTransitionEvent::to)
+                    .extracting(StateTransitionResult::from, StateTransitionResult::action, StateTransitionResult::to)
                     .containsExactly(
                             tuple(NEW, ActionId.START, initReady),
                             tuple(initReady, ActionId.START, RUNNING));
@@ -325,20 +463,18 @@ class StateMachineTest {
     @Test
     void actionIdLayerCanPropagateToChildMachinesSequentiallyWithoutExecutor() {
         List<String> calls = new ArrayList<>();
-        ActionBinding<Void> firstChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("first"));
-        ActionBinding<Void> secondChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("second"));
+        ActionBinding<Void> firstChildStart = action(ActionId.START, ignored -> calls.add("first"));
+        ActionBinding<Void> secondChildStart = action(ActionId.START, ignored -> calls.add("second"));
         StateMachine firstChild = StateMachineDefinition.define()
                 .from(NEW)
                 .on(firstChildStart)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         StateMachine secondChild = StateMachineDefinition.define()
                 .from(NEW)
                 .on(secondChildStart)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
@@ -347,12 +483,11 @@ class StateMachineTest {
                 .child("second", secondChild)
                 .from(NEW)
                 .on(propagateStart)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
-        List<StateTransitionEvent> events = parent.execute(ActionId.START, Void.EMPTY);
+        List<StateTransitionResult> events = parent.execute(ActionId.START, Void.EMPTY);
 
         assertThat(calls).containsExactly("first", "second");
         assertThat(events).singleElement().satisfies(event -> {
@@ -371,15 +506,14 @@ class StateMachineTest {
     @Test
     void statusDescriptionRendersComputedStateAndChildTree() {
         State disabled = state("DISABLED");
-        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> childStart = action(ActionId.START, ignored -> {
         });
         StateMachine child = StateMachineDefinition.define()
                 .name("git-native")
                 .computedState((physicalState, childStates) -> disabled)
                 .from(NEW)
                 .on(childStart)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -400,15 +534,14 @@ class StateMachineTest {
     @Test
     void actionBindingControlsPropagationOrder() {
         List<String> calls = new ArrayList<>();
-        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> calls.add("child"));
+        ActionBinding<Void> childStart = action(ActionId.START, ignored -> calls.add("child"));
         StateMachine child = childMachine(childStart);
         OrderedParentAction parentAction = new OrderedParentAction(calls);
         StateMachine parent = StateMachineDefinition.define()
                 .child("child", child)
                 .from(NEW)
                 .on(parentAction.start())
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -442,8 +575,7 @@ class StateMachineTest {
                     .childExecutor(adapterExecutor)
                     .from(NEW)
                     .on(propagateStart)
-                    .to(RUNNING)
-                    .failTo(ERR)
+                    .to(RUNNING, ERR)
                     .build()
                     .newStateMachine();
 
@@ -469,12 +601,12 @@ class StateMachineTest {
     @Test
     void failedSequentialChildPropagationMovesParentToFailureStateAfterAllChildrenFinish() {
         List<String> calls = new ArrayList<>();
-        ActionBinding<Void> firstChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("first"));
-        ActionBinding<Void> failingChildStart = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> firstChildStart = action(ActionId.START, ignored -> calls.add("first"));
+        ActionBinding<Void> failingChildStart = action(ActionId.START, ignored -> {
             calls.add("second");
             throw new IllegalStateException("second child failed");
         });
-        ActionBinding<Void> thirdChildStart = ActionBinding.of(ActionId.START, ignored -> calls.add("third"));
+        ActionBinding<Void> thirdChildStart = action(ActionId.START, ignored -> calls.add("third"));
         StateMachine firstChild = childMachine(firstChildStart);
         StateMachine secondChild = childMachine(failingChildStart);
         StateMachine thirdChild = childMachine(thirdChildStart);
@@ -485,8 +617,7 @@ class StateMachineTest {
                 .child("third", thirdChild)
                 .from(NEW)
                 .on(propagateStart)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -508,13 +639,12 @@ class StateMachineTest {
 
     @Test
     void parallelPropagationRequiresChildExecutor() {
-        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> childStart = action(ActionId.START, ignored -> {
         });
         StateMachine child = StateMachineDefinition.define()
                 .from(NEW)
                 .on(childStart)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
@@ -522,8 +652,7 @@ class StateMachineTest {
                 .child("child", child)
                 .from(NEW)
                 .on(propagateStart)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -531,18 +660,17 @@ class StateMachineTest {
                 .isInstanceOf(StateTransitionFailedException.class)
                 .hasCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage("Parallel child action START requires childExecutor");
-        assertThat(parent.currentState()).isEqualTo(FAILED);
+        assertThat(parent.currentState()).isEqualTo(ERR);
     }
 
     @Test
     void actionBindingExposesRegisteredStateMachine() {
-        ActionBinding<Void> start = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> start = action(ActionId.START, ignored -> {
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -551,13 +679,12 @@ class StateMachineTest {
 
     @Test
     void actionBindingCannotBeRegisteredInSeveralStateMachines() {
-        ActionBinding<Void> start = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> start = action(ActionId.START, ignored -> {
         });
         StateMachineDefinition definition = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build();
 
         StateMachine first = definition.newStateMachine();
@@ -570,7 +697,7 @@ class StateMachineTest {
 
     @Test
     void unregisteredActionBindingRejectsStateMachineAccess() {
-        ActionBinding<Void> start = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> start = action(ActionId.START, ignored -> {
         });
 
         assertThatThrownBy(start::stateMachine)
@@ -584,8 +711,7 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -597,15 +723,14 @@ class StateMachineTest {
     @Test
     void differentBindingInstanceWithSameIdIsRejectedAndStateIsUnchanged() {
         TestActions actions = new TestActions();
-        ActionBinding<StartAction> otherStart = ActionBinding.of(
+        ActionBinding<StartAction> otherStart = action(
                 actions.start().id(),
                 action -> {
                 });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -617,37 +742,33 @@ class StateMachineTest {
     @Test
     void duplicateTransitionDefinitionIsRejected() {
         TestActions actions = new TestActions();
-        StateMachineDefinition.Builder builder = StateMachineDefinition.define()
-                .from(NEW)
+        StateMachineDefinition.Builder builder = StateMachineDefinition.define();
+        builder.from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED);
+                .to(RUNNING, ERR);
 
         assertThatThrownBy(() -> builder
                 .from(NEW)
                 .on(actions.start())
-                .to(STOPPED)
-                .failTo(FAILED))
+                .to(STOPPED, ERR))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void duplicateActionIdFromSameStateIsRejected() {
-        ActionBinding<Void> firstStart = ActionBinding.of(ActionId.START, action -> {
+        ActionBinding<Void> firstStart = action(ActionId.START, action -> {
         });
-        ActionBinding<Void> secondStart = ActionBinding.of(ActionId.START, action -> {
+        ActionBinding<Void> secondStart = action(ActionId.START, action -> {
         });
-        StateMachineDefinition.Builder builder = StateMachineDefinition.define()
-                .from(NEW)
+        StateMachineDefinition.Builder builder = StateMachineDefinition.define();
+        builder.from(NEW)
                 .on(firstStart)
-                .to(RUNNING)
-                .failTo(FAILED);
+                .to(RUNNING, ERR);
 
         assertThatThrownBy(() -> builder
                 .from(NEW)
                 .on(secondStart)
-                .to(STOPPED)
-                .failTo(FAILED))
+                .to(STOPPED, ERR))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Duplicate transition action id START for state NEW");
     }
@@ -655,17 +776,15 @@ class StateMachineTest {
     @Test
     void duplicateActionIdInMultiStateRuleIsRejectedWithoutPartialTransition() {
         TestActions actions = new TestActions();
-        StateMachineDefinition.Builder builder = StateMachineDefinition.define()
-                .from(RUNNING)
+        StateMachineDefinition.Builder builder = StateMachineDefinition.define();
+        builder.from(RUNNING)
                 .on(actions.stop())
-                .to(FIN)
-                .failTo(FAILED);
+                .to(FIN, ERR);
 
         assertThatThrownBy(() -> builder
                 .from(NEW, RUNNING)
                 .on(actions.stop())
-                .to(STOPPED)
-                .failTo(FAILED))
+                .to(STOPPED, ERR))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Duplicate transition action id test.stop for state RUNNING");
 
@@ -683,11 +802,10 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        List<StateTransitionEvent> events = new ArrayList<>();
+        List<StateTransitionResult> events = new ArrayList<>();
         machine.addListener(events::add);
 
         StartAction payload = new StartAction("broken");
@@ -695,13 +813,13 @@ class StateMachineTest {
                 .isInstanceOf(StateTransitionFailedException.class)
                 .hasCause(failure);
 
-        assertThat(machine.currentState()).isEqualTo(FAILED);
+        assertThat(machine.currentState()).isEqualTo(ERR);
         assertThat(events).hasSize(1);
-        StateTransitionEvent firstEvent = events.getFirst();
+        StateTransitionResult firstEvent = events.getFirst();
         assertThat(firstEvent.from()).isSameAs(NEW);
         assertThat(firstEvent.action()).isEqualTo(actions.start().id());
         assertThat(firstEvent.payload()).isSameAs(payload);
-        assertThat(firstEvent.to()).isEqualTo(FAILED);
+        assertThat(firstEvent.to()).isEqualTo(ERR);
         assertThat(firstEvent.failure()).isSameAs(failure);
     }
 
@@ -711,11 +829,10 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        List<StateTransitionEvent> events = new ArrayList<>();
+        List<StateTransitionResult> events = new ArrayList<>();
         machine.addListener(events::add);
 
         machine.execute(actions.start(), new StartAction("ok"));
@@ -734,12 +851,11 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         IllegalStateException listenerFailure = new IllegalStateException("listener failed");
-        List<StateTransitionEvent> transitionEvents = new ArrayList<>();
+        List<StateTransitionResult> transitionEvents = new ArrayList<>();
         List<StateMachineEvent> machineEvents = new ArrayList<>();
         machine.addListener(event -> {
             throw listenerFailure;
@@ -748,7 +864,7 @@ class StateMachineTest {
         machine.subscribe(machineEvents::add);
 
         try (LogCapture logs = captureStateMachineLogs()) {
-            StateTransitionEvent event = machine.execute(actions.start(), new StartAction("ok"));
+            StateTransitionResult event = machine.execute(actions.start(), new StartAction("ok"));
 
             assertThat(event.to()).isEqualTo(RUNNING);
             assertThat(machine.currentState()).isEqualTo(RUNNING);
@@ -772,19 +888,18 @@ class StateMachineTest {
 
     @Test
     void subscriptionReceivesTransitionEventsThatSubscribersCanUseForTiming() {
-        ActionBinding<Void> start = ActionBinding.of("timed-start", action -> {
+        ActionBinding<Void> start = action("timed-start", action -> {
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         List<StateMachineEvent> events = new ArrayList<>();
 
         machine.subscribe(events::add);
-        StateTransitionEvent event = machine.execute(start, Void.EMPTY);
+        StateTransitionResult event = machine.execute(start, Void.EMPTY);
 
         assertThat(events)
                 .extracting(StateMachineEvent::type)
@@ -804,15 +919,14 @@ class StateMachineTest {
     void subscriptionShowsTransitionStartedWhileFunctionIsStillRunning() throws Exception {
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch releaseHandler = new CountDownLatch(1);
-        ActionBinding<Void> start = ActionBinding.of("observable-start", action -> {
+        ActionBinding<Void> start = action("observable-start", action -> {
             handlerEntered.countDown();
             assertThat(releaseHandler.await(2, TimeUnit.SECONDS)).isTrue();
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         List<StateMachineEvent> events = new CopyOnWriteArrayList<>();
@@ -820,7 +934,7 @@ class StateMachineTest {
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
-            Future<StateTransitionEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
+            Future<StateTransitionResult> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
             assertThat(handlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
 
             assertThat(events)
@@ -832,7 +946,7 @@ class StateMachineTest {
             assertThat(events.get(1).currentState()).isSameAs(NEW);
 
             releaseHandler.countDown();
-            StateTransitionEvent event = future.get(2, TimeUnit.SECONDS);
+            StateTransitionResult event = future.get(2, TimeUnit.SECONDS);
 
             assertThat(event.to()).isEqualTo(RUNNING);
             assertThat(events)
@@ -851,18 +965,17 @@ class StateMachineTest {
     @Test
     void subscriptionReceivesFailureTimingAndFailureStateEntry() {
         IllegalStateException failure = new IllegalStateException("boom");
-        ActionBinding<Void> start = ActionBinding.of("failing-start", action -> {
+        ActionBinding<Void> start = action("failing-start", action -> {
             throw failure;
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         List<StateMachineEvent> events = new ArrayList<>();
-        List<StateTransitionEvent> completedEvents = new ArrayList<>();
+        List<StateTransitionResult> completedEvents = new ArrayList<>();
         machine.subscribe(events::add);
         machine.addListener(completedEvents::add);
 
@@ -879,7 +992,7 @@ class StateMachineTest {
                         AFTER_STATE_ENTERED,
                         TRANSITION_FAILED);
         assertThat(events.get(2).failure()).isSameAs(failure);
-        assertThat(events.get(3).currentState()).isEqualTo(FAILED);
+        assertThat(events.get(3).currentState()).isEqualTo(ERR);
         assertThat(events.get(4).failure()).isSameAs(failure);
         assertThat(completedEvents).singleElement().satisfies(event -> {
             assertThat(event.failed()).isTrue();
@@ -889,13 +1002,12 @@ class StateMachineTest {
 
     @Test
     void subscriptionCanBeClosed() {
-        ActionBinding<Void> start = ActionBinding.of("start-after-close", action -> {
+        ActionBinding<Void> start = action("start-after-close", action -> {
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         List<StateMachineEvent> events = new ArrayList<>();
@@ -909,13 +1021,12 @@ class StateMachineTest {
 
     @Test
     void subscriberFailureDoesNotAffectTransition() {
-        ActionBinding<Void> start = ActionBinding.of("start-with-broken-subscriber", action -> {
+        ActionBinding<Void> start = action("start-with-broken-subscriber", action -> {
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         IllegalStateException subscriberFailure = new IllegalStateException("subscriber failed");
@@ -924,7 +1035,7 @@ class StateMachineTest {
         });
 
         try (LogCapture logs = captureStateMachineLogs()) {
-            StateTransitionEvent event = machine.execute(start, Void.EMPTY);
+            StateTransitionResult event = machine.execute(start, Void.EMPTY);
 
             assertThat(event.to()).isEqualTo(RUNNING);
             assertThat(event.failed()).isFalse();
@@ -940,14 +1051,13 @@ class StateMachineTest {
 
     @Test
     void loggingSubscriberUsesOwnerClassAndLogsTransitionTimingEvents(TestInfo testInfo) {
-        ActionBinding<Void> start = ActionBinding.of("logged-start", action -> {
+        ActionBinding<Void> start = action("logged-start", action -> {
             sleep(100);
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         List<String> messages = new ArrayList<>();
@@ -970,8 +1080,7 @@ class StateMachineTest {
         StateMachine terminal = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
                 .build()
                 .newStateMachine();
 
@@ -984,13 +1093,11 @@ class StateMachineTest {
         StateMachine restartable = StateMachineDefinition.define()
                 .from(NEW)
                 .on(restartableActions.start())
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
 
                 .from(FIN)
                 .on(restartableActions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -1006,8 +1113,7 @@ class StateMachineTest {
         StateMachine terminal = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(STOPPED)
-                .failTo(FAILED)
+                .to(STOPPED, ERR)
                 .terminal(STOPPED)
                 .build()
                 .newStateMachine();
@@ -1024,31 +1130,29 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
-        StateTransition<?> transition = machine.availableTransitions().getFirst();
+        StateTransition transition = machine.availableTransitions().getFirst();
 
         assertThat(transition.action()).isSameAs(actions.start());
-        executeRaw(machine, transition, new StartAction("selected"));
+        machine.execute(actions.start(), new StartAction("selected"));
         assertThat(machine.currentState()).isEqualTo(RUNNING);
     }
 
     @Test
     void emptyVoidPayloadCanBeUsedForParameterlessAction() {
         List<Void> calls = new ArrayList<>();
-        ActionBinding<Void> action = ActionBinding.of("test.empty", calls::add);
+        ActionBinding<Void> action = action("test.empty", calls::add);
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(action)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
-        StateTransitionEvent event = machine.execute(action, Void.EMPTY);
+        StateTransitionResult event = machine.execute(action, Void.EMPTY);
 
         assertThat(machine.currentState()).isEqualTo(RUNNING);
         assertThat(event.payload()).isSameAs(Void.EMPTY);
@@ -1057,75 +1161,74 @@ class StateMachineTest {
 
     @Test
     void transitionEventToStringOmitsEmptyPayloadAndMissingFailure() {
-        ActionBinding<Void> action = ActionBinding.of("test.empty", ignored -> {
+        ActionBinding<Void> action = action("test.empty", ignored -> {
         });
-        StateTransitionEvent event = new StateTransitionEvent(NEW, action.id(), Void.EMPTY, RUNNING, null);
+        StateTransitionResult event = new StateTransitionResult(NEW, action.id(), Void.EMPTY, RUNNING, null);
 
-        assertThat(event.toString()).isEqualTo("StateTransitionEvent[from=NEW, action=test.empty, to=RUNNING]");
+        assertThat(event.toString()).isEqualTo("StateTransitionResult[from=NEW, action=test.empty, to=RUNNING]");
     }
 
     @Test
     void transitionEventToStringIncludesNonEmptyPayloadAndFailure() {
-        ActionBinding<StartAction> action = ActionBinding.of("test.start", ignored -> {
+        ActionBinding<StartAction> action = action("test.start", ignored -> {
         });
         IllegalStateException failure = new IllegalStateException("boom");
-        StateTransitionEvent event = new StateTransitionEvent(
+        StateTransitionResult event = new StateTransitionResult(
                 NEW,
                 action.id(),
                 new StartAction("request"),
-                FAILED,
+                ERR,
                 failure);
 
         assertThat(event.toString()).isEqualTo(
-                "StateTransitionEvent[from=NEW, action=test.start, payload=StartAction[request=request], "
-                        + "to=FAILED, failure=java.lang.IllegalStateException: boom]");
+                "StateTransitionResult[from=NEW, action=test.start, payload=StartAction[request=request], "
+                        + "to=ERR, failure=java.lang.IllegalStateException: boom]");
     }
 
     @Test
     void describeIncludesCurrentStateAndTransitionDiagram() {
-        ActionBinding<Void> start = ActionBinding.of("start", action -> {
+        ActionBinding<Void> start = action("start", action -> {
         });
-        ActionBinding<Void> stop = ActionBinding.of("stop", action -> {
+        ActionBinding<Void> stop = action("stop", action -> {
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
 
                 .from(RUNNING)
                 .on(stop)
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
                 .build()
                 .newStateMachine();
 
         assertThat(machine.describe()).isEqualTo("""
                 state: NEW
                 in progress: <none>
+                last transition: <none>
                 transitions:
-                  NEW --start--> RUNNING (fail -> FAILED)
-                  RUNNING --stop--> FIN (fail -> FAILED)""");
+                  NEW --start--> RUNNING (fail -> ERR)
+                  RUNNING --stop--> FIN (fail -> ERR)""");
 
         machine.execute(start, Void.EMPTY);
 
         assertThat(machine.describe()).isEqualTo("""
                 state: RUNNING
                 in progress: <none>
+                last transition: NEW --start--> RUNNING
                 transitions:
-                  NEW --start--> RUNNING (fail -> FAILED)
-                  RUNNING --stop--> FIN (fail -> FAILED)""");
+                  NEW --start--> RUNNING (fail -> ERR)
+                  RUNNING --stop--> FIN (fail -> ERR)""");
     }
 
     @Test
     void describeIncludesChildMachines() {
-        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+        ActionBinding<Void> childStart = action(ActionId.START, ignored -> {
         });
         StateMachine child = StateMachineDefinition.define()
                 .from(NEW)
                 .on(childStart)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
         ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
@@ -1133,20 +1236,21 @@ class StateMachineTest {
                 .child("transport", child)
                 .from(NEW)
                 .on(propagateStart)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
         assertThat(parent.describe()).isEqualTo("""
                 state: NEW
                 in progress: <none>
+                last transition: <none>
                 transitions:
                   NEW --START--> RUNNING (fail -> ERR)
                 children:
                   transport:
                     state: NEW
                     in progress: <none>
+                    last transition: <none>
                     transitions:
                       NEW --START--> RUNNING (fail -> ERR)""");
 
@@ -1155,12 +1259,14 @@ class StateMachineTest {
         assertThat(parent.describe()).isEqualTo("""
                 state: RUNNING
                 in progress: <none>
+                last transition: NEW --START--> RUNNING
                 transitions:
                   NEW --START--> RUNNING (fail -> ERR)
                 children:
                   transport:
                     state: RUNNING
                     in progress: <none>
+                    last transition: NEW --START--> RUNNING
                     transitions:
                       NEW --START--> RUNNING (fail -> ERR)""");
         parent.close();
@@ -1170,28 +1276,28 @@ class StateMachineTest {
     void describeShowsTransitionInProgress() throws Exception {
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch releaseHandler = new CountDownLatch(1);
-        ActionBinding<Void> start = ActionBinding.of("slow-start", action -> {
+        ActionBinding<Void> start = action("slow-start", action -> {
             handlerEntered.countDown();
             assertThat(releaseHandler.await(2, TimeUnit.SECONDS)).isTrue();
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
-            Future<StateTransitionEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
+            Future<StateTransitionResult> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
             assertThat(handlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
 
             assertThat(machine.describe()).isEqualTo("""
                     state: NEW
-                    in progress: NEW --slow-start--> RUNNING (fail -> FAILED)
+                    in progress: NEW --slow-start--> RUNNING (fail -> ERR)
+                    last transition: <none>
                     transitions:
-                      NEW --slow-start--> RUNNING (fail -> FAILED)""");
+                      NEW --slow-start--> RUNNING (fail -> ERR)""");
 
             releaseHandler.countDown();
             assertThat(future.get(2, TimeUnit.SECONDS).to()).isEqualTo(RUNNING);
@@ -1202,23 +1308,23 @@ class StateMachineTest {
         assertThat(machine.describe()).isEqualTo("""
                 state: RUNNING
                 in progress: <none>
+                last transition: NEW --slow-start--> RUNNING
                 transitions:
-                  NEW --slow-start--> RUNNING (fail -> FAILED)""");
+                  NEW --slow-start--> RUNNING (fail -> ERR)""");
     }
 
     @Test
     void describeCanBePrintedBeforeStartWhileTransitioningAndWhenRunning() throws Exception {
         CountDownLatch handlerEntered = new CountDownLatch(1);
         CountDownLatch releaseHandler = new CountDownLatch(1);
-        ActionBinding<Void> start = ActionBinding.of("start-service", action -> {
+        ActionBinding<Void> start = action("start-service", action -> {
             handlerEntered.countDown();
             assertThat(releaseHandler.await(2, TimeUnit.SECONDS)).isTrue();
         });
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
 
@@ -1227,7 +1333,7 @@ class StateMachineTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         String transitioning;
         try {
-            Future<StateTransitionEvent> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
+            Future<StateTransitionResult> future = executor.submit(() -> machine.execute(start, Void.EMPTY));
             assertThat(handlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
             transitioning = machine.describe();
             releaseHandler.countDown();
@@ -1240,18 +1346,21 @@ class StateMachineTest {
         assertThat(configuredNotStarted).isEqualTo("""
                 state: NEW
                 in progress: <none>
+                last transition: <none>
                 transitions:
-                  NEW --start-service--> RUNNING (fail -> FAILED)""");
+                  NEW --start-service--> RUNNING (fail -> ERR)""");
         assertThat(transitioning).isEqualTo("""
                 state: NEW
-                in progress: NEW --start-service--> RUNNING (fail -> FAILED)
+                in progress: NEW --start-service--> RUNNING (fail -> ERR)
+                last transition: <none>
                 transitions:
-                  NEW --start-service--> RUNNING (fail -> FAILED)""");
+                  NEW --start-service--> RUNNING (fail -> ERR)""");
         assertThat(running).isEqualTo("""
                 state: RUNNING
                 in progress: <none>
+                last transition: NEW --start-service--> RUNNING
                 transitions:
-                  NEW --start-service--> RUNNING (fail -> FAILED)""");
+                  NEW --start-service--> RUNNING (fail -> ERR)""");
     }
 
     @Test
@@ -1269,22 +1378,20 @@ class StateMachineTest {
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
 
                 .from(RUNNING)
                 .on(actions.stop())
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
                 .build()
                 .newStateMachine();
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<StateTransitionEvent> startFuture =
+            Future<StateTransitionResult> startFuture =
                     executor.submit(() -> machine.execute(actions.start(), new StartAction("slow")));
             assertThat(firstHandlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
-            Future<StateTransitionEvent> stopFuture =
+            Future<StateTransitionResult> stopFuture =
                     executor.submit(() -> machine.execute(actions.stop(), new StopAction("after start")));
 
             sleep(100);
@@ -1301,11 +1408,25 @@ class StateMachineTest {
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static void executeRaw(
-            StateMachine machine,
-            StateTransition<?> transition,
-            Object payload) {
-        machine.execute(((StateTransition) transition).action(), payload);
+    private static <P> ActionBinding<P> action(ActionId id, ThrowingConsumer<P> handler) {
+        return ActionBinding.of(id, payload -> {
+            handler.accept(payload);
+            return Void.EMPTY;
+        });
+    }
+
+    private static <P> ActionBinding<P> action(String id, ThrowingConsumer<P> handler) {
+        return ActionBinding.of(id, payload -> {
+            handler.accept(payload);
+            return Void.EMPTY;
+        });
+    }
+
+    private static State resolveStartOutcome(StartOutcome outcome) {
+        return switch (outcome) {
+            case STARTED -> RUNNING;
+            case DISABLED -> DISABLED;
+        };
     }
 
     private static ActionBinding<Void> childStart(
@@ -1321,7 +1442,7 @@ class StateMachineTest {
             List<String> calls,
             CountDownLatch childHandlersEntered,
             ThrowingRunnable afterAllHandlersEntered) {
-        return ActionBinding.of(ActionId.START, ignored -> {
+        return action(ActionId.START, ignored -> {
             calls.add(name);
             childHandlersEntered.countDown();
             assertThat(childHandlersEntered.await(5, TimeUnit.SECONDS)).isTrue();
@@ -1333,8 +1454,7 @@ class StateMachineTest {
         return StateMachineDefinition.define()
                 .from(NEW)
                 .on(start)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
     }
@@ -1352,7 +1472,7 @@ class StateMachineTest {
         private PropagatingAction(ActionId actionId, boolean parallel) {
             this.actionId = actionId;
             this.parallel = parallel;
-            binding = actionId.bind(this::propagate);
+            binding = action(actionId, this::propagate);
         }
 
         private ActionBinding<Void> binding() {
@@ -1370,7 +1490,7 @@ class StateMachineTest {
 
     private static final class OrderedParentAction {
         private final List<String> calls;
-        private final ActionBinding<Void> start = ActionId.START.bind(this::start);
+        private final ActionBinding<Void> start = action(ActionId.START, this::start);
 
         private OrderedParentAction(List<String> calls) {
             this.calls = calls;
@@ -1394,6 +1514,11 @@ class StateMachineTest {
     @FunctionalInterface
     private interface ThrowingRunnable {
         void run() throws Exception;
+    }
+
+    @FunctionalInterface
+    private interface ThrowingConsumer<P> {
+        void accept(P payload) throws Exception;
     }
 
     private static final class LogCapture implements AutoCloseable {
@@ -1434,13 +1559,11 @@ class StateMachineTest {
         return StateMachineDefinition.define()
                 .from(NEW)
                 .on(actions.start())
-                .to(RUNNING)
-                .failTo(FAILED)
+                .to(RUNNING, ERR)
 
                 .from(NEW, RUNNING)
                 .on(actions.stop())
-                .to(FIN)
-                .failTo(FAILED)
+                .to(FIN, ERR)
                 .build();
     }
 
@@ -1454,16 +1577,16 @@ class StateMachineTest {
             });
         }
 
-        private TestActions(LifecycleActionHandler<StartAction> startHandler) {
+        private TestActions(ThrowingConsumer<StartAction> startHandler) {
             this(startHandler, action -> {
             });
         }
 
         private TestActions(
-                LifecycleActionHandler<StartAction> startHandler,
-                LifecycleActionHandler<StopAction> stopHandler) {
-            start = ActionBinding.of("test.start", startHandler);
-            stop = ActionBinding.of("test.stop", stopHandler);
+                ThrowingConsumer<StartAction> startHandler,
+                ThrowingConsumer<StopAction> stopHandler) {
+            start = action("test.start", startHandler);
+            stop = action("test.stop", stopHandler);
         }
 
         private ActionBinding<StartAction> start() {

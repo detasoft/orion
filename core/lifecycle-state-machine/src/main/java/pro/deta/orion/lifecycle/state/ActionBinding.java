@@ -49,8 +49,8 @@ public final class ActionBinding<A> {
         }
     }
 
-    void execute(A payload) throws Exception {
-        handler.execute(payload);
+    Object execute(A payload) throws Exception {
+        return handler.execute(payload);
     }
 
     @Override

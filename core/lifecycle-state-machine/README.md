@@ -11,7 +11,7 @@ contract:
 - fixed states;
 - typed actions and payloads;
 - legal transitions;
-- failure states;
+- default and custom state resolution after an action;
 - available actions from the current state;
 - observable transition events;
 - layered high-level actions such as `START` and `STOP`.
@@ -29,18 +29,16 @@ ActionBinding<StopTransport> stop = ActionBinding.of(
         "git.transport.stop",
         action -> endpoint.stop());
 
-State running = StateMachineDefinition.state("RUNNING");
+State running = StandardStateDefinition.state("RUNNING");
 
 StateMachine machine = StateMachineDefinition.define()
-        .from(StateMachineDefinition.NEW)
+        .from(StandardStateDefinition.NEW)
         .on(start)
-        .to(running)
-        .failTo(StateMachineDefinition.ERR)
+        .to(running, StandardStateDefinition.ERR)
 
         .from(running)
         .on(stop)
-        .to(StateMachineDefinition.FIN)
-        .failTo(StateMachineDefinition.ERR)
+        .to(StandardStateDefinition.FIN, StandardStateDefinition.ERR)
         .build()
         .newStateMachine();
 ```
@@ -49,15 +47,17 @@ StateMachine machine = StateMachineDefinition.define()
 
 - `NEW` is the initial state;
 - `FIN` is terminal by default;
-- `ERR` is the conventional failure state, but it is not special unless the
-  definition uses it.
+- `ERR` is the conventional failure state used by the default resolver when an
+  action throws and `ERR` is one of the transition targets.
 
 `ActionId` is the stable semantic identity of an action. Different machines may
 share the same id, and one machine may expose the same id from several different
 states. This lets a single external action such as `START` progress through
 several lifecycle layers.
 
-`ActionBinding<A>` combines an `ActionId` with a typed handler. The binding
+`ActionBinding<A>` combines an `ActionId` with a typed handler. `A` is the
+payload type. The handler may still return a value, and that value is stored as
+`Object actionResult` in `StateTransitionResult` for diagnostics. The binding
 instance is the precise key for low-level single-step execution. The binding id
 is the key for high-level action execution.
 
@@ -70,13 +70,48 @@ When several states share the same action, list them in one `from(...)` rule:
 StateMachineDefinition.define()
         .from(NEW, RUNNING)
         .on(stop)
-        .to(FIN)
-        .failTo(ERR);
+        .to(FIN, ERR);
 ```
 
-Every transition must define `failTo(...)`. If the handler throws, the machine
-moves to that failure state and throws `StateTransitionFailedException` to the
-caller.
+`to(...)` lists all allowed target states. If no explicit `post(...)` resolver
+is configured, the default resolver is used:
+
+- if the handler throws, select `ERR` when it is one of the targets;
+- if the handler succeeds, ignore `ERR` and select the only remaining target;
+- if several non-`ERR` success targets remain, throw `IllegalStateException`
+  and require an explicit `post(...)` resolver.
+
+Custom resolution receives a `StateTransitionResult` containing the source
+state, action id, payload, allowed targets, diagnostic action result, failure,
+and selected state when already resolved:
+
+```java
+final class TransportAdapter {
+    private final TransportService service;
+    private final ActionBinding<Void> start = ActionId.START.bind(this::startTransport);
+
+    private StartHandle startTransport(Void ignored) {
+        return service.onStart();
+    }
+
+    private State resolveStartState(StateTransitionResult result) {
+        if (result.failed()) {
+            return result.defaultState();
+        }
+        return service.isEnabled() ? RUNNING : DISABLED;
+    }
+
+    StateMachine createStateMachine() {
+        return StateMachineDefinition.define()
+                .from(NEW, DISABLED)
+                .on(start)
+                .to(DISABLED, RUNNING, ERR)
+                .post(this::resolveStartState)
+                .build()
+                .newStateMachine();
+    }
+}
+```
 
 Invalid actions are rejected before any handler runs. They do not emit
 transition events and do not change state.
@@ -91,7 +126,7 @@ transition selected by the concrete `ActionBinding`:
 3. Emit `TRANSITION_FUNCTION_STARTED`.
 4. Run the action handler.
 5. Emit `TRANSITION_FUNCTION_FINISHED`.
-6. Move to the success target or the configured failure state.
+6. Resolve and move to one of the configured target states.
 7. Emit `AFTER_STATE_ENTERED`.
 8. Notify transition listeners.
 9. Emit `TRANSITION_FINISHED` or `TRANSITION_FAILED`.
@@ -105,8 +140,10 @@ executes a sequence of synchronous transitions:
 4. Stop when the machine reaches a state that does not expose `actionId`.
 
 If the first state does not expose `actionId`, the call is rejected as an
-invalid transition. If any layer fails, the current transition moves to its
-configured `failTo(...)` state and the call throws.
+invalid transition. If any layer fails, the current transition resolves to
+`ERR` when configured and the call throws. If the next state exposes the same
+`ActionBinding` instance again, the high-level action stops instead of repeating
+the same binding indefinitely.
 
 Transitions are serialized by the machine instance. A handler should therefore
 avoid waiting for another action on the same machine.
@@ -124,18 +161,15 @@ ActionBinding<Void> startTransports = ActionBinding.of(ActionId.START, adapter::
 StateMachine machine = StateMachineDefinition.define()
         .from(NEW)
         .on(startInit)
-        .to(INIT_READY)
-        .failTo(ERR)
+        .to(INIT_READY, ERR)
 
         .from(INIT_READY)
         .on(startAcl)
-        .to(ACL_READY)
-        .failTo(ERR)
+        .to(ACL_READY, ERR)
 
         .from(ACL_READY)
         .on(startTransports)
-        .to(RUNNING)
-        .failTo(ERR)
+        .to(RUNNING, ERR)
         .build()
         .newStateMachine();
 
@@ -162,12 +196,15 @@ machine is rejected.
 
 ```java
 final class ParentAdapter {
-    private final ActionBinding<Void> startChildren = ActionId.START.bind(this::startChildren);
+    private final ActionBinding<Void> startChildren =
+            ActionId.START.bind(this::startChildren);
 
-    private void startChildren(Void action) {
+    private List<StateTransitionResult> startChildren(Void action) {
         prepare();
-        startChildren.stateMachine().propagateParallel(ActionId.START, action);
+        List<StateTransitionResult> results =
+                startChildren.stateMachine().propagateParallel(ActionId.START, action);
         finish();
+        return results;
     }
 
     StateMachine create(StateMachine storageMachine, StateMachine aclMachine, ExecutorService executor) {
@@ -177,8 +214,7 @@ final class ParentAdapter {
                 .childExecutor(executor)
                 .from(NEW)
                 .on(startChildren)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
     }
@@ -210,7 +246,7 @@ parent.propagateSequential(ActionId.STOP, action);
 ```
 
 The parent waits for every selected child to finish. If any child fails, the
-parent transition fails and moves to its configured `failTo(...)` state.
+parent transition fails and resolves through the parent's configured targets.
 
 A created machine also exposes bound propagation handlers:
 `propagateSequentialHandler(actionId)` and `propagateParallelHandler(actionId)`.
@@ -258,14 +294,14 @@ Use observers for different levels of detail:
   `TRANSITION_STARTED`, `TRANSITION_FUNCTION_STARTED`, and
   `AFTER_STATE_ENTERED`. It is useful for logging, timing, diagnostics, and
   derived monitoring.
-- `StateMachineListener` receives one `StateTransitionEvent` after the machine
+- `StateMachineListener` receives one `StateTransitionResult` after the machine
   has entered the new state. It is useful when only completed transitions matter.
 - Service adapters are not observers. They define and execute actions for a
   concrete service.
 
 `describe()` returns the current state, an in-progress transition if there is
-one, the configured transition diagram, and nested descriptions of child
-machines when the machine has registered children.
+one, the last transition result, the configured transition diagram, and nested
+descriptions of child machines when the machine has registered children.
 
 ## Service Adapters
 
@@ -293,20 +329,17 @@ action:
 record TransportFailure(Throwable cause) {
 }
 
-ActionBinding<TransportFailure> failed = ActionBinding.of(
-        "git.transport.failed",
-        failure -> service.recordFailure(failure.cause()));
+ActionBinding<TransportFailure> failed =
+        ActionBinding.of("git.transport.failed", this::recordFailure);
 
 StateMachine machine = StateMachineDefinition.define()
         .from(NEW)
         .on(start)
-        .to(RUNNING)
-        .failTo(ERR)
+        .to(RUNNING, ERR)
 
         .from(RUNNING)
         .on(failed)
         .to(ERR)
-        .failTo(ERR)
         .build()
         .newStateMachine();
 
@@ -326,6 +359,6 @@ This keeps the boundaries clear:
 - the state machine owns legal transitions;
 - observers see state changes after they happen.
 
-If an action handler fails during `execute(...)`, `failTo(...)` handles it. If a
-running service later detects a failure by itself, model that as another
-explicit action such as `failed`, `disconnected`, or `stopped`.
+If an action handler fails during `execute(...)`, the transition's resolver
+handles it. If a running service later detects a failure by itself, model that
+as another explicit action such as `failed`, `disconnected`, or `stopped`.

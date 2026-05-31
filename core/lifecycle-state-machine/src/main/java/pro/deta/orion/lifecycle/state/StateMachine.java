@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,13 +36,14 @@ public final class StateMachine implements AutoCloseable {
     private final List<StateMachineSubscription> childSubscriptions = new CopyOnWriteArrayList<>();
     private volatile StateMachineDefinition.State currentState;
     private volatile StateMachineDefinition.State computedState;
-    private volatile StateTransition<?> transitionInProgress;
+    private volatile StateTransition transitionInProgress;
+    private volatile StateTransitionResult lastTransitionResult;
 
     public StateMachine(StateMachineDefinition definition) {
         this.definition = Objects.requireNonNull(definition, "definition");
         children = definition.children();
         currentState = definition.initialState();
-        for (StateTransition<?> transition : definition.transitions()) {
+        for (StateTransition transition : definition.transitions()) {
             transition.register(this);
         }
         for (Map.Entry<String, StateMachine> child : children.entrySet()) {
@@ -83,7 +85,7 @@ public final class StateMachine implements AutoCloseable {
         return definition.states();
     }
 
-    public synchronized List<StateTransition<?>> availableTransitions() {
+    public synchronized List<StateTransition> availableTransitions() {
         return definition.transitionsFrom(currentState);
     }
 
@@ -93,7 +95,12 @@ public final class StateMachine implements AutoCloseable {
                 computedState,
                 childStates(),
                 definition.availableActions(currentState),
-                definition.isTerminalState(currentState));
+                definition.isTerminalState(currentState),
+                lastTransitionResult);
+    }
+
+    public StateTransitionResult lastTransitionResult() {
+        return lastTransitionResult;
     }
 
     public String describe() {
@@ -121,6 +128,17 @@ public final class StateMachine implements AutoCloseable {
         if (!status.equals(state)) {
             builder.append(" (state=").append(state).append(")");
         }
+        StateTransitionResult lastResult = lastTransitionResult;
+        if (StandardStateDefinition.ERR.equals(state) && lastResult != null && lastResult.failure() != null) {
+            builder.append(System.lineSeparator())
+                    .append(indent)
+                    .append("  last transition: ");
+            appendTransitionResult(builder, lastResult);
+            builder.append(System.lineSeparator())
+                    .append(indent)
+                    .append("  error: ")
+                    .append(lastResult.failure());
+        }
         for (Map.Entry<String, StateMachine> child : children.entrySet()) {
             builder.append(System.lineSeparator());
             child.getValue().describeStatusInto(builder, indent + "  ", child.getKey());
@@ -129,13 +147,20 @@ public final class StateMachine implements AutoCloseable {
 
     private void describeInto(StringBuilder builder, String indent) {
         StateMachineDefinition.State state = currentState;
-        StateTransition<?> activeTransition = transitionInProgress;
+        StateTransition activeTransition = transitionInProgress;
         builder.append(indent).append("state: ").append(state);
         builder.append("\n").append(indent).append("in progress: ");
         if (activeTransition == null) {
             builder.append("<none>");
         } else {
             builder.append(activeTransition.describe());
+        }
+        StateTransitionResult lastResult = lastTransitionResult;
+        builder.append("\n").append(indent).append("last transition: ");
+        if (lastResult == null) {
+            builder.append("<none>");
+        } else {
+            appendTransitionResult(builder, lastResult);
         }
         appendIndented(builder, indent, definition.transitionDiagram());
         if (children.isEmpty()) {
@@ -152,6 +177,18 @@ public final class StateMachine implements AutoCloseable {
         String[] lines = value.split("\n", -1);
         for (String line : lines) {
             builder.append("\n").append(indent).append(line);
+        }
+    }
+
+    private static void appendTransitionResult(StringBuilder builder, StateTransitionResult result) {
+        builder.append(result.from())
+                .append(" --")
+                .append(result.action())
+                .append("--> ");
+        if (result.to() == null) {
+            builder.append("<unresolved>");
+        } else {
+            builder.append(result.to());
         }
     }
 
@@ -173,14 +210,14 @@ public final class StateMachine implements AutoCloseable {
         return () -> subscribers.remove(subscriber);
     }
 
-    public synchronized <A> StateTransitionEvent execute(ActionBinding<A> action, A payload) {
+    public synchronized <A> StateTransitionResult execute(ActionBinding<A> action, A payload) {
         Objects.requireNonNull(action, "action");
-        StateTransition<A> transition = definition.transition(currentState, action)
+        StateTransition transition = definition.transition(currentState, action)
                 .orElseThrow(() -> new InvalidStateTransitionException(currentState, action.id()));
-        return executeTransition(transition, payload);
+        return executeTransition(transition, action, payload);
     }
 
-    public <A> List<StateTransitionEvent> execute(ActionId actionId, A payload) {
+    public <A> List<StateTransitionResult> execute(ActionId actionId, A payload) {
         Objects.requireNonNull(actionId, "actionId");
         return executeTransitionSequence(actionId, payload);
     }
@@ -195,7 +232,7 @@ public final class StateMachine implements AutoCloseable {
         return payload -> propagateParallel(actionId, payload);
     }
 
-    public synchronized <A> List<StateTransitionEvent> propagateSequential(ActionId actionId, A payload) {
+    public synchronized <A> List<StateTransitionResult> propagateSequential(ActionId actionId, A payload) {
         Objects.requireNonNull(actionId, "actionId");
         List<ChildAction<A>> actions = availableChildActions(actionId, payload);
         if (actions.isEmpty()) {
@@ -204,7 +241,7 @@ public final class StateMachine implements AutoCloseable {
         return executeChildActionsSequentially(actionId, actions);
     }
 
-    public synchronized <A> List<StateTransitionEvent> propagateParallel(ActionId actionId, A payload) {
+    public synchronized <A> List<StateTransitionResult> propagateParallel(ActionId actionId, A payload) {
         Objects.requireNonNull(actionId, "actionId");
         List<ChildAction<A>> actions = availableChildActions(actionId, payload);
         if (actions.isEmpty()) {
@@ -217,10 +254,11 @@ public final class StateMachine implements AutoCloseable {
         return executeChildActionsInParallel(actionId, actions, executor);
     }
 
-    private synchronized <A> List<StateTransitionEvent> executeTransitionSequence(ActionId actionId, A payload) {
-        List<StateTransitionEvent> events = new ArrayList<>();
+    private synchronized <A> List<StateTransitionResult> executeTransitionSequence(ActionId actionId, A payload) {
+        List<StateTransitionResult> events = new ArrayList<>();
+        Set<ActionBinding<?>> executedBindings = new HashSet<>();
         while (true) {
-            StateTransition<?> transition = definition.transition(currentState, actionId)
+            StateTransition transition = definition.transition(currentState, actionId)
                     .orElse(null);
             if (transition == null) {
                 if (events.isEmpty()) {
@@ -228,22 +266,37 @@ public final class StateMachine implements AutoCloseable {
                 }
                 return List.copyOf(events);
             }
-            @SuppressWarnings("unchecked")
-            StateTransition<A> typedTransition = (StateTransition<A>) transition;
-            events.add(executeTransition(typedTransition, payload));
+            if (!executedBindings.add(transition.action())) {
+                return List.copyOf(events);
+            }
+            events.add(executeTransition(transition, payload));
         }
     }
 
-    private synchronized <A> StateTransitionEvent executeTransition(StateTransition<A> transition, A payload) {
+    private synchronized <A> List<StateTransitionResult> executeSingle(ActionId actionId, A payload) {
+        StateTransition transition = definition.transition(currentState, actionId)
+                .orElseThrow(() -> new InvalidStateTransitionException(currentState, actionId));
+        return List.of(executeTransition(transition, payload));
+    }
+
+    private synchronized <A> StateTransitionResult executeTransition(StateTransition transition, A payload) {
+        return executeTransition(transition, actionBinding(transition), payload);
+    }
+
+    private synchronized <A> StateTransitionResult executeTransition(
+            StateTransition transition,
+            ActionBinding<A> action,
+            A payload) {
         StateMachineDefinition.State oldState = currentState;
         transitionInProgress = transition;
+        StateMachineDefinition.State eventTarget = transition.targets().getFirst();
         try {
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.TRANSITION_STARTED,
                     oldState,
                     transition.actionId(),
                     payload,
-                    transition.to(),
+                    eventTarget,
                     oldState,
                     null));
             notifySubscribers(new StateMachineEvent(
@@ -251,12 +304,13 @@ public final class StateMachine implements AutoCloseable {
                     oldState,
                     transition.actionId(),
                     payload,
-                    transition.to(),
+                    eventTarget,
                     currentState,
                     null));
+            Object actionResult = null;
             Exception failure = null;
             try {
-                executeTransitionAction(transition, payload);
+                actionResult = action.execute(payload);
             } catch (Exception e) {
                 failure = e;
             }
@@ -266,59 +320,65 @@ public final class StateMachine implements AutoCloseable {
                     oldState,
                     transition.actionId(),
                     payload,
-                    transition.to(),
+                    eventTarget,
                     currentState,
                     failure));
-            StateMachineDefinition.State nextState;
-            if (failure == null) {
-                nextState = transition.to();
-            } else {
-                nextState = transition.failureState();
+            StateTransitionResult unresolvedResult = new StateTransitionResult(
+                    oldState,
+                    transition.actionId(),
+                    payload,
+                    transition.targets(),
+                    actionResult,
+                    failure,
+                    null);
+            lastTransitionResult = unresolvedResult;
+            StateMachineDefinition.State nextState = transition.resolver().resolve(unresolvedResult);
+            if (!transition.targets().contains(nextState)) {
+                throw new IllegalStateException(
+                        "Transition " + transition.actionId() + " resolved to " + nextState
+                                + " but allowed targets are " + transition.targets());
             }
+            StateTransitionResult result = unresolvedResult.withTo(nextState);
             currentState = nextState;
             computedState = resolveComputedState();
+            lastTransitionResult = result;
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.AFTER_STATE_ENTERED,
                     oldState,
                     transition.actionId(),
                     payload,
-                    transition.to(),
+                    nextState,
                     currentState,
                     failure));
-            StateTransitionEvent event = new StateTransitionEvent(
-                    oldState,
-                    transition.actionId(),
-                    payload,
-                    currentState,
-                    failure);
-            notifyListeners(event);
+            notifyListeners(result);
             if (failure == null) {
                 notifySubscribers(new StateMachineEvent(
                         StateMachineEventType.TRANSITION_FINISHED,
                         oldState,
                         transition.actionId(),
                         payload,
-                        transition.to(),
+                        nextState,
                         currentState,
                         null));
-                return event;
+                return result;
             }
             notifySubscribers(new StateMachineEvent(
                     StateMachineEventType.TRANSITION_FAILED,
                     oldState,
                     transition.actionId(),
                     payload,
-                    transition.to(),
+                    nextState,
                     currentState,
                     failure));
-            throw new StateTransitionFailedException(oldState, transition.actionId(), transition.to(), currentState, failure);
+            throw new StateTransitionFailedException(result);
         } finally {
             transitionInProgress = null;
         }
     }
 
-    private <A> void executeTransitionAction(StateTransition<A> transition, A payload) throws Exception {
-        transition.execute(payload);
+    @SuppressWarnings("unchecked")
+    private static <A> ActionBinding<A> actionBinding(StateTransition transition) {
+        return (ActionBinding<A>) transition.action();
     }
 
     private <A> List<ChildAction<A>> availableChildActions(ActionId actionId, A payload) {
@@ -331,10 +391,10 @@ public final class StateMachine implements AutoCloseable {
         return actions;
     }
 
-    private <A> List<StateTransitionEvent> executeChildActionsSequentially(
+    private <A> List<StateTransitionResult> executeChildActionsSequentially(
             ActionId actionId,
             List<ChildAction<A>> actions) {
-        List<StateTransitionEvent> events = new ArrayList<>();
+        List<StateTransitionResult> events = new ArrayList<>();
         List<Throwable> failures = new ArrayList<>();
         for (ChildAction<A> action : actions) {
             try {
@@ -347,26 +407,26 @@ public final class StateMachine implements AutoCloseable {
         return List.copyOf(events);
     }
 
-    private <A> List<StateTransitionEvent> executeChildActionsInParallel(
+    private <A> List<StateTransitionResult> executeChildActionsInParallel(
             ActionId actionId,
             List<ChildAction<A>> actions,
             ExecutorService executor) {
-        List<Callable<List<StateTransitionEvent>>> tasks = new ArrayList<>();
+        List<Callable<List<StateTransitionResult>>> tasks = new ArrayList<>();
         for (ChildAction<A> action : actions) {
             tasks.add(action::execute);
         }
         return executeActionsInParallel("Child action " + actionId + " failed", tasks, executor);
     }
 
-    private static List<StateTransitionEvent> executeActionsInParallel(
+    private static List<StateTransitionResult> executeActionsInParallel(
             String failureMessage,
-            List<Callable<List<StateTransitionEvent>>> tasks,
+            List<Callable<List<StateTransitionResult>>> tasks,
             ExecutorService executor) {
-        List<StateTransitionEvent> events = new ArrayList<>();
+        List<StateTransitionResult> events = new ArrayList<>();
         List<Throwable> failures = new ArrayList<>();
         try {
-            List<Future<List<StateTransitionEvent>>> futures = executor.invokeAll(tasks);
-            for (Future<List<StateTransitionEvent>> future : futures) {
+            List<Future<List<StateTransitionResult>>> futures = executor.invokeAll(tasks);
+            for (Future<List<StateTransitionResult>> future : futures) {
                 try {
                     events.addAll(future.get());
                 } catch (ExecutionException e) {
@@ -405,7 +465,7 @@ public final class StateMachine implements AutoCloseable {
         return definition.computedStateResolver().resolve(currentState, childStates());
     }
 
-    private void notifyListeners(StateTransitionEvent event) {
+    private void notifyListeners(StateTransitionResult event) {
         for (StateMachineListener listener : listeners) {
             try {
                 listener.onTransition(event);
@@ -444,8 +504,8 @@ public final class StateMachine implements AutoCloseable {
             Objects.requireNonNull(actionId, "actionId");
         }
 
-        private List<StateTransitionEvent> execute() {
-            return machine.execute(actionId, payload);
+        private List<StateTransitionResult> execute() {
+            return machine.executeSingle(actionId, payload);
         }
     }
 }

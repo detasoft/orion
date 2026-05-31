@@ -11,7 +11,8 @@ public record StateMachineSnapshot(
         StateMachineDefinition.State computedState,
         Map<String, StateMachineDefinition.State> childStates,
         Set<ActionId> availableActions,
-        boolean terminal) {
+        boolean terminal,
+        StateTransitionResult lastTransitionResult) {
     public StateMachineSnapshot {
         Objects.requireNonNull(state, "state");
         Objects.requireNonNull(computedState, "computedState");
@@ -24,6 +25,6 @@ public record StateMachineSnapshot(
             StateMachineDefinition.State state,
             Set<ActionId> availableActions,
             boolean terminal) {
-        this(state, state, Map.of(), availableActions, terminal);
+        this(state, state, Map.of(), availableActions, terminal, null);
     }
 }
