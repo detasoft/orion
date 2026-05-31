@@ -103,6 +103,26 @@ class StateMachineTest {
     }
 
     @Test
+    void sameTransitionCanBeDefinedFromMultipleStates() {
+        TestActions actionsFromNew = new TestActions();
+        StateMachineDefinition definitionFromNew = multiStopDefinition(actionsFromNew);
+
+        assertThat(definitionFromNew.availableActions(NEW))
+                .containsExactly(actionsFromNew.start().id(), actionsFromNew.stop().id());
+        assertThat(definitionFromNew.availableActions(RUNNING)).containsExactly(actionsFromNew.stop().id());
+
+        StateMachine stoppedFromNew = definitionFromNew.newStateMachine();
+        stoppedFromNew.execute(actionsFromNew.stop(), new StopAction("new"));
+        assertThat(stoppedFromNew.currentState()).isEqualTo(FIN);
+
+        TestActions actionsFromRunning = new TestActions();
+        StateMachine stoppedFromRunning = multiStopDefinition(actionsFromRunning).newStateMachine();
+        stoppedFromRunning.execute(actionsFromRunning.start(), new StartAction("run"));
+        stoppedFromRunning.execute(actionsFromRunning.stop(), new StopAction("running"));
+        assertThat(stoppedFromRunning.currentState()).isEqualTo(FIN);
+    }
+
+    @Test
     void actionIdExecutionCascadesAcrossBindingsAvailableFromSuccessiveStates() {
         State initReady = state("INIT_READY");
         State aclReady = state("ACL_READY");
@@ -601,6 +621,28 @@ class StateMachineTest {
                 .failTo(FAILED))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Duplicate transition action id START for state NEW");
+    }
+
+    @Test
+    void duplicateActionIdInMultiStateRuleIsRejectedWithoutPartialTransition() {
+        TestActions actions = new TestActions();
+        StateMachineDefinition.Builder builder = StateMachineDefinition.define()
+                .from(RUNNING)
+                .on(actions.stop())
+                .to(FIN)
+                .failTo(FAILED);
+
+        assertThatThrownBy(() -> builder
+                .from(NEW, RUNNING)
+                .on(actions.stop())
+                .to(STOPPED)
+                .failTo(FAILED))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Duplicate transition action id test.stop for state RUNNING");
+
+        StateMachineDefinition definition = builder.build();
+        assertThat(definition.transition(NEW, actions.stop().id())).isEmpty();
+        assertThat(definition.transition(RUNNING, actions.stop().id())).isPresent();
     }
 
     @Test
@@ -1357,6 +1399,20 @@ class StateMachineTest {
     }
 
     private record StopAction(String reason) {
+    }
+
+    private static StateMachineDefinition multiStopDefinition(TestActions actions) {
+        return StateMachineDefinition.define()
+                .from(NEW)
+                .on(actions.start())
+                .to(RUNNING)
+                .failTo(FAILED)
+
+                .from(NEW, RUNNING)
+                .on(actions.stop())
+                .to(FIN)
+                .failTo(FAILED)
+                .build();
     }
 
     private static final class TestActions {

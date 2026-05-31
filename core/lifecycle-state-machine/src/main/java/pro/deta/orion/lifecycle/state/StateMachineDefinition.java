@@ -188,7 +188,17 @@ public final class StateMachineDefinition {
         }
 
         public FromRule from(State state) {
-            return new FromRule(this, state);
+            return from(state, new State[0]);
+        }
+
+        public FromRule from(State firstState, State... additionalStates) {
+            Objects.requireNonNull(additionalStates, "additionalStates");
+            LinkedHashSet<State> states = new LinkedHashSet<>();
+            addFromState(states, firstState);
+            for (State state : additionalStates) {
+                addFromState(states, state);
+            }
+            return new FromRule(this, List.copyOf(states));
         }
 
         private <A> Builder addTransition(
@@ -211,6 +221,33 @@ public final class StateMachineDefinition {
             return this;
         }
 
+        private <A> Builder addTransitions(
+                Map<State, State> targets,
+                ActionId actionId,
+                ActionBinding<A> action,
+                State failureState) {
+            Objects.requireNonNull(targets, "targets");
+            Objects.requireNonNull(actionId, "actionId");
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(failureState, "failureState");
+            Map<StateActionKey, State> transitionsToAdd = new LinkedHashMap<>();
+            for (Map.Entry<State, State> entry : targets.entrySet()) {
+                State from = Objects.requireNonNull(entry.getKey(), "from");
+                State to = Objects.requireNonNull(entry.getValue(), "to");
+                StateActionKey key = new StateActionKey(from, actionId);
+                if (transitions.containsKey(key)) {
+                    throw new IllegalArgumentException(
+                            "Duplicate transition action id " + actionId + " for state " + from);
+                }
+                transitionsToAdd.put(key, to);
+            }
+            for (Map.Entry<StateActionKey, State> entry : transitionsToAdd.entrySet()) {
+                StateActionKey key = entry.getKey();
+                transitions.put(key, new StateTransition<>(key.state(), actionId, action, entry.getValue(), failureState));
+            }
+            return this;
+        }
+
         public StateMachineDefinition build() {
             return new StateMachineDefinition(
                     new LinkedHashMap<>(transitions),
@@ -223,66 +260,77 @@ public final class StateMachineDefinition {
 
     public static final class FromRule {
         private final Builder builder;
-        private final State state;
+        private final List<State> states;
 
-        private FromRule(Builder builder, State state) {
+        private FromRule(Builder builder, List<State> states) {
             this.builder = Objects.requireNonNull(builder, "builder");
-            this.state = Objects.requireNonNull(state, "state");
+            this.states = List.copyOf(Objects.requireNonNull(states, "states"));
         }
 
         public <A> ActionRule<A> on(ActionBinding<A> action) {
-            return new ActionRule<>(builder, state, action.id(), action);
+            return new ActionRule<>(builder, states, action.id(), action);
         }
     }
 
     public static final class ActionRule<A> {
         private final Builder builder;
-        private final State from;
+        private final List<State> fromStates;
         private final ActionId actionId;
         private final ActionBinding<A> action;
 
         private ActionRule(
                 Builder builder,
-                State from,
+                List<State> fromStates,
                 ActionId actionId,
                 ActionBinding<A> action) {
             this.builder = Objects.requireNonNull(builder, "builder");
-            this.from = Objects.requireNonNull(from, "from");
+            this.fromStates = List.copyOf(Objects.requireNonNull(fromStates, "fromStates"));
             this.actionId = Objects.requireNonNull(actionId, "actionId");
             this.action = Objects.requireNonNull(action, "action");
         }
 
         public TargetRule<A> to(State to) {
-            return new TargetRule<>(builder, from, actionId, action, to);
+            Objects.requireNonNull(to, "to");
+            Map<State, State> targets = new LinkedHashMap<>();
+            for (State from : fromStates) {
+                targets.put(from, to);
+            }
+            return new TargetRule<>(builder, targets, actionId, action);
         }
 
         public TargetRule<A> stay() {
-            return to(from);
+            Map<State, State> targets = new LinkedHashMap<>();
+            for (State from : fromStates) {
+                targets.put(from, from);
+            }
+            return new TargetRule<>(builder, targets, actionId, action);
         }
     }
 
     public static final class TargetRule<A> {
         private final Builder builder;
-        private final State from;
+        private final Map<State, State> targets;
         private final ActionId actionId;
         private final ActionBinding<A> action;
-        private final State to;
 
         private TargetRule(
                 Builder builder,
-                State from,
+                Map<State, State> targets,
                 ActionId actionId,
-                ActionBinding<A> action,
-                State to) {
+                ActionBinding<A> action) {
             this.builder = Objects.requireNonNull(builder, "builder");
-            this.from = Objects.requireNonNull(from, "from");
+            this.targets = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    Objects.requireNonNull(targets, "targets")));
             this.actionId = Objects.requireNonNull(actionId, "actionId");
             this.action = Objects.requireNonNull(action, "action");
-            this.to = Objects.requireNonNull(to, "to");
         }
 
         public Builder failTo(State failureState) {
-            return builder.addTransition(from, actionId, action, to, failureState);
+            if (targets.size() == 1) {
+                Map.Entry<State, State> target = targets.entrySet().iterator().next();
+                return builder.addTransition(target.getKey(), actionId, action, target.getValue(), failureState);
+            }
+            return builder.addTransitions(targets, actionId, action, failureState);
         }
     }
 
@@ -335,5 +383,12 @@ public final class StateMachineDefinition {
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return value;
+    }
+
+    private static void addFromState(Set<State> states, State state) {
+        Objects.requireNonNull(state, "state");
+        if (!states.add(state)) {
+            throw new IllegalArgumentException("Duplicate from state " + state);
+        }
     }
 }
