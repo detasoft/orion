@@ -35,10 +35,12 @@ public class OrionShell extends InteractiveProcessShellFactory {
 
         @Override
         public void start(ChannelSession channel, Environment env) throws IOException {
-            errorStream.write(Constants.encode(getMessage()));
-            errorStream.flush();
-
-            exitCallback.onExit(127);
+            try {
+                errorStream.write(Constants.encode(getMessage()));
+                errorStream.flush();
+            } finally {
+                exitCallback.onExit(127);
+            }
         }
 
         String getMessage() {
