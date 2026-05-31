@@ -26,7 +26,7 @@ public final class GitNativeTransportStateMachine {
 
     private final GitTransportConfig config;
     private final Provider<GitNativeTransportService> serviceProvider;
-    private GitNativeTransportService service;
+    private volatile GitNativeTransportService service;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startGitTransport);
     private final ActionBinding<Void> stop = ActionId.STOP.bind(this::stopGitTransport);
     private final StateMachineDefinition definition;
@@ -130,7 +130,11 @@ public final class GitNativeTransportStateMachine {
 
     private GitNativeTransportService resolveService() {
         if (service == null) {
-            service = serviceProvider.get();
+            synchronized (this) {
+                if (service == null) {
+                    service = serviceProvider.get();
+                }
+            }
         }
         return service;
     }
