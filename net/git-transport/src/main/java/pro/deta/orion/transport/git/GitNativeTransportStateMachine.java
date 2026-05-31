@@ -3,7 +3,6 @@ package pro.deta.orion.transport.git;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.config.schema.GitTransportConfig;
-import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
@@ -21,8 +20,9 @@ import java.util.Objects;
 import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
 
 @Singleton
-public final class GitNativeTransportStateMachine implements OrionLifecycleStateMachine {
+public final class GitNativeTransportStateMachine {
     public static final State RUNNING = state("RUNNING");
+    public static final State DISABLED = state("DISABLED");
 
     private final GitTransportConfig config;
     private final Provider<GitNativeTransportService> serviceProvider;
@@ -44,6 +44,8 @@ public final class GitNativeTransportStateMachine implements OrionLifecycleState
 
     private StateMachineDefinition defineStateMachine() {
         return StateMachineDefinition.define()
+                .name("git-native")
+                .computedState((physicalState, childStates) -> isEnabled() ? physicalState : DISABLED)
                 .from(NEW)
                 .on(start)
                 .to(RUNNING)

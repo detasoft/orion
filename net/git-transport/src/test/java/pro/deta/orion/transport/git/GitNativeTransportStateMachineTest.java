@@ -5,7 +5,6 @@ import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.OrionLifecycleStateMachine;
 import pro.deta.orion.lifecycle.state.InvalidStateTransitionException;
 import pro.deta.orion.lifecycle.state.StateMachineEvent;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
@@ -18,7 +17,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,11 +31,7 @@ import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNIN
 
 class GitNativeTransportStateMachineTest {
     @Test
-    void nativeGitStateMachineIsOnlyAStateMachineMarker() {
-        GitNativeTransportStateMachine machine =
-                machine(new RecordingGitNativeTransportService());
-
-        assertInstanceOf(OrionLifecycleStateMachine.class, machine);
+    void nativeGitStateMachineIsNotAnApplicationListener() {
         assertFalse(OrionApplicationStageEventListener.class.isAssignableFrom(GitNativeTransportStateMachine.class));
     }
 
