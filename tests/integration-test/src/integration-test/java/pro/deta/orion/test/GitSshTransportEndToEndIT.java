@@ -382,6 +382,34 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void sshAdminRoutesRemainAccessibleWhenTransportLifecycleIsDisabled() throws Exception {
+        /*
+         * Verifies that the SSH admin channel works correctly in the disabled-transport configuration
+         * (git-native off, SSH on). Two things must hold simultaneously:
+         *   1. The lifecycle state endpoint reports DISABLED for the transport layer.
+         *   2. Other SSH admin commands (issue-token) remain functional, confirming the admin
+         *      interface is not gated on transport state.
+         */
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
+                .valueOrFailure("Server identity key should be available after startup");
+
+        String state = executeStateOverSsh(startedOrion, serverIdentityKey);
+        assertThat(state).contains("transports: DISABLED (state=NEW)");
+        assertThat(state).contains("git-native: DISABLED (state=NEW)");
+
+        String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
+        assertThat(token).isNotBlank();
+        assertThat(startedOrion.accessControlService().authenticateToken(token.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+
+        HttpResponse acl = getAdminAclWithBearerToken(startedOrion, token);
+        assertThat(acl.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+    }
+
+    @Test
     void shutdownCommandStopsServerPromptlyOverSsh() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
