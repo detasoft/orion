@@ -3,10 +3,14 @@ package pro.deta.orion.transport.git;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 
+import java.util.concurrent.CountDownLatch;
+
 final class RecordingGitNativeTransportService extends GitNativeTransportService {
     private int startCalls;
     private int stopCalls;
     private RuntimeException startFailure;
+    private CountDownLatch startEntering;
+    private CountDownLatch startGate;
 
     RecordingGitNativeTransportService() {
         this(true);
@@ -25,6 +29,16 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
     @Override
     public OrionStageCallResult onStart() {
         startCalls++;
+        if (startEntering != null) {
+            startEntering.countDown();
+        }
+        if (startGate != null) {
+            try {
+                startGate.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         if (startFailure != null) {
             throw startFailure;
         }
@@ -39,6 +53,11 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
 
     void failStartWith(RuntimeException failure) {
         startFailure = failure;
+    }
+
+    void blockStartWith(CountDownLatch entering, CountDownLatch gate) {
+        this.startEntering = entering;
+        this.startGate = gate;
     }
 
     int startCalls() {

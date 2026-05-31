@@ -11,13 +11,18 @@ import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.state.Void;
 
 import java.lang.reflect.Constructor;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -174,6 +179,72 @@ class GitNativeTransportStateMachineTest {
 
         assertFalse(serviceResolved.get());
         assertEquals(FIN, machine.currentState());
+    }
+
+    @Test
+    void doubleStopThrowsAfterTerminalState() {
+        RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
+        GitNativeTransportStateMachine machine = machine(service);
+
+        machine.start();
+        machine.stop();
+
+        assertThrows(InvalidStateTransitionException.class, machine::stop);
+        assertEquals(FIN, machine.currentState());
+        assertEquals(1, service.stopCalls());
+    }
+
+    @Test
+    void startAfterFailedStartThrowsInvalidStateTransition() {
+        RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
+        service.failStartWith(new RuntimeException("start failed"));
+        GitNativeTransportStateMachine machine = machine(service);
+
+        assertThrows(StateTransitionFailedException.class, machine::start);
+        assertEquals(ERR, machine.currentState());
+        assertEquals(1, service.startCalls());
+
+        assertThrows(InvalidStateTransitionException.class, machine::start);
+        assertEquals(ERR, machine.currentState());
+        assertEquals(1, service.startCalls());
+    }
+
+    @Test
+    void concurrentStartAndStopSerializeTransitions() throws InterruptedException {
+        CountDownLatch startEntering = new CountDownLatch(1);
+        CountDownLatch startGate = new CountDownLatch(1);
+        CountDownLatch stopQueued = new CountDownLatch(1);
+        RecordingGitNativeTransportService service = new RecordingGitNativeTransportService();
+        service.blockStartWith(startEntering, startGate);
+        GitNativeTransportStateMachine machine = machine(service);
+
+        AtomicReference<Throwable> startError = new AtomicReference<>();
+        AtomicReference<Throwable> stopError = new AtomicReference<>();
+
+        Thread startThread = new Thread(() -> {
+            try { machine.start(); } catch (Throwable t) { startError.set(t); }
+        });
+        Thread stopThread = new Thread(() -> {
+            stopQueued.countDown();
+            try { machine.stop(); } catch (Throwable t) { stopError.set(t); }
+        });
+
+        startThread.start();
+        assertTrue(startEntering.await(5, TimeUnit.SECONDS), "start did not enter service within timeout");
+
+        // start holds the state-machine lock inside onStart(); stop will block until start releases it
+        stopThread.start();
+        assertTrue(stopQueued.await(5, TimeUnit.SECONDS), "stop thread did not queue within timeout");
+
+        startGate.countDown();
+        assertTrue(startThread.join(Duration.ofSeconds(5)));
+        assertTrue(stopThread.join(Duration.ofSeconds(5)));
+
+        assertNull(startError.get(), "start threw unexpectedly");
+        assertNull(stopError.get(), "stop threw unexpectedly");
+        assertEquals(FIN, machine.currentState());
+        assertEquals(1, service.startCalls());
+        assertEquals(1, service.stopCalls());
     }
 
     private static GitNativeTransportStateMachine machine(RecordingGitNativeTransportService service) {
