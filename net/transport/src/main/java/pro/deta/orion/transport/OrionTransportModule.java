@@ -25,7 +25,7 @@ public class OrionTransportModule {
     static GitTransportConfig gitTransportConfig(OrionConfiguration configuration) {
         OrionConfiguration.AppTransport transport = configuration.getTransport();
         if (transport == null || transport.getGit() == null) {
-            GitTransportConfig disabled = new GitTransportConfig(null, 9418);
+            GitTransportConfig disabled = new GitTransportConfig();
             disabled.setEnabled(false);
             return disabled;
         }
