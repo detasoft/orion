@@ -17,14 +17,11 @@ import org.apache.sshd.common.util.security.eddsa.EdDSASecurityProviderRegistrar
 import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.auth.pubkey.CachingPublicKeyAuthenticator;
 import org.apache.sshd.server.forward.StaticDecisionForwardingFilter;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
 import pro.deta.orion.crypto.SshHostKeyService;
-import pro.deta.orion.lifecycle.*;
 import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
@@ -39,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @Singleton
 @RequiredArgsConstructor(onConstructor_ = @Inject)
-public class GitSshTransportService implements AutoCloseable, OrionApplicationStageEventListener {
+public class GitSshTransportService {
     public static final AttributeRepository.AttributeKey<UserIdentity> SSH_AUTHENTICATED_USER = new AttributeRepository.AttributeKey<>();
     private static final long STOP_WAIT_MILLIS = 500;
 
@@ -51,16 +48,7 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
     private final OrionSSHPasswordAuthenticator orionPasswordAuthenticator;
 
 
-    @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.SSH_TRANSPORT_INIT, this::onInit);
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.SSH_TRANSPORT_START, this::onStart)
-                .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.SSH_TRANSPORT_STOP, this::onStop);
-    }
-
-
-    public OrionStageCallResult onInit() {
+    public OrionStageCallResult onStart() {
         SecurityUtils.registerSecurityProvider(new BouncyCastleSecurityProviderRegistrar());
         if (SecurityUtils.isBouncyCastleRegistered()) {
             log.info("BouncyCastle is registered as a JCE provider");
@@ -69,11 +57,6 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
         if (SecurityUtils.isProviderRegistered("EdDSA")) {
             log.info("EdDSA is registered as a JCE provider");
         }
-
-        return null;
-    }
-
-    public OrionStageCallResult onStart() {
         SshTransportConfig config  = orionConfiguration.getTransport().getSsh();
         if (!config.isEnabled()) {
             return null;
@@ -139,8 +122,4 @@ public class GitSshTransportService implements AutoCloseable, OrionApplicationSt
         return null;
     }
 
-    @Override
-    public void close() throws Exception {
-        sshd.close();
-    }
 }
