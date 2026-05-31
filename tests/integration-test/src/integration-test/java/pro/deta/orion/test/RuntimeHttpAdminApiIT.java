@@ -51,15 +51,6 @@ class RuntimeHttpAdminApiIT {
             assertThat(routeWithPattern(routeTable, "/api/admin/lifecycle/transports").get("authorization").asText())
                     .isEqualTo("application-admin");
 
-            RuntimeHttpTestSupport.HttpResponse lifecycleState = RuntimeHttpTestSupport.request(
-                    "GET",
-                    orion.httpUrl("/api/admin/lifecycle/transports"),
-                    TestBearerTokens.bearer(token));
-            assertThat(lifecycleState.status()).isEqualTo(HttpURLConnection.HTTP_OK);
-            assertThat(lifecycleState.contentType()).startsWith("text/plain");
-            assertThat(lifecycleState.body()).contains("transports: DISABLED (state=NEW)");
-            assertThat(lifecycleState.body()).contains("git-native: DISABLED (state=NEW)");
-
             RuntimeHttpTestSupport.HttpResponse wrongMethod = RuntimeHttpTestSupport.request(
                     "PUT",
                     orion.httpUrl("/api/admin/acl"),
@@ -78,6 +69,38 @@ class RuntimeHttpAdminApiIT {
                     orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer("invalid-token"));
             assertThat(invalidToken.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
+        }
+    }
+
+    @Test
+    void adminApiRemainsAccessibleAndReportsDisabledWhenTransportsAreNotConfigured() throws Exception {
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
+                RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion")))) {
+            String token = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"),
+                    600);
+
+            RuntimeHttpTestSupport.HttpResponse lifecycleState = RuntimeHttpTestSupport.request(
+                    "GET",
+                    orion.httpUrl("/api/admin/lifecycle/transports"),
+                    TestBearerTokens.bearer(token));
+            assertThat(lifecycleState.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+            assertThat(lifecycleState.contentType()).startsWith("text/plain");
+            assertThat(lifecycleState.body()).contains("transports: DISABLED (state=NEW)");
+            assertThat(lifecycleState.body()).contains("git-native: DISABLED (state=NEW)");
+
+            RuntimeHttpTestSupport.HttpResponse acl = RuntimeHttpTestSupport.request(
+                    "GET",
+                    orion.httpUrl("/api/admin/acl"),
+                    TestBearerTokens.bearer(token));
+            assertThat(acl.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+
+            RuntimeHttpTestSupport.HttpResponse routes = RuntimeHttpTestSupport.request(
+                    "GET",
+                    orion.httpUrl("/api/admin/routes"),
+                    TestBearerTokens.bearer(token));
+            assertThat(routes.status()).isEqualTo(HttpURLConnection.HTTP_OK);
         }
     }
 
