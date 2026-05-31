@@ -24,6 +24,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.KeyStore;
 import java.util.EnumSet;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -168,15 +169,25 @@ public class JettyHTTPServer {
     }
 
     public OrionStageCallResult onStop() {
+        Server server = jettyServer.getAndSet(null);
+        if (server == null) {
+            return null;
+        }
         try {
-            Server server = jettyServer.get();
-            if (server == null) {
-                return null;
-            }
             server.stop();
-            server.destroy();
+        } catch (TimeoutException e) {
+            log.warn("Jetty graceful shutdown timed out after {} ms; destroying server", STOP_TIMEOUT_MILLIS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while stopping Jetty server; destroying server", e);
         } catch (Exception e) {
             log.error("Failed to stop Jetty server", e);
+        } finally {
+            try {
+                server.destroy();
+            } catch (Exception e) {
+                log.warn("Failed to destroy Jetty server", e);
+            }
         }
         return null;
     }
