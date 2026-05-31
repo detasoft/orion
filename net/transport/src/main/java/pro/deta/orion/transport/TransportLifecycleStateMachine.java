@@ -14,6 +14,8 @@ import pro.deta.orion.lifecycle.state.StateTransitionEvent;
 import pro.deta.orion.lifecycle.state.Void;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
+import pro.deta.orion.transport.git.GitSshTransportStateMachine;
+import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
 
 import java.util.List;
 import java.util.Objects;
@@ -29,25 +31,38 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
     public static final State DISABLED = state("DISABLED");
 
     private final GitNativeTransportStateMachine gitNativeTransport;
+    private final GitSshTransportStateMachine gitSshTransport;
+    private final JettyHTTPServerStateMachine jettyHttpTransport;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startTransports);
     private final ActionBinding<Void> stop = ActionId.STOP.bind(this::stopTransports);
     private final StateMachineDefinition definition;
     private final StateMachine stateMachine;
 
     @Inject
-    public TransportLifecycleStateMachine(GitNativeTransportStateMachine gitNativeTransport) {
+    public TransportLifecycleStateMachine(
+            GitNativeTransportStateMachine gitNativeTransport,
+            GitSshTransportStateMachine gitSshTransport,
+            JettyHTTPServerStateMachine jettyHttpTransport) {
         this.gitNativeTransport = Objects.requireNonNull(gitNativeTransport, "gitNativeTransport");
+        this.gitSshTransport = Objects.requireNonNull(gitSshTransport, "gitSshTransport");
+        this.jettyHttpTransport = Objects.requireNonNull(jettyHttpTransport, "jettyHttpTransport");
         StateMachineDefinition.Builder builder = StateMachineDefinition.define()
                 .name("transports")
-                .computedState((physicalState, childStates) -> gitNativeTransport.isEnabled() ? physicalState : DISABLED);
-        builder.child("git-native", this.gitNativeTransport.stateMachine());
+                .computedState((physicalState, childStates) -> isAnyEnabled() ? physicalState : DISABLED);
+        builder.child("git-native", gitNativeTransport.stateMachine());
+        builder.child("git-ssh", gitSshTransport.stateMachine());
+        builder.child("http", jettyHttpTransport.stateMachine());
         definition = defineStateMachine(builder);
         stateMachine = definition.newStateMachine();
     }
 
+    private boolean isAnyEnabled() {
+        return gitNativeTransport.isEnabled() || gitSshTransport.isEnabled() || jettyHttpTransport.isEnabled();
+    }
+
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        if (!gitNativeTransport.isEnabled()) {
+        if (!isAnyEnabled()) {
             return;
         }
         registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, () -> {
@@ -63,30 +78,23 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
 
     private StateMachineDefinition defineStateMachine(StateMachineDefinition.Builder builder) {
         return builder
-                .from(NEW)
-                .on(start)
-                .to(RUNNING)
-                .failTo(ERR)
-
-                .from(NEW)
-                .on(stop)
-                .to(FIN)
-                .failTo(ERR)
-
-                .from(RUNNING)
-                .on(stop)
-                .to(FIN)
-                .failTo(ERR)
-
-                .from(ERR)
-                .on(stop)
-                .to(FIN)
-                .failTo(ERR)
+                .from(NEW).on(start).to(RUNNING).failTo(ERR)
+                .from(NEW).on(stop).to(FIN).failTo(ERR)
+                .from(RUNNING).on(stop).to(FIN).failTo(ERR)
+                .from(ERR).on(stop).to(FIN).failTo(ERR)
                 .build();
     }
 
     public GitNativeTransportStateMachine gitNativeTransport() {
         return gitNativeTransport;
+    }
+
+    public GitSshTransportStateMachine gitSshTransport() {
+        return gitSshTransport;
+    }
+
+    public JettyHTTPServerStateMachine jettyHttpTransport() {
+        return jettyHttpTransport;
     }
 
     public StateMachineDefinition definition() {
