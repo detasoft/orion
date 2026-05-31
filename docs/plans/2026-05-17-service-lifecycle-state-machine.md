@@ -33,8 +33,9 @@ The generic utility now lives in `core/lifecycle-state-machine` instead of
   propagation.
 
 `GitNativeTransportStateMachine` now models only the native Git transport's
-local `START` / `STOP` transitions. It is marked with `OrionLifecycleStateMachine`
-but is no longer an `OrionApplicationStageEventListener`.
+local `START` / `STOP` transitions. It is no longer an
+`OrionApplicationStageEventListener` and no marker interface is needed for the
+current runtime wiring.
 
 `TransportLifecycleStateMachine` is the temporary aggregate bridge from the
 application lifecycle to transport-local state machines. It explicitly wires the
@@ -42,16 +43,23 @@ native Git state machine as an always-present child. The child owns the native
 Git enabled check and lazily resolves `Provider<GitNativeTransportService>` only
 when an enabled `START` or `STOP` action needs the service. Both the child state
 machine and the low-level native Git service depend on `GitTransportConfig`
-instead of the full runtime configuration object. Dagger owns both
-`GitNativeTransportStateMachine` and `GitNativeTransportService`; the important
-boundary is that only `TransportLifecycleStateMachine` is registered as an
-application lifecycle listener. The aggregate owns the legacy
+instead of the full runtime configuration object. `net/transport` owns the
+transport composition layer: it includes the HTTP Dagger module, registers
+enabled transport services, publishes the aggregate `StateMachine`, and keeps
+`core/bootstrap` dependent only on this transport composition module. Dagger
+owns both `GitNativeTransportStateMachine` and `GitNativeTransportService`; the
+important boundary is that only `TransportLifecycleStateMachine` is registered
+as an application lifecycle listener. The aggregate owns the legacy
 `GIT_TRANSPORT_START` and `GIT_TRANSPORT_STOP` task registration but asks the
-child whether native Git is enabled before registering those tasks.
-`OrionRuntimeModule` registers only this aggregate bridge; it no longer collects
-a Dagger set of abstract state machines. `OrionGitTransportModule` was removed
+child whether native Git is enabled before registering those tasks. The runtime
+module no longer imports concrete transport services and no longer collects a
+Dagger set of abstract state machines. `OrionGitTransportModule` was removed
 because no extra multibinding module is needed for native Git state-machine
 wiring.
+
+`StateMachine.describeStatus()` now renders a compact ASCII tree of the
+aggregate and child states. It uses computed state when present and includes the
+physical state in parentheses, for example `DISABLED (state=NEW)`.
 
 `GitNativeTransportService` is no longer registered directly as an
 `OrionApplicationStageEventListener`; it is the lower-level socket endpoint
