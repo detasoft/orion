@@ -58,6 +58,12 @@ public class OrionHttpModule {
 
     @Provides
     @IntoSet
+    static OrionHttpRoute lifecycleStateRoute(OrionAdminLifecycleStateRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute shutdownRoute(OrionAdminShutdownRoute route) {
         return route;
     }

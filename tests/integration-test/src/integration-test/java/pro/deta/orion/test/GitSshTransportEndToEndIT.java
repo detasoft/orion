@@ -368,6 +368,20 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void rootCanReadTransportLifecycleStateOverSsh() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
+                .valueOrFailure("Server identity key should be available after startup");
+
+        String state = executeStateOverSsh(startedOrion, serverIdentityKey);
+
+        assertThat(state).contains("transports: DISABLED (state=NEW)");
+        assertThat(state).contains("git-native: DISABLED (state=NEW)");
+    }
+
+    @Test
     void shutdownCommandStopsServerPromptlyOverSsh() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
@@ -496,6 +510,14 @@ class GitSshTransportEndToEndIT {
     }
 
     private static String issueTokenOverSsh(StartedOrion orion, KeyPair keyPair, long expiresInSeconds) throws Exception {
+        return executeRootCommandOverSsh(orion, keyPair, "issue-token " + expiresInSeconds).trim();
+    }
+
+    private static String executeStateOverSsh(StartedOrion orion, KeyPair keyPair) throws Exception {
+        return executeRootCommandOverSsh(orion, keyPair, "state");
+    }
+
+    private static String executeRootCommandOverSsh(StartedOrion orion, KeyPair keyPair, String command) throws Exception {
         SshClient client = SshClient.setUpDefaultClient();
         client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
         client.start();
@@ -510,17 +532,17 @@ class GitSshTransportEndToEndIT {
 
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             ByteArrayOutputStream error = new ByteArrayOutputStream();
-            try (ClientChannel channel = session.createExecChannel("issue-token " + expiresInSeconds)) {
+            try (ClientChannel channel = session.createExecChannel(command)) {
                 channel.setOut(output);
                 channel.setErr(error);
                 channel.open().verify(10, TimeUnit.SECONDS);
                 channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(10));
 
                 assertThat(channel.getExitStatus())
-                        .as("issue-token stderr: %s", new String(error.toByteArray(), StandardCharsets.UTF_8))
+                        .as(command + " stderr: %s", new String(error.toByteArray(), StandardCharsets.UTF_8))
                         .isEqualTo(0);
             }
-            return new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
         } finally {
             client.stop();
         }

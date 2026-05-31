@@ -48,6 +48,17 @@ class RuntimeHttpAdminApiIT {
                     .isEqualTo("[\"GET\",\"POST\"]");
             assertThat(routeWithPattern(routeTable, "/api/admin/routes").get("authorization").asText())
                     .isEqualTo("application-admin");
+            assertThat(routeWithPattern(routeTable, "/api/admin/lifecycle/transports").get("authorization").asText())
+                    .isEqualTo("application-admin");
+
+            RuntimeHttpTestSupport.HttpResponse lifecycleState = RuntimeHttpTestSupport.request(
+                    "GET",
+                    orion.httpUrl("/api/admin/lifecycle/transports"),
+                    TestBearerTokens.bearer(token));
+            assertThat(lifecycleState.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+            assertThat(lifecycleState.contentType()).startsWith("text/plain");
+            assertThat(lifecycleState.body()).contains("transports: DISABLED (state=NEW)");
+            assertThat(lifecycleState.body()).contains("git-native: DISABLED (state=NEW)");
 
             RuntimeHttpTestSupport.HttpResponse wrongMethod = RuntimeHttpTestSupport.request(
                     "PUT",

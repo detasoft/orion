@@ -32,6 +32,11 @@ import pro.deta.orion.git.common.GitOperationException;
 import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitUploadRequest;
+import pro.deta.orion.lifecycle.state.ActionBinding;
+import pro.deta.orion.lifecycle.state.ActionId;
+import pro.deta.orion.lifecycle.state.StateMachine;
+import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.lifecycle.state.Void;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
@@ -74,6 +79,9 @@ class OrionHttpRouteServletTest {
             TEST
             -----END RSA PRIVATE KEY-----
             """;
+    private static final String LIFECYCLE_STATUS = """
+            transports: RUNNING
+              git-native: RUNNING""";
 
     @Test
     void createsManagedUser() throws Exception {
@@ -383,10 +391,12 @@ class OrionHttpRouteServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
         JsonNode routes = OBJECT_MAPPER.readTree(response.body.toString()).get("routes");
-        assertThat(routes).hasSize(11);
+        assertThat(routes).hasSize(12);
         assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
+        assertThat(routeWithPattern(routes, "/api/admin/lifecycle/transports").get("methods").toString()).isEqualTo("[\"GET\"]");
+        assertThat(routeWithPattern(routes, "/api/admin/lifecycle/transports").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, "/api/admin/shutdown").get("methods").toString()).isEqualTo("[\"POST\"]");
@@ -400,6 +410,22 @@ class OrionHttpRouteServletTest {
         assertThat(routeWithPattern(routes, "/api/admin/token").get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("handler").asText())
                 .isEqualTo("OrionAdminRoutesRoute");
+    }
+
+    @Test
+    void returnsTransportLifecycleStateAsPlainText() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", "/api/admin/lifecycle/transports", null, ""),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType).isEqualTo("text/plain");
+        assertThat(response.body.toString()).isEqualTo(LIFECYCLE_STATUS);
     }
 
     @Test
@@ -462,6 +488,21 @@ class OrionHttpRouteServletTest {
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
                 request("GET", "/api/admin/routes", null, "", regularSecurityContext()),
+                response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+        assertThat(response.body.toString()).isEmpty();
+    }
+
+    @Test
+    void rejectsTransportLifecycleStateRequestWithoutAdminGrant() throws Exception {
+        RecordingAccessControlService accessControlService = new RecordingAccessControlService();
+        RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
+        OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
+
+        ResponseRecorder response = new ResponseRecorder();
+        servlet.service(
+                request("GET", "/api/admin/lifecycle/transports", null, "", regularSecurityContext()),
                 response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
@@ -646,12 +687,42 @@ class OrionHttpRouteServletTest {
         routes.add(new OrionAdminCreateRepositoryRoute(gitRepositoryProvider, OBJECT_MAPPER));
         routes.add(new OrionAdminIssueTokenRoute(accessControlService, OBJECT_MAPPER));
         routes.add(new OrionAdminAccessControlRoute(accessControlService));
+        routes.add(new OrionAdminLifecycleStateRoute(lifecycleStateMachine()));
         routes.add(new OrionAdminRoutesRoute(() -> new OrionHttpRouteRegistry(routes)));
         routes.add(new OrionAdminShutdownRoute(eventManager));
         routes.add(new OrionAdminAcmeCertificateRoute(acmeCertificateService, OBJECT_MAPPER));
         routes.add(new OrionConfigurationSchemaRoute(new OrionConfigurationJsonSchema()));
         routes.add(new OrionAccessControlSchemaRoute());
         return new OrionHttpRouteServlet(new OrionHttpRouteRegistry(routes), new OrionHttpResponseWriter(OBJECT_MAPPER));
+    }
+
+    private static StateMachine lifecycleStateMachine() {
+        StateMachineDefinition.State running = StateMachineDefinition.state("RUNNING");
+        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
+        });
+        StateMachine child = StateMachineDefinition.define()
+                .name("git-native")
+                .from(StateMachineDefinition.NEW)
+                .on(childStart)
+                .to(running)
+                .failTo(StateMachineDefinition.ERR)
+                .build()
+                .newStateMachine();
+        child.execute(ActionId.START, Void.EMPTY);
+
+        ActionBinding<Void> parentStart = ActionBinding.of(ActionId.START, ignored -> {
+        });
+        StateMachine parent = StateMachineDefinition.define()
+                .name("transports")
+                .child("git-native", child)
+                .from(StateMachineDefinition.NEW)
+                .on(parentStart)
+                .to(running)
+                .failTo(StateMachineDefinition.ERR)
+                .build()
+                .newStateMachine();
+        parent.execute(ActionId.START, Void.EMPTY);
+        return parent;
     }
 
     private static JsonNode routeWithPattern(JsonNode routes, String pattern) {

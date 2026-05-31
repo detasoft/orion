@@ -11,15 +11,18 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.stream.*;
 
+import javax.inject.Named;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
@@ -32,16 +35,32 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Slf4j
-@RequiredArgsConstructor(onConstructor_ = @Inject)
 public class SshCommandFactory implements CommandFactory {
     public static final String SET_KEY = "set-key";
     public static final String SHUTDOWN = "shutdown";
     public static final String ISSUE_TOKEN = "issue-token";
     public static final String TOKEN = "token";
+    public static final String STATE = "state";
+    public static final String STATUS = "status";
     private final GitInternalService gitInternalService;
     private final OrionExecutor orionExecutor;
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
+    private final StateMachine transportStateMachine;
+
+    @Inject
+    public SshCommandFactory(
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor,
+            OrionProvider orionProvider,
+            OrionAccessControlService accessControlService,
+            @Named("transport") StateMachine transportStateMachine) {
+        this.gitInternalService = gitInternalService;
+        this.orionExecutor = orionExecutor;
+        this.orionProvider = orionProvider;
+        this.accessControlService = accessControlService;
+        this.transportStateMachine = transportStateMachine;
+    }
 
     @Override
     public Command createCommand(ChannelSession channelSession, String commandLine) throws IOException {
@@ -91,6 +110,8 @@ public class SshCommandFactory implements CommandFactory {
                         orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
                     } else if (ISSUE_TOKEN.equalsIgnoreCase(command) || TOKEN.equalsIgnoreCase(command)) {
                         issueToken(securityContext, arguments);
+                    } else if (STATE.equalsIgnoreCase(command) || STATUS.equalsIgnoreCase(command)) {
+                        writeLifecycleStatus(securityContext);
                     } else {
                         log.warn("SSH Transport Unknown command: {}", commandLine);
                         outputStream.write("Unknown command".getBytes(StandardCharsets.UTF_8));
@@ -149,6 +170,15 @@ public class SshCommandFactory implements CommandFactory {
                 case TokenIssueResult.Failure(var reason, var throwable) ->
                         throw new IllegalStateException(reason, throwable);
             }
+        }
+
+        private void writeLifecycleStatus(SecurityContext securityContext) throws IOException, OrionSecurityException {
+            accessEnforcer().require(
+                    securityContext,
+                    ApplicationAdminResource.applicationAdmin(),
+                    ApplicationAccessRules.admin());
+            outputStream.write((transportStateMachine.describeStatus() + System.lineSeparator())
+                    .getBytes(StandardCharsets.UTF_8));
         }
     }
 
