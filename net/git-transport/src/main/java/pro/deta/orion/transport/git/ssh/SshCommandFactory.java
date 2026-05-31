@@ -32,12 +32,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Slf4j
 public class SshCommandFactory implements CommandFactory {
+    private static final int SET_KEY_READ_TIMEOUT_SECONDS = 30;
+
     public static final String SET_KEY = "set-key";
     public static final String SHUTDOWN = "shutdown";
     public static final String ISSUE_TOKEN = "issue-token";
@@ -94,11 +98,19 @@ public class SshCommandFactory implements CommandFactory {
                             try {
                                 String username = channel.getSession().getUsername();
                                 StringBuilder publicKeyBuilder = new StringBuilder();
+                                Thread readingThread = Thread.currentThread();
+                                ScheduledFuture<?> watchdog = orionExecutor.schedule(
+                                        readingThread::interrupt,
+                                        SET_KEY_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                                 try (ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream)) {
                                     // for US_ASCII 1-byte encoding we can decode by parts.
                                     while (readableByteChannel.read(bb.rewind()) >= 0) {
                                         publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
                                     }
+                                } finally {
+                                    watchdog.cancel(false);
+                                    // clear interrupt flag set by watchdog before thread returns to pool
+                                    Thread.interrupted();
                                 }
                                 String publicKey = publicKeyBuilder.toString();
                                 orionExecutor.submit(() -> accessControlService.addKeyToUser(username, publicKey));
