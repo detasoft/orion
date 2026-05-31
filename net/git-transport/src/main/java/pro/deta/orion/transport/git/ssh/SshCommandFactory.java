@@ -91,10 +91,11 @@ public class SshCommandFactory implements CommandFactory {
                         try {
                             String username = channel.getSession().getUsername();
                             StringBuilder publicKeyBuilder = new StringBuilder();
-                            ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream);
-                            // for US_ASCII 1-byte encoding we can decode by parts.
-                            while (readableByteChannel.read(bb.rewind()) >= 0) {
-                                publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
+                            try (ReadableByteChannel readableByteChannel = Channels.newChannel(inputStream)) {
+                                // for US_ASCII 1-byte encoding we can decode by parts.
+                                while (readableByteChannel.read(bb.rewind()) >= 0) {
+                                    publicKeyBuilder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
+                                }
                             }
                             String publicKey = publicKeyBuilder.toString();
                             orionExecutor.submit(() -> accessControlService.addKeyToUser(username, publicKey));
