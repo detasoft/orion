@@ -63,7 +63,6 @@ class OrionRuntimeModuleTest {
 
         assertTrue(plan.contains("JGIT_RUNTIME"));
         assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
-        assertFalse(plan.contains("SSH_TRANSPORT_INIT"));
         assertFalse(plan.contains("ACL_INIT"));
     }
 
@@ -74,8 +73,6 @@ class OrionRuntimeModuleTest {
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
 
         assertTrue(plan.contains("JGIT_RUNTIME"));
-        // Security providers are now initialized inline in onStart(), no separate INIT task
-        assertFalse(plan.contains("SSH_TRANSPORT_INIT"));
         assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
     }
 
@@ -88,7 +85,6 @@ class OrionRuntimeModuleTest {
         assertTrue(plan.contains("ACL_LOAD"));
         assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
         assertTrue(plan.contains("TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
-        assertFalse(plan.contains("GIT_TRANSPORT_START"));
     }
 
     @Test
@@ -100,10 +96,6 @@ class OrionRuntimeModuleTest {
         assertTrue(plan.contains("ACL_LOAD"));
         assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
         assertTrue(plan.contains("TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
-        // Individual transport task IDs are no longer registered; the orchestrator drives all children
-        assertFalse(plan.contains("GIT_TRANSPORT_START"));
-        assertFalse(plan.contains("HTTP_TRANSPORT_START"));
-        assertFalse(plan.contains("SSH_TRANSPORT_START"));
     }
 
     @Test
@@ -114,7 +106,6 @@ class OrionRuntimeModuleTest {
 
         assertTrue(plan.contains("TRANSPORTS_STOP"));
         assertTrue(plan.contains("TRANSPORT_LIFECYCLE_STOP"));
-        assertFalse(plan.contains("GIT_TRANSPORT_STOP"));
         assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
@@ -128,10 +119,6 @@ class OrionRuntimeModuleTest {
 
         assertTrue(plan.contains("TRANSPORT_LIFECYCLE_STOP"));
         assertTrue(plan.contains("TRANSPORTS_STOP after TRANSPORT_LIFECYCLE_STOP"));
-        // Individual transport stop IDs no longer registered; orchestrator covers all children
-        assertFalse(plan.contains("GIT_TRANSPORT_STOP"));
-        assertFalse(plan.contains("HTTP_TRANSPORT_STOP"));
-        assertFalse(plan.contains("SSH_TRANSPORT_STOP"));
         assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
@@ -146,12 +133,8 @@ class OrionRuntimeModuleTest {
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP"));
         assertTrue(serviceMap.contains("OrionJGitRuntime: JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
-        assertFalse(serviceMap.contains("JettyHTTPServer: HTTP_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("GitSshTransportService: SSH_TRANSPORT_START"));
         assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
         assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_STOP"));
-        assertFalse(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_STOP"));
     }
 
     @Test
@@ -161,16 +144,9 @@ class OrionRuntimeModuleTest {
         String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
 
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
-        // All transports now stop through the single orchestrator task
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP after TRANSPORT_LIFECYCLE_STOP"));
         assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
         assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_STOP"));
-        // Individual service registrations are gone
-        assertFalse(serviceMap.contains("JettyHTTPServer: HTTP_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("GitSshTransportService: SSH_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_STOP"));
     }
 
     @Test

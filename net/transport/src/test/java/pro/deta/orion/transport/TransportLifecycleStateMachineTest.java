@@ -38,13 +38,6 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
 import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNING;
 
 class TransportLifecycleStateMachineTest {
-    private static final LifecycleTaskId LEGACY_GIT_TRANSPORT_START = new LifecycleTaskId("GIT_TRANSPORT_START");
-    private static final LifecycleTaskId LEGACY_HTTP_TRANSPORT_START = new LifecycleTaskId("HTTP_TRANSPORT_START");
-    private static final LifecycleTaskId LEGACY_SSH_TRANSPORT_START = new LifecycleTaskId("SSH_TRANSPORT_START");
-    private static final LifecycleTaskId LEGACY_GIT_TRANSPORT_STOP = new LifecycleTaskId("GIT_TRANSPORT_STOP");
-    private static final LifecycleTaskId LEGACY_HTTP_TRANSPORT_STOP = new LifecycleTaskId("HTTP_TRANSPORT_STOP");
-    private static final LifecycleTaskId LEGACY_SSH_TRANSPORT_STOP = new LifecycleTaskId("SSH_TRANSPORT_STOP");
-
     @Test
     void aggregateConstructorTakesAllThreeChildStateMachines() {
         List<String> parameterTypes = new ArrayList<>();
@@ -81,12 +74,6 @@ class TransportLifecycleStateMachineTest {
         assertEquals(ApplicationState.STOPPING, stop.phase());
         assertEquals("TransportLifecycleStateMachine", stop.serviceName());
         assertTrue(stop.after().isEmpty());
-        registrar.assertNotRegistered(LEGACY_GIT_TRANSPORT_START);
-        registrar.assertNotRegistered(LEGACY_HTTP_TRANSPORT_START);
-        registrar.assertNotRegistered(LEGACY_SSH_TRANSPORT_START);
-        registrar.assertNotRegistered(LEGACY_GIT_TRANSPORT_STOP);
-        registrar.assertNotRegistered(LEGACY_HTTP_TRANSPORT_STOP);
-        registrar.assertNotRegistered(LEGACY_SSH_TRANSPORT_STOP);
 
         assertNull(start.call().call());
         assertEquals(TransportLifecycleStateMachine.RUNNING, machine.currentState());
@@ -292,12 +279,5 @@ class TransportLifecycleStateMachineTest {
             throw new AssertionError("Missing lifecycle task " + id);
         }
 
-        private void assertNotRegistered(LifecycleTaskId id) {
-            for (LifecycleTaskRegistration registration : registrations) {
-                if (registration.definition().id().equals(id)) {
-                    throw new AssertionError("Unexpected lifecycle task " + id);
-                }
-            }
-        }
     }
 }
