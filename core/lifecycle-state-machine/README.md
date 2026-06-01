@@ -218,7 +218,7 @@ aggregate.start();
 The parent reads direct child status from the child machines:
 
 ```java
-parent.childStates().get("storage").state(); // NEW
+parent.childStatuses().get("storage").state(); // NEW
 ```
 
 `ChildPropagationMode.SEQUENTIAL` runs children in registration order.
@@ -259,7 +259,7 @@ not replace the physical state used to validate transitions. This keeps command
 availability deterministic while still giving the parent a place to publish
 aggregate status.
 
-`childStates()` exposes direct children as structured status nodes, so every
+`childStatuses()` exposes direct children as structured status nodes, so every
 child entry has both `state` and `computedState`. `status()` returns the same
 distinction for the current machine and its recursive child tree.
 `describeStatus()` is the human-readable rendering of that structured status.

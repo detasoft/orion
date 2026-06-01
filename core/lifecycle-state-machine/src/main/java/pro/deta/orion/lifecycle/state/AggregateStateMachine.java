@@ -30,8 +30,8 @@ public final class AggregateStateMachine {
         return stateMachine.computedState();
     }
 
-    public Map<String, StateMachineStatus> childStates() {
-        return stateMachine.childStates();
+    public Map<String, StateMachineStatus> childStatuses() {
+        return stateMachine.childStatuses();
     }
 
     public Set<ActionId> availableActions() {

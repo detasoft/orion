@@ -90,7 +90,7 @@ class TransportLifecycleStateMachineTest {
         machine.registerToStage(registrar);
         registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START).call().call();
 
-        Map<String, ?> children = machine.stateMachine().childStates();
+        Map<String, ?> children = machine.stateMachine().childStatuses();
         assertTrue(children.containsKey("git-native"));
         assertTrue(children.containsKey("git-ssh"));
         assertTrue(children.containsKey("http"));
@@ -118,7 +118,7 @@ class TransportLifecycleStateMachineTest {
         assertFalse(registrar.registrations.isEmpty());
         assertFalse(serviceResolved.get());
         assertEquals(NEW, machine.currentState());
-        Map<String, ?> children = machine.stateMachine().childStates();
+        Map<String, ?> children = machine.stateMachine().childStatuses();
         assertTrue(children.containsKey("git-native"));
         assertTrue(children.containsKey("git-ssh"));
         assertTrue(children.containsKey("http"));

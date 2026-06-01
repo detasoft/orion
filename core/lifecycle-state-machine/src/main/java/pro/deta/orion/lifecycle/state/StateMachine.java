@@ -61,7 +61,7 @@ public final class StateMachine {
         return resolveComputedState();
     }
 
-    public Map<String, StateMachineStatus> childStates() {
+    public Map<String, StateMachineStatus> childStatuses() {
         Map<String, StateMachineStatus> statuses = new LinkedHashMap<>();
         for (Map.Entry<String, StateMachine> child : children.entrySet()) {
             statuses.put(child.getKey(), child.getValue().status(child.getKey()));
@@ -90,7 +90,7 @@ public final class StateMachine {
                 requireName(name),
                 currentState,
                 computedState(),
-                childStates(),
+                childStatuses(),
                 definition.availableActions(currentState),
                 definition.isTerminalState(currentState));
     }
@@ -107,21 +107,15 @@ public final class StateMachine {
 
     public String describeStatus() {
         StringBuilder builder = new StringBuilder();
-        describeStatusInto(builder, "", name());
+        describeStatusInto(builder, "", status());
         return builder.toString();
     }
 
-    public String describeStatus(String name) {
-        StringBuilder builder = new StringBuilder();
-        describeStatusInto(builder, "", requireName(name));
-        return builder.toString();
-    }
-
-    private void describeStatusInto(StringBuilder builder, String indent, String name) {
-        StateMachineDefinition.State state = currentState;
-        StateMachineDefinition.State status = computedState();
-        builder.append(indent).append(name).append(": ").append(status);
-        if (!status.equals(state)) {
+    private void describeStatusInto(StringBuilder builder, String indent, StateMachineStatus status) {
+        StateMachineDefinition.State state = status.state();
+        StateMachineDefinition.State computedState = status.computedState();
+        builder.append(indent).append(status.name()).append(": ").append(computedState);
+        if (!computedState.equals(state)) {
             builder.append(" (state=").append(state).append(")");
         }
         StateTransitionResult lastResult = lastTransitionResult;
@@ -137,7 +131,10 @@ public final class StateMachine {
         }
         for (Map.Entry<String, StateMachine> child : children.entrySet()) {
             builder.append(System.lineSeparator());
-            child.getValue().describeStatusInto(builder, indent + "  ", child.getKey());
+            StateMachineStatus childStatus = Objects.requireNonNull(
+                    status.children().get(child.getKey()),
+                    "child status: " + child.getKey());
+            child.getValue().describeStatusInto(builder, indent + "  ", childStatus);
         }
     }
 

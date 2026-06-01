@@ -118,7 +118,7 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
         if (result.failed()) {
             return result.defaultState();
         }
-        for (StateMachineStatus childState : aggregateStateMachine.childStates().values()) {
+        for (StateMachineStatus childState : aggregateStateMachine.childStatuses().values()) {
             if (ERR.equals(childState.state())) {
                 return ERR;
             }

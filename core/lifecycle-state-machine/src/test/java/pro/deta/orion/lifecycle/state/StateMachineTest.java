@@ -83,11 +83,11 @@ class StateMachineTest {
                         "availableActions",
                         "terminal");
         assertThat(Arrays.stream(StateMachine.class.getDeclaredMethods()).map(Method::getName))
-                .contains("childStates")
-                .doesNotContain("childPhysicalStates");
+                .contains("childStatuses")
+                .doesNotContain("childStates", "childPhysicalStates");
         assertThat(Arrays.stream(AggregateStateMachine.class.getDeclaredMethods()).map(Method::getName))
-                .contains("childStates")
-                .doesNotContain("childPhysicalStates");
+                .contains("childStatuses")
+                .doesNotContain("childStates", "childPhysicalStates");
     }
 
     @Test
@@ -511,7 +511,7 @@ class StateMachineTest {
                     .build()
                     .newStateMachine();
 
-            assertThat(states(parent.childStates()))
+            assertThat(states(parent.childStatuses()))
                     .containsEntry("first", NEW)
                     .containsEntry("second", NEW);
             assertThat(parent.computedState()).isSameAs(NEW);
@@ -521,7 +521,7 @@ class StateMachineTest {
             assertThat(firstChild.currentState()).isEqualTo(RUNNING);
             assertThat(secondChild.currentState()).isEqualTo(RUNNING);
             assertThat(parent.currentState()).isEqualTo(RUNNING);
-            assertThat(states(parent.childStates()))
+            assertThat(states(parent.childStatuses()))
                     .containsEntry("first", RUNNING)
                     .containsEntry("second", RUNNING);
             assertThat(parent.computedState()).isEqualTo(childrenRunning);
@@ -573,7 +573,7 @@ class StateMachineTest {
         });
         assertThat(firstChild.currentState()).isEqualTo(RUNNING);
         assertThat(secondChild.currentState()).isEqualTo(RUNNING);
-        assertThat(states(parent.childStates()))
+        assertThat(states(parent.childStatuses()))
                 .containsEntry("first", RUNNING)
                 .containsEntry("second", RUNNING);
     }
@@ -610,10 +610,10 @@ class StateMachineTest {
         assertThat(secondLeaf.currentState()).isSameAs(RUNNING);
         assertThat(child.currentState()).isSameAs(RUNNING);
         assertThat(parent.currentState()).isSameAs(RUNNING);
-        assertThat(states(child.childStates()))
+        assertThat(states(child.childStatuses()))
                 .containsEntry("first", RUNNING)
                 .containsEntry("second", RUNNING);
-        assertThat(states(parent.childStates())).containsEntry("child", RUNNING);
+        assertThat(states(parent.childStatuses())).containsEntry("child", RUNNING);
         assertThat(results).singleElement().satisfies(parentResult -> {
             StateTransitionResult childResult = (StateTransitionResult) ((List<?>) parentResult.actionResult()).getFirst();
             assertThat(childResult.to()).isSameAs(RUNNING);
@@ -657,10 +657,10 @@ class StateMachineTest {
             assertThat(secondLeaf.currentState()).isSameAs(RUNNING);
             assertThat(child.currentState()).isSameAs(RUNNING);
             assertThat(parent.currentState()).isSameAs(RUNNING);
-            assertThat(states(child.childStates()))
+            assertThat(states(child.childStatuses()))
                     .containsEntry("first", RUNNING)
                     .containsEntry("second", RUNNING);
-            assertThat(states(parent.childStates())).containsEntry("child", RUNNING);
+            assertThat(states(parent.childStatuses())).containsEntry("child", RUNNING);
             assertThat(results).singleElement().satisfies(parentResult -> {
                 StateTransitionResult childResult =
                         (StateTransitionResult) ((List<?>) parentResult.actionResult()).getFirst();
@@ -728,11 +728,11 @@ class StateMachineTest {
         assertThat(childStatus.name()).isEqualTo("child");
         assertThat(childStatus.state()).isSameAs(NEW);
         assertThat(childStatus.computedState()).isSameAs(childComputed);
-        assertThat(parent.childStates()).containsOnlyKeys("child");
-        StateMachineStatus directChildStatus = parent.childStates().get("child");
+        assertThat(parent.childStatuses()).containsOnlyKeys("child");
+        StateMachineStatus directChildStatus = parent.childStatuses().get("child");
         assertThat(directChildStatus.state()).isSameAs(NEW);
         assertThat(directChildStatus.computedState()).isSameAs(childComputed);
-        assertThat(parent.childStates().get("child").computedState()).isSameAs(childComputed);
+        assertThat(parent.childStatuses().get("child").computedState()).isSameAs(childComputed);
 
     }
 
@@ -771,7 +771,7 @@ class StateMachineTest {
             assertThat(secondChild.currentState()).isEqualTo(ERR);
             assertThat(thirdChild.currentState()).isEqualTo(RUNNING);
             assertThat(parent.currentState()).isEqualTo(ERR);
-            assertThat(states(parent.childStates()))
+            assertThat(states(parent.childStatuses()))
                     .containsEntry("first", RUNNING)
                     .containsEntry("second", ERR)
                     .containsEntry("third", RUNNING);
@@ -812,7 +812,7 @@ class StateMachineTest {
         assertThat(secondChild.currentState()).isEqualTo(ERR);
         assertThat(thirdChild.currentState()).isEqualTo(RUNNING);
         assertThat(parent.currentState()).isEqualTo(ERR);
-        assertThat(states(parent.childStates()))
+        assertThat(states(parent.childStatuses()))
                 .containsEntry("first", RUNNING)
                 .containsEntry("second", ERR)
                 .containsEntry("third", RUNNING);
@@ -1735,8 +1735,8 @@ class StateMachineTest {
 
     private static Map<String, State> states(Map<String, StateMachineStatus> childStates) {
         Map<String, State> result = new LinkedHashMap<>();
-        for (Map.Entry<String, StateMachineStatus> childState : childStates.entrySet()) {
-            result.put(childState.getKey(), childState.getValue().state());
+        for (Map.Entry<String, StateMachineStatus> childStatus : childStates.entrySet()) {
+            result.put(childStatus.getKey(), childStatus.getValue().state());
         }
         return result;
     }
