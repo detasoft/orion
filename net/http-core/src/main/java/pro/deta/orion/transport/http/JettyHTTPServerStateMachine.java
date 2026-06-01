@@ -9,6 +9,7 @@ import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
+import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.state.Void;
 
 import javax.inject.Provider;
@@ -45,10 +46,12 @@ public final class JettyHTTPServerStateMachine {
                 .build();
     }
 
+    @TestOnly
     public ActionBinding<Void> startAction() {
         return start;
     }
 
+    @TestOnly
     public ActionBinding<Void> stopAction() {
         return stop;
     }
@@ -57,14 +60,17 @@ public final class JettyHTTPServerStateMachine {
         return stateMachine;
     }
 
+    @TestOnly
     public State currentState() {
         return stateMachine.currentState();
     }
 
+    @TestOnly
     public StateTransitionResult start() {
         return stateMachine.execute(start, Void.EMPTY);
     }
 
+    @TestOnly
     public StateTransitionResult stop() {
         return stateMachine.execute(stop, Void.EMPTY);
     }

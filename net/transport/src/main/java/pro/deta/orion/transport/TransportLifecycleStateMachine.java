@@ -11,6 +11,7 @@ import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
+import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportStateMachine;
@@ -75,18 +76,22 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
                 .build();
     }
 
+    @TestOnly
     public GitNativeTransportStateMachine gitNativeTransport() {
         return gitNativeTransport;
     }
 
+    @TestOnly
     public GitSshTransportStateMachine gitSshTransport() {
         return gitSshTransport;
     }
 
+    @TestOnly
     public JettyHTTPServerStateMachine jettyHttpTransport() {
         return jettyHttpTransport;
     }
 
+    @TestOnly
     public StateMachineDefinition definition() {
         return definition;
     }
@@ -95,6 +100,7 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
         return aggregateStateMachine.stateMachine();
     }
 
+    @TestOnly
     public State currentState() {
         return aggregateStateMachine.currentState();
     }

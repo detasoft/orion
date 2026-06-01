@@ -11,6 +11,7 @@ import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.StateMachineEventSubscriber;
 import pro.deta.orion.lifecycle.state.StateMachineSnapshot;
 import pro.deta.orion.lifecycle.state.StateMachineSubscription;
+import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.state.Void;
 
 import javax.inject.Provider;
@@ -60,18 +61,22 @@ public final class GitNativeTransportStateMachine {
                 .build();
     }
 
+    @TestOnly
     public StateMachineDefinition definition() {
         return definition;
     }
 
+    @TestOnly
     public GitNativeTransportService service() {
         return resolveService();
     }
 
+    @TestOnly
     public ActionBinding<Void> startAction() {
         return start;
     }
 
+    @TestOnly
     public ActionBinding<Void> stopAction() {
         return stop;
     }
@@ -80,26 +85,32 @@ public final class GitNativeTransportStateMachine {
         return stateMachine;
     }
 
+    @TestOnly
     public State currentState() {
         return stateMachine.currentState();
     }
 
+    @TestOnly
     public StateMachineSnapshot snapshot() {
         return stateMachine.snapshot();
     }
 
+    @TestOnly
     public String describe() {
         return stateMachine.describe();
     }
 
+    @TestOnly
     public StateMachineSubscription subscribe(StateMachineEventSubscriber subscriber) {
         return stateMachine.subscribe(subscriber);
     }
 
+    @TestOnly
     public StateTransitionResult start() {
         return stateMachine.execute(start, Void.EMPTY);
     }
 
+    @TestOnly
     public StateTransitionResult stop() {
         return stateMachine.execute(stop, Void.EMPTY);
     }
