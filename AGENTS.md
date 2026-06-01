@@ -6,6 +6,7 @@
 - Use `mvn verify -Pdev` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
 - The project allows running `mvn verify` from the repository root without asking for additional confirmation when it is explicitly needed.
 - The project allows running `mvn test` with any Maven parameters without asking for additional confirmation.
+- Always run test commands outside the sandbox, because local tests may need to bind loopback sockets and sandboxed runs can fail with `Operation not permitted`.
 - When requesting approval for Maven commands, put the Maven phase immediately after `mvn`, then pass the remaining arguments, for example `mvn test -q -pl ...`.
 - After committing, run the Maven test command. If it fails and the failure is fixed, create the follow-up fix commit with the exact same commit message as the original commit so the commits can be squashed later.
 - If the Maven test command fails and cannot be fixed in the current turn, report the failure and the relevant error output.
