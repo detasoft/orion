@@ -1,6 +1,7 @@
 # Agent Instructions
 
 - When the user asks to commit changes, for example by writing `commit` or `сделай коммит`, create the intended logical commit first, then run regular Maven tests for the whole project.
+- Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
 - Use the `dev` Maven profile for routine local checks and the commit workflow, for example `mvn test -Pdev` or `mvn test -Pdev -q -pl ...`.
 - Do not run integration tests automatically after every commit; `mvn test -Pdev` is enough for the commit workflow.
 - Use `mvn verify -Pdev` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
