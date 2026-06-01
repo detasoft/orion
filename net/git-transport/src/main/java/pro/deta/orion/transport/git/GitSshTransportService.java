@@ -49,6 +49,10 @@ public class GitSshTransportService {
 
 
     public OrionStageCallResult onStart() {
+        SshTransportConfig config = sshTransportConfig();
+        if (!isEnabled()) {
+            return null;
+        }
         SecurityUtils.registerSecurityProvider(new BouncyCastleSecurityProviderRegistrar());
         if (SecurityUtils.isBouncyCastleRegistered()) {
             log.info("BouncyCastle is registered as a JCE provider");
@@ -57,10 +61,7 @@ public class GitSshTransportService {
         if (SecurityUtils.isProviderRegistered("EdDSA")) {
             log.info("EdDSA is registered as a JCE provider");
         }
-        SshTransportConfig config  = orionConfiguration.getTransport().getSsh();
-        if (!config.isEnabled()) {
-            return null;
-        }
+        OrionStageCallResult callResult = new OrionStageCallResult(0);
         try {
 //            CoreModuleProperties.NIO2_READ_TIMEOUT.set(sshd.getParentPropertyResolver(), Duration.ofHours(1));
             System.setProperty(IoServiceFactoryFactory.class.getName(), Nio2ServiceFactoryFactory.class.getName());
@@ -107,7 +108,15 @@ public class GitSshTransportService {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return null;
+        return callResult;
+    }
+
+    public boolean isEnabled() {
+        return sshTransportConfig().isEnabled();
+    }
+
+    private SshTransportConfig sshTransportConfig() {
+        return orionConfiguration.getTransport().getSsh();
     }
 
     public OrionStageCallResult onStop() {

@@ -377,16 +377,18 @@ class GitSshTransportEndToEndIT {
 
         String state = executeStateOverSsh(startedOrion, serverIdentityKey);
 
-        assertThat(state).contains("transports: DISABLED (state=NEW)");
-        assertThat(state).contains("git-native: DISABLED (state=NEW)");
+        assertThat(state).contains("transports: RUNNING");
+        assertThat(state).contains("git-native: DISABLED");
+        assertThat(state).contains("git-ssh: RUNNING");
+        assertThat(state).contains("http: RUNNING");
     }
 
     @Test
-    void sshAdminRoutesRemainAccessibleWhenTransportLifecycleIsDisabled() throws Exception {
+    void sshAdminRoutesRemainAccessibleWhenTransportLifecycleIsRunning() throws Exception {
         /*
-         * Verifies that the SSH admin channel works correctly in the disabled-transport configuration
-         * (git-native off, SSH on). Two things must hold simultaneously:
-         *   1. The lifecycle state endpoint reports DISABLED for the transport layer.
+         * Verifies that the SSH admin channel works correctly when git-native is disabled but SSH is running.
+         * Two things must hold simultaneously:
+         *   1. The lifecycle state endpoint reports RUNNING for the transport layer.
          *   2. Other SSH admin commands (issue-token) remain functional, confirming the admin
          *      interface is not gated on transport state.
          */
@@ -397,8 +399,10 @@ class GitSshTransportEndToEndIT {
                 .valueOrFailure("Server identity key should be available after startup");
 
         String state = executeStateOverSsh(startedOrion, serverIdentityKey);
-        assertThat(state).contains("transports: DISABLED (state=NEW)");
-        assertThat(state).contains("git-native: DISABLED (state=NEW)");
+        assertThat(state).contains("transports: RUNNING");
+        assertThat(state).contains("git-native: DISABLED");
+        assertThat(state).contains("git-ssh: RUNNING");
+        assertThat(state).contains("http: RUNNING");
 
         String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
         assertThat(token).isNotBlank();

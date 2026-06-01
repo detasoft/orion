@@ -2,28 +2,24 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.config.schema.HttpTransportConfig;
-import pro.deta.orion.config.schema.HttpsTransportConfig;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
-import pro.deta.orion.lifecycle.state.StateTransitionEvent;
+import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.Void;
 
 import javax.inject.Provider;
 
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 @Singleton
 public final class JettyHTTPServerStateMachine {
     public static final State RUNNING = state("RUNNING");
     public static final State DISABLED = state("DISABLED");
 
-    private final HttpTransportConfig httpConfig;
-    private final HttpsTransportConfig httpsConfig;
     private final Provider<JettyHTTPServer> serverProvider;
     private volatile JettyHTTPServer server;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startHttpTransport);
@@ -33,11 +29,7 @@ public final class JettyHTTPServerStateMachine {
 
     @Inject
     public JettyHTTPServerStateMachine(
-            OrionConfiguration configuration,
             Provider<JettyHTTPServer> serverProvider) {
-        OrionConfiguration.AppTransport transport = configuration.getTransport();
-        this.httpConfig = transport != null ? transport.getHttp() : null;
-        this.httpsConfig = transport != null ? transport.getHttps() : null;
         this.serverProvider = serverProvider;
         definition = defineStateMachine();
         stateMachine = definition.newStateMachine();
@@ -46,17 +38,11 @@ public final class JettyHTTPServerStateMachine {
     private StateMachineDefinition defineStateMachine() {
         return StateMachineDefinition.define()
                 .name("http")
-                .computedState((physicalState, childStates) -> isEnabled() ? physicalState : DISABLED)
-                .from(NEW).on(start).to(RUNNING).failTo(ERR)
-                .from(NEW).on(stop).to(FIN).failTo(ERR)
-                .from(RUNNING).on(stop).to(FIN).failTo(ERR)
-                .from(ERR).on(stop).to(FIN).failTo(ERR)
+                .from(NEW, DISABLED).on(start).to(DISABLED, RUNNING, ERR).post(this::resolveStartState)
+                .from(NEW, DISABLED).on(stop).to(FIN, ERR)
+                .from(RUNNING).on(stop).to(FIN, ERR)
+                .from(ERR).on(stop).to(FIN, ERR)
                 .build();
-    }
-
-    public boolean isEnabled() {
-        return (httpConfig != null && httpConfig.isEnabled())
-                || (httpsConfig != null && httpsConfig.isEnabled());
     }
 
     public ActionBinding<Void> startAction() {
@@ -75,24 +61,32 @@ public final class JettyHTTPServerStateMachine {
         return stateMachine.currentState();
     }
 
-    public StateTransitionEvent start() {
+    public StateTransitionResult start() {
         return stateMachine.execute(start, Void.EMPTY);
     }
 
-    public StateTransitionEvent stop() {
+    public StateTransitionResult stop() {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 
-    private void startHttpTransport(Void ignored) {
-        if (isEnabled()) {
-            resolveServer().onStart();
-        }
+    private OrionStageCallResult startHttpTransport(Void ignored) {
+        return resolveServer().onStart();
     }
 
-    private void stopHttpTransport(Void ignored) {
-        if (isEnabled()) {
-            resolveServer().onStop();
+    private State resolveStartState(StateTransitionResult result) {
+        if (result.failed()) {
+            return result.defaultState();
         }
+        return resolveServer().isEnabled() ? RUNNING : DISABLED;
+    }
+
+    private Void stopHttpTransport(Void ignored) {
+        JettyHTTPServer currentServer = server;
+        State currentState = stateMachine.currentState();
+        if (currentServer != null && (RUNNING.equals(currentState) || ERR.equals(currentState))) {
+            currentServer.onStop();
+        }
+        return Void.EMPTY;
     }
 
     private JettyHTTPServer resolveServer() {

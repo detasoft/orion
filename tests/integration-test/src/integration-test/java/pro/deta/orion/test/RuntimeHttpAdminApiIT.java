@@ -73,7 +73,7 @@ class RuntimeHttpAdminApiIT {
     }
 
     @Test
-    void adminApiRemainsAccessibleAndReportsDisabledWhenTransportsAreNotConfigured() throws Exception {
+    void adminApiRemainsAccessibleAndReportsHttpTransportRunning() throws Exception {
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion")))) {
             String token = TestBearerTokens.issueRootToken(
@@ -87,8 +87,10 @@ class RuntimeHttpAdminApiIT {
                     TestBearerTokens.bearer(token));
             assertThat(lifecycleState.status()).isEqualTo(HttpURLConnection.HTTP_OK);
             assertThat(lifecycleState.contentType()).startsWith("text/plain");
-            assertThat(lifecycleState.body()).contains("transports: DISABLED (state=NEW)");
-            assertThat(lifecycleState.body()).contains("git-native: DISABLED (state=NEW)");
+            assertThat(lifecycleState.body()).contains("transports: RUNNING");
+            assertThat(lifecycleState.body()).contains("git-native: DISABLED");
+            assertThat(lifecycleState.body()).contains("git-ssh: DISABLED");
+            assertThat(lifecycleState.body()).contains("http: RUNNING");
 
             RuntimeHttpTestSupport.HttpResponse acl = RuntimeHttpTestSupport.request(
                     "GET",

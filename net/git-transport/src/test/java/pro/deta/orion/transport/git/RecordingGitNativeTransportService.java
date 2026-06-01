@@ -6,6 +6,7 @@ import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import java.util.concurrent.CountDownLatch;
 
 final class RecordingGitNativeTransportService extends GitNativeTransportService {
+    private final boolean enabled;
     private int startCalls;
     private int stopCalls;
     private RuntimeException startFailure;
@@ -18,6 +19,7 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
 
     RecordingGitNativeTransportService(boolean enabled) {
         super(config(enabled), null, null, 5_000);
+        this.enabled = enabled;
     }
 
     private static GitTransportConfig config(boolean enabled) {
@@ -42,7 +44,7 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
         if (startFailure != null) {
             throw startFailure;
         }
-        return null;
+        return enabled ? new OrionStageCallResult(0) : null;
     }
 
     @Override

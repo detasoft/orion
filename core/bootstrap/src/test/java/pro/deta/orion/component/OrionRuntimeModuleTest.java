@@ -56,7 +56,7 @@ class OrionRuntimeModuleTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
-    void runtimeInitPlanOmitsDisabledTransportInit() {
+    void runtimeInitPlanOmitsTransportInit() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
@@ -68,51 +68,65 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    void runtimeInitPlanIncludesEnabledSshTransportInit() {
+    void runtimeInitPlanOmitsTransportInitEvenWhenTransportsEnabled() {
         OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
 
         assertTrue(plan.contains("JGIT_RUNTIME"));
-        assertTrue(plan.contains("SSH_TRANSPORT_INIT"));
+        // Security providers are now initialized inline in onStart(), no separate INIT task
+        assertFalse(plan.contains("SSH_TRANSPORT_INIT"));
         assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
     }
 
     @Test
-    void runtimeStartingPlanOmitsDisabledTransportServices() {
+    void runtimeStartingPlanRegistersTransportOrchestratorEvenWhenDisabled() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
 
         assertTrue(plan.contains("ACL_LOAD"));
         assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
-        assertFalse(plan.contains("HTTP_TRANSPORT_START"));
-        assertFalse(plan.contains("GIT_TRANSPORT_START"));
-        assertFalse(plan.contains("SSH_TRANSPORT_START"));
+        assertTrue(plan.contains("GIT_TRANSPORT_START after TRANSPORTS_START"));
     }
 
     @Test
-    void runtimeStartingPlanOrdersEnabledTransportsAfterAcl() {
+    void runtimeStartingPlanRegistersOrchestratorTaskAfterAcl() {
         OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
 
         assertTrue(plan.contains("ACL_LOAD"));
         assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
-        assertTrue(plan.contains("HTTP_TRANSPORT_START after TRANSPORTS_START"));
         assertTrue(plan.contains("GIT_TRANSPORT_START after TRANSPORTS_START"));
-        assertTrue(plan.contains("SSH_TRANSPORT_START after TRANSPORTS_START"));
+        // Individual transport task IDs are no longer registered; the orchestrator drives all children
+        assertFalse(plan.contains("HTTP_TRANSPORT_START"));
+        assertFalse(plan.contains("SSH_TRANSPORT_START"));
     }
 
     @Test
-    void runtimeStoppingPlanOmitsDisabledTransportServices() {
+    void runtimeStoppingPlanRegistersTransportOrchestratorEvenWhenDisabled() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
 
         assertTrue(plan.contains("TRANSPORTS_STOP"));
+        assertTrue(plan.contains("GIT_TRANSPORT_STOP"));
+        assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
+        assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
+        assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
+    }
+
+    @Test
+    void runtimeStoppingPlanOrdersOrchestratorBeforeEventsAndExecutor() {
+        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
+
+        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
+
+        assertTrue(plan.contains("GIT_TRANSPORT_STOP"));
+        assertTrue(plan.contains("TRANSPORTS_STOP after GIT_TRANSPORT_STOP"));
+        // Individual transport stop IDs no longer registered; orchestrator covers all children
         assertFalse(plan.contains("HTTP_TRANSPORT_STOP"));
-        assertFalse(plan.contains("GIT_TRANSPORT_STOP"));
         assertFalse(plan.contains("SSH_TRANSPORT_STOP"));
         assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
@@ -120,22 +134,7 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    void runtimeStoppingPlanOrdersEnabledTransportsBeforeEventsAndExecutor() {
-        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
-
-        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
-
-        assertTrue(plan.contains("HTTP_TRANSPORT_STOP"));
-        assertTrue(plan.contains("GIT_TRANSPORT_STOP"));
-        assertTrue(plan.contains("SSH_TRANSPORT_STOP"));
-        assertTrue(plan.contains("TRANSPORTS_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
-        assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
-    }
-
-    @Test
-    void runtimeServiceMapShowsDisabledTransportBarrierOnly() {
+    void runtimeServiceMapShowsDisabledTransportOrchestrator() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
         String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
@@ -144,27 +143,26 @@ class OrionRuntimeModuleTest {
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP"));
         assertTrue(serviceMap.contains("OrionJGitRuntime: JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
         assertFalse(serviceMap.contains("JettyHTTPServer: HTTP_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_START"));
         assertFalse(serviceMap.contains("GitSshTransportService: SSH_TRANSPORT_START"));
+        assertTrue(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_START after TRANSPORTS_START"));
+        assertTrue(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_STOP"));
     }
 
     @Test
-    void runtimeServiceMapShowsEnabledTransportBarrierDependencies() {
+    void runtimeServiceMapShowsOrchestratorWhenTransportsEnabled() {
         OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
 
         String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
 
         assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
-        assertTrue(serviceMap.contains(
-                "TransportLifecycleBarrier: TRANSPORTS_STOP after HTTP_TRANSPORT_STOP, GIT_TRANSPORT_STOP, SSH_TRANSPORT_STOP"));
+        // All transports now stop through the single orchestrator task
+        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP after GIT_TRANSPORT_STOP"));
         assertTrue(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_START after TRANSPORTS_START"));
         assertTrue(serviceMap.contains("TransportLifecycleStateMachine: GIT_TRANSPORT_STOP"));
+        // Individual service registrations are gone
+        assertFalse(serviceMap.contains("JettyHTTPServer: HTTP_TRANSPORT_START"));
+        assertFalse(serviceMap.contains("GitSshTransportService: SSH_TRANSPORT_START"));
         assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("GitNativeTransportService: GIT_TRANSPORT_STOP"));
-        assertFalse(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_START"));
-        assertFalse(serviceMap.contains("GitNativeTransportStateMachine: GIT_TRANSPORT_STOP"));
     }
 
     @Test

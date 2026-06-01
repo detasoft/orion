@@ -57,6 +57,9 @@ public class JettyHTTPServer {
     }
 
     public OrionStageCallResult onStart() {
+        if (!isEnabled()) {
+            return null;
+        }
         jettyServer.set(getNewServer());
 
         try {
@@ -68,7 +71,12 @@ public class JettyHTTPServer {
         log.warn("HTTP Listening on {}:{}", httpTransportConfig.getAddress(), httpTransportConfig.getPort());
         log.warn("HTTPS Listening on {}:{}", httpsTransportConfig.getAddress(), httpsTransportConfig.getPort());
 
-        return null;
+        return new OrionStageCallResult(0);
+    }
+
+    public boolean isEnabled() {
+        return (httpTransportConfig != null && httpTransportConfig.isEnabled())
+                || (httpsTransportConfig != null && httpsTransportConfig.isEnabled());
     }
 
     private Server getNewServer() {

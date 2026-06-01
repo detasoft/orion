@@ -2,13 +2,13 @@ package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.config.schema.GitTransportConfig;
+import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
-import pro.deta.orion.lifecycle.state.StateTransitionEvent;
+import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.StateMachineEventSubscriber;
 import pro.deta.orion.lifecycle.state.StateMachineSnapshot;
 import pro.deta.orion.lifecycle.state.StateMachineSubscription;
@@ -17,14 +17,13 @@ import pro.deta.orion.lifecycle.state.Void;
 import javax.inject.Provider;
 import java.util.Objects;
 
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.*;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 @Singleton
 public final class GitNativeTransportStateMachine {
     public static final State RUNNING = state("RUNNING");
     public static final State DISABLED = state("DISABLED");
 
-    private final GitTransportConfig config;
     private final Provider<GitNativeTransportService> serviceProvider;
     private volatile GitNativeTransportService service;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startGitTransport);
@@ -34,9 +33,7 @@ public final class GitNativeTransportStateMachine {
 
     @Inject
     public GitNativeTransportStateMachine(
-            GitTransportConfig config,
             Provider<GitNativeTransportService> serviceProvider) {
-        this.config = Objects.requireNonNull(config, "config");
         this.serviceProvider = Objects.requireNonNull(serviceProvider, "serviceProvider");
         definition = defineStateMachine();
         stateMachine = definition.newStateMachine();
@@ -45,26 +42,22 @@ public final class GitNativeTransportStateMachine {
     private StateMachineDefinition defineStateMachine() {
         return StateMachineDefinition.define()
                 .name("git-native")
-                .computedState((physicalState, childStates) -> isEnabled() ? physicalState : DISABLED)
-                .from(NEW)
+                .from(NEW, DISABLED)
                 .on(start)
-                .to(RUNNING)
-                .failTo(ERR)
+                .to(DISABLED, RUNNING, ERR)
+                .post(this::resolveStartState)
 
-                .from(NEW)
+                .from(NEW, DISABLED)
                 .on(stop)
-                .to(FIN)
-                .failTo(ERR)
+                .to(FIN, ERR)
 
                 .from(RUNNING)
                 .on(stop)
-                .to(FIN)
-                .failTo(ERR)
+                .to(FIN, ERR)
 
                 .from(ERR)
                 .on(stop)
-                .to(FIN)
-                .failTo(ERR)
+                .to(FIN, ERR)
                 .build();
     }
 
@@ -74,10 +67,6 @@ public final class GitNativeTransportStateMachine {
 
     public GitNativeTransportService service() {
         return resolveService();
-    }
-
-    public boolean isEnabled() {
-        return config != null && config.isEnabled();
     }
 
     public ActionBinding<Void> startAction() {
@@ -108,24 +97,32 @@ public final class GitNativeTransportStateMachine {
         return stateMachine.subscribe(subscriber);
     }
 
-    public StateTransitionEvent start() {
+    public StateTransitionResult start() {
         return stateMachine.execute(start, Void.EMPTY);
     }
 
-    public StateTransitionEvent stop() {
+    public StateTransitionResult stop() {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 
-    private void startGitTransport(Void ignored) {
-        if (isEnabled()) {
-            resolveService().onStart();
-        }
+    private OrionStageCallResult startGitTransport(Void ignored) {
+        return resolveService().onStart();
     }
 
-    private void stopGitTransport(Void ignored) {
-        if (isEnabled()) {
-            resolveService().onStop();
+    private State resolveStartState(StateTransitionResult result) {
+        if (result.failed()) {
+            return result.defaultState();
         }
+        return resolveService().isEnabled() ? RUNNING : DISABLED;
+    }
+
+    private Void stopGitTransport(Void ignored) {
+        GitNativeTransportService currentService = service;
+        State currentState = stateMachine.currentState();
+        if (currentService != null && (RUNNING.equals(currentState) || ERR.equals(currentState))) {
+            currentService.onStop();
+        }
+        return Void.EMPTY;
     }
 
     private GitNativeTransportService resolveService() {

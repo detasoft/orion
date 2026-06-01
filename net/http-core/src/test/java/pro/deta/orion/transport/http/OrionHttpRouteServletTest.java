@@ -32,10 +32,10 @@ import pro.deta.orion.git.common.GitOperationException;
 import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitUploadRequest;
-import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.lifecycle.state.StandardStateDefinition;
 import pro.deta.orion.lifecycle.state.Void;
 import pro.deta.orion.util.Result;
 
@@ -698,27 +698,21 @@ class OrionHttpRouteServletTest {
 
     private static StateMachine lifecycleStateMachine() {
         StateMachineDefinition.State running = StateMachineDefinition.state("RUNNING");
-        ActionBinding<Void> childStart = ActionBinding.of(ActionId.START, ignored -> {
-        });
         StateMachine child = StateMachineDefinition.define()
                 .name("git-native")
-                .from(StateMachineDefinition.NEW)
-                .on(childStart)
-                .to(running)
-                .failTo(StateMachineDefinition.ERR)
+                .from(StandardStateDefinition.NEW)
+                .on(ActionId.START)
+                .to(running, StandardStateDefinition.ERR)
                 .build()
                 .newStateMachine();
         child.execute(ActionId.START, Void.EMPTY);
 
-        ActionBinding<Void> parentStart = ActionBinding.of(ActionId.START, ignored -> {
-        });
         StateMachine parent = StateMachineDefinition.define()
                 .name("transports")
                 .child("git-native", child)
-                .from(StateMachineDefinition.NEW)
-                .on(parentStart)
-                .to(running)
-                .failTo(StateMachineDefinition.ERR)
+                .from(StandardStateDefinition.NEW)
+                .on(ActionId.START)
+                .to(running, StandardStateDefinition.ERR)
                 .build()
                 .newStateMachine();
         parent.execute(ActionId.START, Void.EMPTY);

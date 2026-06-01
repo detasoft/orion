@@ -3,6 +3,7 @@ package pro.deta.orion.transport;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.config.schema.SshTransportConfig;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
@@ -15,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrionTransportModuleTest {
     @Test
-    void transportModuleRegistersTransportAggregateWithoutDirectNativeServiceBinding() {
+    void transportModuleRegistersTransportAggregateWithoutDirectServiceBindings() {
         List<String> parameterTypes = new ArrayList<>();
         for (Method method : OrionTransportModule.class.getDeclaredMethods()) {
             for (Type parameterType : method.getGenericParameterTypes()) {
@@ -26,6 +27,8 @@ class OrionTransportModuleTest {
         assertTrue(containsType(parameterTypes, TransportLifecycleStateMachine.class.getName()));
         assertFalse(containsType(parameterTypes, "GitNativeTransportStateMachine"));
         assertFalse(containsType(parameterTypes, "GitNativeTransportService"));
+        assertFalse(containsType(parameterTypes, "GitSshTransportService"));
+        assertFalse(containsType(parameterTypes, "JettyHTTPServer"));
     }
 
     @Test
@@ -38,6 +41,28 @@ class OrionTransportModuleTest {
 
         assertTrue(gitTransportConfig.isEnabled());
         assertEquals(19418, gitTransportConfig.getPort());
+    }
+
+    @Test
+    void transportModuleProvidesSshTransportConfigFromRuntimeConfiguration() {
+        OrionConfiguration configuration = new OrionConfiguration();
+        configuration.getTransport().getSsh().setEnabled(true);
+        configuration.getTransport().getSsh().setPort(2222);
+
+        SshTransportConfig sshTransportConfig = OrionTransportModule.sshTransportConfig(configuration);
+
+        assertTrue(sshTransportConfig.isEnabled());
+        assertEquals(2222, sshTransportConfig.getPort());
+    }
+
+    @Test
+    void transportModuleReturnsDisabledSshConfigWhenAbsent() {
+        OrionConfiguration configuration = new OrionConfiguration();
+        configuration.setTransport(null);
+
+        SshTransportConfig sshTransportConfig = OrionTransportModule.sshTransportConfig(configuration);
+
+        assertFalse(sshTransportConfig.isEnabled());
     }
 
     private static boolean containsType(List<String> parameterTypes, String value) {

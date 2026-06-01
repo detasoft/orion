@@ -53,13 +53,17 @@ public class GitNativeTransportService {
     }
 
     public OrionStageCallResult onStart() {
-        if (config.isEnabled()) {
+        if (isEnabled()) {
             stopRequested = false;
             OrionStageCallResult callResult = new OrionStageCallResult(0);
             callResult.submit(orionExecutor, () -> listenService());
             return callResult;
         }
         return null;
+    }
+
+    public boolean isEnabled() {
+        return config != null && config.isEnabled();
     }
 
     private void listenService() {
