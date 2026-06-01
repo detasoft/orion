@@ -19,6 +19,7 @@ public final class StateMachineDefinition {
     private final Map<String, StateMachine> children;
     private final ComputedStateResolver computedStateResolver;
     private final ExecutorService childExecutor;
+    private final ChildPropagationMode childPropagationMode;
 
     private StateMachineDefinition(
             String name,
@@ -26,7 +27,8 @@ public final class StateMachineDefinition {
             Set<State> terminalStates,
             Map<String, StateMachine> children,
             ComputedStateResolver computedStateResolver,
-            ExecutorService childExecutor) {
+            ExecutorService childExecutor,
+            ChildPropagationMode childPropagationMode) {
         this.name = requireName(name, "name");
         this.transitions = Collections.unmodifiableMap(new LinkedHashMap<>(transitions));
         LinkedHashSet<State> allTerminalStates = new LinkedHashSet<>();
@@ -38,6 +40,7 @@ public final class StateMachineDefinition {
                 Objects.requireNonNull(children, "children")));
         this.computedStateResolver = Objects.requireNonNull(computedStateResolver, "computedStateResolver");
         this.childExecutor = childExecutor;
+        this.childPropagationMode = Objects.requireNonNull(childPropagationMode, "childPropagationMode");
     }
 
     public static State state(String name) {
@@ -74,6 +77,10 @@ public final class StateMachineDefinition {
 
     ExecutorService childExecutor() {
         return childExecutor;
+    }
+
+    ChildPropagationMode childPropagationMode() {
+        return childPropagationMode;
     }
 
     public Optional<StateTransition> transition(State state, ActionBinding<?> action) {
@@ -153,6 +160,7 @@ public final class StateMachineDefinition {
         private final Map<String, StateMachine> children = new LinkedHashMap<>();
         private ComputedStateResolver computedStateResolver = (physicalState, childStates) -> physicalState;
         private ExecutorService childExecutor;
+        private ChildPropagationMode childPropagationMode = ChildPropagationMode.NONE;
 
         private Builder() {
         }
@@ -184,6 +192,11 @@ public final class StateMachineDefinition {
 
         public Builder childExecutor(ExecutorService childExecutor) {
             this.childExecutor = Objects.requireNonNull(childExecutor, "childExecutor");
+            return this;
+        }
+
+        public Builder childPropagationMode(ChildPropagationMode childPropagationMode) {
+            this.childPropagationMode = Objects.requireNonNull(childPropagationMode, "childPropagationMode");
             return this;
         }
 
@@ -229,7 +242,6 @@ public final class StateMachineDefinition {
                 StateTransitionResolver resolver) {
             Objects.requireNonNull(fromStates, "fromStates");
             Objects.requireNonNull(actionId, "actionId");
-            Objects.requireNonNull(action, "action");
             Objects.requireNonNull(targets, "targets");
             Objects.requireNonNull(resolver, "resolver");
             for (State from : fromStates) {
@@ -253,7 +265,6 @@ public final class StateMachineDefinition {
                 StateTransitionResolver resolver) {
             Objects.requireNonNull(fromStates, "fromStates");
             Objects.requireNonNull(actionId, "actionId");
-            Objects.requireNonNull(action, "action");
             Objects.requireNonNull(targets, "targets");
             Objects.requireNonNull(resolver, "resolver");
             for (State from : fromStates) {
@@ -288,7 +299,8 @@ public final class StateMachineDefinition {
                     new LinkedHashSet<>(terminalStates),
                     new LinkedHashMap<>(children),
                     computedStateResolver,
-                    childExecutor);
+                    childExecutor,
+                    childPropagationMode);
         }
     }
 
@@ -303,6 +315,10 @@ public final class StateMachineDefinition {
 
         public <A> ActionRule<A> on(ActionBinding<A> action) {
             return new ActionRule<>(builder, states, action.id(), action);
+        }
+
+        public ActionRule<Void> on(ActionId actionId) {
+            return new ActionRule<>(builder, states, actionId, null);
         }
     }
 
@@ -320,7 +336,7 @@ public final class StateMachineDefinition {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.fromStates = List.copyOf(Objects.requireNonNull(fromStates, "fromStates"));
             this.actionId = Objects.requireNonNull(actionId, "actionId");
-            this.action = Objects.requireNonNull(action, "action");
+            this.action = action;
         }
 
         public TargetRule<A> to(State firstTarget, State... additionalTargets) {
@@ -375,7 +391,7 @@ public final class StateMachineDefinition {
             this.builder = Objects.requireNonNull(builder, "builder");
             this.fromStates = List.copyOf(Objects.requireNonNull(fromStates, "fromStates"));
             this.actionId = Objects.requireNonNull(actionId, "actionId");
-            this.action = Objects.requireNonNull(action, "action");
+            this.action = action;
             this.targets = List.copyOf(Objects.requireNonNull(targets, "targets"));
         }
 
@@ -407,9 +423,19 @@ public final class StateMachineDefinition {
             return builder.childExecutor(childExecutor);
         }
 
+        public Builder childPropagationMode(ChildPropagationMode childPropagationMode) {
+            return builder.childPropagationMode(childPropagationMode);
+        }
+
         public StateMachineDefinition build() {
             return builder.build();
         }
+    }
+
+    public enum ChildPropagationMode {
+        NONE,
+        SEQUENTIAL,
+        PARALLEL
     }
 
     public static final class State {

@@ -182,43 +182,37 @@ the same action id is available after each successful layer. Calling
 transition.
 
 Adapters may use their own executor or thread pool inside a normal handler when
-they need custom parallel work. Child propagation is also explicit handler code:
-the handler decides whether propagation happens before, after, or between local
-operations.
+they need custom parallel work. Aggregate machines can define transitions
+directly on an `ActionId`; then the machine uses its configured child
+propagation mode when the action is executed.
 
 ## Child Machines
 
-A machine may register child machines in its definition. When the machine is
-created, it registers itself in its action bindings. Handlers can use
-`action.stateMachine()` to call propagation at the exact point needed. An
-`ActionBinding` belongs to one machine; registering the same binding in another
-machine is rejected.
+A machine may register child machines in its definition. A transition declared
+with `.on(ActionId.START)` has no local action binding. When it is executed, the
+machine looks at registered children and executes the same `ActionId` on children
+that currently expose it.
 
 ```java
-final class ParentAdapter {
-    private final ActionBinding<Void> startChildren =
-            ActionId.START.bind(this::startChildren);
+StateMachine parent = StateMachineDefinition.define()
+        .childPropagationMode(StateMachineDefinition.ChildPropagationMode.PARALLEL)
+        .child("storage", storageMachine)
+        .child("acl", aclMachine)
+        .childExecutor(executor)
+        .from(NEW)
+        .on(ActionId.START)
+        .to(RUNNING, ERR)
+        .build()
+        .newStateMachine();
+```
 
-    private List<StateTransitionResult> startChildren(Void action) {
-        prepare();
-        List<StateTransitionResult> results =
-                startChildren.stateMachine().propagateParallel(ActionId.START, action);
-        finish();
-        return results;
-    }
+For aggregates with standard start/stop entry points, `AggregateStateMachine`
+wraps the underlying machine and exposes `start()`, `stop()`, and `execute(...)`
+without adding adapter action methods:
 
-    StateMachine create(StateMachine storageMachine, StateMachine aclMachine, ExecutorService executor) {
-        return StateMachineDefinition.define()
-                .child("storage", storageMachine)
-                .child("acl", aclMachine)
-                .childExecutor(executor)
-                .from(NEW)
-                .on(startChildren)
-                .to(RUNNING, ERR)
-                .build()
-                .newStateMachine();
-    }
-}
+```java
+AggregateStateMachine aggregate = new AggregateStateMachine(definition);
+aggregate.start();
 ```
 
 The parent subscribes to each child and keeps a snapshot of child states:
@@ -227,31 +221,11 @@ The parent subscribes to each child and keeps a snapshot of child states:
 parent.childStates(); // storage=NEW, acl=NEW
 ```
 
-When a parent action handler calls `propagateSequential(actionId, payload)` or
-`propagateParallel(actionId, payload)`, the parent looks at all registered
-children. Children that currently expose the same `ActionId` are executed by the
-selected propagation mode.
-
-Parallel propagation requires `childExecutor(...)`:
-
-```java
-parent.propagateParallel(ActionId.START, action);
-```
-
-Sequential propagation does not need an executor and runs children in
-registration order:
-
-```java
-parent.propagateSequential(ActionId.STOP, action);
-```
+`ChildPropagationMode.SEQUENTIAL` runs children in registration order.
+`ChildPropagationMode.PARALLEL` requires `childExecutor(...)`.
 
 The parent waits for every selected child to finish. If any child fails, the
 parent transition fails and resolves through the parent's configured targets.
-
-A created machine also exposes bound propagation handlers:
-`propagateSequentialHandler(actionId)` and `propagateParallelHandler(actionId)`.
-Use them when an adapter needs a plain `LifecycleActionHandler` and does not
-need extra local code around propagation.
 
 Child listeners only update the parent's observed child snapshot. They do not
 start follow-up actions by themselves. Follow-up layers are still driven by the

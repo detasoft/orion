@@ -5,13 +5,12 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
-import pro.deta.orion.lifecycle.state.StateTransitionEvent;
-import pro.deta.orion.lifecycle.state.Void;
+import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportStateMachine;
@@ -20,10 +19,10 @@ import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
 import java.util.List;
 import java.util.Objects;
 
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.ERR;
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.FIN;
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.NEW;
-import static pro.deta.orion.lifecycle.state.StateMachineDefinition.state;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.state;
 
 @Singleton
 public final class TransportLifecycleStateMachine implements OrionApplicationStageEventListener {
@@ -33,10 +32,8 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
     private final GitNativeTransportStateMachine gitNativeTransport;
     private final GitSshTransportStateMachine gitSshTransport;
     private final JettyHTTPServerStateMachine jettyHttpTransport;
-    private final ActionBinding<Void> start = ActionId.START.bind(this::startTransports);
-    private final ActionBinding<Void> stop = ActionId.STOP.bind(this::stopTransports);
     private final StateMachineDefinition definition;
-    private final StateMachine stateMachine;
+    private final AggregateStateMachine aggregateStateMachine;
 
     @Inject
     public TransportLifecycleStateMachine(
@@ -48,23 +45,16 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
         this.jettyHttpTransport = Objects.requireNonNull(jettyHttpTransport, "jettyHttpTransport");
         StateMachineDefinition.Builder builder = StateMachineDefinition.define()
                 .name("transports")
-                .computedState((physicalState, childStates) -> isAnyEnabled() ? physicalState : DISABLED);
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL);
         builder.child("git-native", gitNativeTransport.stateMachine());
         builder.child("git-ssh", gitSshTransport.stateMachine());
         builder.child("http", jettyHttpTransport.stateMachine());
         definition = defineStateMachine(builder);
-        stateMachine = definition.newStateMachine();
-    }
-
-    private boolean isAnyEnabled() {
-        return gitNativeTransport.isEnabled() || gitSshTransport.isEnabled() || jettyHttpTransport.isEnabled();
+        aggregateStateMachine = new AggregateStateMachine(definition);
     }
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        if (!isAnyEnabled()) {
-            return;
-        }
         registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, () -> {
                     start();
                     return null;
@@ -78,10 +68,10 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
 
     private StateMachineDefinition defineStateMachine(StateMachineDefinition.Builder builder) {
         return builder
-                .from(NEW).on(start).to(RUNNING).failTo(ERR)
-                .from(NEW).on(stop).to(FIN).failTo(ERR)
-                .from(RUNNING).on(stop).to(FIN).failTo(ERR)
-                .from(ERR).on(stop).to(FIN).failTo(ERR)
+                .from(NEW, DISABLED).on(ActionId.START).to(DISABLED, RUNNING, ERR).post(this::resolveStartState)
+                .from(NEW, DISABLED).on(ActionId.STOP).to(FIN, ERR)
+                .from(RUNNING).on(ActionId.STOP).to(FIN, ERR)
+                .from(ERR).on(ActionId.STOP).to(FIN, ERR)
                 .build();
     }
 
@@ -102,26 +92,33 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
     }
 
     public StateMachine stateMachine() {
-        return stateMachine;
+        return aggregateStateMachine.stateMachine();
     }
 
     public State currentState() {
-        return stateMachine.currentState();
+        return aggregateStateMachine.currentState();
     }
 
-    public List<StateTransitionEvent> start() {
-        return stateMachine.execute(ActionId.START, Void.EMPTY);
+    public List<StateTransitionResult> start() {
+        return aggregateStateMachine.start();
     }
 
-    public List<StateTransitionEvent> stop() {
-        return stateMachine.execute(ActionId.STOP, Void.EMPTY);
+    public List<StateTransitionResult> stop() {
+        return aggregateStateMachine.stop();
     }
 
-    private void startTransports(Void ignored) {
-        stateMachine.propagateSequential(ActionId.START, Void.EMPTY);
-    }
-
-    private void stopTransports(Void ignored) {
-        stateMachine.propagateSequential(ActionId.STOP, Void.EMPTY);
+    private State resolveStartState(StateTransitionResult result) {
+        if (result.failed()) {
+            return result.defaultState();
+        }
+        for (State childState : aggregateStateMachine.childStates().values()) {
+            if (ERR.equals(childState)) {
+                return ERR;
+            }
+            if (RUNNING.equals(childState)) {
+                return RUNNING;
+            }
+        }
+        return DISABLED;
     }
 }

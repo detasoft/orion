@@ -58,6 +58,42 @@ class StateMachineTest {
     }
 
     @Test
+    void stateMachineDoesNotExposePropagationHandlerFactories() {
+        assertThat(StateMachine.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("propagateSequentialHandler"))
+                .noneMatch(method -> method.getName().equals("propagateParallelHandler"))
+                .noneMatch(method -> method.getName().equals("propagateSequential"))
+                .noneMatch(method -> method.getName().equals("propagateParallel"));
+    }
+
+    @Test
+    void aggregateStateMachineExecutesStandardActionsWithoutAdapterMethods() {
+        List<String> calls = new ArrayList<>();
+        StateMachine child = childMachine(action(ActionId.START, ignored -> calls.add("child")));
+        StateMachineDefinition definition = StateMachineDefinition.define()
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
+                .child("child", child)
+                .from(NEW)
+                .on(ActionId.START)
+                .to(RUNNING, ERR)
+                .build();
+        AggregateStateMachine aggregate = new AggregateStateMachine(definition);
+
+        List<StateTransitionResult> results = aggregate.start();
+
+        assertThat(calls).containsExactly("child");
+        assertThat(results).singleElement().satisfies(result -> {
+            assertThat(result.from()).isSameAs(NEW);
+            assertThat(result.action()).isSameAs(ActionId.START);
+            assertThat(result.actionResult()).isInstanceOf(List.class);
+            assertThat(result.to()).isSameAs(RUNNING);
+        });
+        assertThat(child.currentState()).isSameAs(RUNNING);
+        assertThat(aggregate.currentState()).isSameAs(RUNNING);
+        aggregate.close();
+    }
+
+    @Test
     void newAndFinAreFixedStatesForEveryDefinition() {
         StateMachineDefinition definition = StateMachineDefinition.define().build();
 
@@ -213,11 +249,11 @@ class StateMachineTest {
                 .post(result -> result.failed() ? result.defaultState() : resolveStartOutcome(childOutcome.get()))
                 .build()
                 .newStateMachine();
-        ActionBinding<Void> parentStart = propagatingAction(ActionId.START, false);
         StateMachine parent = StateMachineDefinition.define()
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
                 .child("child", child)
                 .from(NEW)
-                .on(parentStart)
+                .on(ActionId.START)
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
@@ -411,10 +447,10 @@ class StateMachineTest {
                 .newStateMachine();
         ExecutorService adapterExecutor = Executors.newFixedThreadPool(2);
         try {
-            ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
             ActionBinding<Void> startAcl = action(ActionId.START, ignored -> {
             });
             StateMachine parent = StateMachineDefinition.define()
+                    .childPropagationMode(StateMachineDefinition.ChildPropagationMode.PARALLEL)
                     .child("first", firstChild)
                     .child("second", secondChild)
                     .childExecutor(adapterExecutor)
@@ -425,7 +461,7 @@ class StateMachineTest {
                         return physicalState;
                     })
                     .from(NEW)
-                    .on(propagateStart)
+                    .on(ActionId.START)
                     .to(initReady, ERR)
 
                     .from(initReady)
@@ -477,12 +513,12 @@ class StateMachineTest {
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
         StateMachine parent = StateMachineDefinition.define()
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
                 .child("first", firstChild)
                 .child("second", secondChild)
                 .from(NEW)
-                .on(propagateStart)
+                .on(ActionId.START)
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
@@ -532,28 +568,6 @@ class StateMachineTest {
     }
 
     @Test
-    void actionBindingControlsPropagationOrder() {
-        List<String> calls = new ArrayList<>();
-        ActionBinding<Void> childStart = action(ActionId.START, ignored -> calls.add("child"));
-        StateMachine child = childMachine(childStart);
-        OrderedParentAction parentAction = new OrderedParentAction(calls);
-        StateMachine parent = StateMachineDefinition.define()
-                .child("child", child)
-                .from(NEW)
-                .on(parentAction.start())
-                .to(RUNNING, ERR)
-                .build()
-                .newStateMachine();
-
-        parent.execute(ActionId.START, Void.EMPTY);
-
-        assertThat(calls).containsExactly("parent-before", "child", "parent-after");
-        assertThat(child.currentState()).isEqualTo(RUNNING);
-        assertThat(parent.currentState()).isEqualTo(RUNNING);
-        parent.close();
-    }
-
-    @Test
     void failedParallelChildPropagationMovesParentToFailureState() {
         CountDownLatch childHandlersEntered = new CountDownLatch(3);
         List<String> calls = new CopyOnWriteArrayList<>();
@@ -567,14 +581,14 @@ class StateMachineTest {
         StateMachine thirdChild = childMachine(thirdChildStart);
         ExecutorService adapterExecutor = Executors.newFixedThreadPool(3);
         try {
-            ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
             StateMachine parent = StateMachineDefinition.define()
+                    .childPropagationMode(StateMachineDefinition.ChildPropagationMode.PARALLEL)
                     .child("first", firstChild)
                     .child("second", secondChild)
                     .child("third", thirdChild)
                     .childExecutor(adapterExecutor)
                     .from(NEW)
-                    .on(propagateStart)
+                    .on(ActionId.START)
                     .to(RUNNING, ERR)
                     .build()
                     .newStateMachine();
@@ -610,13 +624,13 @@ class StateMachineTest {
         StateMachine firstChild = childMachine(firstChildStart);
         StateMachine secondChild = childMachine(failingChildStart);
         StateMachine thirdChild = childMachine(thirdChildStart);
-        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
         StateMachine parent = StateMachineDefinition.define()
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
                 .child("first", firstChild)
                 .child("second", secondChild)
                 .child("third", thirdChild)
                 .from(NEW)
-                .on(propagateStart)
+                .on(ActionId.START)
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
@@ -647,11 +661,11 @@ class StateMachineTest {
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, true);
         StateMachine parent = StateMachineDefinition.define()
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.PARALLEL)
                 .child("child", child)
                 .from(NEW)
-                .on(propagateStart)
+                .on(ActionId.START)
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
@@ -1231,11 +1245,11 @@ class StateMachineTest {
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        ActionBinding<Void> propagateStart = propagatingAction(ActionId.START, false);
         StateMachine parent = StateMachineDefinition.define()
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
                 .child("transport", child)
                 .from(NEW)
-                .on(propagateStart)
+                .on(ActionId.START)
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
@@ -1457,54 +1471,6 @@ class StateMachineTest {
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-    }
-
-    private static ActionBinding<Void> propagatingAction(ActionId actionId, boolean parallel) {
-        PropagatingAction action = new PropagatingAction(actionId, parallel);
-        return action.binding();
-    }
-
-    private static final class PropagatingAction {
-        private final ActionId actionId;
-        private final boolean parallel;
-        private final ActionBinding<Void> binding;
-
-        private PropagatingAction(ActionId actionId, boolean parallel) {
-            this.actionId = actionId;
-            this.parallel = parallel;
-            binding = action(actionId, this::propagate);
-        }
-
-        private ActionBinding<Void> binding() {
-            return binding;
-        }
-
-        private void propagate(Void payload) {
-            if (parallel) {
-                binding.stateMachine().propagateParallel(actionId, payload);
-            } else {
-                binding.stateMachine().propagateSequential(actionId, payload);
-            }
-        }
-    }
-
-    private static final class OrderedParentAction {
-        private final List<String> calls;
-        private final ActionBinding<Void> start = action(ActionId.START, this::start);
-
-        private OrderedParentAction(List<String> calls) {
-            this.calls = calls;
-        }
-
-        private ActionBinding<Void> start() {
-            return start;
-        }
-
-        private void start(Void payload) {
-            calls.add("parent-before");
-            start.stateMachine().propagateSequential(ActionId.START, payload);
-            calls.add("parent-after");
-        }
     }
 
     private static LogCapture captureStateMachineLogs() {

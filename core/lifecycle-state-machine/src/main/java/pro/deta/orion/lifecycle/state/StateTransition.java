@@ -12,7 +12,6 @@ public record StateTransition(
     public StateTransition {
         Objects.requireNonNull(from, "from");
         Objects.requireNonNull(actionId, "actionId");
-        Objects.requireNonNull(action, "action");
         targets = List.copyOf(Objects.requireNonNull(targets, "targets"));
         if (targets.isEmpty()) {
             throw new IllegalArgumentException("Transition targets must not be empty");
@@ -21,7 +20,9 @@ public record StateTransition(
     }
 
     void register(StateMachine machine) {
-        action.register(machine);
+        if (action != null) {
+            action.register(machine);
+        }
     }
 
     public String describe() {
