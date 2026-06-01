@@ -5,6 +5,8 @@ import pro.deta.orion.config.schema.GitTransportConfig;
 import java.util.concurrent.CountDownLatch;
 
 final class RecordingGitNativeTransportService extends GitNativeTransportService {
+    private final boolean enabled;
+    private boolean running;
     private int startCalls;
     private int stopCalls;
     private RuntimeException startFailure;
@@ -17,6 +19,7 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
 
     RecordingGitNativeTransportService(boolean enabled) {
         super(config(enabled), null, null, 5_000);
+        this.enabled = enabled;
     }
 
     private static GitTransportConfig config(boolean enabled) {
@@ -41,11 +44,18 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
         if (startFailure != null) {
             throw startFailure;
         }
+        running = enabled;
     }
 
     @Override
     public void onStop() {
         stopCalls++;
+        running = false;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 
     void failStartWith(RuntimeException failure) {

@@ -20,7 +20,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Constructor;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -45,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -92,6 +95,21 @@ class GitNativeTransportServiceTest {
         service.onStart();
 
         assertNotNull(service.boundAddress());
+        assertTrue(service.isRunning());
+    }
+
+    @Test
+    void bindFailureIsReportedToCaller() throws Exception {
+        try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            GitTransportConfig config = new GitTransportConfig("127.0.0.1", occupied.getLocalPort());
+            config.setEnabled(true);
+            executor = new OrionExecutor(4, new OrionThreadFactory());
+            service = new GitNativeTransportService(config, new RecordingGitInternalService(), executor, 5_000);
+
+            assertThrows(RuntimeException.class, service::onStart);
+
+            assertFalse(service.isRunning());
+        }
     }
 
     @Test

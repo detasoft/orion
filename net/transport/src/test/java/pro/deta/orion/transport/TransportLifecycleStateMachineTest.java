@@ -216,12 +216,15 @@ class TransportLifecycleStateMachineTest {
     }
 
     private static final class RecordingGitNativeTransportService extends GitNativeTransportService {
+        private final boolean enabled;
+        private boolean running;
         private int startCalls;
         private int stopCalls;
         private RuntimeException startFailure;
 
         private RecordingGitNativeTransportService(OrionConfiguration configuration) {
             super(configuration.getTransport().getGit(), null, null);
+            enabled = configuration.getTransport().getGit().isEnabled();
         }
 
         @Override
@@ -230,11 +233,18 @@ class TransportLifecycleStateMachineTest {
             if (startFailure != null) {
                 throw startFailure;
             }
+            running = enabled;
         }
 
         @Override
         public void onStop() {
             stopCalls++;
+            running = false;
+        }
+
+        @Override
+        public boolean isRunning() {
+            return running;
         }
 
         private void failStartWith(RuntimeException failure) {

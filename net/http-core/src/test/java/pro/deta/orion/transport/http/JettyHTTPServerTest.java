@@ -47,6 +47,7 @@ class JettyHTTPServerTest {
         server.onStart();
 
         try {
+            assertThat(server.isRunning()).isTrue();
             // Configure SSL context to trust our self-signed certificate
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(null, new TrustManager[] {TrustAllX509TrustManager.INSTANCE}, new java.security.SecureRandom());
@@ -86,6 +87,7 @@ class JettyHTTPServerTest {
             assertThatThrownBy(server::onStart)
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Cannot start Jetty HTTP server");
+            assertThat(server.isRunning()).isFalse();
         }
     }
 
@@ -116,6 +118,7 @@ class JettyHTTPServerTest {
             server.onStop();
 
             assertThat(server.getJettyServer().get()).isNull();
+            assertThat(server.isRunning()).isFalse();
         } finally {
             route.release();
             clientRequest.cancel(true);

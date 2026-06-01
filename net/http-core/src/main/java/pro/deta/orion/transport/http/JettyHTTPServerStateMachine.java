@@ -77,7 +77,11 @@ public final class JettyHTTPServerStateMachine {
         if (result.failed()) {
             return result.defaultState();
         }
-        return resolveServer().isEnabled() ? RUNNING : DISABLED;
+        JettyHTTPServer currentServer = resolveServer();
+        if (!currentServer.isEnabled()) {
+            return DISABLED;
+        }
+        return currentServer.isRunning() ? RUNNING : ERR;
     }
 
     private Void stopHttpTransport(Void ignored) {

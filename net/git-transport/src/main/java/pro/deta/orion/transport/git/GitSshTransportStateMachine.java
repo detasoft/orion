@@ -78,7 +78,11 @@ public final class GitSshTransportStateMachine {
         if (result.failed()) {
             return result.defaultState();
         }
-        return resolveService().isEnabled() ? RUNNING : DISABLED;
+        GitSshTransportService currentService = resolveService();
+        if (!currentService.isEnabled()) {
+            return DISABLED;
+        }
+        return currentService.isRunning() ? RUNNING : ERR;
     }
 
     private Void stopSshTransport(Void ignored) {

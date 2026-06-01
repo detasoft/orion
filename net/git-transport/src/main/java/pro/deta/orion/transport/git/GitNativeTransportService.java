@@ -62,6 +62,10 @@ public class GitNativeTransportService {
         return config != null && config.isEnabled();
     }
 
+    public boolean isRunning() {
+        return boundAddress() != null;
+    }
+
     private void listenService() {
         try {
             InetAddress serverSocketAddress = InetAddress.getByName(config.getAddress());

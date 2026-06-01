@@ -79,6 +79,11 @@ public class JettyHTTPServer {
                 || (httpsTransportConfig != null && httpsTransportConfig.isEnabled());
     }
 
+    public boolean isRunning() {
+        Server server = jettyServer.get();
+        return server != null && server.isStarted();
+    }
+
     private Server getNewServer() {
         try {
             QueuedThreadPool threadPool = new QueuedThreadPool(10, 2, 120);

@@ -113,7 +113,11 @@ public final class GitNativeTransportStateMachine {
         if (result.failed()) {
             return result.defaultState();
         }
-        return resolveService().isEnabled() ? RUNNING : DISABLED;
+        GitNativeTransportService currentService = resolveService();
+        if (!currentService.isEnabled()) {
+            return DISABLED;
+        }
+        return currentService.isRunning() ? RUNNING : ERR;
     }
 
     private Void stopGitTransport(Void ignored) {

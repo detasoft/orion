@@ -104,7 +104,7 @@ public class GitSshTransportService {
             log.warn("Listening on {} sshd: {}", addr, sshd.getVersion());
             sshd.start();
         } catch (BindException e) {
-            log.error("Bind exception: {}: {}", config, e.getMessage());
+            throw new IllegalStateException("Cannot bind SSH transport " + config, e);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -113,6 +113,10 @@ public class GitSshTransportService {
 
     public boolean isEnabled() {
         return sshTransportConfig().isEnabled();
+    }
+
+    public boolean isRunning() {
+        return sshd.isStarted();
     }
 
     private SshTransportConfig sshTransportConfig() {
