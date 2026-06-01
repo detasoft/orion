@@ -100,6 +100,24 @@ public final class StateMachine implements AutoCloseable {
                 lastTransitionResult);
     }
 
+    public StateMachineStatus status() {
+        return status(name());
+    }
+
+    private synchronized StateMachineStatus status(String name) {
+        Map<String, StateMachineStatus> childStatuses = new LinkedHashMap<>();
+        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
+            childStatuses.put(child.getKey(), child.getValue().status(child.getKey()));
+        }
+        return new StateMachineStatus(
+                requireName(name),
+                currentState,
+                computedState,
+                childStatuses,
+                definition.availableActions(currentState),
+                definition.isTerminalState(currentState));
+    }
+
     public StateTransitionResult lastTransitionResult() {
         return lastTransitionResult;
     }

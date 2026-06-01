@@ -666,6 +666,40 @@ class StateMachineTest {
     }
 
     @Test
+    void statusTreeSeparatesPhysicalAndComputedStateForEachNode() {
+        State parentComputed = state("PARENT_COMPUTED");
+        State childComputed = state("CHILD_COMPUTED");
+        StateMachine child = StateMachineDefinition.define()
+                .name("child-machine")
+                .computedState((physicalState, childStates) -> childComputed)
+                .from(NEW)
+                .on(ActionId.START)
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+        StateMachine parent = StateMachineDefinition.define()
+                .name("parent-machine")
+                .child("child", child)
+                .computedState((physicalState, childStates) -> parentComputed)
+                .build()
+                .newStateMachine();
+
+        StateMachineStatus status = parent.status();
+
+        assertThat(status.name()).isEqualTo("parent-machine");
+        assertThat(status.state()).isSameAs(NEW);
+        assertThat(status.computedState()).isSameAs(parentComputed);
+        assertThat(status.children()).containsOnlyKeys("child");
+        StateMachineStatus childStatus = status.children().get("child");
+        assertThat(childStatus.name()).isEqualTo("child");
+        assertThat(childStatus.state()).isSameAs(NEW);
+        assertThat(childStatus.computedState()).isSameAs(childComputed);
+        assertThat(parent.childStates()).containsEntry("child", NEW);
+
+        parent.close();
+    }
+
+    @Test
     void failedParallelChildPropagationMovesParentToFailureState() {
         CountDownLatch childHandlersEntered = new CountDownLatch(3);
         List<String> calls = new CopyOnWriteArrayList<>();

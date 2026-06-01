@@ -257,6 +257,12 @@ StateMachine parent = StateMachineDefinition.define()
 physical state used to validate transitions. This keeps command availability
 deterministic while still giving the parent a place to publish aggregate status.
 
+`childStates()` and `StateMachineSnapshot.childStates()` intentionally expose the
+observed physical states of direct children. Structured status consumers should
+use `status()`, which returns a recursive tree where every node has both
+`state` and `computedState`. `describeStatus()` is the human-readable rendering
+of the same status distinction.
+
 ## Observability
 
 Subscribers and listeners are observers. Their exceptions are logged and ignored
