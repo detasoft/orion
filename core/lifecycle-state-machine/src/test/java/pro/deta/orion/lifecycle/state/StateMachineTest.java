@@ -9,6 +9,7 @@ import org.junit.jupiter.api.TestInfo;
 import org.slf4j.LoggerFactory;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
@@ -81,20 +82,30 @@ class StateMachineTest {
                         "children",
                         "availableActions",
                         "terminal");
-        assertThat(recordComponentNames(StateMachineSnapshot.class))
-                .containsExactly(
-                        "state",
-                        "computedState",
-                        "childStates",
-                        "availableActions",
-                        "terminal",
-                        "lastTransitionResult");
         assertThat(Arrays.stream(StateMachine.class.getDeclaredMethods()).map(Method::getName))
                 .contains("childStates")
                 .doesNotContain("childPhysicalStates");
         assertThat(Arrays.stream(AggregateStateMachine.class.getDeclaredMethods()).map(Method::getName))
                 .contains("childStates")
                 .doesNotContain("childPhysicalStates");
+    }
+
+    @Test
+    void stateMachinePublishesSingleStructuredStatusView() {
+        assertThat(Arrays.stream(StateMachine.class.getDeclaredMethods()).map(Method::getName))
+                .contains("status")
+                .doesNotContain("snapshot");
+        assertThatThrownBy(() -> Class.forName(
+                "pro.deta.orion.lifecycle.state.StateMachineSnapshot"))
+                .isInstanceOf(ClassNotFoundException.class);
+    }
+
+    @Test
+    void stateMachineReadsChildStatesFromChildrenWithoutCachingCopies() {
+        assertThat(Arrays.stream(StateMachine.class.getDeclaredFields()).map(Field::getName))
+                .doesNotContain("childStates", "observedChildStates", "childSubscriptions", "computedState");
+        assertThat(AutoCloseable.class.isAssignableFrom(StateMachine.class)).isFalse();
+        assertThat(AutoCloseable.class.isAssignableFrom(AggregateStateMachine.class)).isFalse();
     }
 
     @Test
@@ -121,7 +132,6 @@ class StateMachineTest {
         });
         assertThat(child.currentState()).isSameAs(RUNNING);
         assertThat(aggregate.currentState()).isSameAs(RUNNING);
-        aggregate.close();
     }
 
     @Test
@@ -211,7 +221,7 @@ class StateMachineTest {
         assertThat(result.to()).isSameAs(DISABLED);
         assertThat(machine.currentState()).isSameAs(DISABLED);
         assertThat(machine.lastTransitionResult()).isSameAs(result);
-        assertThat(machine.snapshot().lastTransitionResult()).isSameAs(result);
+        assertThat(machine.lastTransitionResult()).isSameAs(result);
     }
 
     @Test
@@ -234,7 +244,7 @@ class StateMachineTest {
         assertThat(result.targets()).containsExactly(DISABLED, RUNNING, ERR);
         assertThat(result.actionResult()).isEqualTo(StartOutcome.STARTED);
         assertThat(result.to()).isNull();
-        assertThat(machine.snapshot().lastTransitionResult()).isSameAs(result);
+        assertThat(machine.lastTransitionResult()).isSameAs(result);
     }
 
     @Test
@@ -258,7 +268,7 @@ class StateMachineTest {
         assertThat(result.from()).isSameAs(NEW);
         assertThat(result.to()).isSameAs(ERR);
         assertThat(result.failure()).isSameAs(failure);
-        assertThat(machine.snapshot().lastTransitionResult()).isSameAs(result);
+        assertThat(machine.lastTransitionResult()).isSameAs(result);
         assertThat(machine.describe()).contains("last transition: NEW --START--> ERR");
         assertThat(machine.describeStatus()).contains("start failed");
     }
@@ -515,13 +525,12 @@ class StateMachineTest {
                     .containsEntry("first", RUNNING)
                     .containsEntry("second", RUNNING);
             assertThat(parent.computedState()).isEqualTo(childrenRunning);
-            assertThat(parent.snapshot().computedState()).isEqualTo(childrenRunning);
+            assertThat(parent.computedState()).isEqualTo(childrenRunning);
             assertThat(events)
                     .extracting(StateTransitionResult::from, StateTransitionResult::action, StateTransitionResult::to)
                     .containsExactly(
                             tuple(NEW, ActionId.START, initReady),
                             tuple(initReady, ActionId.START, RUNNING));
-            parent.close();
         } finally {
             adapterExecutor.shutdownNow();
         }
@@ -567,7 +576,6 @@ class StateMachineTest {
         assertThat(states(parent.childStates()))
                 .containsEntry("first", RUNNING)
                 .containsEntry("second", RUNNING);
-        parent.close();
     }
 
     @Test
@@ -611,8 +619,6 @@ class StateMachineTest {
             assertThat(childResult.to()).isSameAs(RUNNING);
             assertThat((List<?>) childResult.actionResult()).hasSize(2);
         });
-        parent.close();
-        child.close();
     }
 
     @Test
@@ -662,8 +668,6 @@ class StateMachineTest {
                 assertThat((List<?>) childResult.actionResult()).hasSize(2);
             });
         } finally {
-            parent.close();
-            child.close();
             childExecutor.shutdownNow();
         }
     }
@@ -693,7 +697,6 @@ class StateMachineTest {
                 transports: DISABLED (state=NEW)
                   git-native: DISABLED (state=NEW)""");
 
-        parent.close();
     }
 
     @Test
@@ -729,9 +732,8 @@ class StateMachineTest {
         StateMachineStatus directChildStatus = parent.childStates().get("child");
         assertThat(directChildStatus.state()).isSameAs(NEW);
         assertThat(directChildStatus.computedState()).isSameAs(childComputed);
-        assertThat(parent.snapshot().childStates().get("child").computedState()).isSameAs(childComputed);
+        assertThat(parent.childStates().get("child").computedState()).isSameAs(childComputed);
 
-        parent.close();
     }
 
     @Test
@@ -773,7 +775,6 @@ class StateMachineTest {
                     .containsEntry("first", RUNNING)
                     .containsEntry("second", ERR)
                     .containsEntry("third", RUNNING);
-            parent.close();
         } finally {
             adapterExecutor.shutdownNow();
         }
@@ -815,7 +816,6 @@ class StateMachineTest {
                 .containsEntry("first", RUNNING)
                 .containsEntry("second", ERR)
                 .containsEntry("third", RUNNING);
-        parent.close();
     }
 
     @Test
@@ -1267,7 +1267,7 @@ class StateMachineTest {
 
         terminal.execute(actions.start(), new StartAction("terminal"));
 
-        assertThat(terminal.snapshot().terminal()).isTrue();
+        assertThat(terminal.status().terminal()).isTrue();
         assertThat(terminal.availableActions()).isEmpty();
 
         TestActions restartableActions = new TestActions();
@@ -1284,7 +1284,7 @@ class StateMachineTest {
 
         restartable.execute(restartableActions.start(), new StartAction("restartable"));
 
-        assertThat(restartable.snapshot().terminal()).isTrue();
+        assertThat(restartable.status().terminal()).isTrue();
         assertThat(restartable.availableActions()).containsExactly(restartableActions.start().id());
     }
 
@@ -1302,7 +1302,7 @@ class StateMachineTest {
         terminal.execute(actions.start(), new StartAction("custom terminal"));
 
         assertThat(terminal.currentState()).isEqualTo(STOPPED);
-        assertThat(terminal.snapshot().terminal()).isTrue();
+        assertThat(terminal.status().terminal()).isTrue();
     }
 
     @Test
@@ -1450,7 +1450,6 @@ class StateMachineTest {
                     last transition: NEW --START--> RUNNING
                     transitions:
                       NEW --START--> RUNNING (fail -> ERR)""");
-        parent.close();
     }
 
     @Test

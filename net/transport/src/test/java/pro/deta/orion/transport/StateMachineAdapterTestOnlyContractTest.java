@@ -21,7 +21,6 @@ class StateMachineAdapterTestOnlyContractTest {
                 "startAction",
                 "stopAction",
                 "currentState",
-                "snapshot",
                 "describe",
                 "subscribe",
                 "start",

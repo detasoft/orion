@@ -215,7 +215,7 @@ AggregateStateMachine aggregate = new AggregateStateMachine(definition);
 aggregate.start();
 ```
 
-The parent subscribes to each child and keeps a snapshot of child states:
+The parent reads direct child status from the child machines:
 
 ```java
 parent.childStates().get("storage").state(); // NEW
@@ -227,14 +227,14 @@ parent.childStates().get("storage").state(); // NEW
 The parent waits for every selected child to finish. If any child fails, the
 parent transition fails and resolves through the parent's configured targets.
 
-Child listeners only update the parent's observed child snapshot. They do not
-start follow-up actions by themselves. Follow-up layers are still driven by the
-parent's own `execute(actionId, payload)` cascade.
+Child transitions do not start follow-up actions by themselves. Follow-up layers
+are still driven by the parent's own `execute(actionId, payload)` cascade.
 
 ## Computed State
 
 Every machine has a physical state: `currentState()`. A parent may also expose a
-computed state derived from its physical state and observed child states:
+computed state derived from its physical state and the current states of its
+direct children:
 
 ```java
 StateMachine parent = StateMachineDefinition.define()
@@ -253,15 +253,16 @@ StateMachine parent = StateMachineDefinition.define()
         .newStateMachine();
 ```
 
-`computedState()` is for monitoring and diagnostics. It does not replace the
-physical state used to validate transitions. This keeps command availability
-deterministic while still giving the parent a place to publish aggregate status.
+`computedState()` is for monitoring and diagnostics and is calculated from the
+machine's current state plus the current states of its direct children. It does
+not replace the physical state used to validate transitions. This keeps command
+availability deterministic while still giving the parent a place to publish
+aggregate status.
 
-`childStates()` and `StateMachineSnapshot.childStates()` expose direct children
-as structured status nodes, so every child entry has both `state` and
-`computedState`. `status()` returns the same distinction for the current machine
-and its recursive child tree. `describeStatus()` is the human-readable rendering
-of that structured status.
+`childStates()` exposes direct children as structured status nodes, so every
+child entry has both `state` and `computedState`. `status()` returns the same
+distinction for the current machine and its recursive child tree.
+`describeStatus()` is the human-readable rendering of that structured status.
 
 ## Observability
 

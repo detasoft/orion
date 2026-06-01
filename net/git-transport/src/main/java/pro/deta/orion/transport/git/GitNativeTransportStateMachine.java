@@ -9,7 +9,6 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.StateMachineEventSubscriber;
-import pro.deta.orion.lifecycle.state.StateMachineSnapshot;
 import pro.deta.orion.lifecycle.state.StateMachineSubscription;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.state.Void;
@@ -88,11 +87,6 @@ public final class GitNativeTransportStateMachine {
     @TestOnly
     public State currentState() {
         return stateMachine.currentState();
-    }
-
-    @TestOnly
-    public StateMachineSnapshot snapshot() {
-        return stateMachine.snapshot();
     }
 
     @TestOnly

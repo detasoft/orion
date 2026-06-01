@@ -63,7 +63,7 @@ class GitNativeTransportStateMachineTest {
 
         machine.stop();
         assertEquals(FIN, machine.currentState());
-        assertTrue(machine.snapshot().terminal());
+        assertTrue(machine.stateMachine().status().terminal());
         assertTrue(machine.stateMachine().availableActions().isEmpty());
         assertEquals(1, service.stopCalls());
     }

@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-public final class AggregateStateMachine implements AutoCloseable {
+public final class AggregateStateMachine {
     private final StateMachineDefinition definition;
     private final StateMachine stateMachine;
 
@@ -50,8 +50,4 @@ public final class AggregateStateMachine implements AutoCloseable {
         return execute(ActionId.STOP);
     }
 
-    @Override
-    public void close() {
-        stateMachine.close();
-    }
 }
