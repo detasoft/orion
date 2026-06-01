@@ -11,7 +11,6 @@ import pro.deta.orion.auth.check.rule.ConnectionAccessRules;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
 
@@ -52,14 +51,11 @@ public class GitNativeTransportService {
         this.socketTimeoutMillis = socketTimeoutMillis;
     }
 
-    public OrionStageCallResult onStart() {
+    public void onStart() {
         if (isEnabled()) {
             stopRequested = false;
-            OrionStageCallResult callResult = new OrionStageCallResult(0);
-            callResult.submit(orionExecutor, () -> listenService());
-            return callResult;
+            listenService();
         }
-        return null;
     }
 
     public boolean isEnabled() {
@@ -128,7 +124,7 @@ public class GitNativeTransportService {
         }
     }
 
-    public OrionStageCallResult onStop() {
+    public void onStop() {
         stopRequested = true;
         try {
             if (listenSock != null)
@@ -138,7 +134,6 @@ public class GitNativeTransportService {
         } finally {
             listenSock = null;
         }
-        return null;
     }
 
     InetSocketAddress boundAddress() {

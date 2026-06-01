@@ -216,29 +216,25 @@ class TransportLifecycleStateMachineTest {
     }
 
     private static final class RecordingGitNativeTransportService extends GitNativeTransportService {
-        private final boolean enabled;
         private int startCalls;
         private int stopCalls;
         private RuntimeException startFailure;
 
         private RecordingGitNativeTransportService(OrionConfiguration configuration) {
             super(configuration.getTransport().getGit(), null, null);
-            this.enabled = configuration.getTransport().getGit().isEnabled();
         }
 
         @Override
-        public pro.deta.orion.lifecycle.data.OrionStageCallResult onStart() {
+        public void onStart() {
             startCalls++;
             if (startFailure != null) {
                 throw startFailure;
             }
-            return enabled ? new pro.deta.orion.lifecycle.data.OrionStageCallResult(0) : null;
         }
 
         @Override
-        public pro.deta.orion.lifecycle.data.OrionStageCallResult onStop() {
+        public void onStop() {
             stopCalls++;
-            return null;
         }
 
         private void failStartWith(RuntimeException failure) {

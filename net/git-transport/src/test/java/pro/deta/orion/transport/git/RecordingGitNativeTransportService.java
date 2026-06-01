@@ -1,12 +1,10 @@
 package pro.deta.orion.transport.git;
 
 import pro.deta.orion.config.schema.GitTransportConfig;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 
 import java.util.concurrent.CountDownLatch;
 
 final class RecordingGitNativeTransportService extends GitNativeTransportService {
-    private final boolean enabled;
     private int startCalls;
     private int stopCalls;
     private RuntimeException startFailure;
@@ -19,7 +17,6 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
 
     RecordingGitNativeTransportService(boolean enabled) {
         super(config(enabled), null, null, 5_000);
-        this.enabled = enabled;
     }
 
     private static GitTransportConfig config(boolean enabled) {
@@ -29,7 +26,7 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
     }
 
     @Override
-    public OrionStageCallResult onStart() {
+    public void onStart() {
         startCalls++;
         if (startEntering != null) {
             startEntering.countDown();
@@ -44,13 +41,11 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
         if (startFailure != null) {
             throw startFailure;
         }
-        return enabled ? new OrionStageCallResult(0) : null;
     }
 
     @Override
-    public OrionStageCallResult onStop() {
+    public void onStop() {
         stopCalls++;
-        return null;
     }
 
     void failStartWith(RuntimeException failure) {

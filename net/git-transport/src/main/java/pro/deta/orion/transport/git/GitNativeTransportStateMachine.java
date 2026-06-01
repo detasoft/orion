@@ -2,7 +2,6 @@ package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
@@ -105,8 +104,9 @@ public final class GitNativeTransportStateMachine {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 
-    private OrionStageCallResult startGitTransport(Void ignored) {
-        return resolveService().onStart();
+    private Void startGitTransport(Void ignored) {
+        resolveService().onStart();
+        return Void.EMPTY;
     }
 
     private State resolveStartState(StateTransitionResult result) {

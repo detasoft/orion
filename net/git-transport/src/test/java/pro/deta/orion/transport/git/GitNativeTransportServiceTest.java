@@ -13,7 +13,6 @@ import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.Result;
 import pro.deta.orion.util.stream.StandardStreams;
 
@@ -79,11 +78,20 @@ class GitNativeTransportServiceTest {
         RecordingGitInternalService gitService = new RecordingGitInternalService();
         service = newService(gitService, false, 5_000);
 
-        OrionStageCallResult result = service.onStart();
+        service.onStart();
 
-        assertNull(result);
         assertNull(service.boundAddress());
         assertTrue(gitService.calls.isEmpty());
+    }
+
+    @Test
+    void enabledTransportBindsListenerBeforeReturningFromStart() {
+        RecordingGitInternalService gitService = new RecordingGitInternalService();
+        service = newService(gitService, true, 5_000);
+
+        service.onStart();
+
+        assertNotNull(service.boundAddress());
     }
 
     @Test
@@ -240,7 +248,7 @@ class GitNativeTransportServiceTest {
 
     private InetSocketAddress startService(GitInternalService gitService, int socketTimeoutMillis) throws Exception {
         service = newService(gitService, true, socketTimeoutMillis);
-        assertNotNull(service.onStart());
+        service.onStart();
         return awaitBoundAddress(service);
     }
 
