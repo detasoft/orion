@@ -31,7 +31,7 @@ public final class TransportLifecycleBarrier implements OrionApplicationStageEve
         if (TransportRuntimeConfig.isHttpTransportEnabled(configuration)
                 || TransportRuntimeConfig.isGitTransportEnabled(configuration)
                 || TransportRuntimeConfig.isSshTransportEnabled(configuration)) {
-            transportsStop.after(OrionLifecycleTasks.GIT_TRANSPORT_STOP);
+            transportsStop.after(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_STOP);
         }
     }
 }

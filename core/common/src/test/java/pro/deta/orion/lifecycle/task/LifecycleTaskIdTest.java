@@ -12,7 +12,9 @@ class LifecycleTaskIdTest {
         assertThat(OrionLifecycleTasks.JGIT_RUNTIME_STOP.toString()).isEqualTo("JGIT_RUNTIME_STOP");
         assertThat(OrionLifecycleTasks.ACL_LOAD.toString()).isEqualTo("ACL_LOAD");
         assertThat(OrionLifecycleTasks.TRANSPORTS_START.toString()).isEqualTo("TRANSPORTS_START");
+        assertThat(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START.toString()).isEqualTo("TRANSPORT_LIFECYCLE_START");
         assertThat(OrionLifecycleTasks.TRANSPORTS_STOP.toString()).isEqualTo("TRANSPORTS_STOP");
+        assertThat(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_STOP.toString()).isEqualTo("TRANSPORT_LIFECYCLE_STOP");
         assertThat(OrionLifecycleTasks.HTTP_TRANSPORT_STOP.toString()).isEqualTo("HTTP_TRANSPORT_STOP");
     }
 

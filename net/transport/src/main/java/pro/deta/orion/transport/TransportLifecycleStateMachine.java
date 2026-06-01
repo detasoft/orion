@@ -56,12 +56,12 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
 
     @Override
     public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.GIT_TRANSPORT_START, () -> {
+        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START, () -> {
                     start();
                     return null;
                 })
                 .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.GIT_TRANSPORT_STOP, () -> {
+        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.TRANSPORT_LIFECYCLE_STOP, () -> {
             stop();
             return null;
         });

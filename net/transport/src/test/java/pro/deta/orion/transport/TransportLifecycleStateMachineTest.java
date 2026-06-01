@@ -65,15 +65,21 @@ class TransportLifecycleStateMachineTest {
         assertInstanceOf(OrionApplicationStageEventListener.class, machine);
         machine.registerToStage(registrar);
 
-        LifecycleTaskDefinition start = registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_START);
+        LifecycleTaskDefinition start = registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START);
         assertEquals(ApplicationState.STARTING, start.phase());
         assertEquals("TransportLifecycleStateMachine", start.serviceName());
         assertEquals(List.of(OrionLifecycleTasks.TRANSPORTS_START), start.after());
 
-        LifecycleTaskDefinition stop = registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_STOP);
+        LifecycleTaskDefinition stop = registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_STOP);
         assertEquals(ApplicationState.STOPPING, stop.phase());
         assertEquals("TransportLifecycleStateMachine", stop.serviceName());
         assertTrue(stop.after().isEmpty());
+        registrar.assertNotRegistered(OrionLifecycleTasks.GIT_TRANSPORT_START);
+        registrar.assertNotRegistered(OrionLifecycleTasks.HTTP_TRANSPORT_START);
+        registrar.assertNotRegistered(OrionLifecycleTasks.SSH_TRANSPORT_START);
+        registrar.assertNotRegistered(OrionLifecycleTasks.GIT_TRANSPORT_STOP);
+        registrar.assertNotRegistered(OrionLifecycleTasks.HTTP_TRANSPORT_STOP);
+        registrar.assertNotRegistered(OrionLifecycleTasks.SSH_TRANSPORT_STOP);
 
         assertNull(start.call().call());
         assertEquals(TransportLifecycleStateMachine.RUNNING, machine.currentState());
@@ -88,7 +94,7 @@ class TransportLifecycleStateMachineTest {
         RecordingRegistrar registrar = new RecordingRegistrar();
 
         machine.registerToStage(registrar);
-        registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_START).call().call();
+        registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START).call().call();
 
         Map<String, ?> children = machine.stateMachine().childStates();
         assertTrue(children.containsKey("git-native"));
@@ -122,7 +128,7 @@ class TransportLifecycleStateMachineTest {
         assertTrue(children.containsKey("git-native"));
         assertTrue(children.containsKey("git-ssh"));
         assertTrue(children.containsKey("http"));
-        registrar.definition(OrionLifecycleTasks.GIT_TRANSPORT_START).call().call();
+        registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START).call().call();
 
         assertTrue(serviceResolved.get());
         assertEquals(TransportLifecycleStateMachine.DISABLED, machine.currentState());
@@ -277,6 +283,14 @@ class TransportLifecycleStateMachineTest {
                 }
             }
             throw new AssertionError("Missing lifecycle task " + id);
+        }
+
+        private void assertNotRegistered(LifecycleTaskId id) {
+            for (LifecycleTaskRegistration registration : registrations) {
+                if (registration.definition().id().equals(id)) {
+                    throw new AssertionError("Unexpected lifecycle task " + id);
+                }
+            }
         }
     }
 }

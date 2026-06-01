@@ -49,13 +49,13 @@ enabled transport services, publishes the aggregate `StateMachine`, and keeps
 `core/bootstrap` dependent only on this transport composition module. Dagger
 owns both `GitNativeTransportStateMachine` and `GitNativeTransportService`; the
 important boundary is that only `TransportLifecycleStateMachine` is registered
-as an application lifecycle listener. The aggregate owns the legacy
-`GIT_TRANSPORT_START` and `GIT_TRANSPORT_STOP` task registration but asks the
-child whether native Git is enabled before registering those tasks. The runtime
-module no longer imports concrete transport services and no longer collects a
-Dagger set of abstract state machines. `OrionGitTransportModule` was removed
-because no extra multibinding module is needed for native Git state-machine
-wiring.
+as an application lifecycle listener. The aggregate owns the transport-wide
+`TRANSPORT_LIFECYCLE_START` and `TRANSPORT_LIFECYCLE_STOP` task registrations;
+individual `GIT_TRANSPORT_*`, `HTTP_TRANSPORT_*`, and `SSH_TRANSPORT_*`
+start/stop tasks are not registered separately. The runtime module no longer
+imports concrete transport services and no longer collects a Dagger set of
+abstract state machines. `OrionGitTransportModule` was removed because no extra
+multibinding module is needed for native Git state-machine wiring.
 
 `StateMachine.describeStatus()` now renders a compact ASCII tree of the
 aggregate and child states. It uses computed state when present and includes the
@@ -221,13 +221,13 @@ LifecycleStateMachineAdapter<ServiceState, ServiceAction> adapter =
 adapter.register(
         registrar,
         ApplicationState.STARTING,
-        OrionLifecycleTasks.GIT_TRANSPORT_START,
+        OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START,
         ServiceAction.START);
 
 adapter.register(
         registrar,
         ApplicationState.STOPPING,
-        OrionLifecycleTasks.GIT_TRANSPORT_STOP,
+        OrionLifecycleTasks.TRANSPORT_LIFECYCLE_STOP,
         ServiceAction.STOP);
 ```
 
@@ -310,11 +310,11 @@ Add an adapter that converts application lifecycle tasks into state machine
 actions.
 
 Current status: a generic adapter is deferred. The transport aggregate now has a
-narrow adapter inside `TransportLifecycleStateMachine`, which registers the
-existing `GIT_TRANSPORT_START` and `GIT_TRANSPORT_STOP` lifecycle task ids and
-executes aggregate `ActionId.START` / `ActionId.STOP` transitions. Those
-aggregate actions propagate to the explicitly listed child state machines, which
-currently means `GitNativeTransportStateMachine`.
+narrow adapter inside `TransportLifecycleStateMachine`, which registers
+transport-wide `TRANSPORT_LIFECYCLE_START` and `TRANSPORT_LIFECYCLE_STOP`
+lifecycle task ids and executes aggregate `ActionId.START` / `ActionId.STOP`
+transitions. Those aggregate actions propagate to the explicitly listed child
+state machines.
 
 Cover:
 
