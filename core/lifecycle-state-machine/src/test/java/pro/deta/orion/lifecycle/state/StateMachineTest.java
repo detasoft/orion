@@ -540,6 +540,104 @@ class StateMachineTest {
     }
 
     @Test
+    void propagatedChildMachineCanPropagateToItsChildrenSequentially() {
+        List<String> calls = new ArrayList<>();
+        StateMachine firstLeaf = childMachine(action(ActionId.START, ignored -> calls.add("first")));
+        StateMachine secondLeaf = childMachine(action(ActionId.START, ignored -> calls.add("second")));
+        StateMachine child = StateMachineDefinition.define()
+                .name("child")
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
+                .child("first", firstLeaf)
+                .child("second", secondLeaf)
+                .from(NEW)
+                .on(ActionId.START)
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+        StateMachine parent = StateMachineDefinition.define()
+                .name("parent")
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
+                .child("child", child)
+                .from(NEW)
+                .on(ActionId.START)
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+
+        List<StateTransitionResult> results = parent.execute(ActionId.START, Void.EMPTY);
+
+        assertThat(calls).containsExactly("first", "second");
+        assertThat(firstLeaf.currentState()).isSameAs(RUNNING);
+        assertThat(secondLeaf.currentState()).isSameAs(RUNNING);
+        assertThat(child.currentState()).isSameAs(RUNNING);
+        assertThat(parent.currentState()).isSameAs(RUNNING);
+        assertThat(child.childStates())
+                .containsEntry("first", RUNNING)
+                .containsEntry("second", RUNNING);
+        assertThat(parent.childStates()).containsEntry("child", RUNNING);
+        assertThat(results).singleElement().satisfies(parentResult -> {
+            StateTransitionResult childResult = (StateTransitionResult) ((List<?>) parentResult.actionResult()).getFirst();
+            assertThat(childResult.to()).isSameAs(RUNNING);
+            assertThat((List<?>) childResult.actionResult()).hasSize(2);
+        });
+        parent.close();
+        child.close();
+    }
+
+    @Test
+    void propagatedChildMachineCanPropagateToItsChildrenInParallel() {
+        CountDownLatch childHandlersEntered = new CountDownLatch(2);
+        List<String> calls = new CopyOnWriteArrayList<>();
+        StateMachine firstLeaf = childMachine(childStart("first", calls, childHandlersEntered));
+        StateMachine secondLeaf = childMachine(childStart("second", calls, childHandlersEntered));
+        ExecutorService childExecutor = Executors.newFixedThreadPool(2);
+        StateMachine child = StateMachineDefinition.define()
+                .name("child")
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.PARALLEL)
+                .child("first", firstLeaf)
+                .child("second", secondLeaf)
+                .childExecutor(childExecutor)
+                .from(NEW)
+                .on(ActionId.START)
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+        StateMachine parent = StateMachineDefinition.define()
+                .name("parent")
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
+                .child("child", child)
+                .from(NEW)
+                .on(ActionId.START)
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+
+        try {
+            List<StateTransitionResult> results = parent.execute(ActionId.START, Void.EMPTY);
+
+            assertThat(calls).containsExactlyInAnyOrder("first", "second");
+            assertThat(firstLeaf.currentState()).isSameAs(RUNNING);
+            assertThat(secondLeaf.currentState()).isSameAs(RUNNING);
+            assertThat(child.currentState()).isSameAs(RUNNING);
+            assertThat(parent.currentState()).isSameAs(RUNNING);
+            assertThat(child.childStates())
+                    .containsEntry("first", RUNNING)
+                    .containsEntry("second", RUNNING);
+            assertThat(parent.childStates()).containsEntry("child", RUNNING);
+            assertThat(results).singleElement().satisfies(parentResult -> {
+                StateTransitionResult childResult =
+                        (StateTransitionResult) ((List<?>) parentResult.actionResult()).getFirst();
+                assertThat(childResult.to()).isSameAs(RUNNING);
+                assertThat((List<?>) childResult.actionResult()).hasSize(2);
+            });
+        } finally {
+            parent.close();
+            child.close();
+            childExecutor.shutdownNow();
+        }
+    }
+
+    @Test
     void statusDescriptionRendersComputedStateAndChildTree() {
         State disabled = state("DISABLED");
         ActionBinding<Void> childStart = action(ActionId.START, ignored -> {
@@ -1416,6 +1514,90 @@ class StateMachineTest {
             assertThat(stopFuture.get(2, TimeUnit.SECONDS).to()).isSameAs(FIN);
             assertThat(machine.currentState()).isSameAs(FIN);
             assertThat(handlerOrder.get()).isEqualTo(2);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentSameBindingThrowsWhenStateWasAlreadyChanged() throws Exception {
+        CountDownLatch firstHandlerEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirstHandler = new CountDownLatch(1);
+        AtomicInteger startCalls = new AtomicInteger();
+        TestActions actions = new TestActions(action -> {
+            startCalls.incrementAndGet();
+            firstHandlerEntered.countDown();
+            assertThat(releaseFirstHandler.await(2, TimeUnit.SECONDS)).isTrue();
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(actions.start())
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<StateTransitionResult> first =
+                    executor.submit(() -> machine.execute(actions.start(), new StartAction("first")));
+            assertThat(firstHandlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
+            Future<StateTransitionResult> second =
+                    executor.submit(() -> machine.execute(actions.start(), new StartAction("second")));
+
+            sleep(100);
+            assertThat(second.isDone()).isFalse();
+            releaseFirstHandler.countDown();
+
+            assertThat(first.get(2, TimeUnit.SECONDS).to()).isSameAs(RUNNING);
+            assertThatThrownBy(() -> second.get(2, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(InvalidStateTransitionException.class)
+                    .cause()
+                    .hasMessage("Action test.start is not available from state RUNNING");
+            assertThat(startCalls.get()).isEqualTo(1);
+            assertThat(machine.currentState()).isSameAs(RUNNING);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentSameActionIdThrowsWhenStateWasAlreadyChanged() throws Exception {
+        CountDownLatch firstHandlerEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirstHandler = new CountDownLatch(1);
+        AtomicInteger startCalls = new AtomicInteger();
+        TestActions actions = new TestActions(action -> {
+            startCalls.incrementAndGet();
+            firstHandlerEntered.countDown();
+            assertThat(releaseFirstHandler.await(2, TimeUnit.SECONDS)).isTrue();
+        });
+        StateMachine machine = StateMachineDefinition.define()
+                .from(NEW)
+                .on(actions.start())
+                .to(RUNNING, ERR)
+                .build()
+                .newStateMachine();
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<List<StateTransitionResult>> first =
+                    executor.submit(() -> machine.execute(actions.start().id(), new StartAction("first")));
+            assertThat(firstHandlerEntered.await(2, TimeUnit.SECONDS)).isTrue();
+            Future<List<StateTransitionResult>> second =
+                    executor.submit(() -> machine.execute(actions.start().id(), new StartAction("second")));
+
+            sleep(100);
+            assertThat(second.isDone()).isFalse();
+            releaseFirstHandler.countDown();
+
+            assertThat(first.get(2, TimeUnit.SECONDS))
+                    .singleElement()
+                    .satisfies(result -> assertThat(result.to()).isSameAs(RUNNING));
+            assertThatThrownBy(() -> second.get(2, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(InvalidStateTransitionException.class)
+                    .cause()
+                    .hasMessage("Action test.start is not available from state RUNNING");
+            assertThat(startCalls.get()).isEqualTo(1);
+            assertThat(machine.currentState()).isSameAs(RUNNING);
         } finally {
             executor.shutdownNow();
         }
