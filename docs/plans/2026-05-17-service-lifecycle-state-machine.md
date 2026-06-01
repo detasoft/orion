@@ -70,6 +70,11 @@ application lifecycle API detail. The transport aggregate lifecycle registration
 adapts `START` and `STOP` transition execution to lifecycle tasks and returns no
 lifecycle wait result.
 
+Aggregate startup failures intentionally allow partial running. If one endpoint
+fails to start, the aggregate moves to `ERR`/`FAILED`, but endpoints that already
+started remain `RUNNING`. The aggregate does not automatically roll them back;
+cleanup is handled by an explicit later `STOP` from the failure state.
+
 The old `NativeGitListenerEndpoint` name should be read as a future extraction
 of the socket listener currently inside `GitNativeTransportService`. It is not a
 required extra abstraction for the current single-listener runtime wiring. It
@@ -257,7 +262,8 @@ The service-level machine coordinates aggregate actions:
 
 - `START` starts all configured endpoints;
 - `STOP` stops all configured endpoints;
-- if any endpoint fails during start, already-started endpoints are stopped;
+- if any endpoint fails during start, already-started endpoints remain running
+  until an explicit `STOP` cleans them up;
 - `availableActions()` reflects the aggregate service state.
 
 This allows running two `git://` listener ports while keeping lifecycle policy
@@ -352,7 +358,8 @@ Add tests proving:
 - two endpoints can listen on two different dynamic ports;
 - service `START` starts both endpoints;
 - service `STOP` stops both endpoints;
-- one endpoint bind failure rolls back any endpoint already started;
+- one endpoint bind failure leaves any already-started endpoint running, marks
+  the aggregate failed, and permits cleanup through `STOP`;
 - invalid repeated `START` is rejected or is explicitly idempotent;
 - `availableActions()` is correct in `NEW`, `RUNNING`, `STOPPING`,
   `STOPPED`, and `FAILED`.
@@ -385,17 +392,24 @@ Native Git service tests:
 
 - one endpoint;
 - two endpoints;
-- partial start rollback;
+- partial start failure without automatic rollback;
 - aggregate state and available actions.
+
+## Resolved Decisions
+
+Endpoint startup failure uses partial-running semantics: successful endpoints
+stay `RUNNING`, failed endpoints move to their failure state, and the aggregate
+moves to `FAILED`.
+
+`FAILED` allows `STOP` when cleanup is still required after partial startup.
+Cleanup happens through that explicit transition, not before moving to
+`FAILED`.
 
 ## Open Questions
 
 Should repeated `START` in `RUNNING` be rejected or treated as idempotent?
 
 Should repeated `STOP` in `STOPPED` be rejected or treated as idempotent?
-
-Should `FAILED` allow `STOP` for cleanup, or must cleanup happen before moving
-to `FAILED`?
 
 Should endpoint state be visible as child state machines, or as resource status
 events attached to one parent state machine?
