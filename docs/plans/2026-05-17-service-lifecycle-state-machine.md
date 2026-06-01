@@ -38,16 +38,14 @@ local `START` / `STOP` transitions. It is no longer an
 current runtime wiring.
 
 `TransportLifecycleStateMachine` is the temporary aggregate bridge from the
-application lifecycle to transport-local state machines. It explicitly wires the
-native Git state machine as an always-present child. The child owns the native
-Git enabled check and lazily resolves `Provider<GitNativeTransportService>` only
-when an enabled `START` or `STOP` action needs the service. Both the child state
-machine and the low-level native Git service depend on `GitTransportConfig`
-instead of the full runtime configuration object. `net/transport` owns the
-transport composition layer: it includes the HTTP Dagger module, registers
-enabled transport services, publishes the aggregate `StateMachine`, and keeps
-`core/bootstrap` dependent only on this transport composition module. Dagger
-owns both `GitNativeTransportStateMachine` and `GitNativeTransportService`; the
+application lifecycle to transport-local state machines. It explicitly wires
+`git-native`, `git-ssh`, and `http` children and propagates aggregate
+`START` / `STOP` actions to those child state machines. Each child owns its
+transport-specific enabled check and lazily resolves its underlying service only
+when an enabled action needs that service. `net/transport` owns the transport
+composition layer: it includes the HTTP Dagger module, registers enabled
+transport services, publishes the aggregate `StateMachine`, and keeps
+`core/bootstrap` dependent only on this transport composition module. The
 important boundary is that only `TransportLifecycleStateMachine` is registered
 as an application lifecycle listener. The aggregate owns the transport-wide
 `TRANSPORT_LIFECYCLE_START` and `TRANSPORT_LIFECYCLE_STOP` task registrations;
