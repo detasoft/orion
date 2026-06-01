@@ -9,7 +9,7 @@ import java.util.Set;
 public record StateMachineSnapshot(
         StateMachineDefinition.State state,
         StateMachineDefinition.State computedState,
-        Map<String, StateMachineDefinition.State> childStates,
+        Map<String, StateMachineStatus> childStates,
         Set<ActionId> availableActions,
         boolean terminal,
         StateTransitionResult lastTransitionResult) {

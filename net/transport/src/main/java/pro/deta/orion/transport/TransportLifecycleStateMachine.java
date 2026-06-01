@@ -10,6 +10,7 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
+import pro.deta.orion.lifecycle.state.StateMachineStatus;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
@@ -117,11 +118,11 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
         if (result.failed()) {
             return result.defaultState();
         }
-        for (State childState : aggregateStateMachine.childStates().values()) {
-            if (ERR.equals(childState)) {
+        for (StateMachineStatus childState : aggregateStateMachine.childStates().values()) {
+            if (ERR.equals(childState.state())) {
                 return ERR;
             }
-            if (RUNNING.equals(childState)) {
+            if (RUNNING.equals(childState.state())) {
                 return RUNNING;
             }
         }

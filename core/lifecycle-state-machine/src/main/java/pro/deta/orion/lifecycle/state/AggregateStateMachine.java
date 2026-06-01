@@ -30,7 +30,7 @@ public final class AggregateStateMachine implements AutoCloseable {
         return stateMachine.computedState();
     }
 
-    public Map<String, StateMachineDefinition.State> childStates() {
+    public Map<String, StateMachineStatus> childStates() {
         return stateMachine.childStates();
     }
 

@@ -33,7 +33,7 @@ public final class StateMachine implements AutoCloseable {
     private final List<StateMachineListener> listeners = new CopyOnWriteArrayList<>();
     private final List<StateMachineEventSubscriber> subscribers = new CopyOnWriteArrayList<>();
     private final Map<String, StateMachine> children;
-    private final Map<String, StateMachineDefinition.State> childStates = new ConcurrentHashMap<>();
+    private final Map<String, StateMachineDefinition.State> observedChildStates = new ConcurrentHashMap<>();
     private final List<StateMachineSubscription> childSubscriptions = new CopyOnWriteArrayList<>();
     private volatile StateMachineDefinition.State currentState;
     private volatile StateMachineDefinition.State computedState;
@@ -48,7 +48,7 @@ public final class StateMachine implements AutoCloseable {
             transition.register(this);
         }
         for (Map.Entry<String, StateMachine> child : children.entrySet()) {
-            childStates.put(child.getKey(), child.getValue().currentState());
+            observedChildStates.put(child.getKey(), child.getValue().currentState());
             childSubscriptions.add(child.getValue().subscribe(event -> onChildEvent(child.getKey(), event)));
         }
         computedState = resolveComputedState();
@@ -70,10 +70,10 @@ public final class StateMachine implements AutoCloseable {
         return computedState;
     }
 
-    public Map<String, StateMachineDefinition.State> childStates() {
-        Map<String, StateMachineDefinition.State> snapshot = new LinkedHashMap<>();
-        for (String child : children.keySet()) {
-            snapshot.put(child, childStates.get(child));
+    public Map<String, StateMachineStatus> childStates() {
+        Map<String, StateMachineStatus> snapshot = new LinkedHashMap<>();
+        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
+            snapshot.put(child.getKey(), child.getValue().status(child.getKey()));
         }
         return Collections.unmodifiableMap(snapshot);
     }
@@ -105,15 +105,11 @@ public final class StateMachine implements AutoCloseable {
     }
 
     private synchronized StateMachineStatus status(String name) {
-        Map<String, StateMachineStatus> childStatuses = new LinkedHashMap<>();
-        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
-            childStatuses.put(child.getKey(), child.getValue().status(child.getKey()));
-        }
         return new StateMachineStatus(
                 requireName(name),
                 currentState,
                 computedState,
-                childStatuses,
+                childStates(),
                 definition.availableActions(currentState),
                 definition.isTerminalState(currentState));
     }
@@ -477,12 +473,20 @@ public final class StateMachine implements AutoCloseable {
         if (event.type() != StateMachineEventType.AFTER_STATE_ENTERED) {
             return;
         }
-        childStates.put(child, event.currentState());
+        observedChildStates.put(child, event.currentState());
         computedState = resolveComputedState();
     }
 
     private StateMachineDefinition.State resolveComputedState() {
-        return definition.computedStateResolver().resolve(currentState, childStates());
+        return definition.computedStateResolver().resolve(currentState, observedChildStates());
+    }
+
+    private Map<String, StateMachineDefinition.State> observedChildStates() {
+        Map<String, StateMachineDefinition.State> snapshot = new LinkedHashMap<>();
+        for (String child : children.keySet()) {
+            snapshot.put(child, observedChildStates.get(child));
+        }
+        return Collections.unmodifiableMap(snapshot);
     }
 
     private void notifyListeners(StateTransitionResult event) {
