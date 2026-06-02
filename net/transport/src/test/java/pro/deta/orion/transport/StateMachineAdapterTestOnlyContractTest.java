@@ -52,6 +52,7 @@ class StateMachineAdapterTestOnlyContractTest {
         assertMethodNotMarked(root, "net/git-transport/src/main/java/pro/deta/orion/transport/git/GitNativeTransportStateMachine.java", "stateMachine");
         assertMethodNotMarked(root, "net/git-transport/src/main/java/pro/deta/orion/transport/git/GitSshTransportStateMachine.java", "stateMachine");
         assertMethodNotMarked(root, "net/http-core/src/main/java/pro/deta/orion/transport/http/JettyHTTPServerStateMachine.java", "stateMachine");
+        assertMethodNotMarked(root, "net/transport/src/main/java/pro/deta/orion/transport/TransportLifecycleStateMachine.java", "aggregateStateMachine");
         assertMethodNotMarked(root, "net/transport/src/main/java/pro/deta/orion/transport/TransportLifecycleStateMachine.java", "stateMachine");
         assertMethodNotMarked(root, "net/transport/src/main/java/pro/deta/orion/transport/TransportLifecycleStateMachine.java", "start");
         assertMethodNotMarked(root, "net/transport/src/main/java/pro/deta/orion/transport/TransportLifecycleStateMachine.java", "stop");

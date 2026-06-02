@@ -2,17 +2,17 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.lifecycle.state.StateMachine;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 
 import javax.inject.Named;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
 public class OrionAdminLifecycleStateRoute extends BaseAdminRoute {
-    private final StateMachine transportStateMachine;
+    private final AggregateStateMachine transportStateMachine;
 
     @Inject
-    public OrionAdminLifecycleStateRoute(@Named("transport") StateMachine transportStateMachine) {
+    public OrionAdminLifecycleStateRoute(@Named("transport") AggregateStateMachine transportStateMachine) {
         super(OrionAdminPaths.LIFECYCLE_TRANSPORTS, "GET");
         this.transportStateMachine = transportStateMachine;
     }

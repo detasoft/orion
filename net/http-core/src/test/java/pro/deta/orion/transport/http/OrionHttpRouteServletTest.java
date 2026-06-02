@@ -33,6 +33,7 @@ import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.lifecycle.state.ActionId;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StandardStateDefinition;
@@ -696,7 +697,7 @@ class OrionHttpRouteServletTest {
         return new OrionHttpRouteServlet(new OrionHttpRouteRegistry(routes), new OrionHttpResponseWriter(OBJECT_MAPPER));
     }
 
-    private static StateMachine lifecycleStateMachine() {
+    private static AggregateStateMachine lifecycleStateMachine() {
         StateMachineDefinition.State running = StateMachineDefinition.state("RUNNING");
         StateMachine child = StateMachineDefinition.define()
                 .name("git-native")
@@ -707,15 +708,15 @@ class OrionHttpRouteServletTest {
                 .newStateMachine();
         child.execute(ActionId.START, Void.EMPTY);
 
-        StateMachine parent = StateMachineDefinition.define()
+        StateMachineDefinition parentDefinition = StateMachineDefinition.define()
                 .name("transports")
                 .child("git-native", child)
                 .from(StandardStateDefinition.NEW)
                 .on(ActionId.START)
                 .to(running, StandardStateDefinition.ERR)
-                .build()
-                .newStateMachine();
-        parent.execute(ActionId.START, Void.EMPTY);
+                .build();
+        AggregateStateMachine parent = new AggregateStateMachine(parentDefinition);
+        parent.execute(ActionId.START);
         return parent;
     }
 

@@ -101,6 +101,10 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
         return aggregateStateMachine.stateMachine();
     }
 
+    public AggregateStateMachine aggregateStateMachine() {
+        return aggregateStateMachine;
+    }
+
     @TestOnly
     public State currentState() {
         return aggregateStateMachine.currentState();

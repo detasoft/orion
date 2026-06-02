@@ -86,7 +86,16 @@ class StateMachineTest {
                 .contains("childStatuses")
                 .doesNotContain("childStates", "childPhysicalStates");
         assertThat(Arrays.stream(AggregateStateMachine.class.getDeclaredMethods()).map(Method::getName))
-                .contains("childStatuses")
+                .contains(
+                        "name",
+                        "childStatuses",
+                        "states",
+                        "availableTransitions",
+                        "status",
+                        "lastTransitionResult",
+                        "describe",
+                        "describeStatus",
+                        "subscribe")
                 .doesNotContain("childStates", "childPhysicalStates");
     }
 
@@ -132,6 +141,31 @@ class StateMachineTest {
         });
         assertThat(child.currentState()).isSameAs(RUNNING);
         assertThat(aggregate.currentState()).isSameAs(RUNNING);
+    }
+
+    @Test
+    void aggregateStateMachineExposesStructuredStatusFacade() {
+        StateMachine child = childMachine(action(ActionId.START, ignored -> {
+        }));
+        StateMachineDefinition definition = StateMachineDefinition.define()
+                .name("parent")
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
+                .child("child", child)
+                .from(NEW)
+                .on(ActionId.START)
+                .to(RUNNING, ERR)
+                .build();
+        AggregateStateMachine aggregate = new AggregateStateMachine(definition);
+
+        StateMachineStatus status = aggregate.status();
+
+        assertThat(status.name()).isEqualTo("parent");
+        assertThat(status.state()).isSameAs(NEW);
+        assertThat(status.children()).containsOnlyKeys("child");
+        assertThat(status.children().get("child").state()).isSameAs(NEW);
+        assertThat(aggregate.describeStatus()).isEqualTo("""
+                parent: NEW
+                  child: NEW""");
     }
 
     @Test

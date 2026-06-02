@@ -22,6 +22,10 @@ public final class AggregateStateMachine {
         return stateMachine;
     }
 
+    public String name() {
+        return stateMachine.name();
+    }
+
     public StateMachineDefinition.State currentState() {
         return stateMachine.currentState();
     }
@@ -36,6 +40,42 @@ public final class AggregateStateMachine {
 
     public Set<ActionId> availableActions() {
         return stateMachine.availableActions();
+    }
+
+    public Set<StateMachineDefinition.State> states() {
+        return stateMachine.states();
+    }
+
+    public List<StateTransition> availableTransitions() {
+        return stateMachine.availableTransitions();
+    }
+
+    public StateMachineStatus status() {
+        return stateMachine.status();
+    }
+
+    public StateTransitionResult lastTransitionResult() {
+        return stateMachine.lastTransitionResult();
+    }
+
+    public String describe() {
+        return stateMachine.describe();
+    }
+
+    public String describeStatus() {
+        return stateMachine.describeStatus();
+    }
+
+    public StateMachineSubscription subscribe(StateMachineEventSubscriber subscriber) {
+        return stateMachine.subscribe(subscriber);
+    }
+
+    public <A> StateTransitionResult execute(ActionBinding<A> action, A payload) {
+        return stateMachine.execute(action, payload);
+    }
+
+    public <A> List<StateTransitionResult> execute(ActionId actionId, A payload) {
+        return stateMachine.execute(actionId, payload);
     }
 
     public List<StateTransitionResult> execute(ActionId actionId) {

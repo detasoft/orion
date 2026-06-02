@@ -90,7 +90,7 @@ class TransportLifecycleStateMachineTest {
         machine.registerToStage(registrar);
         registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START).call().call();
 
-        Map<String, ?> children = machine.stateMachine().childStatuses();
+        Map<String, ?> children = machine.aggregateStateMachine().childStatuses();
         assertTrue(children.containsKey("git-native"));
         assertTrue(children.containsKey("git-ssh"));
         assertTrue(children.containsKey("http"));
@@ -98,7 +98,7 @@ class TransportLifecycleStateMachineTest {
                 transports: RUNNING
                   git-native: RUNNING
                   git-ssh: DISABLED
-                  http: DISABLED""", machine.stateMachine().describeStatus());
+                  http: DISABLED""", machine.aggregateStateMachine().describeStatus());
     }
 
     @Test
@@ -118,7 +118,7 @@ class TransportLifecycleStateMachineTest {
         assertFalse(registrar.registrations.isEmpty());
         assertFalse(serviceResolved.get());
         assertEquals(NEW, machine.currentState());
-        Map<String, ?> children = machine.stateMachine().childStatuses();
+        Map<String, ?> children = machine.aggregateStateMachine().childStatuses();
         assertTrue(children.containsKey("git-native"));
         assertTrue(children.containsKey("git-ssh"));
         assertTrue(children.containsKey("http"));
@@ -130,7 +130,7 @@ class TransportLifecycleStateMachineTest {
                 transports: DISABLED
                   git-native: DISABLED
                   git-ssh: DISABLED
-                  http: DISABLED""", machine.stateMachine().describeStatus());
+                  http: DISABLED""", machine.aggregateStateMachine().describeStatus());
     }
 
     @Test

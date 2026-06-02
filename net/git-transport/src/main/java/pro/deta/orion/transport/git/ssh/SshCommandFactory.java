@@ -19,7 +19,7 @@ import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.lifecycle.state.StateMachine;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.stream.*;
 
@@ -50,7 +50,7 @@ public class SshCommandFactory implements CommandFactory {
     private final OrionExecutor orionExecutor;
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
-    private final StateMachine transportStateMachine;
+    private final AggregateStateMachine transportStateMachine;
     private final long setKeyReadTimeoutMillis;
 
     @Inject
@@ -59,7 +59,7 @@ public class SshCommandFactory implements CommandFactory {
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
-            @Named("transport") StateMachine transportStateMachine) {
+            @Named("transport") AggregateStateMachine transportStateMachine) {
         this(gitInternalService, orionExecutor, orionProvider, accessControlService,
                 transportStateMachine, 30_000);
     }
@@ -69,7 +69,7 @@ public class SshCommandFactory implements CommandFactory {
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
-            StateMachine transportStateMachine,
+            AggregateStateMachine transportStateMachine,
             long setKeyReadTimeoutMillis) {
         this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;

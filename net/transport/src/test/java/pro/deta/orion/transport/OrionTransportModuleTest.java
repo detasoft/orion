@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
@@ -15,6 +16,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrionTransportModuleTest {
+    @Test
+    void transportStateMachineBindingPublishesAggregateFacade() throws NoSuchMethodException {
+        Method provider = OrionTransportModule.class.getDeclaredMethod(
+                "transportStateMachine",
+                TransportLifecycleStateMachine.class);
+
+        assertEquals(AggregateStateMachine.class, provider.getReturnType());
+    }
+
     @Test
     void transportModuleRegistersTransportAggregateWithoutDirectServiceBindings() {
         List<String> parameterTypes = new ArrayList<>();

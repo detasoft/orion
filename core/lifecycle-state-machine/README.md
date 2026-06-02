@@ -207,13 +207,25 @@ StateMachine parent = StateMachineDefinition.define()
 ```
 
 For aggregates with standard start/stop entry points, `AggregateStateMachine`
-wraps the underlying machine and exposes `start()`, `stop()`, and `execute(...)`
-without adding adapter action methods:
+wraps the underlying machine and exposes aggregate lifecycle operations such as
+`start()`, `stop()`, `execute(...)`, `status()`, `childStatuses()`, and
+`describeStatus()` without adding adapter action methods:
 
 ```java
 AggregateStateMachine aggregate = new AggregateStateMachine(definition);
 aggregate.start();
 ```
+
+Future API direction: `AggregateStateMachine` is intended to be the facade for
+aggregate lifecycle use cases, including child composition and propagation. The
+current implementation still stores child machines and propagation settings in
+`StateMachineDefinition`, and the underlying `StateMachine` performs the actual
+child action propagation. This keeps the current builder DSL small, but callers
+that deal with aggregate lifecycle status should prefer aggregate-level APIs
+over exposing the raw underlying `StateMachine`. If aggregate behavior grows,
+split the aggregate definition/builder from the plain state machine definition
+instead of collapsing child and propagation concerns into unrelated service
+state machines.
 
 The parent reads direct child status from the child machines:
 

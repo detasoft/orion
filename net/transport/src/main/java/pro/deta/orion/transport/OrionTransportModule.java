@@ -8,7 +8,7 @@ import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.state.StateMachine;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.transport.http.OrionHttpModule;
 
 import javax.inject.Named;
@@ -48,8 +48,8 @@ public class OrionTransportModule {
     @Provides
     @Singleton
     @Named("transport")
-    static StateMachine transportStateMachine(TransportLifecycleStateMachine stateMachine) {
-        return stateMachine.stateMachine();
+    static AggregateStateMachine transportStateMachine(TransportLifecycleStateMachine stateMachine) {
+        return stateMachine.aggregateStateMachine();
     }
 
     @Provides
