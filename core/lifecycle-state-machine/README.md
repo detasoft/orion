@@ -90,8 +90,9 @@ final class TransportAdapter {
     private final TransportService service;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startTransport);
 
-    private StartHandle startTransport(Void ignored) {
-        return service.onStart();
+    private Void startTransport(Void ignored) {
+        service.onStart();
+        return Void.EMPTY;
     }
 
     private State resolveStartState(StateTransitionResult result) {
