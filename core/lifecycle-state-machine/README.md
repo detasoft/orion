@@ -128,8 +128,7 @@ transition selected by the concrete `ActionBinding`:
 5. Emit `TRANSITION_FUNCTION_FINISHED`.
 6. Resolve and move to one of the configured target states.
 7. Emit `AFTER_STATE_ENTERED`.
-8. Notify transition listeners.
-9. Emit `TRANSITION_FINISHED` or `TRANSITION_FAILED`.
+8. Emit `TRANSITION_FINISHED` or `TRANSITION_FAILED`.
 
 `StateMachine.execute(actionId, payload)` is the default high-level mode. It
 executes a sequence of synchronous transitions:
