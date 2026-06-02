@@ -7,7 +7,6 @@ import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
-import pro.deta.orion.lifecycle.state.StateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.StateMachineStatus;
@@ -95,10 +94,6 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
     @TestOnly
     public StateMachineDefinition definition() {
         return definition;
-    }
-
-    public StateMachine stateMachine() {
-        return aggregateStateMachine.stateMachine();
     }
 
     public AggregateStateMachine aggregateStateMachine() {

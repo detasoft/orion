@@ -11,6 +11,7 @@ import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -115,6 +116,13 @@ class StateMachineTest {
                 .doesNotContain("childStates", "observedChildStates", "childSubscriptions", "computedState");
         assertThat(AutoCloseable.class.isAssignableFrom(StateMachine.class)).isFalse();
         assertThat(AutoCloseable.class.isAssignableFrom(AggregateStateMachine.class)).isFalse();
+    }
+
+    @Test
+    void aggregateRawStateMachineAccessorIsNotPublic() throws NoSuchMethodException {
+        Method accessor = AggregateStateMachine.class.getDeclaredMethod("stateMachine");
+
+        assertThat(Modifier.isPublic(accessor.getModifiers())).isFalse();
     }
 
     @Test

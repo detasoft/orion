@@ -18,7 +18,8 @@ public final class AggregateStateMachine {
         return definition;
     }
 
-    public StateMachine stateMachine() {
+    @TestOnly
+    StateMachine stateMachine() {
         return stateMachine;
     }
 

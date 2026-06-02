@@ -3,8 +3,10 @@ package pro.deta.orion.transport;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,6 +58,15 @@ class StateMachineAdapterTestOnlyContractTest {
         assertMethodNotMarked(root, "net/transport/src/main/java/pro/deta/orion/transport/TransportLifecycleStateMachine.java", "stateMachine");
         assertMethodNotMarked(root, "net/transport/src/main/java/pro/deta/orion/transport/TransportLifecycleStateMachine.java", "start");
         assertMethodNotMarked(root, "net/transport/src/main/java/pro/deta/orion/transport/TransportLifecycleStateMachine.java", "stop");
+    }
+
+    @Test
+    void transportAggregateDoesNotExposeRawStateMachineAsPublicApi() {
+        boolean exposesRawStateMachine = Arrays.stream(TransportLifecycleStateMachine.class.getDeclaredMethods())
+                .anyMatch(method -> method.getName().equals("stateMachine")
+                        && Modifier.isPublic(method.getModifiers()));
+
+        assertFalse(exposesRawStateMachine);
     }
 
     private static void assertMethodsMarked(Path root, String relativePath, String... methodNames) throws IOException {
