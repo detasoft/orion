@@ -238,6 +238,11 @@ parent.childStatuses().get("storage").state(); // NEW
 
 The parent waits for every selected child to finish. If any child fails, the
 parent transition fails and resolves through the parent's configured targets.
+Child propagation is best effort: sequential propagation still attempts later
+children after an earlier child fails, and the state machine does not
+automatically roll back children that already reached a successful state. If an
+aggregate needs all-or-nothing startup or cleanup, implement that policy in the
+aggregate adapter.
 
 Child transitions do not start follow-up actions by themselves. Follow-up layers
 are still driven by the parent's own `execute(actionId, payload)` cascade.

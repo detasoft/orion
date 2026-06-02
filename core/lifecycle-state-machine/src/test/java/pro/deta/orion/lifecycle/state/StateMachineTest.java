@@ -823,7 +823,7 @@ class StateMachineTest {
     }
 
     @Test
-    void failedSequentialChildPropagationMovesParentToFailureStateAfterAllChildrenFinish() {
+    void failedSequentialChildPropagationIsBestEffortWithoutRollback() {
         List<String> calls = new ArrayList<>();
         ActionBinding<Void> firstChildStart = action(ActionId.START, ignored -> calls.add("first"));
         ActionBinding<Void> failingChildStart = action(ActionId.START, ignored -> {
@@ -831,9 +831,19 @@ class StateMachineTest {
             throw new IllegalStateException("second child failed");
         });
         ActionBinding<Void> thirdChildStart = action(ActionId.START, ignored -> calls.add("third"));
-        StateMachine firstChild = childMachine(firstChildStart);
+        ActionBinding<Void> firstChildStop = action(ActionId.STOP, ignored -> calls.add("first-stop"));
+        ActionBinding<Void> thirdChildStop = action(ActionId.STOP, ignored -> calls.add("third-stop"));
+        StateMachine firstChild = StateMachineDefinition.define()
+                .from(NEW).on(firstChildStart).to(RUNNING, ERR)
+                .from(RUNNING).on(firstChildStop).to(FIN, ERR)
+                .build()
+                .newStateMachine();
         StateMachine secondChild = childMachine(failingChildStart);
-        StateMachine thirdChild = childMachine(thirdChildStart);
+        StateMachine thirdChild = StateMachineDefinition.define()
+                .from(NEW).on(thirdChildStart).to(RUNNING, ERR)
+                .from(RUNNING).on(thirdChildStop).to(FIN, ERR)
+                .build()
+                .newStateMachine();
         StateMachine parent = StateMachineDefinition.define()
                 .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
                 .child("first", firstChild)
