@@ -29,7 +29,6 @@ import java.util.concurrent.Future;
 @Slf4j
 public final class StateMachine {
     private final StateMachineDefinition definition;
-    private final List<StateMachineListener> listeners = new CopyOnWriteArrayList<>();
     private final List<StateMachineEventSubscriber> subscribers = new CopyOnWriteArrayList<>();
     private final Map<String, StateMachine> children;
     private volatile StateMachineDefinition.State currentState;
@@ -193,10 +192,6 @@ public final class StateMachine {
         return value;
     }
 
-    public void addListener(StateMachineListener listener) {
-        listeners.add(Objects.requireNonNull(listener, "listener"));
-    }
-
     public StateMachineSubscription subscribe(StateMachineEventSubscriber subscriber) {
         Objects.requireNonNull(subscriber, "subscriber");
         subscribers.add(subscriber);
@@ -315,7 +310,6 @@ public final class StateMachine {
                     nextState,
                     currentState,
                     failure));
-            notifyListeners(result);
             if (failure == null) {
                 notifySubscribers(new StateMachineEvent(
                         StateMachineEventType.TRANSITION_FINISHED,
@@ -456,16 +450,6 @@ public final class StateMachine {
             states.put(child.getKey(), child.getValue().currentState());
         }
         return Collections.unmodifiableMap(states);
-    }
-
-    private void notifyListeners(StateTransitionResult event) {
-        for (StateMachineListener listener : listeners) {
-            try {
-                listener.onTransition(event);
-            } catch (RuntimeException e) {
-                log.warn("State machine listener failed while observing transition {}", event, e);
-            }
-        }
     }
 
     private void notifySubscribers(StateMachineEvent event) {

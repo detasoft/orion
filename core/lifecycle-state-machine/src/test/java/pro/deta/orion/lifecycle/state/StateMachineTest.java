@@ -1020,26 +1020,26 @@ class StateMachineTest {
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        List<StateTransitionResult> events = new ArrayList<>();
-        machine.addListener(events::add);
 
         StartAction payload = new StartAction("broken");
         assertThatThrownBy(() -> machine.execute(actions.start(), payload))
                 .isInstanceOf(StateTransitionFailedException.class)
-                .hasCause(failure);
+                .hasCause(failure)
+                .satisfies(throwable -> {
+                    StateTransitionFailedException exception = (StateTransitionFailedException) throwable;
+                    StateTransitionResult result = exception.result();
+                    assertThat(result.from()).isSameAs(NEW);
+                    assertThat(result.action()).isEqualTo(actions.start().id());
+                    assertThat(result.payload()).isSameAs(payload);
+                    assertThat(result.to()).isEqualTo(ERR);
+                    assertThat(result.failure()).isSameAs(failure);
+                });
 
         assertThat(machine.currentState()).isEqualTo(ERR);
-        assertThat(events).hasSize(1);
-        StateTransitionResult firstEvent = events.getFirst();
-        assertThat(firstEvent.from()).isSameAs(NEW);
-        assertThat(firstEvent.action()).isEqualTo(actions.start().id());
-        assertThat(firstEvent.payload()).isSameAs(payload);
-        assertThat(firstEvent.to()).isEqualTo(ERR);
-        assertThat(firstEvent.failure()).isSameAs(failure);
     }
 
     @Test
-    void listenerReceivesSuccessfulTransition() {
+    void subscriberReceivesSuccessfulTransitionCompletion() {
         TestActions actions = new TestActions();
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
@@ -1047,21 +1047,32 @@ class StateMachineTest {
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        List<StateTransitionResult> events = new ArrayList<>();
-        machine.addListener(events::add);
+        List<StateMachineEvent> events = new ArrayList<>();
+        StartAction payload = new StartAction("ok");
+        machine.subscribe(events::add);
 
-        machine.execute(actions.start(), new StartAction("ok"));
+        machine.execute(actions.start(), payload);
 
-        assertThat(events).singleElement().satisfies(event -> {
+        assertThat(events)
+                .extracting(StateMachineEvent::type)
+                .containsExactly(
+                        TRANSITION_STARTED,
+                        TRANSITION_FUNCTION_STARTED,
+                        TRANSITION_FUNCTION_FINISHED,
+                        AFTER_STATE_ENTERED,
+                        TRANSITION_FINISHED);
+        assertThat(events.getLast()).satisfies(event -> {
             assertThat(event.from()).isSameAs(NEW);
             assertThat(event.action()).isEqualTo(actions.start().id());
-            assertThat(event.to()).isEqualTo(RUNNING);
+            assertThat(event.payload()).isSameAs(payload);
+            assertThat(event.targetState()).isEqualTo(RUNNING);
+            assertThat(event.currentState()).isEqualTo(RUNNING);
             assertThat(event.failure()).isNull();
         });
     }
 
     @Test
-    void listenerFailureDoesNotAffectTransitionOrOtherObservers() {
+    void subscriberFailureDoesNotAffectTransitionOrOtherSubscribers() {
         TestActions actions = new TestActions();
         StateMachine machine = StateMachineDefinition.define()
                 .from(NEW)
@@ -1069,22 +1080,19 @@ class StateMachineTest {
                 .to(RUNNING, ERR)
                 .build()
                 .newStateMachine();
-        IllegalStateException listenerFailure = new IllegalStateException("listener failed");
-        List<StateTransitionResult> transitionEvents = new ArrayList<>();
-        List<StateMachineEvent> machineEvents = new ArrayList<>();
-        machine.addListener(event -> {
-            throw listenerFailure;
+        IllegalStateException subscriberFailure = new IllegalStateException("subscriber failed");
+        List<StateMachineEvent> events = new ArrayList<>();
+        machine.subscribe(event -> {
+            throw subscriberFailure;
         });
-        machine.addListener(transitionEvents::add);
-        machine.subscribe(machineEvents::add);
+        machine.subscribe(events::add);
 
         try (LogCapture logs = captureStateMachineLogs()) {
             StateTransitionResult event = machine.execute(actions.start(), new StartAction("ok"));
 
             assertThat(event.to()).isEqualTo(RUNNING);
             assertThat(machine.currentState()).isEqualTo(RUNNING);
-            assertThat(transitionEvents).singleElement().satisfies(observed -> assertThat(observed.to()).isEqualTo(RUNNING));
-            assertThat(machineEvents)
+            assertThat(events)
                     .extracting(StateMachineEvent::type)
                     .containsExactly(
                             TRANSITION_STARTED,
@@ -1095,8 +1103,8 @@ class StateMachineTest {
             assertThat(logs.events()).anySatisfy(record -> {
                 assertThat(record.getLevel()).isEqualTo(Level.WARN);
                 assertThat(record.getFormattedMessage())
-                        .contains("State machine listener failed while observing transition");
-                assertThat(record.getThrowableProxy().getMessage()).isEqualTo(listenerFailure.getMessage());
+                        .contains("State machine subscriber failed while observing event");
+                assertThat(record.getThrowableProxy().getMessage()).isEqualTo(subscriberFailure.getMessage());
             });
         }
     }
@@ -1190,13 +1198,16 @@ class StateMachineTest {
                 .build()
                 .newStateMachine();
         List<StateMachineEvent> events = new ArrayList<>();
-        List<StateTransitionResult> completedEvents = new ArrayList<>();
         machine.subscribe(events::add);
-        machine.addListener(completedEvents::add);
 
         assertThatThrownBy(() -> machine.execute(start, Void.EMPTY))
                 .isInstanceOf(StateTransitionFailedException.class)
-                .hasCause(failure);
+                .hasCause(failure)
+                .satisfies(throwable -> {
+                    StateTransitionFailedException exception = (StateTransitionFailedException) throwable;
+                    assertThat(exception.result().failed()).isTrue();
+                    assertThat(exception.result().failure()).isSameAs(failure);
+                });
 
         assertThat(events)
                 .extracting(StateMachineEvent::type)
@@ -1209,9 +1220,10 @@ class StateMachineTest {
         assertThat(events.get(2).failure()).isSameAs(failure);
         assertThat(events.get(3).currentState()).isEqualTo(ERR);
         assertThat(events.get(4).failure()).isSameAs(failure);
-        assertThat(completedEvents).singleElement().satisfies(event -> {
+        assertThat(events.get(4)).satisfies(event -> {
             assertThat(event.failed()).isTrue();
             assertThat(event.failure()).isSameAs(failure);
+            assertThat(event.currentState()).isEqualTo(ERR);
         });
     }
 
@@ -1232,36 +1244,6 @@ class StateMachineTest {
         machine.execute(start, Void.EMPTY);
 
         assertThat(events).isEmpty();
-    }
-
-    @Test
-    void subscriberFailureDoesNotAffectTransition() {
-        ActionBinding<Void> start = action("start-with-broken-subscriber", action -> {
-        });
-        StateMachine machine = StateMachineDefinition.define()
-                .from(NEW)
-                .on(start)
-                .to(RUNNING, ERR)
-                .build()
-                .newStateMachine();
-        IllegalStateException subscriberFailure = new IllegalStateException("subscriber failed");
-        machine.subscribe(event -> {
-            throw subscriberFailure;
-        });
-
-        try (LogCapture logs = captureStateMachineLogs()) {
-            StateTransitionResult event = machine.execute(start, Void.EMPTY);
-
-            assertThat(event.to()).isEqualTo(RUNNING);
-            assertThat(event.failed()).isFalse();
-            assertThat(machine.currentState()).isEqualTo(RUNNING);
-            assertThat(logs.events()).anySatisfy(record -> {
-                assertThat(record.getLevel()).isEqualTo(Level.WARN);
-                assertThat(record.getFormattedMessage())
-                        .contains("State machine subscriber failed while observing event");
-                assertThat(record.getThrowableProxy().getMessage()).isEqualTo(subscriberFailure.getMessage());
-            });
-        }
     }
 
     @Test

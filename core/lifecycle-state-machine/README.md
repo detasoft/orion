@@ -278,19 +278,14 @@ distinction for the current machine and its recursive child tree.
 
 ## Observability
 
-Subscribers and listeners are observers. Their exceptions are logged and ignored
-so they cannot change machine behavior.
+Subscribers are observers. Their exceptions are logged and ignored so they
+cannot change machine behavior.
 
-Use observers for different levels of detail:
-
-- `StateMachineEventSubscriber` receives internal transition points such as
-  `TRANSITION_STARTED`, `TRANSITION_FUNCTION_STARTED`, and
-  `AFTER_STATE_ENTERED`. It is useful for logging, timing, diagnostics, and
-  derived monitoring.
-- `StateMachineListener` receives one `StateTransitionResult` after the machine
-  has entered the new state. It is useful when only completed transitions matter.
-- Service adapters are not observers. They define and execute actions for a
-  concrete service.
+`StateMachineEventSubscriber` receives internal transition points such as
+`TRANSITION_STARTED`, `TRANSITION_FUNCTION_STARTED`, `AFTER_STATE_ENTERED`, and
+`TRANSITION_FINISHED`. It is useful for logging, timing, diagnostics, and
+derived monitoring. Service adapters are not observers. They define and execute
+actions for a concrete service.
 
 `describe()` returns the current state, an in-progress transition if there is
 one, the last transition result, the configured transition diagram, and nested
