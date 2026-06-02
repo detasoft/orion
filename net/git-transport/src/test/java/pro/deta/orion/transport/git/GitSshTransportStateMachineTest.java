@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.SshHostKeyService;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.state.Void;
@@ -80,9 +79,8 @@ class GitSshTransportStateMachineTest {
         }
 
         @Override
-        public OrionStageCallResult onStart() {
+        public void onStart() {
             startCalls++;
-            return new OrionStageCallResult(0);
         }
 
         @Override

@@ -16,7 +16,6 @@ import pro.deta.orion.config.schema.HttpTransportConfig;
 import pro.deta.orion.config.schema.HttpsTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SSLKeyStoreConfig;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.CertUtils;
 import pro.deta.orion.util.OrionUtils;
 
@@ -56,9 +55,9 @@ public class JettyHTTPServer {
         this(orionConfiguration, rootServlet, null);
     }
 
-    public OrionStageCallResult onStart() {
+    public void onStart() {
         if (!isEnabled()) {
-            return null;
+            return;
         }
         jettyServer.set(getNewServer());
 
@@ -70,8 +69,6 @@ public class JettyHTTPServer {
         }
         log.warn("HTTP Listening on {}:{}", httpTransportConfig.getAddress(), httpTransportConfig.getPort());
         log.warn("HTTPS Listening on {}:{}", httpsTransportConfig.getAddress(), httpsTransportConfig.getPort());
-
-        return new OrionStageCallResult(0);
     }
 
     public boolean isEnabled() {
@@ -181,10 +178,10 @@ public class JettyHTTPServer {
         }
     }
 
-    public OrionStageCallResult onStop() {
+    public void onStop() {
         Server server = jettyServer.getAndSet(null);
         if (server == null) {
-            return null;
+            return;
         }
         try {
             server.stop();
@@ -202,7 +199,6 @@ public class JettyHTTPServer {
                 log.warn("Failed to destroy Jetty server", e);
             }
         }
-        return null;
     }
 
     public URL relativiseHttp(String path) throws MalformedURLException {

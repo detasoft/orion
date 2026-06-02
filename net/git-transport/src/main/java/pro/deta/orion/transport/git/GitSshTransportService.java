@@ -21,7 +21,6 @@ import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
 import pro.deta.orion.crypto.SshHostKeyService;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
@@ -48,10 +47,10 @@ public class GitSshTransportService {
     private final OrionSSHPasswordAuthenticator orionPasswordAuthenticator;
 
 
-    public OrionStageCallResult onStart() {
+    public void onStart() {
         SshTransportConfig config = sshTransportConfig();
         if (!isEnabled()) {
-            return null;
+            return;
         }
         SecurityUtils.registerSecurityProvider(new BouncyCastleSecurityProviderRegistrar());
         if (SecurityUtils.isBouncyCastleRegistered()) {
@@ -61,7 +60,6 @@ public class GitSshTransportService {
         if (SecurityUtils.isProviderRegistered("EdDSA")) {
             log.info("EdDSA is registered as a JCE provider");
         }
-        OrionStageCallResult callResult = new OrionStageCallResult(0);
         try {
 //            CoreModuleProperties.NIO2_READ_TIMEOUT.set(sshd.getParentPropertyResolver(), Duration.ofHours(1));
             System.setProperty(IoServiceFactoryFactory.class.getName(), Nio2ServiceFactoryFactory.class.getName());
@@ -108,7 +106,6 @@ public class GitSshTransportService {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return callResult;
     }
 
     public boolean isEnabled() {
@@ -123,7 +120,7 @@ public class GitSshTransportService {
         return orionConfiguration.getTransport().getSsh();
     }
 
-    public OrionStageCallResult onStop() {
+    public void onStop() {
         try {
             boolean closed = sshd.close(true).await(STOP_WAIT_MILLIS, TimeUnit.MILLISECONDS, CancelOption.CANCEL_ON_TIMEOUT);
             if (!closed) {
@@ -132,7 +129,6 @@ public class GitSshTransportService {
         } catch (IOException e) {
             log.error("Error while closing sshd.", e);
         }
-        return null;
     }
 
 }

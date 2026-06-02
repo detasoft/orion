@@ -2,7 +2,6 @@ package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.Void;
 
@@ -30,9 +29,8 @@ class JettyHTTPServerStateMachineTest {
         }
 
         @Override
-        public OrionStageCallResult onStart() {
+        public void onStart() {
             startCalls++;
-            return new OrionStageCallResult(0);
         }
 
         @Override
