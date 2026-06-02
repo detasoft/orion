@@ -5,7 +5,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.SshHostKeyService;
+import pro.deta.orion.lifecycle.data.OrionStageCallResult;
+import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
+import pro.deta.orion.lifecycle.state.Void;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.ConfigurationContext;
 
@@ -15,6 +18,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
 
@@ -29,6 +33,18 @@ class GitSshTransportStateMachineTest {
         if (service != null) {
             service.onStop();
         }
+    }
+
+    @Test
+    void startActionDoesNotExposeApplicationStageResult() {
+        RecordingGitSshTransportService service = new RecordingGitSshTransportService();
+        GitSshTransportStateMachine machine = new GitSshTransportStateMachine(() -> service);
+
+        StateTransitionResult result = machine.stateMachine().execute(machine.startAction(), Void.EMPTY);
+
+        assertSame(Void.EMPTY, result.actionResult());
+        assertEquals(GitSshTransportStateMachine.RUNNING, machine.currentState());
+        assertEquals(1, service.startCalls());
     }
 
     @Test
@@ -54,5 +70,33 @@ class GitSshTransportStateMachineTest {
         SshCommandFactory commandFactory = new SshCommandFactory(null, null, null, null, null);
         OrionSSHPasswordAuthenticator authenticator = new OrionSSHPasswordAuthenticator(null);
         return new GitSshTransportService(configuration, commandFactory, () -> hostKeyService, authenticator);
+    }
+
+    private static final class RecordingGitSshTransportService extends GitSshTransportService {
+        private int startCalls;
+
+        private RecordingGitSshTransportService() {
+            super(new OrionConfiguration(), null, null, null);
+        }
+
+        @Override
+        public OrionStageCallResult onStart() {
+            startCalls++;
+            return new OrionStageCallResult(0);
+        }
+
+        @Override
+        public boolean isEnabled() {
+            return true;
+        }
+
+        @Override
+        public boolean isRunning() {
+            return true;
+        }
+
+        private int startCalls() {
+            return startCalls;
+        }
     }
 }

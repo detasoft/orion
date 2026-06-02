@@ -2,7 +2,6 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
@@ -75,8 +74,9 @@ public final class JettyHTTPServerStateMachine {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 
-    private OrionStageCallResult startHttpTransport(Void ignored) {
-        return resolveServer().onStart();
+    private Void startHttpTransport(Void ignored) {
+        resolveServer().onStart();
+        return Void.EMPTY;
     }
 
     private State resolveStartState(StateTransitionResult result) {

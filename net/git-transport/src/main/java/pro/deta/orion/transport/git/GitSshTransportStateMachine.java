@@ -2,7 +2,6 @@ package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.StateMachine;
@@ -76,8 +75,9 @@ public final class GitSshTransportStateMachine {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 
-    private OrionStageCallResult startSshTransport(Void ignored) {
-        return resolveService().onStart();
+    private Void startSshTransport(Void ignored) {
+        resolveService().onStart();
+        return Void.EMPTY;
     }
 
     private State resolveStartState(StateTransitionResult result) {
