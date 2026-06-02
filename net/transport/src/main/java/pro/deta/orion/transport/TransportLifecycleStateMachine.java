@@ -25,6 +25,9 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.state;
 
+/**
+ * @AiRule This aggregate facade intentionally composes child adapters through their public raw StateMachine contract.
+ */
 @Singleton
 public final class TransportLifecycleStateMachine implements OrionApplicationStageEventListener {
     public static final State RUNNING = state("RUNNING");

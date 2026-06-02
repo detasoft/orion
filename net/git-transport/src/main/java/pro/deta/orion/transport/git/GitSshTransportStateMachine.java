@@ -16,6 +16,9 @@ import java.util.Objects;
 
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
+/**
+ * @AiRule This standalone transport adapter intentionally exposes its raw StateMachine as production API.
+ */
 @Singleton
 public final class GitSshTransportStateMachine {
     public static final State RUNNING = state("RUNNING");

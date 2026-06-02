@@ -15,6 +15,9 @@ import javax.inject.Provider;
 
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
+/**
+ * @AiRule This standalone transport adapter intentionally exposes its raw StateMachine as production API.
+ */
 @Singleton
 public final class JettyHTTPServerStateMachine {
     public static final State RUNNING = state("RUNNING");
