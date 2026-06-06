@@ -426,9 +426,6 @@ void sequentialAggregateResolvesRunningWhenAnyChildRuns() {
     AggregateLifecycleStateMachineAdapter aggregate = AggregateLifecycleStateMachineAdapter.define("aggregate")
             .child("running", running.stateMachine())
             .child("disabled", disabled.stateMachine())
-            .activeChildState(StandardStateDefinition.RUNNING)
-            .runningState(StandardStateDefinition.RUNNING)
-            .disabledState(StandardStateDefinition.DISABLED)
             .build();
 
     aggregate.start();
@@ -494,18 +491,15 @@ The builder should support:
 ```java
 child(String name, StateMachine child)
 childPropagationMode(StateMachineDefinition.ChildPropagationMode mode)
-activeChildState(State state)
-runningState(State state)
-disabledState(State state)
 build()
 ```
 
 Default `childPropagationMode` should be `SEQUENTIAL`. The generated definition should:
 
 ```java
-.from(NEW, disabledState).on(ActionId.START).to(disabledState, runningState, ERR).post(this::resolveStartState)
-.from(NEW, disabledState).on(ActionId.STOP).to(FIN, ERR)
-.from(runningState).on(ActionId.STOP).to(FIN, ERR)
+.from(NEW, DISABLED).on(ActionId.START).to(DISABLED, RUNNING, ERR).post(this::resolveStartState)
+.from(NEW, DISABLED).on(ActionId.STOP).to(FIN, ERR)
+.from(RUNNING).on(ActionId.STOP).to(FIN, ERR)
 .from(ERR).on(ActionId.STOP).to(FIN, ERR)
 ```
 
@@ -513,8 +507,8 @@ Default `childPropagationMode` should be `SEQUENTIAL`. The generated definition 
 
 - return `result.defaultState()` on failure;
 - return `ERR` if any direct child state is `ERR`;
-- return `runningState` if any direct child state equals an active child state;
-- otherwise return `disabledState`.
+- return `RUNNING` if any direct child state is `RUNNING`;
+- otherwise return `DISABLED`.
 
 **Step 4: Run test to verify it passes**
 
@@ -555,7 +549,7 @@ void transportAggregateUsesGenericAggregatePolicyWithStableChildNames() throws E
     machine.registerToStage(registrar);
     registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START).call().call();
 
-    assertEquals(TransportLifecycleStateMachine.RUNNING, machine.currentState());
+    assertEquals(StandardStateDefinition.RUNNING, machine.currentState());
     assertTrue(machine.aggregateStateMachine().childStatuses().containsKey("git-native"));
     assertTrue(machine.aggregateStateMachine().childStatuses().containsKey("git-ssh"));
     assertTrue(machine.aggregateStateMachine().childStatuses().containsKey("http"));
@@ -579,17 +573,14 @@ Expected: PASS. This is a preservation test before refactor.
 Replace handwritten `StateMachineDefinition`/`AggregateStateMachine` wiring with:
 
 ```java
-private final AggregateLifecycleStateMachineAdapter aggregateAdapter;
+extends AggregateLifecycleStateMachineAdapter
 
-aggregateAdapter = AggregateLifecycleStateMachineAdapter.define("transports")
+super(AggregateLifecycleStateMachineAdapter.define("transports")
         .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
         .child("git-native", gitNativeTransport.stateMachine())
         .child("git-ssh", gitSshTransport.stateMachine())
         .child("http", jettyHttpTransport.stateMachine())
-        .activeChildState(RUNNING)
-        .runningState(RUNNING)
-        .disabledState(DISABLED)
-        .build();
+        .buildAggregateStateMachine());
 ```
 
 Keep these public methods stable:
