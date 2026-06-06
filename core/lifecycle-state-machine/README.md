@@ -216,6 +216,12 @@ AggregateStateMachine aggregate = new AggregateStateMachine(definition);
 aggregate.start();
 ```
 
+Application lifecycle migration should build a root aggregate from reusable leaf
+and aggregate adapters. Keep phase boundaries such as transport startup as
+explicit aggregate nodes, and keep concrete endpoint startup in child service
+adapters. The root application machine can then choose startup and shutdown
+order without reintroducing lifecycle task ids.
+
 Future API direction: `AggregateStateMachine` is intended to be the facade for
 aggregate lifecycle use cases, including child composition and propagation. The
 current implementation still stores child machines and propagation settings in

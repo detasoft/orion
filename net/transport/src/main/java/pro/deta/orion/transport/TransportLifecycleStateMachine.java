@@ -5,56 +5,52 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.ApplicationState;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.state.ActionId;
+import pro.deta.orion.lifecycle.state.AggregateLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
-import pro.deta.orion.lifecycle.state.StateMachineStatus;
-import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
 
-import java.util.List;
 import java.util.Objects;
-
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.state;
 
 /**
  * @AiRule This aggregate facade intentionally composes child adapters through their public raw StateMachine contract.
  */
 @Singleton
-public final class TransportLifecycleStateMachine implements OrionApplicationStageEventListener {
-    public static final State RUNNING = state("RUNNING");
-    public static final State DISABLED = state("DISABLED");
-
+public final class TransportLifecycleStateMachine extends AggregateLifecycleStateMachineAdapter
+        implements OrionApplicationStageEventListener {
     private final GitNativeTransportStateMachine gitNativeTransport;
     private final GitSshTransportStateMachine gitSshTransport;
     private final JettyHTTPServerStateMachine jettyHttpTransport;
-    private final StateMachineDefinition definition;
-    private final AggregateStateMachine aggregateStateMachine;
 
     @Inject
     public TransportLifecycleStateMachine(
             GitNativeTransportStateMachine gitNativeTransport,
             GitSshTransportStateMachine gitSshTransport,
             JettyHTTPServerStateMachine jettyHttpTransport) {
-        this.gitNativeTransport = Objects.requireNonNull(gitNativeTransport, "gitNativeTransport");
-        this.gitSshTransport = Objects.requireNonNull(gitSshTransport, "gitSshTransport");
-        this.jettyHttpTransport = Objects.requireNonNull(jettyHttpTransport, "jettyHttpTransport");
-        StateMachineDefinition.Builder builder = StateMachineDefinition.define()
-                .name("transports")
-                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL);
-        builder.child("git-native", gitNativeTransport.stateMachine());
-        builder.child("git-ssh", gitSshTransport.stateMachine());
-        builder.child("http", jettyHttpTransport.stateMachine());
-        definition = defineStateMachine(builder);
-        aggregateStateMachine = new AggregateStateMachine(definition);
+        super(aggregateStateMachine(
+                Objects.requireNonNull(gitNativeTransport, "gitNativeTransport"),
+                Objects.requireNonNull(gitSshTransport, "gitSshTransport"),
+                Objects.requireNonNull(jettyHttpTransport, "jettyHttpTransport")));
+        this.gitNativeTransport = gitNativeTransport;
+        this.gitSshTransport = gitSshTransport;
+        this.jettyHttpTransport = jettyHttpTransport;
+    }
+
+    private static AggregateStateMachine aggregateStateMachine(
+            GitNativeTransportStateMachine gitNativeTransport,
+            GitSshTransportStateMachine gitSshTransport,
+            JettyHTTPServerStateMachine jettyHttpTransport) {
+        return AggregateLifecycleStateMachineAdapter.define("transports")
+                .childPropagationMode(StateMachineDefinition.ChildPropagationMode.SEQUENTIAL)
+                .child("git-native", gitNativeTransport.stateMachine())
+                .child("git-ssh", gitSshTransport.stateMachine())
+                .child("http", jettyHttpTransport.stateMachine())
+                .buildAggregateStateMachine();
     }
 
     @Override
@@ -68,15 +64,6 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
             stop();
             return null;
         });
-    }
-
-    private StateMachineDefinition defineStateMachine(StateMachineDefinition.Builder builder) {
-        return builder
-                .from(NEW, DISABLED).on(ActionId.START).to(DISABLED, RUNNING, ERR).post(this::resolveStartState)
-                .from(NEW, DISABLED).on(ActionId.STOP).to(FIN, ERR)
-                .from(RUNNING).on(ActionId.STOP).to(FIN, ERR)
-                .from(ERR).on(ActionId.STOP).to(FIN, ERR)
-                .build();
     }
 
     @TestOnly
@@ -96,38 +83,12 @@ public final class TransportLifecycleStateMachine implements OrionApplicationSta
 
     @TestOnly
     public StateMachineDefinition definition() {
-        return definition;
+        return aggregateStateMachine().definition();
     }
 
-    public AggregateStateMachine aggregateStateMachine() {
-        return aggregateStateMachine;
-    }
-
+    @Override
     @TestOnly
     public State currentState() {
-        return aggregateStateMachine.currentState();
-    }
-
-    public List<StateTransitionResult> start() {
-        return aggregateStateMachine.start();
-    }
-
-    public List<StateTransitionResult> stop() {
-        return aggregateStateMachine.stop();
-    }
-
-    private State resolveStartState(StateTransitionResult result) {
-        if (result.failed()) {
-            return result.defaultState();
-        }
-        for (StateMachineStatus childState : aggregateStateMachine.childStatuses().values()) {
-            if (ERR.equals(childState.state())) {
-                return ERR;
-            }
-            if (RUNNING.equals(childState.state())) {
-                return RUNNING;
-            }
-        }
-        return DISABLED;
+        return super.currentState();
     }
 }
