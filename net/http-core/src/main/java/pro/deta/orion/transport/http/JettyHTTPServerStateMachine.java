@@ -3,113 +3,107 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.lifecycle.state.ActionBinding;
-import pro.deta.orion.lifecycle.state.ActionId;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.StateMachine;
-import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.state.Void;
 
 import javax.inject.Provider;
+import java.util.Objects;
 
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.state;
 
 /**
  * @AiRule This standalone transport adapter intentionally exposes its raw StateMachine as production API.
  */
 @Singleton
-public final class JettyHTTPServerStateMachine {
+public final class JettyHTTPServerStateMachine extends ServiceLifecycleStateMachineAdapter {
     public static final State RUNNING = state("RUNNING");
     public static final State DISABLED = state("DISABLED");
-
-    private final Provider<JettyHTTPServer> serverProvider;
-    private volatile JettyHTTPServer server;
-    private final ActionBinding<Void> start = ActionId.START.bind(this::startHttpTransport);
-    private final ActionBinding<Void> stop = ActionId.STOP.bind(this::stopHttpTransport);
-    private final StateMachineDefinition definition;
-    private final StateMachine stateMachine;
 
     @Inject
     public JettyHTTPServerStateMachine(
             Provider<JettyHTTPServer> serverProvider) {
-        this.serverProvider = serverProvider;
-        definition = defineStateMachine();
-        stateMachine = definition.newStateMachine();
+        super("http", new HttpLifecycle(serverProvider));
     }
 
-    private StateMachineDefinition defineStateMachine() {
-        return StateMachineDefinition.define()
-                .name("http")
-                .from(NEW, DISABLED).on(start).to(DISABLED, RUNNING, ERR).post(this::resolveStartState)
-                .from(NEW, DISABLED).on(stop).to(FIN, ERR)
-                .from(RUNNING).on(stop).to(FIN, ERR)
-                .from(ERR).on(stop).to(FIN, ERR)
-                .build();
-    }
-
+    @Override
     @TestOnly
     public ActionBinding<Void> startAction() {
-        return start;
+        return super.startAction();
     }
 
+    @Override
     @TestOnly
     public ActionBinding<Void> stopAction() {
-        return stop;
+        return super.stopAction();
     }
 
+    @Override
     public StateMachine stateMachine() {
-        return stateMachine;
+        return super.stateMachine();
     }
 
+    @Override
     @TestOnly
     public State currentState() {
-        return stateMachine.currentState();
+        return super.currentState();
     }
 
+    @Override
     @TestOnly
     public StateTransitionResult start() {
-        return stateMachine.execute(start, Void.EMPTY);
+        return super.start();
     }
 
+    @Override
     @TestOnly
     public StateTransitionResult stop() {
-        return stateMachine.execute(stop, Void.EMPTY);
+        return super.stop();
     }
 
-    private Void startHttpTransport(Void ignored) {
-        resolveServer().onStart();
-        return Void.EMPTY;
-    }
+    private static final class HttpLifecycle implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
+        private final Provider<JettyHTTPServer> serverProvider;
+        private volatile JettyHTTPServer server;
 
-    private State resolveStartState(StateTransitionResult result) {
-        if (result.failed()) {
-            return result.defaultState();
+        private HttpLifecycle(Provider<JettyHTTPServer> serverProvider) {
+            this.serverProvider = Objects.requireNonNull(serverProvider, "serverProvider");
         }
-        JettyHTTPServer currentServer = resolveServer();
-        if (!currentServer.isEnabled()) {
-            return DISABLED;
-        }
-        return currentServer.isRunning() ? RUNNING : ERR;
-    }
 
-    private Void stopHttpTransport(Void ignored) {
-        JettyHTTPServer currentServer = server;
-        State currentState = stateMachine.currentState();
-        if (currentServer != null && (RUNNING.equals(currentState) || ERR.equals(currentState))) {
-            currentServer.onStop();
+        @Override
+        public void onStart() {
+            resolveServer().onStart();
         }
-        return Void.EMPTY;
-    }
 
-    private JettyHTTPServer resolveServer() {
-        if (server == null) {
-            synchronized (this) {
-                if (server == null) {
-                    server = serverProvider.get();
-                }
+        @Override
+        public void onStop() {
+            JettyHTTPServer currentServer = server;
+            if (currentServer != null) {
+                currentServer.onStop();
             }
         }
-        return server;
+
+        @Override
+        public boolean isEnabled() {
+            return resolveServer().isEnabled();
+        }
+
+        @Override
+        public boolean isRunning() {
+            return resolveServer().isRunning();
+        }
+
+        private JettyHTTPServer resolveServer() {
+            if (server == null) {
+                synchronized (this) {
+                    if (server == null) {
+                        server = serverProvider.get();
+                    }
+                }
+            }
+            return server;
+        }
     }
 }

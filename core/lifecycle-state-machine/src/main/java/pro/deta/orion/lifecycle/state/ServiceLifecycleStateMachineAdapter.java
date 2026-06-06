@@ -11,7 +11,7 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 /**
  * Reusable state-machine adapter for leaf services with synchronous start/stop lifecycle hooks.
  */
-public final class ServiceLifecycleStateMachineAdapter {
+public class ServiceLifecycleStateMachineAdapter {
     private final ServiceLifecycle lifecycle;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startService);
     private final ActionBinding<Void> stop = ActionId.STOP.bind(this::stopService);
