@@ -9,6 +9,7 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -132,6 +133,30 @@ class RuntimeHttpAdminApiIT {
     }
 
     @Test
+    void bearerTokenExpiresAndFreshTokenRestoresAdminAccess() throws Exception {
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
+                RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-token-lifecycle")))) {
+            String shortLivedToken = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"),
+                    1);
+
+            RuntimeHttpTestSupport.HttpResponse authorized = adminAcl(orion, shortLivedToken);
+            assertThat(authorized.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+
+            RuntimeHttpTestSupport.HttpResponse expired = waitForForbiddenAdminAcl(orion, shortLivedToken);
+            assertThat(expired.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
+
+            String freshToken = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"),
+                    600);
+            RuntimeHttpTestSupport.HttpResponse restored = adminAcl(orion, freshToken);
+            assertThat(restored.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+        }
+    }
+
+    @Test
     void adminApiRemainsAccessibleAndReportsRuntimeLifecycleState() throws Exception {
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion")))) {
@@ -177,5 +202,28 @@ class RuntimeHttpAdminApiIT {
             }
         }
         throw new AssertionError("Route not found: " + pattern);
+    }
+
+    private static RuntimeHttpTestSupport.HttpResponse adminAcl(RuntimeHttpTestSupport.StartedOrion orion, String token)
+            throws Exception {
+        return RuntimeHttpTestSupport.request(
+                "GET",
+                orion.httpUrl("/api/admin/acl"),
+                TestBearerTokens.bearer(token));
+    }
+
+    private static RuntimeHttpTestSupport.HttpResponse waitForForbiddenAdminAcl(
+            RuntimeHttpTestSupport.StartedOrion orion,
+            String token) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        RuntimeHttpTestSupport.HttpResponse response;
+        do {
+            response = adminAcl(orion, token);
+            if (response.status() == HttpURLConnection.HTTP_FORBIDDEN) {
+                return response;
+            }
+            Thread.sleep(100);
+        } while (System.nanoTime() < deadline);
+        return response;
     }
 }
