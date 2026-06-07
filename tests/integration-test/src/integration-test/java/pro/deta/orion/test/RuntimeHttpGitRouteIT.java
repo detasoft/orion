@@ -123,18 +123,110 @@ class RuntimeHttpGitRouteIT {
         assertThat(orionRoot.resolve("repos").resolve("r").resolve(repositoryName + ".git")).doesNotExist();
     }
 
+    @Test
+    void readOnlyBearerUserCanCloneButCannotPushOrCreateThroughHttpGitRoute() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-http-git-read-only");
+        String repositoryName = "http-read-only-project";
+        String createdRepositoryName = "http-read-only-created";
+        Path serverRepository = orionRoot.resolve("repos").resolve(repositoryName);
+        Path createdServerRepository = orionRoot.resolve("repos").resolve(createdRepositoryName);
+        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
+            String remoteUrl = orion.httpUrl("/r/" + repositoryName + ".git").toString();
+            Path sourceDirectory = tempDir.resolve("http-read-only-source");
+            Path cloneDirectory = tempDir.resolve("http-read-only-clone");
+
+            try (Git source = initRepository(sourceDirectory)) {
+                ObjectId initialCommit = createCommit(source, "README.md", "seeded for read-only http\n", "seed http commit");
+                String rootToken = TestBearerTokens.issueRootToken(
+                        orion.accessControlService(),
+                        orion.httpUrl("/api/admin/token"),
+                        600);
+                TransportConfigCallback rootAuthorization = bearerAuthorization(rootToken);
+
+                Iterable<PushResult> seedPushResults = source.push()
+                        .setRemote(remoteUrl)
+                        .setTransportConfigCallback(rootAuthorization)
+                        .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                        .call();
+                assertThat(seedPushResults)
+                        .flatExtracting(PushResult::getRemoteUpdates)
+                        .extracting(RemoteRefUpdate::getStatus)
+                        .containsExactly(RemoteRefUpdate.Status.OK);
+                assertRepositoryContains(serverRepository, initialCommit, "README.md", "seeded for read-only http\n");
+
+                RuntimeHttpTestSupport.HttpResponse updateAcl = RuntimeHttpTestSupport.request(
+                        "POST",
+                        orion.httpUrl("/api/admin/acl"),
+                        TestBearerTokens.bearer(rootToken),
+                        "application/xml",
+                        serialize(accessControlForHttpGitUser(repositoryName, true, false, false)));
+                assertThat(updateAcl.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+
+                String userToken = TestBearerTokens.issueToken(
+                        orion.httpUrl("/api/admin/token"),
+                        USERNAME,
+                        TEST_PASSWORD.toCharArray(),
+                        600);
+                TransportConfigCallback readOnlyAuthorization = bearerAuthorization(userToken);
+
+                assertThatThrownBy(() -> source.push()
+                        .setRemote(orion.httpUrl("/r/" + createdRepositoryName + ".git").toString())
+                        .setTransportConfigCallback(readOnlyAuthorization)
+                        .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                        .call())
+                        .isInstanceOf(TransportException.class);
+                assertThat(createdServerRepository).doesNotExist();
+
+                try (Git clone = Git.cloneRepository()
+                        .setURI(remoteUrl)
+                        .setDirectory(cloneDirectory.toFile())
+                        .setBranch(BRANCH)
+                        .setTransportConfigCallback(readOnlyAuthorization)
+                        .call()) {
+                    assertThat(Files.readString(cloneDirectory.resolve("README.md"))).isEqualTo("seeded for read-only http\n");
+
+                    createCommit(clone, "README.md", "read-only update over http\n", "read-only update http commit");
+                    assertThatThrownBy(() -> clone.push()
+                            .setRemote("origin")
+                            .setTransportConfigCallback(readOnlyAuthorization)
+                            .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                            .call())
+                            .isInstanceOf(TransportException.class);
+                }
+
+                assertRepositoryContains(serverRepository, initialCommit, "README.md", "seeded for read-only http\n");
+            }
+        }
+    }
+
     private static AccessControl accessControlForHttpGitUser(String repositoryName) {
+        return accessControlForHttpGitUser(repositoryName, true, true, true);
+    }
+
+    private static AccessControl accessControlForHttpGitUser(
+            String repositoryName,
+            boolean read,
+            boolean write,
+            boolean create) {
         AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(
                 TEST_PASSWORD_HASH,
                 AccessControl.CredentialType.SHA1).toDraft();
         AccessControlDraft.User user = ACLUtil.createUser(USERNAME, USERNAME + "@example.test")
                 .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH);
-        user.addGrant("REPOSITORY_" + repositoryName)
+        AccessControlDraft.Grant grant = user.addGrant("REPOSITORY_" + repositoryName)
                 .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
-                .addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING)
-                .addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING)
                 .addKey(AccessControl.GrantKey.BRANCH, "*");
+        if (read) {
+            grant.addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING);
+        }
+        if (write) {
+            grant.addKey(AccessControl.GrantKey.WRITE, AccessControl.TRUE_STRING);
+        }
+        if (create) {
+            grant.addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+        }
         draft.getUsers().add(user);
         return draft.toAccessControl();
     }

@@ -34,6 +34,9 @@ public class AccessRulesTest {
         // '*/orion', 'orion/*', '*/*', 'pre*/some'
         Assertions.assertTrue(matchExpressionValue("orion", "orion"));
         Assertions.assertTrue(matchExpressionValue("or*on", "orion"));
+        Assertions.assertTrue(matchExpressionValue("*", "http-read-only-project"));
+        Assertions.assertTrue(matchExpressionValue("team/*", "team/service-api"));
+        Assertions.assertFalse(matchExpressionValue("team/*", "team/service/api"));
     }
 
     @Test
