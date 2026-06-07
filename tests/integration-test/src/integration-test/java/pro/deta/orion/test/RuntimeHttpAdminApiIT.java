@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -133,6 +134,76 @@ class RuntimeHttpAdminApiIT {
     }
 
     @Test
+    void adminUserApiRejectsUnauthorizedAndInvalidRequestsWithoutAclChanges() throws Exception {
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
+                RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-user-api")))) {
+            String token = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"),
+                    600);
+            String baselineAcl = adminAcl(orion, token).body();
+
+            RuntimeHttpTestSupport.HttpResponse withoutToken = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/users"),
+                    null,
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of("id", "denied-admin-user")));
+            assertThat(withoutToken.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
+            assertAclUnchanged(orion, token, baselineAcl);
+
+            RuntimeHttpTestSupport.HttpResponse missingId = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/users"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertThat(missingId.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            assertAclUnchanged(orion, token, baselineAcl);
+
+            RuntimeHttpTestSupport.HttpResponse blankId = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/users"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of("id", "   ")));
+            assertThat(blankId.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            assertAclUnchanged(orion, token, baselineAcl);
+
+            RuntimeHttpTestSupport.HttpResponse blankRepositoryGrant = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/users"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of(
+                            "id", "broken-grant-user",
+                            "repositories", List.of(Map.of(
+                                    "repository", "   ",
+                                    "read", true)))));
+            assertThat(blankRepositoryGrant.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            assertAclUnchanged(orion, token, baselineAcl);
+
+            RuntimeHttpTestSupport.HttpResponse invalidJson = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/users"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    "{\"id\":\"malformed-user\"".getBytes(StandardCharsets.UTF_8));
+            assertThat(invalidJson.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            assertAclUnchanged(orion, token, baselineAcl);
+
+            RuntimeHttpTestSupport.HttpResponse validCreate = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/users"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of("id", "created-admin-user")));
+            assertThat(validCreate.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            assertThat(adminAcl(orion, token).body()).contains("created-admin-user");
+        }
+    }
+
+    @Test
     void bearerTokenExpiresAndFreshTokenRestoresAdminAccess() throws Exception {
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-token-lifecycle")))) {
@@ -210,6 +281,15 @@ class RuntimeHttpAdminApiIT {
                 "GET",
                 orion.httpUrl("/api/admin/acl"),
                 TestBearerTokens.bearer(token));
+    }
+
+    private static void assertAclUnchanged(
+            RuntimeHttpTestSupport.StartedOrion orion,
+            String token,
+            String expectedAcl) throws Exception {
+        RuntimeHttpTestSupport.HttpResponse acl = adminAcl(orion, token);
+        assertThat(acl.status()).isEqualTo(HttpURLConnection.HTTP_OK);
+        assertThat(acl.body()).isEqualTo(expectedAcl);
     }
 
     private static RuntimeHttpTestSupport.HttpResponse waitForForbiddenAdminAcl(
