@@ -1,5 +1,5 @@
 MAVEN ?= mvn
-ORION_ROOT ?= $(CURDIR)/target/orion_root
+ORION_ROOT ?= $(CURDIR)/orion_root
 ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
 ORION_HTTP_HOST ?= localhost
