@@ -3,6 +3,7 @@ package pro.deta.orion.lifecycle.state;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public final class AggregateStateMachine {
@@ -37,6 +38,14 @@ public final class AggregateStateMachine {
 
     public Map<String, StateMachineStatus> childStatuses() {
         return stateMachine.childStatuses();
+    }
+
+    public StateMachine machine(String name) {
+        return stateMachine.machine(name);
+    }
+
+    public Optional<StateMachine> findMachine(String name) {
+        return stateMachine.findMachine(name);
     }
 
     public Set<ActionId> availableActions() {

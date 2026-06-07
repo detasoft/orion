@@ -90,6 +90,8 @@ class StateMachineTest {
                 .contains(
                         "name",
                         "childStatuses",
+                        "machine",
+                        "findMachine",
                         "states",
                         "availableTransitions",
                         "status",
@@ -116,6 +118,33 @@ class StateMachineTest {
                 .doesNotContain("childStates", "observedChildStates", "childSubscriptions", "computedState");
         assertThat(AutoCloseable.class.isAssignableFrom(StateMachine.class)).isFalse();
         assertThat(AutoCloseable.class.isAssignableFrom(AggregateStateMachine.class)).isFalse();
+    }
+
+    @Test
+    void aggregateStateMachineFindsNestedMachinesFromRoot() {
+        StateMachine leaf = StateMachineDefinition.define()
+                .name("leaf")
+                .build()
+                .newStateMachine();
+        StateMachine branch = StateMachineDefinition.define()
+                .name("branch")
+                .child("leaf-alias", leaf)
+                .build()
+                .newStateMachine();
+        AggregateStateMachine root = new AggregateStateMachine(StateMachineDefinition.define()
+                .name("root")
+                .child("branch-alias", branch)
+                .build());
+
+        assertThat(root.machine("root")).isSameAs(root.stateMachine());
+        assertThat(root.machine("branch")).isSameAs(branch);
+        assertThat(root.machine("branch-alias")).isSameAs(branch);
+        assertThat(root.machine("leaf")).isSameAs(leaf);
+        assertThat(root.machine("leaf-alias")).isSameAs(leaf);
+        assertThat(root.findMachine("missing")).isEmpty();
+        assertThatThrownBy(() -> root.machine("missing"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("State machine not found: missing");
     }
 
     @Test

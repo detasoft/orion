@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -66,6 +67,29 @@ public final class StateMachine {
             statuses.put(child.getKey(), child.getValue().status(child.getKey()));
         }
         return Collections.unmodifiableMap(statuses);
+    }
+
+    public StateMachine machine(String name) {
+        return findMachine(name)
+                .orElseThrow(() -> new IllegalArgumentException("State machine not found: " + name));
+    }
+
+    public Optional<StateMachine> findMachine(String name) {
+        requireName(name);
+        if (name.equals(this.name())) {
+            return Optional.of(this);
+        }
+        for (Map.Entry<String, StateMachine> child : children.entrySet()) {
+            StateMachine childMachine = child.getValue();
+            if (child.getKey().equals(name) || childMachine.name().equals(name)) {
+                return Optional.of(childMachine);
+            }
+            Optional<StateMachine> nested = childMachine.findMachine(name);
+            if (nested.isPresent()) {
+                return nested;
+            }
+        }
+        return Optional.empty();
     }
 
     public synchronized Set<ActionId> availableActions() {

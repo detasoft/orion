@@ -715,9 +715,19 @@ class OrionHttpRouteServletTest {
                 .on(ActionId.START)
                 .to(running, StandardStateDefinition.ERR)
                 .build();
-        AggregateStateMachine parent = new AggregateStateMachine(parentDefinition);
-        parent.execute(ActionId.START);
-        return parent;
+        StateMachine transports = parentDefinition.newStateMachine();
+        transports.execute(ActionId.START, Void.EMPTY);
+
+        StateMachineDefinition rootDefinition = StateMachineDefinition.define()
+                .name("orion")
+                .child("transports", transports)
+                .from(StandardStateDefinition.NEW)
+                .on(ActionId.START)
+                .to(running, StandardStateDefinition.ERR)
+                .build();
+        AggregateStateMachine root = new AggregateStateMachine(rootDefinition);
+        root.execute(ActionId.START);
+        return root;
     }
 
     private static JsonNode routeWithPattern(JsonNode routes, String pattern) {
