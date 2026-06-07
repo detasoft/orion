@@ -8,7 +8,8 @@ import pro.deta.orion.util.Result;
 
 @Singleton
 public class S3GitRepositoryProvider implements GitRepositoryProvider {
-    private static final String NOT_IMPLEMENTED = "S3 repository storage is not implemented yet";
+    static final String NOT_SUPPORTED_MESSAGE =
+            "S3 repository storage is configured, but the S3 Git backend is not implemented yet";
 
     @Inject
     public S3GitRepositoryProvider() {
@@ -30,6 +31,6 @@ public class S3GitRepositoryProvider implements GitRepositoryProvider {
     }
 
     private Result<GitRepository> notSupported() {
-        return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, NOT_IMPLEMENTED);
+        return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, NOT_SUPPORTED_MESSAGE);
     }
 }

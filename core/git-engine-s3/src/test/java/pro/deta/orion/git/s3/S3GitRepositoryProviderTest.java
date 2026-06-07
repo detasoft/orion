@@ -11,11 +11,15 @@ class S3GitRepositoryProviderTest {
         S3GitRepositoryProvider provider = new S3GitRepositoryProvider();
 
         assertThat(provider.exists("project")).isFalse();
-        assertThat(provider.find("project"))
+        assertUnsupported(provider.find("project"));
+        assertUnsupported(provider.findOrCreate("project"));
+    }
+
+    private static void assertUnsupported(Result<?> result) {
+        assertThat(result)
                 .isInstanceOfSatisfying(Result.Failure.class, failure ->
-                        assertThat(failure.code()).isEqualTo(Result.FailureCode.NOT_SUPPORTED));
-        assertThat(provider.findOrCreate("project"))
-                .isInstanceOfSatisfying(Result.Failure.class, failure ->
-                        assertThat(failure.code()).isEqualTo(Result.FailureCode.NOT_SUPPORTED));
+                        assertThat(failure)
+                                .returns(Result.FailureCode.NOT_SUPPORTED, Result.Failure::code)
+                                .returns(S3GitRepositoryProvider.NOT_SUPPORTED_MESSAGE, Result.Failure::message));
     }
 }

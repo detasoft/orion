@@ -30,7 +30,7 @@ public class S3GitRepositoryIT extends BaseOrionTest implements S3ServerRule.Abs
     }
 
     @Test
-    @Disabled("investigation needed")
+    @Disabled("S3 Git repository storage is currently unsupported until the native S3 Git backend is implemented")
     @DisplayName("first pushed commit can be listed and fetched")
     void pushFirstCommitThenFetchIt() throws IOException {
         runScenarioInFreshRepository(Scenarios::pushFirstCommitThenListAndFetchWithoutReceivePackAdvertisement);

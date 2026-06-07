@@ -40,7 +40,7 @@ public class S3SPIGitInteractionIT extends BaseOrionTest implements S3ServerRule
     }
 
     @Test
-    @Disabled("need to properly inject s3x: into filesystem")
+    @Disabled("S3 Git repository storage is currently unsupported; s3x SPI wiring is not a supported backend")
     @DisplayName("first pushed commit can be listed and fetched")
     void pushFirstCommitThenFetchIt() throws IOException {
         Path repositoryPath = Paths.get("s3x://%s:%s/%s/%s".formatted(
