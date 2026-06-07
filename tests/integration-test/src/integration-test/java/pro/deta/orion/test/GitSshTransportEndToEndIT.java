@@ -369,24 +369,27 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
-    void rootCanReadTransportLifecycleStateOverSsh() throws Exception {
+    void rootSeesSameLifecycleStateOverSshAndHttp() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
 
         KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
                 .valueOrFailure("Server identity key should be available after startup");
 
-        String state = executeStateOverSsh(startedOrion, serverIdentityKey);
+        String sshState = executeStateOverSsh(startedOrion, serverIdentityKey);
+        String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
+        String httpState = getAdminLifecycleStateWithBearerToken(startedOrion, token);
 
-        assertThat(state).contains("orion: RUNNING");
-        assertThat(state).contains("executor: RUNNING");
-        assertThat(state).contains("jgit-runtime: RUNNING");
-        assertThat(state).contains("event-manager: RUNNING");
-        assertThat(state).contains("access-control: RUNNING");
-        assertThat(state).contains("transports: RUNNING");
-        assertThat(state).contains("git-native: DISABLED");
-        assertThat(state).contains("git-ssh: RUNNING");
-        assertThat(state).contains("http: RUNNING");
+        assertThat(httpState).isEqualTo(sshState.stripTrailing());
+        assertThat(sshState).contains("orion: RUNNING");
+        assertThat(sshState).contains("executor: RUNNING");
+        assertThat(sshState).contains("jgit-runtime: RUNNING");
+        assertThat(sshState).contains("event-manager: RUNNING");
+        assertThat(sshState).contains("access-control: RUNNING");
+        assertThat(sshState).contains("transports: RUNNING");
+        assertThat(sshState).contains("git-native: DISABLED");
+        assertThat(sshState).contains("git-ssh: RUNNING");
+        assertThat(sshState).contains("http: RUNNING");
     }
 
     @Test
@@ -934,6 +937,17 @@ class GitSshTransportEndToEndIT {
         int status = connection.getResponseCode();
         String contentType = connection.getContentType();
         return new HttpResponse(status, contentType);
+    }
+
+    private static String getAdminLifecycleStateWithBearerToken(StartedOrion orion, String token) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl("/api/admin/lifecycle/state").openConnection();
+        connection.setRequestMethod("GET");
+        connection.setRequestProperty("Authorization", TestBearerTokens.bearer(token));
+        assertThat(connection.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+        assertThat(connection.getContentType()).startsWith("text/plain");
+        try (InputStream input = connection.getInputStream()) {
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private record HttpResponse(int status, String contentType) {

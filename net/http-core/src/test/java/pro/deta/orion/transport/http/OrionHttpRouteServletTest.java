@@ -81,8 +81,9 @@ class OrionHttpRouteServletTest {
             -----END RSA PRIVATE KEY-----
             """;
     private static final String LIFECYCLE_STATUS = """
-            transports: RUNNING
-              git-native: RUNNING""";
+            orion: RUNNING
+              transports: RUNNING
+                git-native: RUNNING""";
 
     @Test
     void createsManagedUser() throws Exception {
@@ -396,8 +397,8 @@ class OrionHttpRouteServletTest {
         assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
         assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
-        assertThat(routeWithPattern(routes, "/api/admin/lifecycle/transports").get("methods").toString()).isEqualTo("[\"GET\"]");
-        assertThat(routeWithPattern(routes, "/api/admin/lifecycle/transports").get("authorization").asText()).isEqualTo("application-admin");
+        assertThat(routeWithPattern(routes, "/api/admin/lifecycle/state").get("methods").toString()).isEqualTo("[\"GET\"]");
+        assertThat(routeWithPattern(routes, "/api/admin/lifecycle/state").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("methods").toString()).isEqualTo("[\"GET\"]");
         assertThat(routeWithPattern(routes, "/api/admin/routes").get("authorization").asText()).isEqualTo("application-admin");
         assertThat(routeWithPattern(routes, "/api/admin/shutdown").get("methods").toString()).isEqualTo("[\"POST\"]");
@@ -414,14 +415,14 @@ class OrionHttpRouteServletTest {
     }
 
     @Test
-    void returnsTransportLifecycleStateAsPlainText() throws Exception {
+    void returnsRuntimeLifecycleStateAsPlainText() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
         OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
-                request("GET", "/api/admin/lifecycle/transports", null, ""),
+                request("GET", "/api/admin/lifecycle/state", null, ""),
                 response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
@@ -496,14 +497,14 @@ class OrionHttpRouteServletTest {
     }
 
     @Test
-    void rejectsTransportLifecycleStateRequestWithoutAdminGrant() throws Exception {
+    void rejectsRuntimeLifecycleStateRequestWithoutAdminGrant() throws Exception {
         RecordingAccessControlService accessControlService = new RecordingAccessControlService();
         RecordingGitRepositoryProvider gitRepositoryProvider = new RecordingGitRepositoryProvider();
         OrionHttpRouteServlet servlet = servlet(accessControlService, gitRepositoryProvider);
 
         ResponseRecorder response = new ResponseRecorder();
         servlet.service(
-                request("GET", "/api/admin/lifecycle/transports", null, "", regularSecurityContext()),
+                request("GET", "/api/admin/lifecycle/state", null, "", regularSecurityContext()),
                 response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);

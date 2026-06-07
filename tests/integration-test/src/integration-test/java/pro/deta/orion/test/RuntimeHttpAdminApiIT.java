@@ -48,7 +48,7 @@ class RuntimeHttpAdminApiIT {
                     .isEqualTo("[\"GET\",\"POST\"]");
             assertThat(routeWithPattern(routeTable, "/api/admin/routes").get("authorization").asText())
                     .isEqualTo("application-admin");
-            assertThat(routeWithPattern(routeTable, "/api/admin/lifecycle/transports").get("authorization").asText())
+            assertThat(routeWithPattern(routeTable, "/api/admin/lifecycle/state").get("authorization").asText())
                     .isEqualTo("application-admin");
 
             RuntimeHttpTestSupport.HttpResponse wrongMethod = RuntimeHttpTestSupport.request(
@@ -73,7 +73,7 @@ class RuntimeHttpAdminApiIT {
     }
 
     @Test
-    void adminApiRemainsAccessibleAndReportsHttpTransportRunning() throws Exception {
+    void adminApiRemainsAccessibleAndReportsRuntimeLifecycleState() throws Exception {
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion")))) {
             String token = TestBearerTokens.issueRootToken(
@@ -83,10 +83,15 @@ class RuntimeHttpAdminApiIT {
 
             RuntimeHttpTestSupport.HttpResponse lifecycleState = RuntimeHttpTestSupport.request(
                     "GET",
-                    orion.httpUrl("/api/admin/lifecycle/transports"),
+                    orion.httpUrl("/api/admin/lifecycle/state"),
                     TestBearerTokens.bearer(token));
             assertThat(lifecycleState.status()).isEqualTo(HttpURLConnection.HTTP_OK);
             assertThat(lifecycleState.contentType()).startsWith("text/plain");
+            assertThat(lifecycleState.body()).contains("orion: RUNNING");
+            assertThat(lifecycleState.body()).contains("executor: RUNNING");
+            assertThat(lifecycleState.body()).contains("jgit-runtime: RUNNING");
+            assertThat(lifecycleState.body()).contains("event-manager: RUNNING");
+            assertThat(lifecycleState.body()).contains("access-control: RUNNING");
             assertThat(lifecycleState.body()).contains("transports: RUNNING");
             assertThat(lifecycleState.body()).contains("git-native: DISABLED");
             assertThat(lifecycleState.body()).contains("git-ssh: DISABLED");
