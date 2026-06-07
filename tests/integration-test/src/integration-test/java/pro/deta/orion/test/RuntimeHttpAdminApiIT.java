@@ -6,7 +6,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.net.HttpURLConnection;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -69,6 +71,63 @@ class RuntimeHttpAdminApiIT {
                     orion.httpUrl("/api/admin/acl"),
                     TestBearerTokens.bearer("invalid-token"));
             assertThat(invalidToken.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
+        }
+    }
+
+    @Test
+    void adminRepositoryApiRejectsUnauthorizedAndInvalidCreateRequestsWithoutSideEffects() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-repository-api");
+        Path repositoriesRoot = orionRoot.resolve("repos");
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
+                RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot))) {
+            String token = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"),
+                    600);
+
+            RuntimeHttpTestSupport.HttpResponse withoutToken = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/repositories"),
+                    null,
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of("name", "denied-admin-project")));
+            assertThat(withoutToken.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
+            assertThat(repositoriesRoot.resolve("denied-admin-project")).doesNotExist();
+
+            RuntimeHttpTestSupport.HttpResponse missingName = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/repositories"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertThat(missingName.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+
+            RuntimeHttpTestSupport.HttpResponse blankName = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/repositories"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of("name", "   ")));
+            assertThat(blankName.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            assertThat(repositoriesRoot.resolve("   ")).doesNotExist();
+
+            RuntimeHttpTestSupport.HttpResponse invalidJson = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/repositories"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    "{\"name\":\"malformed-project\"".getBytes(StandardCharsets.UTF_8));
+            assertThat(invalidJson.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+            assertThat(repositoriesRoot.resolve("malformed-project")).doesNotExist();
+
+            RuntimeHttpTestSupport.HttpResponse validCreate = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/repositories"),
+                    TestBearerTokens.bearer(token),
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of("name", "created-project")));
+            assertThat(validCreate.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+            assertThat(repositoriesRoot.resolve("created-project").resolve("config")).exists();
         }
     }
 
