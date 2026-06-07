@@ -27,6 +27,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -37,6 +40,8 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class OrionStartupIT {
@@ -160,7 +165,9 @@ class OrionStartupIT {
     void httpShutdownRequestStopsServerPromptly() throws Exception {
         Path orionRoot = tempDir.resolve("orion");
 
-        try (StartedOrion orion = startServerWithConfig(serverConfiguration(orionRoot))) {
+        StartedOrion orion = startServerWithConfig(serverConfiguration(orionRoot));
+        boolean shutdownCompleted = false;
+        try {
             String token = TestBearerTokens.issueRootToken(
                     orion.accessControlService(),
                     orion.httpUrl("/api/admin/token"),
@@ -169,10 +176,45 @@ class OrionStartupIT {
             long startedAtNanos = System.nanoTime();
             int responseCode = postShutdown(orion, token);
             orion.lifecycle().waitForShutdown();
+            shutdownCompleted = true;
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
 
             assertThat(responseCode).isEqualTo(HttpURLConnection.HTTP_ACCEPTED);
             assertThat(elapsedMillis).isLessThan(2_000);
+        } finally {
+            if (!shutdownCompleted) {
+                orion.close();
+            }
+        }
+    }
+
+    @Test
+    void occupiedHttpPortFailsRootStartupAndStillShutsDownCleanly() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-port-conflict");
+        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        configuration.getTransport().getGit().setEnabled(false);
+        configuration.getTransport().getSsh().setEnabled(false);
+        configuration.getTransport().getHttps().setEnabled(false);
+
+        ServerSocket occupiedHttpPort = bindHttpPort(configuration);
+        try {
+            OrionComponent orionComponent = DaggerOrionComponent.builder()
+                    .configurationProvider(() -> configuration)
+                    .build();
+            OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
+
+            assertThat(lifecycle.runApplication()).isEqualTo(ERR);
+            assertThat(lifecycle.describeLifecycle())
+                    .contains("orion: ERR", "transports: ERR", "http: ERR")
+                    .doesNotContain("http: RUNNING");
+
+            assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+            lifecycle.waitForShutdown();
+
+            occupiedHttpPort.close();
+            assertCanBindHttpPort(configuration);
+        } finally {
+            occupiedHttpPort.close();
         }
     }
 
@@ -311,6 +353,21 @@ class OrionStartupIT {
             // Send an explicit empty POST body.
         }
         return connection.getResponseCode();
+    }
+
+    private static ServerSocket bindHttpPort(OrionConfiguration configuration) throws IOException {
+        ServerSocket socket = new ServerSocket();
+        socket.setReuseAddress(false);
+        socket.bind(new InetSocketAddress(
+                InetAddress.getByName(configuration.getTransport().getHttp().getAddress()),
+                configuration.getTransport().getHttp().getPort()));
+        return socket;
+    }
+
+    private static void assertCanBindHttpPort(OrionConfiguration configuration) throws IOException {
+        try (ServerSocket ignored = bindHttpPort(configuration)) {
+            assertThat(ignored.isBound()).isTrue();
+        }
     }
 
     private static boolean hasUser(AccessControl accessControl, String id) {
