@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -228,6 +231,50 @@ class RuntimeHttpAdminApiIT {
     }
 
     @Test
+    void tokenApiRejectsInvalidCredentialsAndExpirationBeforeIssuingFreshToken() throws Exception {
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
+                RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion-token-api")))) {
+            RuntimeHttpTestSupport.HttpResponse withoutBasic = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/token"),
+                    null,
+                    "application/json",
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertThat(withoutBasic.status()).isEqualTo(HttpURLConnection.HTTP_UNAUTHORIZED);
+
+            RuntimeHttpTestSupport.HttpResponse malformedBasic = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/token"),
+                    "Basic not-base64",
+                    "application/json",
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertThat(malformedBasic.status()).isEqualTo(HttpURLConnection.HTTP_UNAUTHORIZED);
+
+            RuntimeHttpTestSupport.HttpResponse wrongPassword = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/token"),
+                    basic("root", "wrong-password".toCharArray()),
+                    "application/json",
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            assertThat(wrongPassword.status()).isEqualTo(HttpURLConnection.HTTP_UNAUTHORIZED);
+
+            RuntimeHttpTestSupport.HttpResponse invalidExpiration = RuntimeHttpTestSupport.request(
+                    "POST",
+                    orion.httpUrl("/api/admin/token"),
+                    rootBasic(orion),
+                    "application/json",
+                    OBJECT_MAPPER.writeValueAsBytes(Map.of("expiresInSeconds", 0)));
+            assertThat(invalidExpiration.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
+
+            String freshToken = TestBearerTokens.issueRootToken(
+                    orion.accessControlService(),
+                    orion.httpUrl("/api/admin/token"),
+                    600);
+            assertThat(adminAcl(orion, freshToken).status()).isEqualTo(HttpURLConnection.HTTP_OK);
+        }
+    }
+
+    @Test
     void adminApiRemainsAccessibleAndReportsRuntimeLifecycleState() throws Exception {
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
                 RuntimeHttpTestSupport.httpOnlyConfiguration(tempDir.resolve("orion")))) {
@@ -281,6 +328,24 @@ class RuntimeHttpAdminApiIT {
                 "GET",
                 orion.httpUrl("/api/admin/acl"),
                 TestBearerTokens.bearer(token));
+    }
+
+    private static String rootBasic(RuntimeHttpTestSupport.StartedOrion orion) {
+        char[] rootPassword = orion.accessControlService().plainRootToken(PlainRootTokenAccessForTests.create());
+        try {
+            return basic("root", rootPassword);
+        } finally {
+            Arrays.fill(rootPassword, '\0');
+        }
+    }
+
+    private static String basic(String username, char[] password) {
+        byte[] credentials = (username + ":" + String.valueOf(password)).getBytes(StandardCharsets.UTF_8);
+        try {
+            return "Basic " + Base64.getEncoder().encodeToString(credentials);
+        } finally {
+            Arrays.fill(credentials, (byte) 0);
+        }
     }
 
     private static void assertAclUnchanged(
