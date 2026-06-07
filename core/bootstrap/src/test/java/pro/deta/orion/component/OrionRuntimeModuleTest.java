@@ -5,7 +5,6 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
@@ -22,26 +21,20 @@ import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.transport.OrionTransportModule;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.lang.reflect.Method;
-import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,100 +49,6 @@ class OrionRuntimeModuleTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
-    void runtimeInitPlanOmitsTransportInit() {
-        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
-
-        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
-
-        assertTrue(plan.contains("JGIT_RUNTIME"));
-        assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
-        assertFalse(plan.contains("ACL_INIT"));
-    }
-
-    @Test
-    void runtimeInitPlanOmitsTransportInitEvenWhenTransportsEnabled() {
-        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
-
-        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.INIT);
-
-        assertTrue(plan.contains("JGIT_RUNTIME"));
-        assertTrue(plan.contains("EVENT_MANAGER after JGIT_RUNTIME"));
-    }
-
-    @Test
-    void runtimeStartingPlanRegistersTransportOrchestratorEvenWhenDisabled() {
-        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
-
-        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
-
-        assertTrue(plan.contains("ACL_LOAD"));
-        assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
-        assertTrue(plan.contains("TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
-    }
-
-    @Test
-    void runtimeStartingPlanRegistersOrchestratorTaskAfterAcl() {
-        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
-
-        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING);
-
-        assertTrue(plan.contains("ACL_LOAD"));
-        assertTrue(plan.contains("TRANSPORTS_START after ACL_LOAD"));
-        assertTrue(plan.contains("TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
-    }
-
-    @Test
-    void runtimeStoppingPlanRegistersTransportOrchestratorEvenWhenDisabled() {
-        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
-
-        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
-
-        assertTrue(plan.contains("TRANSPORTS_STOP"));
-        assertTrue(plan.contains("TRANSPORT_LIFECYCLE_STOP"));
-        assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
-    }
-
-    @Test
-    void runtimeStoppingPlanOrdersOrchestratorBeforeEventsAndExecutor() {
-        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
-
-        String plan = component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STOPPING);
-
-        assertTrue(plan.contains("TRANSPORT_LIFECYCLE_STOP"));
-        assertTrue(plan.contains("TRANSPORTS_STOP after TRANSPORT_LIFECYCLE_STOP"));
-        assertTrue(plan.contains("JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("EVENT_MANAGER_STOP after TRANSPORTS_STOP"));
-        assertTrue(plan.contains("EXECUTOR_STOP after EVENT_MANAGER_STOP"));
-    }
-
-    @Test
-    void runtimeServiceMapShowsDisabledTransportOrchestrator() {
-        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
-
-        String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
-
-        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
-        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP"));
-        assertTrue(serviceMap.contains("OrionJGitRuntime: JGIT_RUNTIME_STOP after TRANSPORTS_STOP"));
-        assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
-        assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_STOP"));
-    }
-
-    @Test
-    void runtimeServiceMapShowsOrchestratorWhenTransportsEnabled() {
-        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
-
-        String serviceMap = component.orionApplicationLifecycle().describeServiceMap();
-
-        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_START after ACL_LOAD"));
-        assertTrue(serviceMap.contains("TransportLifecycleBarrier: TRANSPORTS_STOP after TRANSPORT_LIFECYCLE_STOP"));
-        assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_START after TRANSPORTS_START"));
-        assertTrue(serviceMap.contains("TransportLifecycleStateMachine: TRANSPORT_LIFECYCLE_STOP"));
-    }
-
-    @Test
     void runtimePlanDoesNotLoadServerKeysWhenTransportsAreOnlyRegistered() {
         OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
 
@@ -157,15 +56,6 @@ class OrionRuntimeModuleTest {
 
         assertFalse(tempDir.resolve("server-identity").toFile().exists());
         assertFalse(tempDir.resolve("ssh-host-keys").toFile().exists());
-    }
-
-    @Test
-    void runtimeLifecycleResolvesWithHttpShutdownRoute() {
-        OrionConfiguration configuration = defaultRuntimeConfiguration();
-        configuration.getTransport().getHttp().setEnabled(true);
-        OrionComponent component = runtimeComponent(configuration);
-
-        assertDoesNotThrow(() -> component.orionApplicationLifecycle().describeTaskPlan(ApplicationState.STARTING));
     }
 
     @Test
@@ -367,23 +257,6 @@ class OrionRuntimeModuleTest {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .build();
-    }
-
-    private static Path bootstrapPom() {
-        Path reactorRelativePom = Path.of("core", "bootstrap", "pom.xml");
-        if (Files.exists(reactorRelativePom)) {
-            return reactorRelativePom;
-        }
-        return Path.of("pom.xml");
-    }
-
-    private static boolean containsType(List<String> parameterTypes, String value) {
-        for (String parameterType : parameterTypes) {
-            if (parameterType.contains(value)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static final class RecordingGitRepositoryProvider extends FileGitRepositoryProvider {

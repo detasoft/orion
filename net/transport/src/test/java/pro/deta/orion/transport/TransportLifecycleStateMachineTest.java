@@ -1,16 +1,9 @@
 package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
-import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
-import pro.deta.orion.lifecycle.task.LifecycleTaskId;
-import pro.deta.orion.lifecycle.task.LifecycleTaskRegistration;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportService;
@@ -27,8 +20,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -53,26 +44,12 @@ class TransportLifecycleStateMachineTest {
     }
 
     @Test
-    void registersLifecycleTasksThroughTransportAggregate() throws Exception {
+    void transportAggregateIsStartedDirectlyByParentMachine() {
         OrionConfiguration configuration = configuration(true, true, true);
         RecordingGitNativeTransportService service = new RecordingGitNativeTransportService(configuration);
         TransportLifecycleStateMachine machine = machine(configuration, service);
-        RecordingRegistrar registrar = new RecordingRegistrar();
 
-        assertInstanceOf(OrionApplicationStageEventListener.class, machine);
-        machine.registerToStage(registrar);
-
-        LifecycleTaskDefinition start = registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START);
-        assertEquals(ApplicationState.STARTING, start.phase());
-        assertEquals("TransportLifecycleStateMachine", start.serviceName());
-        assertEquals(List.of(OrionLifecycleTasks.TRANSPORTS_START), start.after());
-
-        LifecycleTaskDefinition stop = registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_STOP);
-        assertEquals(ApplicationState.STOPPING, stop.phase());
-        assertEquals("TransportLifecycleStateMachine", stop.serviceName());
-        assertTrue(stop.after().isEmpty());
-
-        assertNull(start.call().call());
+        machine.start();
         assertEquals(RUNNING, machine.currentState());
         assertEquals(RUNNING, machine.gitNativeTransport().currentState());
         assertEquals(1, service.startCalls());
@@ -82,10 +59,8 @@ class TransportLifecycleStateMachineTest {
     void allChildrenAppearInStateMachineChildMap() throws Exception {
         OrionConfiguration configuration = configuration(true, true, true);
         TransportLifecycleStateMachine machine = machine(configuration, new RecordingGitNativeTransportService(configuration));
-        RecordingRegistrar registrar = new RecordingRegistrar();
 
-        machine.registerToStage(registrar);
-        registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START).call().call();
+        machine.start();
 
         Map<String, ?> children = machine.aggregateStateMachine().childStatuses();
         assertTrue(children.containsKey("git-native"));
@@ -99,27 +74,23 @@ class TransportLifecycleStateMachineTest {
     }
 
     @Test
-    void disabledTransportsRegisterLifecycleTasksAndMoveAggregateToDisabled() throws Exception {
+    void disabledTransportsMoveAggregateToDisabled() throws Exception {
         OrionConfiguration configuration = configuration(false, false, false);
         AtomicBoolean serviceResolved = new AtomicBoolean(false);
         GitNativeTransportStateMachine child = new GitNativeTransportStateMachine(() -> {
                     serviceResolved.set(true);
                     return new RecordingGitNativeTransportService(configuration);
-                });
+        });
         TransportLifecycleStateMachine machine = machine(child,
                 disabledSshMachine(), disabledHttpMachine());
-        RecordingRegistrar registrar = new RecordingRegistrar();
 
-        machine.registerToStage(registrar);
-
-        assertFalse(registrar.registrations.isEmpty());
         assertFalse(serviceResolved.get());
         assertEquals(NEW, machine.currentState());
         Map<String, ?> children = machine.aggregateStateMachine().childStatuses();
         assertTrue(children.containsKey("git-native"));
         assertTrue(children.containsKey("git-ssh"));
         assertTrue(children.containsKey("http"));
-        registrar.definition(OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START).call().call();
+        machine.start();
 
         assertTrue(serviceResolved.get());
         assertEquals(DISABLED, machine.currentState());
@@ -131,13 +102,14 @@ class TransportLifecycleStateMachineTest {
     }
 
     @Test
-    void anyEnabledTransportTriggersLifecycleRegistration() {
+    void anyEnabledTransportMovesAggregateToRunning() {
         // only git-native enabled
         OrionConfiguration configuration = configuration(true, false, false);
-        RecordingRegistrar registrar = new RecordingRegistrar();
-        machine(configuration, new RecordingGitNativeTransportService(configuration)).registerToStage(registrar);
+        TransportLifecycleStateMachine machine = machine(configuration, new RecordingGitNativeTransportService(configuration));
 
-        assertFalse(registrar.registrations.isEmpty());
+        machine.start();
+
+        assertEquals(RUNNING, machine.currentState());
     }
 
     @Test
@@ -257,24 +229,4 @@ class TransportLifecycleStateMachineTest {
         }
     }
 
-    private static final class RecordingRegistrar implements ApplicationStateListenerRegistrar {
-        private final List<LifecycleTaskRegistration> registrations = new ArrayList<>();
-
-        @Override
-        public LifecycleTaskRegistration register(LifecycleTaskRegistration registration) {
-            registrations.add(registration);
-            return registration;
-        }
-
-        private LifecycleTaskDefinition definition(LifecycleTaskId id) {
-            for (LifecycleTaskRegistration registration : registrations) {
-                LifecycleTaskDefinition definition = registration.definition();
-                if (definition.id().equals(id)) {
-                    return definition;
-                }
-            }
-            throw new AssertionError("Missing lifecycle task " + id);
-        }
-
-    }
 }

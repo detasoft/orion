@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Transport services intentionally expose plain lifecycle hooks instead of application stage results.
  * State-machine adapters ignore action return values, so call sites would keep compiling if a transport
- * service started returning OrionStageCallResult again.
+ * service started returning the old stage result contract again.
  */
 class TransportServiceLifecycleContractTest {
     @Test

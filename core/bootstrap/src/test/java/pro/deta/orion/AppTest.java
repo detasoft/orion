@@ -7,9 +7,9 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.lifecycle.ApplicationStateHolder;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.LifecycleTaskId;
+import pro.deta.orion.lifecycle.state.AggregateLifecycleStateMachineAdapter;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.util.OrionProvider;
 
 import java.io.ByteArrayOutputStream;
@@ -19,7 +19,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -33,7 +32,7 @@ class AppTest {
 
     @Test
     void runWaitsUntilLifecycleShutdown() throws Exception {
-        try (TestLifecycleContext context = new TestLifecycleContext(Set.of())) {
+        try (TestLifecycleContext context = new TestLifecycleContext()) {
             FutureTask<Integer> run = new FutureTask<>(() -> App.run(context.lifecycle(), false));
             Thread appThread = new Thread(run, "app-run-test");
             appThread.start();
@@ -49,12 +48,7 @@ class AppTest {
 
     @Test
     void runReturnsErrorWhenStartupFails() {
-        OrionApplicationStageEventListener failingInit = registrar ->
-                registrar.task(ApplicationState.INIT, new LifecycleTaskId("FAILING_INIT"), () -> {
-                    throw new IllegalStateException("boom");
-                });
-
-        try (TestLifecycleContext context = new TestLifecycleContext(Set.of(failingInit))) {
+        try (TestLifecycleContext context = new TestLifecycleContext(true)) {
             assertEquals(1, App.run(context.lifecycle(), false));
         }
     }
@@ -124,19 +118,29 @@ class AppTest {
     private static final class TestLifecycleContext implements AutoCloseable {
         private final OrionExecutor executor = new OrionExecutor(4, new OrionThreadFactory());
         private final ApplicationStateHolder stateHolder = new ApplicationStateHolder();
+        private final OrionEventManager eventManager = new OrionEventManager();
         private final OrionApplicationLifecycle lifecycle;
 
-        private TestLifecycleContext(Set<OrionApplicationStageEventListener> listeners) {
+        private TestLifecycleContext() {
+            this(false);
+        }
+
+        private TestLifecycleContext(boolean failStart) {
+            RecordingServiceLifecycle service = new RecordingServiceLifecycle(failStart);
+            ServiceLifecycleStateMachineAdapter serviceMachine =
+                    new ServiceLifecycleStateMachineAdapter("service", service);
+            AggregateStateMachine runtime = AggregateLifecycleStateMachineAdapter.define("runtime")
+                    .child("service", serviceMachine.stateMachine())
+                    .buildAggregateStateMachine();
             AtomicReference<OrionApplicationLifecycle> lifecycleRef = new AtomicReference<>();
             OrionProvider provider = new OrionProvider(
                     stateHolder,
                     lifecycleRef::get,
-                    OrionEventManager::new,
+                    () -> eventManager,
                     () -> executor);
             lifecycle = new OrionApplicationLifecycle(
                     stateHolder,
-                    executor,
-                    listeners,
+                    runtime,
                     provider);
             lifecycleRef.set(lifecycle);
         }
@@ -148,6 +152,38 @@ class AppTest {
         @Override
         public void close() {
             executor.shutdownNow();
+        }
+    }
+
+    private static final class RecordingServiceLifecycle implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
+        private final boolean failStart;
+        private boolean running;
+
+        private RecordingServiceLifecycle(boolean failStart) {
+            this.failStart = failStart;
+        }
+
+        @Override
+        public void onStart() {
+            if (failStart) {
+                throw new IllegalStateException("boom");
+            }
+            running = true;
+        }
+
+        @Override
+        public void onStop() {
+            running = false;
+        }
+
+        @Override
+        public boolean isEnabled() {
+            return true;
+        }
+
+        @Override
+        public boolean isRunning() {
+            return running;
         }
     }
 

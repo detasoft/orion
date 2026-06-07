@@ -31,7 +31,6 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.ApplicationStateHolder;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionUtils;
@@ -438,7 +437,7 @@ class AccessControlStorageTest {
                 return SHA1;
             }
         };
-        waitForStageTasks(service.aclLoad());
+        service.onStart();
         assertUserAuthenticates(service, "initial-user");
 
         Files.write(aclDirectory.resolve(ACL_FILE), aclBytesWithPasswordUser("reloaded-user"));
@@ -790,17 +789,10 @@ class AccessControlStorageTest {
             PrintStream originalOut = System.out;
             try {
                 System.setOut(new PrintStream(OutputStream.nullOutputStream()));
-                OrionStageCallResult result = service.aclLoad();
-                waitForStageTasks(result);
+                service.onStart();
             } finally {
                 System.setOut(originalOut);
             }
-        }
-    }
-
-    private void waitForStageTasks(OrionStageCallResult result) throws Exception {
-        for (var future : result.getFuturesToWait()) {
-            future.getFuture().get(5, TimeUnit.SECONDS);
         }
     }
 

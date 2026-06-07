@@ -4,7 +4,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.schema.GitTransportConfig;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.state.*;
 import pro.deta.orion.lifecycle.state.Void;
 
@@ -19,7 +18,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -32,11 +30,6 @@ import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_ST
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class GitNativeTransportStateMachineTest {
-    @Test
-    void nativeGitStateMachineIsNotAnApplicationListener() {
-        assertFalse(OrionApplicationStageEventListener.class.isAssignableFrom(GitNativeTransportStateMachine.class));
-    }
-
     @Test
     void nativeGitStateMachineUsesGenericServiceLifecycleAdapter() {
         assertTrue(ServiceLifecycleStateMachineAdapter.class.isAssignableFrom(GitNativeTransportStateMachine.class));
