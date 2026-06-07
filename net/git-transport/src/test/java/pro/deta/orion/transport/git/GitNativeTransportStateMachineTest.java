@@ -5,9 +5,7 @@ import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.state.InvalidStateTransitionException;
-import pro.deta.orion.lifecycle.state.StateMachineEvent;
-import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
+import pro.deta.orion.lifecycle.state.*;
 import pro.deta.orion.lifecycle.state.Void;
 
 import java.lang.reflect.Constructor;
@@ -32,12 +30,16 @@ import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FU
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_FUNCTION_FINISHED;
 import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_STARTED;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
-import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNING;
 
 class GitNativeTransportStateMachineTest {
     @Test
     void nativeGitStateMachineIsNotAnApplicationListener() {
         assertFalse(OrionApplicationStageEventListener.class.isAssignableFrom(GitNativeTransportStateMachine.class));
+    }
+
+    @Test
+    void nativeGitStateMachineUsesGenericServiceLifecycleAdapter() {
+        assertTrue(ServiceLifecycleStateMachineAdapter.class.isAssignableFrom(GitNativeTransportStateMachine.class));
     }
 
     @Test
@@ -53,7 +55,6 @@ class GitNativeTransportStateMachineTest {
 
         assertEquals(NEW, machine.currentState());
         assertTrue(service.isEnabled());
-        assertSame(service, machine.service());
         assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.stateMachine().availableActions());
 
         machine.start();
@@ -128,7 +129,7 @@ class GitNativeTransportStateMachineTest {
         assertEquals(Set.of(machine.startAction().id(), machine.stopAction().id()), machine.definition().availableActions(NEW));
         assertEquals(
                 Set.of(machine.startAction().id(), machine.stopAction().id()),
-                machine.definition().availableActions(GitNativeTransportStateMachine.DISABLED));
+                machine.definition().availableActions(StandardStateDefinition.DISABLED));
         assertEquals(Set.of(machine.stopAction().id()), machine.definition().availableActions(RUNNING));
         assertEquals(Set.of(machine.stopAction().id()), machine.definition().availableActions(ERR));
         assertTrue(machine.definition().availableActions(FIN).isEmpty());
@@ -140,11 +141,11 @@ class GitNativeTransportStateMachineTest {
         GitNativeTransportStateMachine machine =
                 machine(new RecordingGitNativeTransportService());
 
-        assertTrue(machine.describe().contains("state: NEW"));
-        assertTrue(machine.describe().contains("in progress: <none>"));
-        assertTrue(machine.describe().contains("NEW --START--> [DISABLED, RUNNING, ERR]"));
-        assertTrue(machine.describe().contains("DISABLED --START--> [DISABLED, RUNNING, ERR]"));
-        assertTrue(machine.describe().contains("RUNNING --STOP--> FIN (fail -> ERR)"));
+        assertTrue(machine.stateMachine().describe().contains("state: NEW"));
+        assertTrue(machine.stateMachine().describe().contains("in progress: <none>"));
+        assertTrue(machine.stateMachine().describe().contains("NEW --START--> [DISABLED, RUNNING, ERR]"));
+        assertTrue(machine.stateMachine().describe().contains("DISABLED --START--> [DISABLED, RUNNING, ERR]"));
+        assertTrue(machine.stateMachine().describe().contains("RUNNING --STOP--> FIN (fail -> ERR)"));
     }
 
     @Test
@@ -153,7 +154,7 @@ class GitNativeTransportStateMachineTest {
                 machine(new RecordingGitNativeTransportService());
         List<StateMachineEvent> events = new ArrayList<>();
 
-        machine.subscribe(events::add);
+        machine.stateMachine().subscribe(events::add);
         machine.start();
 
         assertEquals(
@@ -178,7 +179,7 @@ class GitNativeTransportStateMachineTest {
         assertEquals(NEW, machine.currentState());
 
         machine.start();
-        assertEquals(GitNativeTransportStateMachine.DISABLED, machine.currentState());
+        assertEquals(DISABLED, machine.currentState());
         machine.stop();
 
         assertTrue(serviceResolved.get());

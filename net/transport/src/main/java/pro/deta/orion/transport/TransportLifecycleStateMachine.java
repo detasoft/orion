@@ -8,7 +8,6 @@ import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.state.AggregateLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
-import pro.deta.orion.lifecycle.state.StateMachineDefinition.State;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
@@ -79,16 +78,5 @@ public final class TransportLifecycleStateMachine extends AggregateLifecycleStat
     @TestOnly
     public JettyHTTPServerStateMachine jettyHttpTransport() {
         return jettyHttpTransport;
-    }
-
-    @TestOnly
-    public StateMachineDefinition definition() {
-        return aggregateStateMachine().definition();
-    }
-
-    @Override
-    @TestOnly
-    public State currentState() {
-        return super.currentState();
     }
 }

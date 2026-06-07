@@ -1,6 +1,7 @@
 package pro.deta.orion.lifecycle.state;
 
 import java.util.Objects;
+import javax.inject.Provider;
 
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.DISABLED;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
@@ -12,13 +13,17 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
  * Reusable state-machine adapter for leaf services with synchronous start/stop lifecycle hooks.
  */
 public class ServiceLifecycleStateMachineAdapter {
-    private final ServiceLifecycle lifecycle;
+    private final Provider<? extends ServiceLifecycle> lifecycle;
     private final ActionBinding<Void> start = ActionId.START.bind(this::startService);
     private final ActionBinding<Void> stop = ActionId.STOP.bind(this::stopService);
     private final StateMachineDefinition definition;
     private final StateMachine stateMachine;
 
     public ServiceLifecycleStateMachineAdapter(String name, ServiceLifecycle lifecycle) {
+        this(name, () -> lifecycle);
+    }
+
+    public ServiceLifecycleStateMachineAdapter(String name, Provider<? extends ServiceLifecycle> lifecycle) {
         this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
         definition = StateMachineDefinition.define()
                 .name(name)
@@ -58,8 +63,12 @@ public class ServiceLifecycleStateMachineAdapter {
         return stateMachine.execute(stop, Void.EMPTY);
     }
 
+    private ServiceLifecycle resolve() {
+        return lifecycle.get();
+    }
+
     private Void startService(Void ignored) throws Exception {
-        lifecycle.onStart();
+        resolve().onStart();
         return Void.EMPTY;
     }
 
@@ -67,16 +76,16 @@ public class ServiceLifecycleStateMachineAdapter {
         if (result.failed()) {
             return result.defaultState();
         }
-        if (!lifecycle.isEnabled()) {
+        if (!resolve().isEnabled()) {
             return DISABLED;
         }
-        return lifecycle.isRunning() ? RUNNING : ERR;
+        return resolve().isRunning() ? RUNNING : ERR;
     }
 
     private Void stopService(Void ignored) throws Exception {
         StateMachineDefinition.State currentState = stateMachine.currentState();
         if (RUNNING.equals(currentState) || ERR.equals(currentState)) {
-            lifecycle.onStop();
+            resolve().onStop();
         }
         return Void.EMPTY;
     }

@@ -11,6 +11,7 @@ import pro.deta.orion.auth.check.rule.ConnectionAccessRules;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.util.stream.StandardStreams;
 import pro.deta.orion.util.stream.StreamUtils;
 
@@ -22,7 +23,7 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 @Slf4j
 @Singleton
-public class GitNativeTransportService {
+public class GitNativeTransportService implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private static final int DEFAULT_SOCKET_TIMEOUT_MILLIS = 5 * 1000;
 
     private final GitTransportConfig config;

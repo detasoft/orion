@@ -21,6 +21,7 @@ import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
 import pro.deta.orion.crypto.SshHostKeyService;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
@@ -35,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @Singleton
 @RequiredArgsConstructor(onConstructor_ = @Inject)
-public class GitSshTransportService {
+public class GitSshTransportService implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final AttributeRepository.AttributeKey<UserIdentity> SSH_AUTHENTICATED_USER = new AttributeRepository.AttributeKey<>();
     private static final long STOP_WAIT_MILLIS = 500;
 

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.SshHostKeyService;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.StateTransitionResult;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.state.Void;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class GitSshTransportStateMachineTest {
     @TempDir
@@ -35,6 +37,11 @@ class GitSshTransportStateMachineTest {
     }
 
     @Test
+    void sshGitStateMachineUsesGenericServiceLifecycleAdapter() {
+        assertEquals(ServiceLifecycleStateMachineAdapter.class, GitSshTransportStateMachine.class.getSuperclass());
+    }
+
+    @Test
     void startActionDoesNotExposeApplicationStageResult() {
         RecordingGitSshTransportService service = new RecordingGitSshTransportService();
         GitSshTransportStateMachine machine = new GitSshTransportStateMachine(() -> service);
@@ -42,7 +49,7 @@ class GitSshTransportStateMachineTest {
         StateTransitionResult result = machine.stateMachine().execute(machine.startAction(), Void.EMPTY);
 
         assertSame(Void.EMPTY, result.actionResult());
-        assertEquals(GitSshTransportStateMachine.RUNNING, machine.currentState());
+        assertEquals(RUNNING, machine.currentState());
         assertEquals(1, service.startCalls());
     }
 

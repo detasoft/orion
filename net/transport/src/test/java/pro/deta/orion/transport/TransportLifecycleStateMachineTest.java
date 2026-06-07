@@ -6,7 +6,6 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
 import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.state.StandardStateDefinition;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.lifecycle.task.LifecycleTaskDefinition;
 import pro.deta.orion.lifecycle.task.LifecycleTaskId;
@@ -33,11 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.DISABLED;
-import static pro.deta.orion.transport.git.GitNativeTransportStateMachine.RUNNING;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class TransportLifecycleStateMachineTest {
     @Test
@@ -78,7 +73,7 @@ class TransportLifecycleStateMachineTest {
         assertTrue(stop.after().isEmpty());
 
         assertNull(start.call().call());
-        assertEquals(StandardStateDefinition.RUNNING, machine.currentState());
+        assertEquals(RUNNING, machine.currentState());
         assertEquals(RUNNING, machine.gitNativeTransport().currentState());
         assertEquals(1, service.startCalls());
     }

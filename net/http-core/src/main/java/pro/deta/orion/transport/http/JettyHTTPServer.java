@@ -16,6 +16,7 @@ import pro.deta.orion.config.schema.HttpTransportConfig;
 import pro.deta.orion.config.schema.HttpsTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SSLKeyStoreConfig;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.util.CertUtils;
 import pro.deta.orion.util.OrionUtils;
 
@@ -29,7 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 @Singleton
 @Getter
-public class JettyHTTPServer {
+public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final String ROOT_CONTEXT_PATH = "/";
     private static final long STOP_TIMEOUT_MILLIS = 1_000;
 

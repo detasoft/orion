@@ -9,6 +9,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class JettyHTTPServerStateMachineTest {
     @Test
@@ -19,7 +20,7 @@ class JettyHTTPServerStateMachineTest {
         StateTransitionResult result = machine.stateMachine().execute(machine.startAction(), Void.EMPTY);
 
         assertSame(Void.EMPTY, result.actionResult());
-        assertEquals(JettyHTTPServerStateMachine.RUNNING, machine.currentState());
+        assertEquals(RUNNING, machine.currentState());
         assertEquals(1, server.startCalls());
     }
 
