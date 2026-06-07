@@ -6,10 +6,7 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
-import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.transport.http.OrionHttpModule;
-
-import jakarta.inject.Named;
 
 @Module(includes = OrionHttpModule.class)
 public class OrionTransportModule {
@@ -37,10 +34,4 @@ public class OrionTransportModule {
         return transport.getSsh();
     }
 
-    @Provides
-    @Singleton
-    @Named("transport")
-    static AggregateStateMachine transportStateMachine(TransportLifecycleStateMachine stateMachine) {
-        return stateMachine.aggregateStateMachine();
-    }
 }
