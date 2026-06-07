@@ -8,7 +8,7 @@ public record LifecycleStep(
         ApplicationState from,
         ApplicationState success,
         ApplicationState failure,
-        boolean runListeners
+        boolean runRuntime
 ) {
     public LifecycleStep {
         Objects.requireNonNull(from, "from");
@@ -24,7 +24,7 @@ public record LifecycleStep(
         private final ApplicationState from;
         private ApplicationState success;
         private ApplicationState failure = ApplicationState.FAILED;
-        private boolean runListeners = true;
+        private boolean runRuntime = true;
 
         private Builder(ApplicationState from) {
             this.from = from;
@@ -41,12 +41,12 @@ public record LifecycleStep(
         }
 
         public Builder transitionOnly() {
-            this.runListeners = false;
+            this.runRuntime = false;
             return this;
         }
 
         public LifecycleStep build() {
-            return new LifecycleStep(from, success, failure, runListeners);
+            return new LifecycleStep(from, success, failure, runRuntime);
         }
     }
 }

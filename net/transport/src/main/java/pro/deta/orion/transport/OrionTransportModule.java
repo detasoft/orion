@@ -2,12 +2,10 @@ package pro.deta.orion.transport;
 
 import dagger.Module;
 import dagger.Provides;
-import dagger.multibindings.IntoSet;
 import jakarta.inject.Singleton;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.transport.http.OrionHttpModule;
 
@@ -40,21 +38,9 @@ public class OrionTransportModule {
     }
 
     @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener transportLifecycleStateMachine(TransportLifecycleStateMachine stateMachine) {
-        return stateMachine;
-    }
-
-    @Provides
     @Singleton
     @Named("transport")
     static AggregateStateMachine transportStateMachine(TransportLifecycleStateMachine stateMachine) {
         return stateMachine.aggregateStateMachine();
-    }
-
-    @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener transportLifecycleBarrier(TransportLifecycleBarrier barrier) {
-        return barrier;
     }
 }

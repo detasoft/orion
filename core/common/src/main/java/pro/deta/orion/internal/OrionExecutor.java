@@ -3,13 +3,9 @@ package pro.deta.orion.internal;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.internal.async.StackTraceCapturingCallable;
 import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.util.OrionUtils;
 
 import java.lang.reflect.Field;
@@ -18,7 +14,7 @@ import java.util.concurrent.*;
 
 @Singleton
 @Slf4j
-public class OrionExecutor extends ScheduledThreadPoolExecutor implements OrionApplicationStageEventListener {
+public class OrionExecutor extends ScheduledThreadPoolExecutor implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private final List<Thread> dedicatedThreads = new LinkedList<>();
 
     @Inject
@@ -41,18 +37,27 @@ public class OrionExecutor extends ScheduledThreadPoolExecutor implements OrionA
     }
 
     @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.EXECUTOR_STOP, this::onStop)
-                .after(OrionLifecycleTasks.EVENT_MANAGER_STOP);
+    public void onStart() {
+        // The executor is active immediately after construction; the lifecycle state machine records that fact.
     }
 
-    public OrionStageCallResult onStop() {
+    @Override
+    public void onStop() {
         for (Thread t: dedicatedThreads) {
             t.interrupt();
 
         }
         shutdown();
-        return null;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return !isShutdown();
     }
 
     public static Map<String, String> dumpThreadContextParams(Thread t) {

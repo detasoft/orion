@@ -19,10 +19,6 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>lifecycle-state-machine</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
             <artifactId>acl-model</artifactId>
         </dependency>
         <dependency>

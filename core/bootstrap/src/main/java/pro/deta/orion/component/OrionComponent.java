@@ -3,12 +3,14 @@ package pro.deta.orion.component;
 import dagger.BindsInstance;
 import dagger.Component;
 
+import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.transport.OrionTransportModule;
 
 @Singleton
@@ -20,6 +22,9 @@ public interface OrionComponent {
     GitRepositoryProvider gitRepositoryProvider();
 
     OrionAccessControlServiceImpl orionAccessControlService();
+
+    @Named("runtime")
+    AggregateStateMachine runtimeStateMachine();
 
     @Component.Builder
     interface Builder {

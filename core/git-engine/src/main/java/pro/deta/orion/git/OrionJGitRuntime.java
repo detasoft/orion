@@ -3,11 +3,7 @@ package pro.deta.orion.git;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.eclipse.jgit.util.SystemReader;
-import pro.deta.orion.ApplicationState;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 
 import java.util.Objects;
 
@@ -21,9 +17,10 @@ import java.util.Objects;
  * that installs it into JGit.</p>
  */
 @Singleton
-public class OrionJGitRuntime implements OrionApplicationStageEventListener {
+public class OrionJGitRuntime implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private final ControlledOrionJGitSystemReader systemReader;
     private final JGitGlobalRuntime globalRuntime;
+    private volatile boolean running;
 
     @Inject
     public OrionJGitRuntime(ControlledOrionJGitSystemReader systemReader, JGitGlobalRuntime globalRuntime) {
@@ -35,21 +32,34 @@ public class OrionJGitRuntime implements OrionApplicationStageEventListener {
         this(systemReader, new JGitGlobalRuntime());
     }
 
-    @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.JGIT_RUNTIME, this::install);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.JGIT_RUNTIME_STOP, this::shutdown)
-                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
-    }
-
-    public OrionStageCallResult install() {
+    public void install() {
         SystemReader.setInstance(systemReader);
         globalRuntime.initializeGlobalExecutors();
-        return OrionStageCallResult.EMPTY;
+        running = true;
     }
 
-    public OrionStageCallResult shutdown() {
+    public void shutdown() {
         globalRuntime.shutdownGlobalExecutors();
-        return OrionStageCallResult.EMPTY;
+        running = false;
+    }
+
+    @Override
+    public void onStart() {
+        install();
+    }
+
+    @Override
+    public void onStop() {
+        shutdown();
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 }

@@ -3,7 +3,6 @@ package pro.deta.orion.acl;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.storage.AccessControlStorage;
@@ -26,10 +25,7 @@ import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.crypto.ServerKeySigner;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
@@ -51,7 +47,7 @@ import static pro.deta.orion.util.Result.Failure.generalFailure;
 
 @Slf4j
 @Singleton
-public class OrionAccessControlServiceImpl implements OrionAccessControlService, OrionApplicationStageEventListener {
+public class OrionAccessControlServiceImpl implements OrionAccessControlService, ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private static final String ROOT_USER_ID = "root";
 
     private final XmlService xmlService = new XmlService();
@@ -80,37 +76,20 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         this.jwtAccessTokenService = new JwtAccessTokenService(serverKeySigner, publicKeysProvider);
     }
 
-    @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::aclLoad);
-    }
-
-    public OrionStageCallResult aclLoad() {
+    private void loadAccessControlOnStart() {
         orionProvider.getEventManager().registerTypeHandler(RequestToAclUpdate.class, (event) -> {
             log.debug("Request to update ACL received: {}", event);
             requestToUpdate();
         });
-        OrionStageCallResult orionStageCallResult = OrionStageCallResult.defaultWithWait();
         try {
             switch (loadAccessControl()) {
-                case Result.Success<AccessControl> ignored -> requestAclUpdateAndWait("aclLoad()");
+                case Result.Success<AccessControl> ignored -> requestAclUpdateAndWait("access-control start");
                 case Result.Failure<AccessControl> f -> {
                     if (f.code() == Result.FailureCode.NOT_FOUND) {
                         if (!configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing()) {
                             throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
                         }
-                        orionStageCallResult.submit(orionProvider.getOrionExecutor(), () -> {
-                            PasswordHashingAlgorithm passwordHashingAlgorithm = defaultPasswordHashingAlgorithm();
-                            char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
-                            String passwordHash = orionPasswordHashingService.calculateHash(
-                                    passwordHashingAlgorithm,
-                                    defaultRootPassword);
-                            printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
-                            AccessControl ac = createDefaultAccessControl(
-                                    passwordHash,
-                                    defaultPasswordCredentialType(passwordHashingAlgorithm));
-                            saveAccessControlAndRequestUpdate(ac, "default scheme applied", UserEmail.EMPTY);
-                        });
+                        createDefaultAccessControlAndRequestUpdate();
                     } else {
                         log.error("Error while preparing configuration repository.", f.throwable());
                         throw new IllegalStateException("Configuration repository not initialized.", f.throwable());
@@ -121,7 +100,26 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             log.error("Error while preparing configuration repository.", e);
             throw new IllegalStateException("Configuration repository not initialized.", e);
         }
-        return orionStageCallResult;
+    }
+
+    @Override
+    public void onStart() {
+        loadAccessControlOnStart();
+    }
+
+    @Override
+    public void onStop() {
+        // ACL state remains available until process shutdown.
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return accessControl.get() != null;
     }
 
     private void printAndClearPlainTextPasswordMessage(PrintStream out, char[] secureChars) {
@@ -292,6 +290,19 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(passwordHash, passwordCredentialType).toDraft();
         addInternalServerKeysToRoot(draft);
         return draft.toAccessControl();
+    }
+
+    private void createDefaultAccessControlAndRequestUpdate() {
+        PasswordHashingAlgorithm passwordHashingAlgorithm = defaultPasswordHashingAlgorithm();
+        char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
+        String passwordHash = orionPasswordHashingService.calculateHash(
+                passwordHashingAlgorithm,
+                defaultRootPassword);
+        printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
+        AccessControl ac = createDefaultAccessControl(
+                passwordHash,
+                defaultPasswordCredentialType(passwordHashingAlgorithm));
+        saveAccessControlAndRequestUpdate(ac, "default scheme applied", UserEmail.EMPTY);
     }
 
     protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {

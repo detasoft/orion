@@ -6,13 +6,10 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.event.disruptor.EventHolder;
 import pro.deta.orion.event.disruptor.OrionDisruptor;
 import pro.deta.orion.event.type.OrionEvent;
-import pro.deta.orion.lifecycle.*;
-import pro.deta.orion.lifecycle.data.OrionStageCallResult;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
+import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.util.OrionUtils;
 
 import java.util.ArrayList;
@@ -40,21 +37,13 @@ import java.util.function.Supplier;
 @Singleton
 @Slf4j
 @RequiredArgsConstructor(onConstructor_ = @Inject)
-public class OrionEventManager implements OrionApplicationStageEventListener {
+public class OrionEventManager implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     public static final int RING_BUFFER_SIZE = 32_768;
     private final OrionDisruptor rootDisruptor = new OrionDisruptor(RING_BUFFER_SIZE);
     private final Map<String, List<Consumer<OrionEvent>>> handlersMap = new ConcurrentHashMap<>();
+    private volatile boolean running;
 
-    @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.INIT, OrionLifecycleTasks.EVENT_MANAGER, this::onInit)
-                .after(OrionLifecycleTasks.JGIT_RUNTIME)
-                .waitForCompletionSecs(2);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.EVENT_MANAGER_STOP, this::onStop)
-                .after(OrionLifecycleTasks.TRANSPORTS_STOP);
-    }
-
-    public OrionStageCallResult onInit() {
+    public void onInit() {
         rootDisruptor.handleEventsWith(new EventHandler<EventHolder>() {
             @Override
             public void onEvent(EventHolder eventHolder, long l, boolean b) {
@@ -63,22 +52,36 @@ public class OrionEventManager implements OrionApplicationStageEventListener {
             }
         });
         rootDisruptor.start();
-        // start and wait until all init-registered tasks are finished (tech debt for init stage)
-
-        return null;
+        running = true;
     }
 
     public long getUnprocessedLength() {
         return rootDisruptor.getUnprocessedLength();
     }
 
-    public OrionStageCallResult onStop() {
+    public void onStop() {
         try {
             rootDisruptor.stop();
         } catch (TimeoutException e) {
             log.error("Error while stopping Disruptor: ",e);
+        } finally {
+            running = false;
         }
-        return null;
+    }
+
+    @Override
+    public void onStart() {
+        onInit();
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 
     private void handleEvent(OrionEvent event) {

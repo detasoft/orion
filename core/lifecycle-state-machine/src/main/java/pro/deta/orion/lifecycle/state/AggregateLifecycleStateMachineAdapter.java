@@ -41,6 +41,10 @@ public class AggregateLifecycleStateMachineAdapter {
         return aggregateStateMachine;
     }
 
+    public StateMachine stateMachine() {
+        return aggregateStateMachine.stateMachine();
+    }
+
     public List<StateTransitionResult> start() {
         return aggregateStateMachine.start();
     }
@@ -67,6 +71,11 @@ public class AggregateLifecycleStateMachineAdapter {
             }
             children.put(name, child);
             return this;
+        }
+
+        public Builder child(String name, AggregateStateMachine child) {
+            Objects.requireNonNull(child, "child");
+            return child(name, child.stateMachine());
         }
 
         public Builder childPropagationMode(StateMachineDefinition.ChildPropagationMode mode) {

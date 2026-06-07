@@ -19,13 +19,13 @@ public final class LifecycleFlowRunner {
     private final ReentrantLock stateLock = new ReentrantLock();
     private final Condition stateChanged = stateLock.newCondition();
     private final ApplicationStateHolder applicationStateHolder;
-    private final Function<ApplicationState, Boolean> stageRunner;
+    private final Function<ApplicationState, Boolean> runtimeTransitionRunner;
 
     public LifecycleFlowRunner(
             ApplicationStateHolder applicationStateHolder,
-            Function<ApplicationState, Boolean> stageRunner) {
+            Function<ApplicationState, Boolean> runtimeTransitionRunner) {
         this.applicationStateHolder = Objects.requireNonNull(applicationStateHolder, "applicationStateHolder");
-        this.stageRunner = Objects.requireNonNull(stageRunner, "stageRunner");
+        this.runtimeTransitionRunner = Objects.requireNonNull(runtimeTransitionRunner, "runtimeTransitionRunner");
     }
 
     public ApplicationState runStartup() {
@@ -82,7 +82,7 @@ public final class LifecycleFlowRunner {
     }
 
     private void followStep(LifecycleFlow flow, LifecycleStep step) {
-        boolean completed = !step.runListeners() || stageRunner.apply(step.from());
+        boolean completed = !step.runRuntime() || runtimeTransitionRunner.apply(step.from());
         ApplicationState targetState = completed ? step.success() : step.failure();
         log.debug("Lifecycle flow '{}' moves {} -> {}", flow.name(), step.from(), targetState);
         moveState(step.from(), targetState);

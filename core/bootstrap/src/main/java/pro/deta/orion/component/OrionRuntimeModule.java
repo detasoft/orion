@@ -2,9 +2,9 @@ package pro.deta.orion.component;
 
 import dagger.Module;
 import dagger.Provides;
-import dagger.multibindings.IntoSet;
 
 import jakarta.inject.Singleton;
+import jakarta.inject.Named;
 import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
@@ -15,10 +15,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.crypto.ServerIdentityKeyService;
 import pro.deta.orion.crypto.ServerKeySigner;
-import pro.deta.orion.event.OrionEventManager;
-import pro.deta.orion.git.OrionJGitRuntime;
-import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 
 import jakarta.inject.Provider;
 import java.security.PublicKey;
@@ -34,27 +31,10 @@ public class OrionRuntimeModule {
     }
 
     @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener orionAccessControlServiceImpl(OrionAccessControlServiceImpl orionAccessControlService) {
-        return orionAccessControlService;
-    }
-
-    @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener orionEventQueue(OrionExecutor orionEvent) {
-        return orionEvent;
-    }
-
-    @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener orionEventManager(OrionEventManager orionEventManager) {
-        return orionEventManager;
-    }
-
-    @Provides
-    @IntoSet
-    static OrionApplicationStageEventListener orionJGitRuntime(OrionJGitRuntime orionJGitRuntime) {
-        return orionJGitRuntime;
+    @Singleton
+    @Named("runtime")
+    static AggregateStateMachine runtimeStateMachine(OrionRuntimeStateMachine stateMachine) {
+        return stateMachine.aggregateStateMachine();
     }
 
     @Provides

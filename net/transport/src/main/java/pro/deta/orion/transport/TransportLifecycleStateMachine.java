@@ -2,14 +2,10 @@ package pro.deta.orion.transport;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.ApplicationState;
-import pro.deta.orion.lifecycle.ApplicationStateListenerRegistrar;
-import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.state.AggregateLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.lifecycle.state.TestOnly;
-import pro.deta.orion.lifecycle.task.OrionLifecycleTasks;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportStateMachine;
 import pro.deta.orion.transport.http.JettyHTTPServerStateMachine;
@@ -20,8 +16,7 @@ import java.util.Objects;
  * @AiRule This aggregate facade intentionally composes child adapters through their public raw StateMachine contract.
  */
 @Singleton
-public final class TransportLifecycleStateMachine extends AggregateLifecycleStateMachineAdapter
-        implements OrionApplicationStageEventListener {
+public final class TransportLifecycleStateMachine extends AggregateLifecycleStateMachineAdapter {
     private final GitNativeTransportStateMachine gitNativeTransport;
     private final GitSshTransportStateMachine gitSshTransport;
     private final JettyHTTPServerStateMachine jettyHttpTransport;
@@ -50,19 +45,6 @@ public final class TransportLifecycleStateMachine extends AggregateLifecycleStat
                 .child("git-ssh", gitSshTransport.stateMachine())
                 .child("http", jettyHttpTransport.stateMachine())
                 .buildAggregateStateMachine();
-    }
-
-    @Override
-    public void registerToStage(ApplicationStateListenerRegistrar registrar) {
-        registrar.task(this, ApplicationState.STARTING, OrionLifecycleTasks.TRANSPORT_LIFECYCLE_START, () -> {
-                    start();
-                    return null;
-                })
-                .after(OrionLifecycleTasks.TRANSPORTS_START);
-        registrar.task(this, ApplicationState.STOPPING, OrionLifecycleTasks.TRANSPORT_LIFECYCLE_STOP, () -> {
-            stop();
-            return null;
-        });
     }
 
     @TestOnly
