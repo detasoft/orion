@@ -8,10 +8,14 @@ import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.lifecycle.state.StateMachineEventType;
+import pro.deta.orion.lifecycle.state.StateMachineSubscription;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;
 
+import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
@@ -91,10 +95,31 @@ public class OrionApplicationLifecycle {
     }
 
     private void waitForState(StateMachineDefinition.State state) {
-        if (!OrionUtils.waitForCondition(() -> runtimeStateMachine.currentState().equals(state))) {
-            throw new IllegalStateException(
-                    "Timed out waiting for runtime state " + state
-                            + ", current state is " + runtimeStateMachine.currentState());
+        Objects.requireNonNull(state, "state");
+        if (runtimeStateMachine.currentState().equals(state)) {
+            return;
+        }
+
+        CountDownLatch stateReached = new CountDownLatch(1);
+        try (StateMachineSubscription ignored = runtimeStateMachine.subscribe(event -> {
+            if (event.type() == StateMachineEventType.AFTER_STATE_ENTERED
+                    && event.currentState().equals(state)) {
+                stateReached.countDown();
+            }
+        })) {
+            if (runtimeStateMachine.currentState().equals(state)) {
+                return;
+            }
+            awaitState(stateReached, state);
+        }
+    }
+
+    private static void awaitState(CountDownLatch stateReached, StateMachineDefinition.State state) {
+        try {
+            stateReached.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for runtime state " + state, e);
         }
     }
 }

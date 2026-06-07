@@ -83,6 +83,26 @@ class OrionApplicationLifecycleTest {
     }
 
     @Test
+    void waitForShutdownReturnsAfterShutdownMovesMachineToFin() throws Exception {
+        RecordingServiceLifecycle service = new RecordingServiceLifecycle();
+        try (TestLifecycleContext context = new TestLifecycleContext(service)) {
+            assertThat(context.lifecycle().runApplication()).isEqualTo(RUNNING);
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> waiter = executor.submit(() -> context.lifecycle().waitForShutdown());
+
+                Thread.sleep(50);
+                assertThat(waiter).isNotDone();
+                context.lifecycle().shutdownApplication();
+
+                waiter.get(1, TimeUnit.SECONDS);
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+    }
+
+    @Test
     void concurrentStartupRunsRuntimeOnlyOnce() throws Exception {
         RecordingServiceLifecycle service = new RecordingServiceLifecycle();
         CountDownLatch startEntered = new CountDownLatch(1);
