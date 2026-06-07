@@ -377,6 +377,11 @@ class GitSshTransportEndToEndIT {
 
         String state = executeStateOverSsh(startedOrion, serverIdentityKey);
 
+        assertThat(state).contains("orion: RUNNING");
+        assertThat(state).contains("executor: RUNNING");
+        assertThat(state).contains("jgit-runtime: RUNNING");
+        assertThat(state).contains("event-manager: RUNNING");
+        assertThat(state).contains("access-control: RUNNING");
         assertThat(state).contains("transports: RUNNING");
         assertThat(state).contains("git-native: DISABLED");
         assertThat(state).contains("git-ssh: RUNNING");
@@ -399,6 +404,11 @@ class GitSshTransportEndToEndIT {
                 .valueOrFailure("Server identity key should be available after startup");
 
         String state = executeStateOverSsh(startedOrion, serverIdentityKey);
+        assertThat(state).contains("orion: RUNNING");
+        assertThat(state).contains("executor: RUNNING");
+        assertThat(state).contains("jgit-runtime: RUNNING");
+        assertThat(state).contains("event-manager: RUNNING");
+        assertThat(state).contains("access-control: RUNNING");
         assertThat(state).contains("transports: RUNNING");
         assertThat(state).contains("git-native: DISABLED");
         assertThat(state).contains("git-ssh: RUNNING");

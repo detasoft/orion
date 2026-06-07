@@ -83,7 +83,7 @@ public class OrionShell extends InteractiveProcessShellFactory {
             msg.append(b2);
             msg.append(nl);
 
-            msg.append(" You may inspect transport lifecycle state with the following syntax:");
+            msg.append(" You may inspect application lifecycle state with the following syntax:");
             msg.append(nl);
 
             msg.append(String.format("   ssh -i /path/to/server-identity/signing-rsa.pem -l root -p %d %s " + STATE, port, hostname));

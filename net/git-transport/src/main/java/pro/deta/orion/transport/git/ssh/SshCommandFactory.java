@@ -50,7 +50,7 @@ public class SshCommandFactory implements CommandFactory {
     private final OrionExecutor orionExecutor;
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
-    private final AggregateStateMachine transportStateMachine;
+    private final AggregateStateMachine runtimeStateMachine;
     private final long setKeyReadTimeoutMillis;
 
     @Inject
@@ -59,9 +59,9 @@ public class SshCommandFactory implements CommandFactory {
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
-            @Named("transport") AggregateStateMachine transportStateMachine) {
+            @Named("runtime") AggregateStateMachine runtimeStateMachine) {
         this(gitInternalService, orionExecutor, orionProvider, accessControlService,
-                transportStateMachine, 30_000);
+                runtimeStateMachine, 30_000);
     }
 
     SshCommandFactory(
@@ -69,13 +69,13 @@ public class SshCommandFactory implements CommandFactory {
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
-            AggregateStateMachine transportStateMachine,
+            AggregateStateMachine runtimeStateMachine,
             long setKeyReadTimeoutMillis) {
         this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;
         this.orionProvider = orionProvider;
         this.accessControlService = accessControlService;
-        this.transportStateMachine = transportStateMachine;
+        this.runtimeStateMachine = runtimeStateMachine;
         this.setKeyReadTimeoutMillis = setKeyReadTimeoutMillis;
     }
 
@@ -193,7 +193,7 @@ public class SshCommandFactory implements CommandFactory {
                     securityContext,
                     ApplicationAdminResource.applicationAdmin(),
                     ApplicationAccessRules.admin());
-            outputStream.write((transportStateMachine.describeStatus() + System.lineSeparator())
+            outputStream.write((runtimeStateMachine.describeStatus() + System.lineSeparator())
                     .getBytes(StandardCharsets.UTF_8));
         }
     }
