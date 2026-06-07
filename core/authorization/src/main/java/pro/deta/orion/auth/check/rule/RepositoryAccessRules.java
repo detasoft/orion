@@ -16,6 +16,7 @@ public final class RepositoryAccessRules {
     private static final AccessRule<RepositoryResource> CREATE = new NamedAccessRule<>("repository create", RepositoryAccessRules::evaluateCreate);
     private static final AccessRule<RepositoryResource> READ = new NamedAccessRule<>("repository read", RepositoryAccessRules::evaluateRead);
     private static final AccessRule<RepositoryResource> WRITE = new NamedAccessRule<>("repository write", RepositoryAccessRules::evaluateWrite);
+    private static final AccessRule<RepositoryResource> FORCE = new NamedAccessRule<>("repository force", RepositoryAccessRules::evaluateForce);
 
     private RepositoryAccessRules() {
     }
@@ -30,6 +31,10 @@ public final class RepositoryAccessRules {
 
     public static AccessRule<RepositoryResource> write() {
         return WRITE;
+    }
+
+    public static AccessRule<RepositoryResource> force() {
+        return FORCE;
     }
 
     private static AccessDecision evaluateCreate(SecurityContext securityContext, RepositoryResource resource) {
@@ -63,5 +68,17 @@ public final class RepositoryAccessRules {
             return AccessDecision.allow("repository write grant matched");
         }
         return AccessDecision.deny("missing repository write grant for " + resource.repositoryName());
+    }
+
+    private static AccessDecision evaluateForce(SecurityContext securityContext, RepositoryResource resource) {
+        UserIdentity userIdentity = securityContext.getUserIdentity();
+        boolean allowed = GrantAccess.hasGrant(
+                userIdentity,
+                GrantAccess.repositoryGrant(resource.repositoryName()),
+                GrantMatcher.of(AccessControl.GrantKey.FORCE));
+        if (allowed) {
+            return AccessDecision.allow("repository force grant matched");
+        }
+        return AccessDecision.deny("missing repository force grant for " + resource.repositoryName());
     }
 }

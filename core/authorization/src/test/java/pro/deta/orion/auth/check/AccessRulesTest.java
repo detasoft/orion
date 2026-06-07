@@ -117,6 +117,29 @@ public class AccessRulesTest {
     }
 
     @Test
+    public void forceAccessRequiresRepositoryForceGrant() {
+        AccessControl.Grant writeGrant = grantDraft("write")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .toAccessControl();
+        SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(writeGrant)));
+        assertThatThrownBy(() -> requireRepositoryForce(writer, "project"))
+                .isInstanceOf(OrionSecurityException.class);
+
+        AccessControl.Grant forceGrant = grantDraft("force")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "project")
+                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.FORCE, TRUE_STRING)
+                .toAccessControl();
+        SecurityContext forceWriter = securityContext(new InternalUserImpl("force-writer", List.of(forceGrant)));
+
+        assertThatCode(() -> requireRepositoryForce(forceWriter, "project"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireRepositoryForce(forceWriter, "other"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
+    @Test
     public void shutdownRequiresShutdownGrant() {
         SecurityContext regular = securityContext(new InternalUserImpl("regular", List.of()));
         assertThatThrownBy(() -> requireApplicationShutdown(regular))
@@ -266,6 +289,29 @@ public class AccessRulesTest {
                 .isInstanceOf(OrionSecurityException.class);
     }
 
+    @Test
+    void branchPushRequiresParentRepositoryWriteGrant() {
+        SecurityContext reader = securityContext(new InternalUserImpl("reader", List.of(repositoryGrant("project", "master"))));
+
+        assertThatThrownBy(() -> requireBranchPush(reader, "project", "master"))
+                .isInstanceOf(OrionSecurityException.class)
+                .hasMessageContaining("parent repository write denied");
+    }
+
+    @Test
+    void branchPushAllowsGrantedBranchAndDeniesOtherBranches() {
+        AccessControl.Grant grant = repositoryGrantDraft("project")
+                .addKey(AccessControl.GrantKey.WRITE, TRUE_STRING)
+                .addKey(AccessControl.GrantKey.BRANCH, "master")
+                .toAccessControl();
+        SecurityContext writer = securityContext(new InternalUserImpl("writer", List.of(grant)));
+
+        assertThatCode(() -> requireBranchPush(writer, "project", "master"))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> requireBranchPush(writer, "project", "feature"))
+                .isInstanceOf(OrionSecurityException.class);
+    }
+
     private static void requireRepositoryCreate(SecurityContext securityContext, String repositoryName) throws OrionSecurityException {
         accessEnforcer().require(securityContext, RepositoryResource.of(repositoryName), RepositoryAccessRules.create());
     }
@@ -278,9 +324,18 @@ public class AccessRulesTest {
         accessEnforcer().require(securityContext, RepositoryResource.of(repositoryName), RepositoryAccessRules.write());
     }
 
+    private static void requireRepositoryForce(SecurityContext securityContext, String repositoryName) throws OrionSecurityException {
+        accessEnforcer().require(securityContext, RepositoryResource.of(repositoryName), RepositoryAccessRules.force());
+    }
+
     private static void requireBranchFetch(SecurityContext securityContext, String repositoryName, String branchName) throws OrionSecurityException {
         RepositoryResource repository = RepositoryResource.of(repositoryName);
         accessEnforcer().require(securityContext, BranchResource.of(repository, branchName), BranchAccessRules.fetch());
+    }
+
+    private static void requireBranchPush(SecurityContext securityContext, String repositoryName, String branchName) throws OrionSecurityException {
+        RepositoryResource repository = RepositoryResource.of(repositoryName);
+        accessEnforcer().require(securityContext, BranchResource.of(repository, branchName), BranchAccessRules.push());
     }
 
     private static void requireApplicationShutdown(SecurityContext securityContext) throws OrionSecurityException {

@@ -20,6 +20,8 @@ import static pro.deta.orion.auth.check.MatcherUtils.filterGrants;
 public final class BranchAccessRules {
     private static final AccessRule<BranchResource> FETCH =
             new NamedAccessRule<>("branch fetch", BranchAccessRules::evaluateFetch);
+    private static final AccessRule<BranchResource> PUSH =
+            new NamedAccessRule<>("branch push", BranchAccessRules::evaluatePush);
 
     private BranchAccessRules() {
     }
@@ -28,11 +30,35 @@ public final class BranchAccessRules {
         return FETCH;
     }
 
+    public static AccessRule<BranchResource> push() {
+        return PUSH;
+    }
+
     private static AccessDecision evaluateFetch(SecurityContext securityContext, BranchResource resource) {
+        return evaluateBranchAccess(
+                securityContext,
+                resource,
+                RepositoryAccessRules.read(),
+                "parent repository read denied");
+    }
+
+    private static AccessDecision evaluatePush(SecurityContext securityContext, BranchResource resource) {
+        return evaluateBranchAccess(
+                securityContext,
+                resource,
+                RepositoryAccessRules.write(),
+                "parent repository write denied");
+    }
+
+    private static AccessDecision evaluateBranchAccess(
+            SecurityContext securityContext,
+            BranchResource resource,
+            AccessRule<RepositoryResource> parentRule,
+            String parentDeniedReason) {
         RepositoryResource repository = resource.parentResource();
-        AccessDecision repositoryRead = RepositoryAccessRules.read().evaluate(securityContext, repository);
-        if (!repositoryRead.allowed()) {
-            return AccessDecision.deny("parent repository read denied: " + repositoryRead.reason());
+        AccessDecision parentDecision = parentRule.evaluate(securityContext, repository);
+        if (!parentDecision.allowed()) {
+            return AccessDecision.deny(parentDeniedReason + ": " + parentDecision.reason());
         }
 
         List<AccessControl.Grant> branchGrants = GrantAccess.branchRestrictedRepositoryGrants(

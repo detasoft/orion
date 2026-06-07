@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -201,6 +202,112 @@ class RuntimeHttpGitRouteIT {
         }
     }
 
+    @Test
+    void bearerUserIsLimitedToGrantedHttpGitBranchAndCannotForcePushWithoutForceGrant() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-http-git-branch");
+        String repositoryName = "http-branch-project";
+        String featureBranch = "feature";
+        Path serverRepository = orionRoot.resolve("repos").resolve(repositoryName);
+        OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
+
+        try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
+            String remoteUrl = orion.httpUrl("/r/" + repositoryName + ".git").toString();
+            Path sourceDirectory = tempDir.resolve("http-branch-source");
+            Path cloneDirectory = tempDir.resolve("http-branch-clone");
+            Path forceDirectory = tempDir.resolve("http-branch-force-source");
+
+            try (Git source = initRepository(sourceDirectory)) {
+                ObjectId masterCommit = createCommit(source, "README.md", "master over http\n", "seed master");
+                String rootToken = TestBearerTokens.issueRootToken(
+                        orion.accessControlService(),
+                        orion.httpUrl("/api/admin/token"),
+                        600);
+                TransportConfigCallback rootAuthorization = bearerAuthorization(rootToken);
+
+                assertPushStatus(
+                        source.push()
+                                .setRemote(remoteUrl)
+                                .setTransportConfigCallback(rootAuthorization)
+                                .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                                .call(),
+                        RemoteRefUpdate.Status.OK);
+
+                source.checkout()
+                        .setCreateBranch(true)
+                        .setName(featureBranch)
+                        .call();
+                ObjectId featureCommit = createCommit(source, "FEATURE.md", "feature over http\n", "seed feature");
+                assertPushStatus(
+                        source.push()
+                                .setRemote(remoteUrl)
+                                .setTransportConfigCallback(rootAuthorization)
+                                .setRefSpecs(new RefSpec("refs/heads/" + featureBranch + ":refs/heads/" + featureBranch))
+                                .call(),
+                        RemoteRefUpdate.Status.OK);
+                source.checkout().setName(BRANCH).call();
+
+                assertRepositoryRef(serverRepository, BRANCH, masterCommit);
+                assertRepositoryRef(serverRepository, featureBranch, featureCommit);
+
+                RuntimeHttpTestSupport.HttpResponse updateAcl = RuntimeHttpTestSupport.request(
+                        "POST",
+                        orion.httpUrl("/api/admin/acl"),
+                        TestBearerTokens.bearer(rootToken),
+                        "application/xml",
+                        serialize(accessControlForHttpGitUser(repositoryName, true, true, true, BRANCH, false)));
+                assertThat(updateAcl.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
+
+                String userToken = TestBearerTokens.issueToken(
+                        orion.httpUrl("/api/admin/token"),
+                        USERNAME,
+                        TEST_PASSWORD.toCharArray(),
+                        600);
+                TransportConfigCallback branchAuthorization = bearerAuthorization(userToken);
+
+                try (Git clone = Git.cloneRepository()
+                        .setURI(remoteUrl)
+                        .setDirectory(cloneDirectory.toFile())
+                        .setBranchesToClone(List.of("refs/heads/" + BRANCH))
+                        .setBranch(BRANCH)
+                        .setTransportConfigCallback(branchAuthorization)
+                        .call()) {
+                    assertThat(Files.readString(cloneDirectory.resolve("README.md"))).isEqualTo("master over http\n");
+
+                    assertThatThrownBy(() -> clone.fetch()
+                            .setRemote("origin")
+                            .setTransportConfigCallback(branchAuthorization)
+                            .setRefSpecs(new RefSpec("refs/heads/" + featureBranch + ":refs/remotes/origin/" + featureBranch))
+                            .call())
+                            .isInstanceOf(TransportException.class);
+                    assertThat(clone.getRepository().resolve("refs/remotes/origin/" + featureBranch)).isNull();
+                }
+
+                source.checkout().setName(featureBranch).call();
+                createCommit(source, "FEATURE.md", "denied feature update over http\n", "denied feature update");
+                assertPushStatus(
+                        source.push()
+                                .setRemote(remoteUrl)
+                                .setTransportConfigCallback(branchAuthorization)
+                                .setRefSpecs(new RefSpec("refs/heads/" + featureBranch + ":refs/heads/" + featureBranch))
+                                .call(),
+                        RemoteRefUpdate.Status.REJECTED_OTHER_REASON);
+                assertRepositoryRef(serverRepository, featureBranch, featureCommit);
+
+                try (Git forceSource = initRepository(forceDirectory)) {
+                    createCommit(forceSource, "README.md", "denied force over http\n", "denied force");
+                    assertPushStatus(
+                            forceSource.push()
+                                    .setRemote(remoteUrl)
+                                    .setTransportConfigCallback(branchAuthorization)
+                                    .setRefSpecs(new RefSpec("+refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                                    .call(),
+                            RemoteRefUpdate.Status.REJECTED_OTHER_REASON);
+                }
+                assertRepositoryRef(serverRepository, BRANCH, masterCommit);
+            }
+        }
+    }
+
     private static AccessControl accessControlForHttpGitUser(String repositoryName) {
         return accessControlForHttpGitUser(repositoryName, true, true, true);
     }
@@ -210,6 +317,16 @@ class RuntimeHttpGitRouteIT {
             boolean read,
             boolean write,
             boolean create) {
+        return accessControlForHttpGitUser(repositoryName, read, write, create, "*", false);
+    }
+
+    private static AccessControl accessControlForHttpGitUser(
+            String repositoryName,
+            boolean read,
+            boolean write,
+            boolean create,
+            String branch,
+            boolean force) {
         AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(
                 TEST_PASSWORD_HASH,
                 AccessControl.CredentialType.SHA1).toDraft();
@@ -217,7 +334,7 @@ class RuntimeHttpGitRouteIT {
                 .addCredential(AccessControl.CredentialType.SHA1, TEST_PASSWORD_HASH);
         AccessControlDraft.Grant grant = user.addGrant("REPOSITORY_" + repositoryName)
                 .addKey(AccessControl.GrantKey.REPOSITORY, repositoryName)
-                .addKey(AccessControl.GrantKey.BRANCH, "*");
+                .addKey(AccessControl.GrantKey.BRANCH, branch);
         if (read) {
             grant.addKey(AccessControl.GrantKey.READ, AccessControl.TRUE_STRING);
         }
@@ -226,6 +343,9 @@ class RuntimeHttpGitRouteIT {
         }
         if (create) {
             grant.addKey(AccessControl.GrantKey.CREATE, AccessControl.TRUE_STRING);
+        }
+        if (force) {
+            grant.addKey(AccessControl.GrantKey.FORCE, AccessControl.TRUE_STRING);
         }
         draft.getUsers().add(user);
         return draft.toAccessControl();
@@ -276,6 +396,21 @@ class RuntimeHttpGitRouteIT {
             assertThat(repository.getObjectDatabase().has(commitId)).isTrue();
             assertThat(readFileFromCommit(repository, commitId, fileName)).isEqualTo(expectedContent);
         }
+    }
+
+    private static void assertRepositoryRef(Path repositoryPath, String branch, ObjectId commitId) throws Exception {
+        try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile())) {
+            var ref = repository.exactRef("refs/heads/" + branch);
+            assertThat(ref).isNotNull();
+            assertThat(ref.getObjectId()).isEqualTo(commitId);
+        }
+    }
+
+    private static void assertPushStatus(Iterable<PushResult> pushResults, RemoteRefUpdate.Status status) {
+        assertThat(pushResults)
+                .flatExtracting(PushResult::getRemoteUpdates)
+                .extracting(RemoteRefUpdate::getStatus)
+                .containsExactly(status);
     }
 
     private static String readFileFromCommit(Repository repository, ObjectId commitId, String fileName) throws Exception {
