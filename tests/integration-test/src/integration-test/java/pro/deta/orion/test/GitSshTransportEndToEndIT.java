@@ -307,6 +307,61 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void managedUserUpdateReplacesSshKeyAndRepositoryGrants() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        String oldRepositoryName = "managed-old-project";
+        String newRepositoryName = "managed-new-project";
+
+        startedOrion = startFreshOrion(orionRoot);
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
+                .valueOrFailure("Server identity key should be available after startup");
+        String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
+
+        createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, oldRepositoryName);
+        createManagedRepository(startedOrion, rootToken, oldRepositoryName);
+        ObjectId oldCommit = pushCommitThroughSsh(
+                startedOrion,
+                TRUSTED_USER_KEY,
+                oldRepositoryName,
+                tempDir.resolve("managed-old-source"),
+                tempDir.resolve("managed-old-ssh-home"),
+                "old access\n");
+        assertRepositoryContains(oldRepositoryName, oldCommit, "state.txt", "old access\n");
+
+        createManagedUser(startedOrion, rootToken, UNKNOWN_USER_KEY, newRepositoryName);
+        createManagedRepository(startedOrion, rootToken, newRepositoryName);
+
+        assertSshRemoteDenied(startedOrion, TRUSTED_USER_KEY, oldRepositoryName, tempDir.resolve("old-key-after-update-ssh-home"));
+        assertSshRemoteDenied(startedOrion, UNKNOWN_USER_KEY, oldRepositoryName, tempDir.resolve("new-key-old-repository-ssh-home"));
+
+        ObjectId newCommit = pushCommitThroughSsh(
+                startedOrion,
+                UNKNOWN_USER_KEY,
+                newRepositoryName,
+                tempDir.resolve("managed-new-source"),
+                tempDir.resolve("managed-new-ssh-home"),
+                "new access\n");
+        assertRepositoryContains(newRepositoryName, newCommit, "state.txt", "new access\n");
+
+        startedOrion.stop();
+        startedOrion = null;
+        startedOrion = startExistingOrion(orionRoot);
+
+        assertSshRemoteDenied(startedOrion, TRUSTED_USER_KEY, newRepositoryName, tempDir.resolve("old-key-after-restart-ssh-home"));
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("new-key-after-restart-ssh-home"), UNKNOWN_USER_KEY);
+             Git ignored = Git.cloneRepository()
+                     .setURI(startedOrion.sshUrl(newRepositoryName + ".git"))
+                     .setDirectory(tempDir.resolve("managed-new-clone-after-restart").toFile())
+                     .setBranch(BRANCH)
+                     .setTransportConfigCallback(sshCallback(ssh))
+                     .call()) {
+            assertThat(Files.readString(tempDir.resolve("managed-new-clone-after-restart").resolve("state.txt")))
+                    .isEqualTo("new access\n");
+        }
+        assertRepositoryContains(newRepositoryName, newCommit, "state.txt", "new access\n");
+    }
+
+    @Test
     void managedUserCanCreateOwnRepositoryByFirstPushOverSsh() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         Path sourceDirectory = tempDir.resolve("self-service-source");
@@ -709,6 +764,41 @@ class GitSshTransportEndToEndIT {
 
                 assertThat(clone.getRepository().resolve("refs/remotes/origin/" + BRANCH)).isEqualTo(updatedCommit);
             }
+        }
+    }
+
+    private static ObjectId pushCommitThroughSsh(
+            StartedOrion orion,
+            KeyPair keyPair,
+            String repositoryName,
+            Path sourceDirectory,
+            Path sshHome,
+            String content) throws Exception {
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(sshHome, keyPair);
+             Git source = initRepository(sourceDirectory)) {
+            ObjectId commit = createCommit(source, "state.txt", content, "managed user update");
+            Iterable<PushResult> pushResults = source.push()
+                    .setRemote(orion.sshUrl(repositoryName + ".git"))
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
+                    .call();
+
+            assertThat(pushResults)
+                    .flatExtracting(PushResult::getRemoteUpdates)
+                    .extracting(RemoteRefUpdate::getStatus)
+                    .containsExactly(RemoteRefUpdate.Status.OK);
+            return commit;
+        }
+    }
+
+    private static void assertSshRemoteDenied(StartedOrion orion, KeyPair keyPair, String repositoryName, Path sshHome)
+            throws Exception {
+        try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(sshHome, keyPair)) {
+            assertThatThrownBy(() -> Git.lsRemoteRepository()
+                    .setRemote(orion.sshUrl(repositoryName + ".git"))
+                    .setTransportConfigCallback(sshCallback(ssh))
+                    .call())
+                    .isInstanceOf(TransportException.class);
         }
     }
 
