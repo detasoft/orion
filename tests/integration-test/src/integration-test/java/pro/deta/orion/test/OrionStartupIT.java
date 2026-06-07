@@ -218,6 +218,32 @@ class OrionStartupIT {
         }
     }
 
+    @Test
+    void unavailableRemoteAclStorageFailsRootStartupBeforeTransportsStart() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-acl-failure");
+        Path missingRemoteAclRepository = tempDir.resolve("missing-acl.git");
+        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        configuration.getBootstrap().getAccessControl().setLocation("git+" + missingRemoteAclRepository.toUri());
+        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+        configuration.getTransport().getGit().setEnabled(false);
+        configuration.getTransport().getSsh().setEnabled(false);
+        configuration.getTransport().getHttps().setEnabled(false);
+
+        OrionComponent orionComponent = DaggerOrionComponent.builder()
+                .configurationProvider(() -> configuration)
+                .build();
+        OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
+
+        assertThat(lifecycle.runApplication()).isEqualTo(ERR);
+        assertThat(lifecycle.describeLifecycle())
+                .contains("orion: ERR", "access-control: ERR", "transports: NEW", "http: NEW")
+                .doesNotContain("transports: RUNNING", "http: RUNNING");
+
+        assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+        lifecycle.waitForShutdown();
+        assertCanBindHttpPort(configuration);
+    }
+
     private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> orionConfiguration)
