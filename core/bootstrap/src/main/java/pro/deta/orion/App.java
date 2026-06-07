@@ -6,10 +6,13 @@ import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.config.ConfigurationProvider;
 import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.function.Supplier;
+
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 @Slf4j
 public class App {
@@ -84,8 +87,8 @@ public class App {
     }
 
     static int run(OrionApplicationLifecycle lifecycle, boolean installShutdownHook) {
-        ApplicationState state = lifecycle.runApplication();
-        if (state != ApplicationState.UP) {
+        StateMachineDefinition.State state = lifecycle.runApplication();
+        if (!RUNNING.equals(state)) {
             log.error("Orion startup failed with state {}", state);
             return 1;
         }

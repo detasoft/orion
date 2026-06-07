@@ -5,7 +5,6 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
-import pro.deta.orion.lifecycle.ApplicationStateHolder;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -117,7 +116,6 @@ class AppTest {
 
     private static final class TestLifecycleContext implements AutoCloseable {
         private final OrionExecutor executor = new OrionExecutor(4, new OrionThreadFactory());
-        private final ApplicationStateHolder stateHolder = new ApplicationStateHolder();
         private final OrionEventManager eventManager = new OrionEventManager();
         private final OrionApplicationLifecycle lifecycle;
 
@@ -134,12 +132,10 @@ class AppTest {
                     .buildAggregateStateMachine();
             AtomicReference<OrionApplicationLifecycle> lifecycleRef = new AtomicReference<>();
             OrionProvider provider = new OrionProvider(
-                    stateHolder,
                     lifecycleRef::get,
                     () -> eventManager,
                     () -> executor);
             lifecycle = new OrionApplicationLifecycle(
-                    stateHolder,
                     runtime,
                     provider);
             lifecycleRef.set(lifecycle);

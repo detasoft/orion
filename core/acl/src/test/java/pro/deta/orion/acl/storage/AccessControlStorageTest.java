@@ -30,7 +30,6 @@ import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.lifecycle.ApplicationStateHolder;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.KeyUtils;
 import pro.deta.orion.util.OrionUtils;
@@ -944,7 +943,6 @@ class AccessControlStorageTest {
         private final OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
         private final OrionEventManager eventManager = new OrionEventManager();
         private final OrionProvider provider = new OrionProvider(
-                new ApplicationStateHolder(),
                 () -> null,
                 () -> eventManager,
                 () -> executor);

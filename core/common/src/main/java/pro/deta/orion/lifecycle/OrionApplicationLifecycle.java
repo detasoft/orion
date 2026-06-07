@@ -4,19 +4,18 @@ import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
-import pro.deta.orion.lifecycle.flow.LifecycleFlowRunner;
+import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
+import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.OrionUtils;
 
 import java.util.concurrent.TimeUnit;
 
-import static pro.deta.orion.ApplicationState.STARTING;
-import static pro.deta.orion.ApplicationState.STOPPING;
-import static pro.deta.orion.ApplicationState.OFF;
-import static pro.deta.orion.ApplicationState.UP;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 @Slf4j
 @Singleton
@@ -26,54 +25,42 @@ public class OrionApplicationLifecycle {
 
     private final AggregateStateMachine runtimeStateMachine;
     private final OrionProvider orionProvider;
-    private final LifecycleFlowRunner flowRunner;
 
     @Inject
     public OrionApplicationLifecycle(
-            ApplicationStateHolder applicationStateHolder,
             @Named("runtime") AggregateStateMachine runtimeStateMachine,
             OrionProvider orionProvider) {
         this.runtimeStateMachine = runtimeStateMachine;
         this.orionProvider = orionProvider;
-        flowRunner = new LifecycleFlowRunner(applicationStateHolder, this::runRuntimeTransition);
         registerLifecycleEventHandlers();
     }
 
-    private boolean runRuntimeTransition(ApplicationState state) {
-        log.warn("[{}] lifecycle transition initiated...", state);
-        boolean isSuccess = runRuntimeStateMachine(state);
-        log.warn("[{}] lifecycle transition completed: {}.", state, isSuccess ? "success" : "failure");
-        return isSuccess;
-    }
-
-    private boolean runRuntimeStateMachine(ApplicationState state) {
+    private StateMachineDefinition.State runRuntimeTransition(ActionId actionId, Runnable transition) {
+        log.warn("[{}] lifecycle transition initiated...", actionId);
         try {
-            if (state == STARTING) {
-                runtimeStateMachine.start();
-            } else if (state == STOPPING) {
-                runtimeStateMachine.stop();
-            }
-            return true;
-        } catch (RuntimeException e) {
-            log.error("[{}] runtime state machine transition failed.", state, e);
-            return false;
+            transition.run();
+        } catch (StateTransitionFailedException e) {
+            log.error("[{}] runtime state machine transition failed.", actionId, e);
         }
+        StateMachineDefinition.State state = runtimeStateMachine.currentState();
+        log.warn("[{}] lifecycle transition completed with state {}.", actionId, state);
+        return state;
     }
 
     public String describeLifecycle() {
-        return flowRunner.describeFlows() + '\n' + runtimeStateMachine.describeStatus();
+        return runtimeStateMachine.describeStatus();
     }
 
-    public ApplicationState runApplication() {
+    public StateMachineDefinition.State runApplication() {
         if (log.isDebugEnabled()) {
             log.debug("Lifecycle before initialization:\n{}", describeLifecycle());
         }
-        return flowRunner.runStartup();
+        return runRuntimeTransition(ActionId.START, runtimeStateMachine::start);
     }
 
-    public ApplicationState shutdownApplication() {
+    public StateMachineDefinition.State shutdownApplication() {
         log.info("System shutdown process initiated.");
-        return flowRunner.runShutdown();
+        return runRuntimeTransition(ActionId.STOP, runtimeStateMachine::stop);
     }
 
     private void doShutdown() {
@@ -90,20 +77,24 @@ public class OrionApplicationLifecycle {
         orionProvider.getOrionExecutor().schedule(this::doShutdown, SHUTDOWN_REQUEST_DELAY_MILLIS, TimeUnit.MILLISECONDS);
     }
 
-    public String describeFlows() {
-        return flowRunner.describeFlows();
-    }
-
     public void beginShutdown() {
         orionProvider.getOrionExecutor().submit(this::doShutdown);
     }
 
     public void waitForStarting() {
-        flowRunner.waitForState(UP);
+        waitForState(RUNNING);
         OrionUtils.waitForCondition(() -> orionProvider.getEventManager().getUnprocessedLength() == 0);
     }
 
     public void waitForShutdown() {
-        flowRunner.waitForState(OFF);
+        waitForState(FIN);
+    }
+
+    private void waitForState(StateMachineDefinition.State state) {
+        if (!OrionUtils.waitForCondition(() -> runtimeStateMachine.currentState().equals(state))) {
+            throw new IllegalStateException(
+                    "Timed out waiting for runtime state " + state
+                            + ", current state is " + runtimeStateMachine.currentState());
+        }
     }
 }

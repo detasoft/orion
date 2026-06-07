@@ -11,7 +11,6 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
 import pro.deta.orion.acl.schema.AccessControl;
@@ -38,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class OrionStartupIT {
     private static final String BRANCH = "master";
@@ -181,8 +181,7 @@ class OrionStartupIT {
                 .configurationProvider(() -> orionConfiguration)
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
-        ApplicationState state = lifecycle.runApplication();
-        assertThat(state).isEqualTo(ApplicationState.UP);
+        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
         lifecycle.waitForStarting();
         return new StartedOrion(orionConfiguration, lifecycle, orionComponent.orionAccessControlService());
     }

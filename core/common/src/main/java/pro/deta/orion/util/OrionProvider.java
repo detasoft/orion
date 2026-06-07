@@ -5,7 +5,6 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.lifecycle.ApplicationStateHolder;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 import jakarta.inject.Provider;
@@ -14,7 +13,6 @@ import jakarta.inject.Provider;
 @Data
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class OrionProvider {
-    private final ApplicationStateHolder applicationStateHolder;
     private final Provider<OrionApplicationLifecycle> orionApplicationLifecycle;
     private final Provider<OrionEventManager> eventManager;
     private final Provider<OrionExecutor> orionExecutor;

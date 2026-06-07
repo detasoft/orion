@@ -1,6 +1,5 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
@@ -16,6 +15,7 @@ import java.nio.file.Path;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 final class RuntimeHttpTestSupport {
     private RuntimeHttpTestSupport() {
@@ -45,8 +45,7 @@ final class RuntimeHttpTestSupport {
                 .configurationProvider(() -> orionConfiguration)
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
-        ApplicationState state = lifecycle.runApplication();
-        assertThat(state).isEqualTo(ApplicationState.UP);
+        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
         lifecycle.waitForStarting();
         return new StartedOrion(orionConfiguration, lifecycle, orionComponent.orionAccessControlService());
     }

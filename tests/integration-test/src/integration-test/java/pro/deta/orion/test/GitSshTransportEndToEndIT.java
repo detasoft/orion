@@ -24,7 +24,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.GitRepositoryProvider;
-import pro.deta.orion.ApplicationState;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.acl.schema.ACLUtil;
@@ -58,6 +57,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class GitSshTransportEndToEndIT {
     private static final String BRANCH = "master";
@@ -509,7 +510,7 @@ class GitSshTransportEndToEndIT {
                 .configurationProvider(() -> configuration)
                 .build();
         OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
-        assertThat(lifecycle.runApplication()).isEqualTo(ApplicationState.UP);
+        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
         lifecycle.waitForStarting();
 
         return new StartedOrion(configuration, lifecycle, component.gitRepositoryProvider(), component.orionAccessControlService());
@@ -962,7 +963,7 @@ class GitSshTransportEndToEndIT {
         }
 
         private void stopSynchronously() {
-            assertThat(lifecycle.shutdownApplication()).isEqualTo(ApplicationState.OFF);
+            assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
         }
 
         private void stop() {

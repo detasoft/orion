@@ -48,7 +48,7 @@ public final class StateMachine {
         return new StateMachine(definition);
     }
 
-    public synchronized StateMachineDefinition.State currentState() {
+    public StateMachineDefinition.State currentState() {
         return currentState;
     }
 
