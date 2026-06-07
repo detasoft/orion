@@ -11,7 +11,7 @@ import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.transport.http.OrionHttpModule;
 
-import javax.inject.Named;
+import jakarta.inject.Named;
 
 @Module(includes = OrionHttpModule.class)
 public class OrionTransportModule {

@@ -3,7 +3,7 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 
-import javax.inject.Provider;
+import jakarta.inject.Provider;
 import java.util.List;
 
 public class OrionAdminRoutesRoute extends BaseAdminRoute {

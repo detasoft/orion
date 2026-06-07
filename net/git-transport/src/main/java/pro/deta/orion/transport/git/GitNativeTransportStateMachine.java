@@ -4,7 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 
-import javax.inject.Provider;
+import jakarta.inject.Provider;
 
 /**
  * @AiRule This standalone transport adapter intentionally exposes its raw StateMachine as production API.

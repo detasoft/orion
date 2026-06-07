@@ -23,7 +23,7 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.stream.*;
 
-import javax.inject.Named;
+import jakarta.inject.Named;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;

@@ -20,7 +20,7 @@ import pro.deta.orion.git.OrionJGitRuntime;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.OrionApplicationStageEventListener;
 
-import javax.inject.Provider;
+import jakarta.inject.Provider;
 import java.security.PublicKey;
 import java.util.Collection;
 

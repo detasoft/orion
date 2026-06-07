@@ -25,7 +25,7 @@ import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
-import javax.inject.Provider;
+import jakarta.inject.Provider;
 import java.io.*;
 import java.net.BindException;
 import java.net.InetSocketAddress;

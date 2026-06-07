@@ -8,7 +8,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.ApplicationStateHolder;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
-import javax.inject.Provider;
+import jakarta.inject.Provider;
 
 
 @Data

@@ -1,7 +1,7 @@
 package pro.deta.orion.lifecycle.state;
 
 import java.util.Objects;
-import javax.inject.Provider;
+import jakarta.inject.Provider;
 
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.DISABLED;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;

@@ -4,7 +4,7 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 
-import javax.inject.Named;
+import jakarta.inject.Named;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 

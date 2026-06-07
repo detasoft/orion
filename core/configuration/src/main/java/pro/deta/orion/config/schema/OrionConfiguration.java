@@ -3,7 +3,7 @@ package pro.deta.orion.config.schema;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
-import javax.inject.Singleton;
+import jakarta.inject.Singleton;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
