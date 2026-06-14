@@ -3,180 +3,328 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.wire.control.ControlState;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFixedControlFrameReaderTest {
     @Test
-    void readsCompletePktLineFrameWithoutAllocatingStructuralBuffer() {
+    void readsCompleteHeaderWithoutAllocatingFragmentState() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf input = ascii("000aabcdef");
-            try {
-                assertThat(reader.accept(input))
-                        .isEqualTo(GitFixedControlFrameReader.ControlReadState.CONTROL_COMPLETE);
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+        ByteBuf input = ascii("000aabcdef");
+        try {
+            assertThat(reader.accept(input))
+                    .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
 
-                assertThat(input.readerIndex()).isEqualTo(10);
-                assertThat(input.readableBytes()).isZero();
-                assertThat(input.refCnt()).isEqualTo(2);
-                assertThat(allocator.allocations()).isZero();
-                assertThat(reader.bufferedBytes()).isZero();
-                assertThat(reader.isRetainedFrom(input)).isTrue();
-                assertThat(readableBytes(reader.bytes())).containsExactly(asciiBytes("000aabcdef"));
-            } finally {
-                input.release();
-            }
+            assertThat(input.readerIndex()).isEqualTo(4);
+            assertThat(input.readableBytes()).isEqualTo(6);
+            assertThat(input.refCnt()).isOne();
+            assertThat(allocator.allocations()).isZero();
+            assertThat(reader.controlState()).isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+        } finally {
+            input.release();
         }
     }
 
     @Test
-    void copiesFragmentedPayloadAfterCompleteHeader() {
+    void copiesFirstHeaderFragmentUntilSecondFragmentCompletesHeader() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf first = ascii("000aab");
-            try {
-                assertThat(reader.accept(first))
-                        .isEqualTo(GitFixedControlFrameReader.ControlReadState.NEEDS_MORE_DATA);
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
 
-                assertThat(first.readerIndex()).isEqualTo(6);
-                assertThat(first.readableBytes()).isZero();
-                assertThat(allocator.allocations()).isOne();
-                assertThat(allocator.lastInitialCapacity()).isEqualTo(10);
-                assertThat(allocator.lastMaxCapacity()).isEqualTo(GitFixedControlFrameReader.MAX_PKT_LINE_LENGTH);
-                assertThat(reader.bufferedBytes()).isEqualTo(6);
-                assertThatThrownBy(reader::bytes)
-                        .isInstanceOf(IllegalStateException.class)
-                        .hasMessage("Control frame is not complete");
-            } finally {
-                first.release();
-            }
+        ByteBuf first = ascii("00");
+        ControlState firstState = reader.accept(first);
+        assertThat(firstState).isInstanceOf(ControlState.MoreDataNeeded.class);
+        ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
+        assertThat(first.readerIndex()).isEqualTo(2);
+        assertThat(first.readableBytes()).isZero();
+        assertThat(first.refCnt()).isOne();
+        assertThat(firstFragment.readableBytes()).isEqualTo(2);
+        assertThat(allocator.allocations()).isOne();
+        assertThat(allocator.lastInitialCapacity()).isEqualTo(2);
+        assertThat(allocator.lastMaxCapacity()).isEqualTo(4);
 
-            ByteBuf second = ascii("cdefxy");
-            try {
-                assertThat(reader.accept(second))
-                        .isEqualTo(GitFixedControlFrameReader.ControlReadState.CONTROL_COMPLETE);
+        first.release();
+        assertThat(first.refCnt()).isZero();
+        assertThat(firstFragment.refCnt()).isOne();
 
-                assertThat(second.readerIndex()).isEqualTo(4);
-                assertThat(second.readableBytes()).isEqualTo(2);
-                assertThat(allocator.allocations()).isOne();
-                assertThat(reader.isRetainedFrom(second)).isFalse();
-                assertThat(readableBytes(reader.bytes())).containsExactly(asciiBytes("000aabcdef"));
-            } finally {
-                second.release();
-            }
+        ByteBuf second = ascii("0aPACK");
+        try {
+            assertThat(reader.accept(second))
+                    .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+
+            assertThat(second.readerIndex()).isEqualTo(2);
+            assertThat(second.readableBytes()).isEqualTo(4);
+            assertThat(second.refCnt()).isOne();
+            assertThat(firstFragment.refCnt()).isZero();
+            assertThat(allocator.allocations()).isOne();
+        } finally {
+            second.release();
         }
     }
 
     @Test
-    void rejectsHeaderSplitAcrossInputsForNow() {
+    void releasesAllRetainedFragmentsWhenHeaderCompletesAfterThreeInputs() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf input = ascii("00");
-            try {
-                assertThatThrownBy(() -> reader.accept(input))
-                        .isInstanceOf(IllegalArgumentException.class)
-                        .hasMessage("Pkt-line header must be available in one input buffer");
-                assertThat(input.readerIndex()).isZero();
-                assertThat(allocator.allocations()).isZero();
-            } finally {
-                input.release();
-            }
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+
+        ByteBuf first = ascii("0");
+        ControlState firstState = reader.accept(first);
+        ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
+        first.release();
+        assertThat(first.refCnt()).isZero();
+        assertThat(firstFragment.refCnt()).isOne();
+        assertThat(allocator.allocations()).isOne();
+
+        ByteBuf second = ascii("0");
+        ControlState secondState = reader.accept(second);
+        ByteBuf secondFragment = ((ControlState.MoreDataNeeded) secondState).fragment();
+        second.release();
+        assertThat(first.refCnt()).isZero();
+        assertThat(second.refCnt()).isZero();
+        assertThat(secondFragment).isSameAs(firstFragment);
+        assertThat(firstFragment.refCnt()).isOne();
+        assertThat(secondFragment.readableBytes()).isEqualTo(2);
+        assertThat(allocator.allocations()).isOne();
+
+        ByteBuf third = ascii("0aPACK");
+        try {
+            assertThat(reader.accept(third))
+                    .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+
+            assertThat(third.readerIndex()).isEqualTo(2);
+            assertThat(third.readableBytes()).isEqualTo(4);
+            assertThat(firstFragment.refCnt()).isZero();
+            assertThat(secondFragment.refCnt()).isZero();
+            assertThat(allocator.allocations()).isOne();
+        } finally {
+            third.release();
+        }
+    }
+
+    @Test
+    void returnsMoreDataNeededForEachSingleHeaderByteUntilFourthByteCompletesHeader() {
+        CountingByteBufAllocator allocator = new CountingByteBufAllocator();
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+
+        ByteBuf first = ascii("0");
+        ControlState firstState = reader.accept(first);
+        assertThat(firstState).isInstanceOf(ControlState.MoreDataNeeded.class);
+        ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
+        first.release();
+        assertThat(first.refCnt()).isZero();
+        assertThat(firstFragment.refCnt()).isOne();
+
+        ByteBuf second = ascii("0");
+        ControlState secondState = reader.accept(second);
+        assertThat(secondState).isInstanceOf(ControlState.MoreDataNeeded.class);
+        ByteBuf secondFragment = ((ControlState.MoreDataNeeded) secondState).fragment();
+        second.release();
+        assertThat(second.refCnt()).isZero();
+        assertThat(secondFragment).isSameAs(firstFragment);
+        assertThat(secondFragment.refCnt()).isOne();
+        assertThat(allocator.allocations()).isOne();
+
+        ByteBuf third = ascii("0");
+        ControlState thirdState = reader.accept(third);
+        assertThat(thirdState).isInstanceOf(ControlState.MoreDataNeeded.class);
+        ByteBuf thirdFragment = ((ControlState.MoreDataNeeded) thirdState).fragment();
+        third.release();
+        assertThat(third.refCnt()).isZero();
+        assertThat(thirdFragment).isSameAs(firstFragment);
+        assertThat(thirdFragment.refCnt()).isOne();
+        assertThat(allocator.allocations()).isOne();
+
+        ByteBuf fourth = ascii("aPACK");
+        try {
+            assertThat(reader.accept(fourth))
+                    .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+
+            assertThat(fourth.readerIndex()).isEqualTo(1);
+            assertThat(fourth.readableBytes()).isEqualTo(4);
+            assertThat(firstFragment.refCnt()).isZero();
+            assertThat(secondFragment.refCnt()).isZero();
+            assertThat(thirdFragment.refCnt()).isZero();
+            assertThat(allocator.allocations()).isOne();
+        } finally {
+            fourth.release();
+        }
+    }
+
+    @Test
+    void releasesAllSingleByteHeaderFragmentsWhenFourthByteCompletesInvalidHeader() {
+        CountingByteBufAllocator allocator = new CountingByteBufAllocator();
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+
+        ByteBuf first = ascii("z");
+        ControlState firstState = reader.accept(first);
+        assertThat(firstState).isInstanceOf(ControlState.MoreDataNeeded.class);
+        ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
+        first.release();
+        assertThat(first.refCnt()).isZero();
+        assertThat(firstFragment.refCnt()).isOne();
+
+        ByteBuf second = ascii("z");
+        ControlState secondState = reader.accept(second);
+        assertThat(secondState).isInstanceOf(ControlState.MoreDataNeeded.class);
+        ByteBuf secondFragment = ((ControlState.MoreDataNeeded) secondState).fragment();
+        second.release();
+        assertThat(second.refCnt()).isZero();
+        assertThat(secondFragment).isSameAs(firstFragment);
+        assertThat(secondFragment.refCnt()).isOne();
+        assertThat(allocator.allocations()).isOne();
+
+        ByteBuf third = ascii("z");
+        ControlState thirdState = reader.accept(third);
+        assertThat(thirdState).isInstanceOf(ControlState.MoreDataNeeded.class);
+        ByteBuf thirdFragment = ((ControlState.MoreDataNeeded) thirdState).fragment();
+        third.release();
+        assertThat(third.refCnt()).isZero();
+        assertThat(thirdFragment).isSameAs(firstFragment);
+        assertThat(thirdFragment.refCnt()).isOne();
+        assertThat(allocator.allocations()).isOne();
+
+        ByteBuf fourth = ascii("zPACK");
+        try {
+            assertThatThrownBy(() -> reader.accept(fourth))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Pkt-line length contains non-hex byte");
+
+            assertThat(fourth.readerIndex()).isEqualTo(1);
+            assertThat(fourth.readableBytes()).isEqualTo(4);
+            assertThat(firstFragment.refCnt()).isZero();
+            assertThat(secondFragment.refCnt()).isZero();
+            assertThat(thirdFragment.refCnt()).isZero();
+            assertThat(fourth.refCnt()).isEqualTo(1);
+            assertThat(allocator.allocations()).isOne();
+            assertThat(reader.controlState()).isSameAs(ControlState.ControlEmpty.INSTANCE);
+        } finally {
+            fourth.release();
         }
     }
 
     @Test
     void rejectsAcceptAfterCompleteWithoutConsumingInput() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf first = ascii("000aabcdef");
-            try {
-                assertThat(reader.accept(first))
-                        .isEqualTo(GitFixedControlFrameReader.ControlReadState.CONTROL_COMPLETE);
-            } finally {
-                first.release();
-            }
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+        ByteBuf first = ascii("000aabcdef");
+        try {
+            assertThat(reader.accept(first))
+                    .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+        } finally {
+            first.release();
+        }
 
-            ByteBuf second = ascii("x");
-            try {
-                int readableBefore = second.readableBytes();
-                assertThatThrownBy(() -> reader.accept(second))
-                        .isInstanceOf(IllegalStateException.class)
-                        .hasMessage("Control frame is already complete");
-                assertThat(second.readableBytes()).isEqualTo(readableBefore);
-            } finally {
-                second.release();
-            }
+        ByteBuf second = ascii("x");
+        try {
+            int readableBefore = second.readableBytes();
+            assertThatThrownBy(() -> reader.accept(second))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Control frame is already complete");
+            assertThat(second.readableBytes()).isEqualTo(readableBefore);
+        } finally {
+            second.release();
         }
     }
 
     @Test
     void readsSpecialPktLinePacketsWithoutAllocatingStructuralBuffer() {
-        assertSpecialPacket("0000");
-        assertSpecialPacket("0001");
-        assertSpecialPacket("0002");
+        assertSpecialPacket("0000", ControlState.ControlType.FLUSH);
+        assertSpecialPacket("0001", ControlState.ControlType.DELIMITER);
+        assertSpecialPacket("0002", ControlState.ControlType.RESPONSE_END);
     }
 
     @Test
     void rejectsInvalidPktLineHeader() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf input = ascii("zzzz");
-            try {
-                assertThatThrownBy(() -> reader.accept(input))
-                        .isInstanceOf(IllegalArgumentException.class)
-                        .hasMessage("Pkt-line length contains non-hex byte");
-            } finally {
-                input.release();
-            }
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+        ByteBuf input = ascii("zzzz");
+        try {
+            assertThatThrownBy(() -> reader.accept(input))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Pkt-line length contains non-hex byte");
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void resetsAfterCompletedFragmentedHeaderIsInvalid() {
+        CountingByteBufAllocator allocator = new CountingByteBufAllocator();
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+
+        ByteBuf first = ascii("zz");
+        ControlState firstState = reader.accept(first);
+        ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
+        first.release();
+        assertThat(first.refCnt()).isZero();
+        assertThat(firstFragment.refCnt()).isOne();
+
+        ByteBuf second = ascii("zzPACK");
+        try {
+            assertThatThrownBy(() -> reader.accept(second))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Pkt-line length contains non-hex byte");
+
+            assertThat(firstFragment.refCnt()).isZero();
+            assertThat(reader.controlState()).isSameAs(ControlState.ControlEmpty.INSTANCE);
+        } finally {
+            second.release();
+        }
+
+        ByteBuf third = ascii("000aPACK");
+        try {
+            assertThat(reader.accept(third))
+                    .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+            assertThat(third.readerIndex()).isEqualTo(4);
+            assertThat(third.readableBytes()).isEqualTo(4);
+        } finally {
+            third.release();
         }
     }
 
     @Test
     void rejectsReservedPktLineLength() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf input = ascii("0003");
-            try {
-                assertThatThrownBy(() -> reader.accept(input))
-                        .isInstanceOf(IllegalArgumentException.class)
-                        .hasMessage("Pkt-line length 0003 is reserved");
-            } finally {
-                input.release();
-            }
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+        ByteBuf input = ascii("0003");
+        try {
+            assertThatThrownBy(() -> reader.accept(input))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Pkt-line length 0003 is reserved");
+        } finally {
+            input.release();
         }
     }
 
     @Test
     void rejectsPktLinePacketAboveGitLimit() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf input = ascii("fff1");
-            try {
-                assertThatThrownBy(() -> reader.accept(input))
-                        .isInstanceOf(IllegalArgumentException.class)
-                        .hasMessage("Pkt-line length exceeds Git pkt-line limit");
-            } finally {
-                input.release();
-            }
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+        ByteBuf input = ascii("fff1");
+        try {
+            assertThatThrownBy(() -> reader.accept(input))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Pkt-line length exceeds Git pkt-line limit");
+        } finally {
+            input.release();
         }
     }
 
-    private static void assertSpecialPacket(String header) {
+    private static void assertSpecialPacket(String header, ControlState.ControlType type) {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        try (GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator)) {
-            ByteBuf input = ascii(header + "tail");
-            try {
-                assertThat(reader.accept(input))
-                        .isEqualTo(GitFixedControlFrameReader.ControlReadState.CONTROL_COMPLETE);
+        GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
+        ByteBuf input = ascii(header + "tail");
+        try {
+            assertThat(reader.accept(input))
+                    .isEqualTo(new ControlState.ControlSuccess(type, 4));
 
-                assertThat(input.readerIndex()).isEqualTo(4);
-                assertThat(input.readableBytes()).isEqualTo(4);
-                assertThat(allocator.allocations()).isZero();
-                assertThat(readableBytes(reader.bytes())).containsExactly(asciiBytes(header));
-            } finally {
-                input.release();
-            }
+            assertThat(input.readerIndex()).isEqualTo(4);
+            assertThat(input.readableBytes()).isEqualTo(4);
+            assertThat(allocator.allocations()).isZero();
+        } finally {
+            input.release();
         }
     }
 
@@ -186,19 +334,5 @@ class GitFixedControlFrameReaderTest {
             buffer.writeByte(value.charAt(i));
         }
         return buffer;
-    }
-
-    private static byte[] readableBytes(ByteBuf buffer) {
-        byte[] bytes = new byte[buffer.readableBytes()];
-        buffer.getBytes(buffer.readerIndex(), bytes);
-        return bytes;
-    }
-
-    private static byte[] asciiBytes(String value) {
-        byte[] bytes = new byte[value.length()];
-        for (int i = 0; i < value.length(); i++) {
-            bytes[i] = (byte) value.charAt(i);
-        }
-        return bytes;
     }
 }

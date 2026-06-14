@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
@@ -23,8 +24,8 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         Objects.requireNonNull(input, "input");
         while (input.isReadable()) {
             if (phase == Phase.CONTROL) {
-                GitFixedControlFrameReader.ControlReadState state = controlReader.accept(input);
-                if (state == GitFixedControlFrameReader.ControlReadState.NEEDS_MORE_DATA) {
+                ControlState state = controlReader.accept(input);
+                if (state instanceof ControlState.MoreDataNeeded) {
                     return true;
                 }
                 phase = Phase.RAW;
@@ -42,8 +43,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     ComposedState state() {
         return new ComposedState(
                 phase,
-                rawSink != null,
-                controlReader.bufferedBytes());
+                rawSink != null);
     }
 
     private void forwardRaw(ByteBuf input) {
@@ -57,24 +57,17 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     private RawSink rawSink() {
         if (rawSink == null) {
-            rawSink = Objects.requireNonNull(rawSinkFactory.create(control()), "rawSink");
-            controlReader.releaseCompletedStorage();
+            rawSink = Objects.requireNonNull(
+                    rawSinkFactory.create((ControlState.ControlSuccess) controlReader.controlState()),
+                    "rawSink");
         }
         return rawSink;
     }
 
-    private ByteBuf control() {
-        return controlReader.bytes();
-    }
-
     @Override
     public void close() {
-        try {
-            if (rawSink != null) {
-                rawSink.close();
-            }
-        } finally {
-            controlReader.close();
+        if (rawSink != null) {
+            rawSink.close();
         }
     }
 
@@ -85,13 +78,12 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     record ComposedState(
             Phase phase,
-            boolean rawSinkCreated,
-            int bufferedControlBytes) {
+            boolean rawSinkCreated) {
     }
 
     @FunctionalInterface
     public interface RawSinkFactory {
-        RawSink create(ByteBuf control);
+        RawSink create(ControlState.ControlSuccess control);
     }
 
     public interface RawSink extends AutoCloseable {

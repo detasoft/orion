@@ -2,107 +2,87 @@ package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
-import pro.deta.orion.lifecycle.state.TestOnly;
+import pro.deta.orion.git.parser.wire.control.ControlState;
 
 import java.util.Objects;
 
-public final class GitFixedControlFrameReader implements AutoCloseable {
+public final class GitFixedControlFrameReader {
     static final int MAX_PKT_LINE_LENGTH = 65_520;
 
     private static final int HEADER_SIZE = 4;
-
     private final ByteBufAllocator allocator;
-    private ByteBuf buffer;
-    private ByteBuf retainedFrame;
-    private ByteBuf retainedSource;
-    private int wireLength;
-    private boolean ready;
+    private ControlState controlState = ControlState.ControlEmpty.INSTANCE;
 
     public GitFixedControlFrameReader(ByteBufAllocator allocator) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
     }
 
-    public ControlReadState accept(ByteBuf input) {
+    public ControlState controlState() {
+        return controlState;
+    }
+
+    public ControlState accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
-        if (ready) {
-            throw new IllegalStateException("Control frame is already complete");
-        }
-        if (buffer != null) {
-            copyReadableBytes(input);
-            return ready ? ControlReadState.CONTROL_COMPLETE : ControlReadState.NEEDS_MORE_DATA;
-        }
-        if (input.readableBytes() < HEADER_SIZE) {
-            throw new IllegalArgumentException("Pkt-line header must be available in one input buffer");
-        }
+        controlState = switch (controlState) {
+            case ControlState.ControlSuccess _ignored ->
+                    throw new IllegalStateException("Control frame is already complete");
 
-        int length = wireLength(input, input.readerIndex());
-        if (input.readableBytes() >= length) {
-            retainedSource = input;
-            retainedFrame = input.readRetainedSlice(length);
-            ready = true;
-            return ControlReadState.CONTROL_COMPLETE;
-        }
+            case ControlState.ControlEmpty _ignored -> readEmpty(input);
 
-        wireLength = length;
-        buffer = allocator.buffer(wireLength, MAX_PKT_LINE_LENGTH);
-        buffer.writeBytes(input, input.readableBytes());
-        return ControlReadState.NEEDS_MORE_DATA;
+            case ControlState.MoreDataNeeded prevData -> readMore(prevData.fragment(), input);
+        };
+        return controlState;
     }
 
-    ByteBuf bytes() {
-        if (!ready) {
-            throw new IllegalStateException("Control frame is not complete");
+    private ControlState readEmpty(ByteBuf input) {
+        if (!input.isReadable()) {
+            return controlState;
         }
-        if (buffer != null) {
-            return buffer.slice(buffer.readerIndex(), buffer.readableBytes());
+        if (input.readableBytes() >= HEADER_SIZE) {
+            ControlState state = buildControlState(input);
+            input.skipBytes(HEADER_SIZE);
+            return state;
         }
-        return retainedFrame.slice(retainedFrame.readerIndex(), retainedFrame.readableBytes());
+        return new ControlState.MoreDataNeeded(CachingByteBuf.start(allocator, input, HEADER_SIZE, CachingByteBuf.Mode.BUFFERED));
     }
 
-    @TestOnly
-    int bufferedBytes() {
-        return buffer == null ? 0 : buffer.readableBytes();
-    }
-
-    @TestOnly
-    boolean isRetainedFrom(ByteBuf input) {
-        return retainedSource == input;
-    }
-
-    void releaseCompletedStorage() {
-        wireLength = 0;
-        ready = false;
-        if (retainedFrame != null) {
-            retainedFrame.release();
-            retainedFrame = null;
+    private ControlState readMore(ByteBuf previousFragment, ByteBuf input) {
+        CachingByteBuf.append(previousFragment, input, HEADER_SIZE, CachingByteBuf.Mode.BUFFERED);
+        if (!CachingByteBuf.isComplete(previousFragment, HEADER_SIZE)) {
+            return new ControlState.MoreDataNeeded(previousFragment);
         }
-        retainedSource = null;
-        if (buffer != null) {
-            buffer.release();
-            buffer = null;
+        try {
+            return buildControlState(previousFragment);
+        } catch (RuntimeException | Error e) {
+            controlState = ControlState.ControlEmpty.INSTANCE;
+            throw e;
+        } finally {
+            previousFragment.release();
         }
     }
 
-    @Override
-    public void close() {
-        releaseCompletedStorage();
+    private ControlState buildControlState(ByteBuf input) {
+        int packetLength = packetLength(input, input.readerIndex());
+        int length = resolveWireLength(packetLength);
+        ControlState.ControlType controlType = controlType(packetLength);
+        return new ControlState.ControlSuccess(controlType, length);
     }
 
-    private void copyReadableBytes(ByteBuf input) {
-        int missing = wireLength - buffer.readableBytes();
-        int copied = Math.min(missing, input.readableBytes());
-        if (copied > 0) {
-            buffer.writeBytes(input, copied);
-        }
-        ready = buffer.readableBytes() == wireLength;
-    }
-
-    private int wireLength(ByteBuf input, int headerIndex) {
+    private int packetLength(ByteBuf input, int headerIndex) {
         int packetLength = 0;
         for (int i = 0; i < HEADER_SIZE; i++) {
             packetLength = (packetLength << 4) | hexValue(input.getByte(headerIndex + i));
         }
-        return resolveWireLength(packetLength);
+        return packetLength;
+    }
+
+    private ControlState.ControlType controlType(int packetLength) {
+        return switch (packetLength) {
+            case 0 -> ControlState.ControlType.FLUSH;
+            case 1 -> ControlState.ControlType.DELIMITER;
+            case 2 -> ControlState.ControlType.RESPONSE_END;
+            default -> ControlState.ControlType.DATA;
+        };
     }
 
     private int resolveWireLength(int packetLength) {
@@ -130,10 +110,5 @@ public final class GitFixedControlFrameReader implements AutoCloseable {
             return unsigned - 'A' + 10;
         }
         throw new IllegalArgumentException("Pkt-line length contains non-hex byte");
-    }
-
-    public enum ControlReadState {
-        NEEDS_MORE_DATA,
-        CONTROL_COMPLETE
     }
 }

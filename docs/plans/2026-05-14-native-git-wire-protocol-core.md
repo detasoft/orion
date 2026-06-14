@@ -107,29 +107,31 @@ import `org.eclipse.jgit` and do not depend on JGit artifacts transitively.
 
 Current prototype zones:
 
-- `GitFixedControlFrameReader` is currently a bounded pkt-line control cursor.
-  It requires the four-byte hex pkt-line header to be present in the current
-  input buffer, handles Git special packets `0000`, `0001`, and `0002`, rejects
-  invalid lengths, and consumes exactly one pkt-line frame. If the frame is
-  complete in the current input, it uses a retained slice and performs no byte
-  copy. If the frame payload is fragmented after a complete header, it allocates
-  bounded structural storage lazily, copies consumed fragments, and advances
-  `readerIndex` over copied bytes. Calling its byte output before completion
-  throws. Calling `accept` again after completion is an illegal state.
+- `GitFixedControlFrameReader` is currently a bounded pkt-line header cursor. It
+  consumes only the four-byte hex pkt-line header, handles Git special packets
+  `0000`, `0001`, and `0002`, rejects invalid lengths, and leaves payload or raw
+  tail bytes in the original input buffer. If the header is complete in the
+  current input, it advances `readerIndex` without copying. If the header is
+  fragmented, it uses `CachingByteBuf` in buffered mode to own one fixed
+  four-byte cache until the header completes. Its `accept` result is
+  `ControlState`: `MoreDataNeeded` while fragmented input is pending, or
+  `Success(type, length)` where `length` is the pkt-line wire length. Calling
+  `accept` again after completion is an illegal state.
+- `CachingByteBuf` is a generic fixed-size cache for fragmented structural
+  reads. `BufferedCaching` copies bytes into one owned buffer; `CompositeCaching`
+  retains input slices in a composite buffer. Each use case chooses the strategy
+  based on whether small-copy simplicity or no-copy slice retention is better.
 - `GitMinimalWireMachine` processes accepted inbound buffers and returns whether
   the caller should release the original input reference after `accept`. It
-  tracks the current phase, owns the readers, routes on `ControlReadState`, and
+  tracks the current phase, owns the readers, routes on `ControlState`, and
   forwards raw tails to the raw sink. It does not store borrowed input buffers
-  and does not manually advance `readerIndex` for control bytes. If a no-copy
-  complete control frame has no raw tail yet, the reader holds the retained
-  control slice until raw sink creation or `close()`. The current prototype
-  accepts Git's fixed 65,520 byte pkt-line maximum rather than a per-machine
-  structural capacity parameter.
+  and does not manually advance `readerIndex` for control bytes. The current
+  prototype accepts Git's fixed 65,520 byte pkt-line maximum rather than a
+  per-machine structural capacity parameter.
 - `GitMinimalWireMachine` owns lazy sink creation. A complete control frame with
   no raw tail must not create a raw sink; the raw sink is created only when raw
-  bytes are actually observed. The control slice passed into sink creation is
-  borrowed for that call; the factory must parse, copy, or retain it before
-  returning if it needs the bytes later.
+  bytes are actually observed. The raw sink factory receives `ControlSuccess`
+  metadata from the reader, not a control byte buffer.
 - `GitMinimalWireMachine.RawSink` owns the retained raw slices passed to it. The
   caller releases the original inbound buffer when the state machine returns a
   positive release decision.
