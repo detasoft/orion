@@ -95,6 +95,11 @@ It should not depend on:
 - SSH client/server implementations;
 - ACL or authorization services.
 
+This module should use Netty `ByteBuf` as the production byte boundary. Depend
+on the smallest practical Netty buffer artifact, not `netty-all`, so Git wire
+code can share the same buffer model as `core/communication` without pulling in
+transport stacks.
+
 Add a dependency boundary test proving production classes in this module do not
 import `org.eclipse.jgit` and do not depend on JGit artifacts transitively.
 
@@ -116,6 +121,10 @@ Introduce wire-level models:
 - `GitWirePhase`;
 - `GitSideBandMode`;
 - `GitSideBandPacket`;
+- `GitWireSession`;
+- `GitStructuralBuffer`;
+- `GitRawSink`;
+- `GitWireOutput`;
 - `GitProtocolLimits`.
 
 Keep these models wire-focused. Service-specific request models such as
@@ -143,8 +152,9 @@ Decoder requirements:
 - preserve binary payload exactly;
 - expose byte offset or packet index in errors;
 - distinguish clean flush from unexpected end-of-stream;
-- stream packet payloads through the caller's buffer or channel without copying
-  the whole packet into a second byte array.
+- parse bounded control payloads through the session structural buffer;
+- stream raw payloads through `GitRawSink` without copying the whole packet into
+  a second byte array.
 
 Encoder requirements:
 
@@ -156,39 +166,126 @@ Encoder requirements:
 Text helpers should be explicit about LF handling because Git packet grammars
 vary by context.
 
-## Streaming Entry Point
+## ByteBuf Session Boundary
 
-Use `ReadableByteChannel` as the core parser boundary and keep `InputStream` as a
-compatibility adapter.
+Use `ByteBuf` as the core parser boundary.
+
+The core should expose a chunk-driven session API:
+
+```text
+GitWireSession.accept(ByteBuf input, GitRawSink rawSink, GitWireOutput output)
+```
+
+The transport/session boundary owns accepted input buffers and releases them
+after all readable bytes in that input have either been consumed, copied into
+bounded control state, or handed to a downstream sink. Lower-level control
+readers must not release inbound buffers or expose copied frame objects. They
+advance `readerIndex` over the exact control bytes they consume and return parser
+state such as `NEEDS_MORE_CONTROL`, `CONTROL_COMPLETE`, or `ALREADY_COMPLETE`.
+Buffer ownership and any decision to copy consumed control bytes into structural
+state remain with the calling state machine. Calling a completed control reader
+should not be a fatal protocol error by itself; it should preserve the input and
+return an already-complete result so the owner can route the buffer to the next
+phase. Stream, channel, socket, SSH, and HTTP adapters may exist outside the
+core, but they should adapt into `ByteBuf` chunks before invoking wire parsing.
 
 Rationale:
 
-- native socket/NIO work can feed channels directly;
-- `InputStream` callers can be supported through `Channels.newChannel(input)`;
-- a channel reader can own a small fixed header buffer and stream payload bytes
-  into caller-provided `ByteBuffer` instances;
-- the implementation can avoid allocating a full packet copy only for parser
-  diagnostics.
+- `core/communication` already uses `ByteBuf` for ownership, slicing, and
+  network handoff;
+- native Git transports can feed pooled direct buffers without converting to
+  `ByteBuffer`;
+- parsing code can use `ByteBuf` absolute reads for fixed-width Git headers;
+- output can be produced as `ByteBuf` chunks and flushed by the transport layer;
+- compatibility adapters for `InputStream` and `OutputStream` stay at the edge
+  while the protocol state machine remains buffer-native.
+
+## Structural Buffer and Raw Bypass
+
+Each Git wire session owns one fixed-size structural buffer, initially 32 KiB.
+This buffer is only for protocol/control structures:
+
+- initial service request;
+- pkt-line headers and bounded text payloads;
+- capability lines;
+- protocol v2 arguments and section delimiters;
+- receive-pack command lines;
+- report-status lines;
+- bounded progress and error previews.
+
+Raw pack data, blob data, and large side-band band-1 payloads must not be
+retained in the structural buffer. Once the parser reaches a raw phase, readable
+input slices are forwarded to `GitRawSink` and released according to the sink
+contract.
+
+The accumulator should prefer a simple merged `ByteBuf` for structural data.
+If a complete control structure is available in the current inbound `ByteBuf`,
+the parser can read it directly from that buffer without copying. If the control
+structure is incomplete and the parser must wait for later input, the owning
+state machine copies only the bounded consumed control fragment into the session
+structural buffer. Release a fragmented inbound buffer only after the state
+machine has consumed or copied all bytes it needs from that input. If completing
+the control structure leaves unread bytes in the same inbound buffer, preserve
+that buffer until the remaining bytes have been parsed by the next phase. Do not
+retain a large pooled inbound buffer only to preserve a small incomplete control
+tail.
+
+This gives the common path zero copy for complete structures while keeping memory
+bounded for slow or fragmented clients. It should reject control payloads that
+exceed the configured structural limit rather than expanding without bound.
+
+The connection-level parser should be a small state machine around the specific
+control and raw branches. It should create downstream sinks lazily, only when the
+state first observes bytes that actually need that sink. For example, reading a
+complete control frame with no raw tail should not create a raw sink; the sink is
+created when the next inbound buffer contains raw bytes or when the current
+buffer has a preserved readable tail after control parsing.
+
+`CompositeByteBuf` can be used internally only when it measurably improves an
+edge case. It should not be the default control-path representation because
+fixed-width parsing, component cleanup, and reference ownership are simpler with
+a merged structural buffer.
+
+The session must distinguish three payload ownership modes:
+
+- borrowed slice: used synchronously during the current parse step and not
+  retained;
+- retained slice: passed to a downstream component that explicitly owns release;
+- copied structural bytes: small bounded control data kept in the reusable
+  session buffer.
+
+Diagnostics must be bounded. Trace formatting can keep packet metadata and a
+small configurable preview, but the default transport path must not materialize
+complete pkt-line payloads or raw pack tails just to log or round-trip them.
+
+## Compatibility Entry Points
+
+Keep compatibility adapters outside the core parser:
+
+- `InputStream` to `ByteBuf` reader for the current `GitRepository` boundary;
+- `OutputStream` writer for compatibility with JGit-backed repositories;
+- socket, SSH, and HTTP adapters that already receive buffers or can allocate
+  buffers at the transport edge;
+- scripted fixture adapter that can replay directional byte chunks.
 
 The first implementation may keep the existing `GitTransportInputStream` class as
 an adapter for `GitRepository.upload(...)` and `GitRepository.receive(...)`, but
 the parsing state machine should live below it and should not depend on
 `InputStream`.
 
-Diagnostics must be bounded. Trace formatting can keep packet metadata and a
-small configurable preview, but the default transport path must not materialize
-complete pkt-line payloads or raw pack tails just to log or round-trip them.
-
 ## Packet Readers and Writers
 
 Add small stateful readers/writers:
 
-- `GitPktLineChannelReader`;
+- `GitWireSession`;
+- `GitStructuralBuffer`;
 - `GitPktLineReader`;
 - `GitPktLineWriter`;
 - `GitPacketSequenceReader`;
 - `GitPacketSequenceWriter`;
-- `GitRawPayloadBridge`.
+- `GitRawPayloadBridge`;
+- `GitRawSink`;
+- `GitWireOutput`.
 
 The raw payload bridge is needed for phases where the stream changes from
 pkt-line framing to raw pack bytes or side-band packet streams.
@@ -386,12 +483,19 @@ Bands:
 
 Decoder requirements:
 
-- reconstruct exact band-1 bytes;
+- reconstruct exact band-1 bytes by streaming them to `GitRawSink`;
 - capture band-2 progress separately;
 - turn band-3 payload into a typed fatal error;
 - reject unknown band ids;
 - enforce packet size and total payload limits;
 - tolerate arbitrary packet boundaries.
+
+Side-band packets use pkt-line framing, but band-1 payload is raw Git data after
+the one-byte band id has been parsed. The decoder should read the pkt-line
+length and band id as control data, then forward the remaining band-1 payload to
+`GitRawSink` in available `ByteBuf` slices. It must not accumulate the whole
+side-band-64k payload in the structural buffer. Band-2 progress and band-3 fatal
+messages are control data and must remain bounded by protocol limits.
 
 Encoder requirements:
 
@@ -455,6 +559,7 @@ payloads, or hidden ref names in user-facing messages.
 
 Add protocol limits:
 
+- structural buffer size, default 32 KiB per connection;
 - maximum pkt-line payload size;
 - maximum packet count per section;
 - maximum capability count;
@@ -465,9 +570,9 @@ Add protocol limits:
 - maximum report-status lines.
 
 Do not add a default maximum "raw pack bytes retained in memory" knob. Raw pack
-payloads should be bridged as streams or channels. Any caller that deliberately
-records raw pack bytes for a fixture or debug dump must opt in with an explicit
-byte limit.
+payloads should bypass the structural buffer and be bridged to `GitRawSink` as
+`ByteBuf` slices. Any caller that deliberately records raw pack bytes for a
+fixture or debug dump must opt in with an explicit byte limit.
 
 Service layers can add stricter limits for upload-pack wants/haves or
 receive-pack command counts.
@@ -539,7 +644,8 @@ Receive-pack service code should keep:
 
 ## Integration With Transports
 
-Transport layers should adapt byte streams to the wire core:
+Transport layers should adapt byte streams to `ByteBuf` chunks for the wire
+core:
 
 - classic socket transport;
 - future NIO transport;
@@ -548,8 +654,9 @@ Transport layers should adapt byte streams to the wire core:
 - outbound client transports from the client primitives plan.
 
 The wire core should not know whether bytes came from TCP, HTTP, SSH, or an
-in-memory fixture. It should operate on streams/sessions and expose structured
-wire state.
+in-memory fixture. It should operate on `GitWireSession` inputs and outputs and
+expose structured wire state. Stream and channel adapters are compatibility
+layers outside the parser state machine.
 
 ## Scripted Fixtures
 
@@ -595,56 +702,71 @@ of accepting every observed malformed variant.
 Phase 1: Module and dependency boundary.
 
 Create shared wire protocol package/module and dependency test that production
-code has no JGit dependency.
+code has no JGit dependency. Add the minimal Netty buffer dependency needed for
+`ByteBuf` without depending on `netty-all`.
 
-Phase 2: Pkt-line codec.
+Phase 2: ByteBuf session and structural buffer.
+
+Implement `GitWireSession`, `GitStructuralBuffer`, `GitRawSink`, and
+`GitWireOutput`. Add tests for input ownership, release behavior, fixed 32 KiB
+structural capacity, direct no-copy parsing when a control structure is complete
+in the inbound buffer, fragmented-control copying into the structural buffer,
+bounded preview diagnostics, and raw bypass handoff.
+
+Phase 3: Pkt-line codec.
 
 Implement binary-safe encoder/decoder, packet readers/writers, packet kinds,
-limits, and malformed input errors. Start with a channel-backed streaming reader
-and an `InputStream` adapter test that proves normal reads do not allocate a
-second full-packet buffer.
+limits, and malformed input errors. Start with an incremental `ByteBuf` reader
+that can parse headers and bounded control payloads split across input chunks
+without materializing raw payloads.
 
-Phase 3: Initial service request parser.
+Phase 4: Initial service request parser.
 
 Replace JGit helper use for parsing `git-upload-pack` and `git-receive-pack`
 initial commands in a native-compatible path.
 
-Phase 4: Capability registry.
+Phase 5: Capability registry.
 
 Parse and write capability sets for v0/v1 first-ref lines and protocol v2
 advertisements. Preserve unknown capabilities.
 
-Phase 5: Protocol version negotiation.
+Phase 6: Protocol version negotiation.
 
 Implement selected-version logic from transport hints and server/client support
 policy.
 
-Phase 6: Advertisement helpers.
+Phase 7: Advertisement helpers.
 
 Write v0/v1 ref advertisements and protocol v2 capability/ls-refs response
 packet sequences from caller-provided ref rows.
 
-Phase 7: Protocol v2 section parser.
+Phase 8: Protocol v2 section parser.
 
 Parse command sections, arguments, delimiters, body packets, flush, and
 response-end with limits.
 
-Phase 8: Side-band core.
+Phase 9: Side-band core.
 
-Implement side-band and side-band-64k encoder/decoder and exact band-1 stream
-reconstruction.
+Implement side-band and side-band-64k encoder/decoder. Stream exact band-1 bytes
+to `GitRawSink`; keep progress and fatal messages bounded.
 
-Phase 9: Report-status core.
+Phase 10: Report-status core.
 
 Parse and write receive-pack report-status packet sequences.
 
-Phase 10: Service integration.
+Phase 11: Compatibility adapters.
+
+Add `InputStream`/`OutputStream` compatibility adapters for the existing
+`GitRepository` boundary and scripted fixtures. Keep adapters outside the core
+parser API.
+
+Phase 12: Service integration.
 
 Refactor native protocol client primitives, native upload-pack serving, and
 native receive-pack serving to use the shared core instead of feature-local
 packet logic.
 
-Phase 11: Transport fixtures.
+Phase 13: Transport fixtures.
 
 Wire scripted transcripts into native transport baseline tests and add Git CLI
 compatibility fixtures where practical.
@@ -654,6 +776,19 @@ compatibility fixtures where practical.
 Cover at least these cases:
 
 - production wire protocol module has no JGit dependency;
+- production wire protocol module depends on Netty buffer APIs without pulling in
+  `netty-all`;
+- session parser accepts `ByteBuf` chunks and releases consumed input buffers;
+- complete control structures available in one inbound `ByteBuf` are parsed
+  directly without copying into the structural buffer, and the control reader
+  leaves the borrowed inbound buffer owned by the caller;
+- fragmented control structures are copied into the fixed structural buffer and
+  the original inbound buffers are released only when fully consumed;
+- fragmented control completion preserves the completing inbound buffer when it
+  still contains readable bytes for the next phase;
+- structural buffer keeps bounded control data within the configured 32 KiB
+  limit;
+- raw pack payload bypasses the structural buffer and reaches `GitRawSink`;
 - pkt-line codec handles data, flush, delimiter, response-end, binary payloads,
   malformed hex, short lengths, oversized packets, and truncation;
 - encoder preserves payload bytes and only adds LF through explicit text helper;
@@ -671,7 +806,9 @@ Cover at least these cases:
   and response-end;
 - protocol v2 parser rejects duplicate or malformed sections according to
   service policy;
-- side-band decoder reconstructs exact band-1 pack bytes split across packets;
+- side-band decoder streams exact band-1 pack bytes split across packets and
+  input buffers;
+- side-band progress retention is bounded and does not retain pack data;
 - side-band encoder splits payload into legal packet sizes;
 - side-band fatal payload becomes a typed error;
 - report-status parser handles unpack ok, unpack failure, per-ref ok, per-ref
