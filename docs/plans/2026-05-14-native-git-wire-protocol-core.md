@@ -103,6 +103,63 @@ transport stacks.
 Add a dependency boundary test proving production classes in this module do not
 import `org.eclipse.jgit` and do not depend on JGit artifacts transitively.
 
+## Responsibility Zones
+
+Current prototype zones:
+
+- `GitFixedControlFrameReader` is only a bounded control cursor. It consumes
+  exactly the control bytes assigned to it by advancing the inbound
+  `ByteBuf.readerIndex()` and returns `ControlReadState`. It does not allocate,
+  copy, retain, release, expose frame objects, or decide what happens to the
+  consumed bytes.
+- `GitMinimalWireMachine` owns accepted inbound buffers. It tracks the current
+  phase, owns the structural control buffer, records the `readerIndex` range
+  consumed by the control reader, copies that range only when needed for current
+  control state, releases inbound buffers when fully handled, and forwards raw
+  tails to the raw sink.
+- `GitMinimalWireMachine` owns lazy sink creation. A complete control frame with
+  no raw tail must not create a raw sink; the raw sink is created only when raw
+  bytes are actually observed.
+- `GitMinimalWireMachine.RawSink` owns the retained raw slices passed to it. The
+  state machine releases the original inbound buffer after the retained raw slice
+  has been handed off.
+
+Planned production zones:
+
+- Transport adapters convert sockets, SSH commands, HTTP bodies, streams, or test
+  fixtures into inbound `ByteBuf` chunks and call the wire session. Transport
+  adapters should not parse Git grammar beyond transport-specific request
+  metadata.
+- `GitWireSession` is the connection-level state machine. It owns inbound buffer
+  lifecycle after `accept`, phase transitions, structural buffer use, lazy raw
+  sink creation, and routing between control readers, pkt-line readers, raw
+  payload bridges, and service-specific handlers.
+- Control readers are small stateful cursors. They consume only the bytes for the
+  structure they recognize, expose parser state, counters, and limit failures,
+  and leave ownership, copying, and routing decisions to `GitWireSession`.
+- `GitStructuralBuffer` is session-owned bounded storage for fragmented control
+  data. It should be the only default place where small control fragments are
+  copied across inbound buffers.
+- `GitPktLineReader` owns pkt-line length/header state and bounded control
+  payload parsing. It must not materialize large raw payloads; when pkt-line
+  framing carries raw data, it should expose consumed ranges or stream retained
+  slices through the session's raw bridge.
+- `GitRawPayloadBridge` owns transitions from structured parsing into raw byte
+  forwarding, including pack bodies and side-band band-1 payloads. It should
+  forward retained slices to `GitRawSink` without copying complete raw packets
+  into heap arrays.
+- `GitRawSink` owns raw byte ingestion into the next subsystem, such as pack
+  indexing, disk writes, quarantine storage, or test capture. It must explicitly
+  define whether it consumes retained slices synchronously or asynchronously.
+- Wire writers own outbound `ByteBuf` creation and packet framing. Service
+  layers provide semantic commands or response data, not raw packet formatting.
+- Upload-pack and receive-pack service layers own negotiation, authorization
+  decisions, ref policy, pack creation or ingestion, and report-status semantics.
+  They should consume wire primitives and raw sinks rather than depending on
+  transport buffers directly.
+- Repository storage, pack indexing, object validation, ACL, and authorization
+  remain outside the wire core.
+
 ## Core Value Objects
 
 Introduce wire-level models:
