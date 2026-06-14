@@ -90,6 +90,19 @@ public class ServiceLifecycleStateMachineAdapter {
         return Void.EMPTY;
     }
 
+    /**
+     * Lifecycle contract used by the adapter to resolve a leaf service state after start and decide whether stop
+     * should touch the service.
+     *
+     * <pre>
+     * NEW      --START--> DISABLED | RUNNING | ERR
+     * DISABLED --START--> DISABLED | RUNNING | ERR
+     * NEW      --STOP--> FIN
+     * DISABLED --STOP--> FIN
+     * RUNNING  --STOP--> FIN | ERR
+     * ERR      --STOP--> FIN | ERR
+     * </pre>
+     */
     public interface ServiceLifecycle {
         void onStart() throws Exception;
 

@@ -21,3 +21,4 @@
 - When asked to add comments or explanations to classes, add class-level comments only. Do not add method or constructor comments unless explicitly requested.
 - Treat class-level comments tagged with `@AiRule` as local implementation rules. When changing a class, read these comments and verify the rules still hold before finishing the change.
 - Commit messages must be a single line. Do not add a body, bullet points, or multi-line descriptions — the entire meaning goes in the subject line.
+- Use `TASKS.md` to track only current high-level implementation work and a small set of upcoming high-level tasks. The current section may contain multiple active tasks, not just one. Keep it short, update it when starting or finishing substantial work, and leave detailed designs and implementation steps in `docs/plans/`.

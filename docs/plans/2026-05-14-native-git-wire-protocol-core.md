@@ -142,7 +142,9 @@ Decoder requirements:
 - reject truncated packet payloads;
 - preserve binary payload exactly;
 - expose byte offset or packet index in errors;
-- distinguish clean flush from unexpected end-of-stream.
+- distinguish clean flush from unexpected end-of-stream;
+- stream packet payloads through the caller's buffer or channel without copying
+  the whole packet into a second byte array.
 
 Encoder requirements:
 
@@ -154,10 +156,34 @@ Encoder requirements:
 Text helpers should be explicit about LF handling because Git packet grammars
 vary by context.
 
+## Streaming Entry Point
+
+Use `ReadableByteChannel` as the core parser boundary and keep `InputStream` as a
+compatibility adapter.
+
+Rationale:
+
+- native socket/NIO work can feed channels directly;
+- `InputStream` callers can be supported through `Channels.newChannel(input)`;
+- a channel reader can own a small fixed header buffer and stream payload bytes
+  into caller-provided `ByteBuffer` instances;
+- the implementation can avoid allocating a full packet copy only for parser
+  diagnostics.
+
+The first implementation may keep the existing `GitTransportInputStream` class as
+an adapter for `GitRepository.upload(...)` and `GitRepository.receive(...)`, but
+the parsing state machine should live below it and should not depend on
+`InputStream`.
+
+Diagnostics must be bounded. Trace formatting can keep packet metadata and a
+small configurable preview, but the default transport path must not materialize
+complete pkt-line payloads or raw pack tails just to log or round-trip them.
+
 ## Packet Readers and Writers
 
 Add small stateful readers/writers:
 
+- `GitPktLineChannelReader`;
 - `GitPktLineReader`;
 - `GitPktLineWriter`;
 - `GitPacketSequenceReader`;
@@ -436,8 +462,12 @@ Add protocol limits:
 - maximum initial command size;
 - maximum protocol v2 argument count;
 - maximum side-band progress bytes retained;
-- maximum report-status lines;
-- maximum raw pack bytes when a caller asks the core to bridge raw payload.
+- maximum report-status lines.
+
+Do not add a default maximum "raw pack bytes retained in memory" knob. Raw pack
+payloads should be bridged as streams or channels. Any caller that deliberately
+records raw pack bytes for a fixture or debug dump must opt in with an explicit
+byte limit.
 
 Service layers can add stricter limits for upload-pack wants/haves or
 receive-pack command counts.
@@ -570,7 +600,9 @@ code has no JGit dependency.
 Phase 2: Pkt-line codec.
 
 Implement binary-safe encoder/decoder, packet readers/writers, packet kinds,
-limits, and malformed input errors.
+limits, and malformed input errors. Start with a channel-backed streaming reader
+and an `InputStream` adapter test that proves normal reads do not allocate a
+second full-packet buffer.
 
 Phase 3: Initial service request parser.
 
