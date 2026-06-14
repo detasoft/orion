@@ -107,22 +107,32 @@ import `org.eclipse.jgit` and do not depend on JGit artifacts transitively.
 
 Current prototype zones:
 
-- `GitFixedControlFrameReader` is only a bounded control cursor. It consumes
-  exactly the control bytes assigned to it by advancing the inbound
-  `ByteBuf.readerIndex()` and returns `ControlReadState`. It does not allocate,
-  copy, retain, release, expose frame objects, or decide what happens to the
-  consumed bytes.
-- `GitMinimalWireMachine` owns accepted inbound buffers. It tracks the current
-  phase, owns the structural control buffer, records the `readerIndex` range
-  consumed by the control reader, copies that range only when needed for current
-  control state, releases inbound buffers when fully handled, and forwards raw
-  tails to the raw sink.
+- `GitFixedControlFrameReader` is currently a bounded pkt-line control cursor.
+  It requires the four-byte hex pkt-line header to be present in the current
+  input buffer, handles Git special packets `0000`, `0001`, and `0002`, rejects
+  invalid lengths, and consumes exactly one pkt-line frame. If the frame is
+  complete in the current input, it uses a retained slice and performs no byte
+  copy. If the frame payload is fragmented after a complete header, it allocates
+  bounded structural storage lazily, copies consumed fragments, and advances
+  `readerIndex` over copied bytes. Calling its byte output before completion
+  throws. Calling `accept` again after completion is an illegal state.
+- `GitMinimalWireMachine` processes accepted inbound buffers and returns whether
+  the caller should release the original input reference after `accept`. It
+  tracks the current phase, owns the readers, routes on `ControlReadState`, and
+  forwards raw tails to the raw sink. It does not store borrowed input buffers
+  and does not manually advance `readerIndex` for control bytes. If a no-copy
+  complete control frame has no raw tail yet, the reader holds the retained
+  control slice until raw sink creation or `close()`. The current prototype
+  accepts Git's fixed 65,520 byte pkt-line maximum rather than a per-machine
+  structural capacity parameter.
 - `GitMinimalWireMachine` owns lazy sink creation. A complete control frame with
   no raw tail must not create a raw sink; the raw sink is created only when raw
-  bytes are actually observed.
+  bytes are actually observed. The control slice passed into sink creation is
+  borrowed for that call; the factory must parse, copy, or retain it before
+  returning if it needs the bytes later.
 - `GitMinimalWireMachine.RawSink` owns the retained raw slices passed to it. The
-  state machine releases the original inbound buffer after the retained raw slice
-  has been handed off.
+  caller releases the original inbound buffer when the state machine returns a
+  positive release decision.
 
 Planned production zones:
 
@@ -134,9 +144,10 @@ Planned production zones:
   lifecycle after `accept`, phase transitions, structural buffer use, lazy raw
   sink creation, and routing between control readers, pkt-line readers, raw
   payload bridges, and service-specific handlers.
-- Control readers are small stateful cursors. They consume only the bytes for the
-  structure they recognize, expose parser state, counters, and limit failures,
-  and leave ownership, copying, and routing decisions to `GitWireSession`.
+- Control readers are small stateful cursors. Header readers consume only their
+  headers and expose typed metadata. Bounded byte readers consume exactly known
+  remaining structure bytes, own copy/no-copy decisions for fragmented input,
+  and leave lifecycle and routing decisions to `GitWireSession`.
 - `GitStructuralBuffer` is session-owned bounded storage for fragmented control
   data. It should be the only default place where small control fragments are
   copied across inbound buffers.
@@ -209,7 +220,8 @@ Decoder requirements:
 - preserve binary payload exactly;
 - expose byte offset or packet index in errors;
 - distinguish clean flush from unexpected end-of-stream;
-- parse bounded control payloads through the session structural buffer;
+- parse bounded control payloads through lazy structural storage only when an
+  input fragment must survive until later input;
 - stream raw payloads through `GitRawSink` without copying the whole packet into
   a second byte array.
 
@@ -230,21 +242,24 @@ Use `ByteBuf` as the core parser boundary.
 The core should expose a chunk-driven session API:
 
 ```text
-GitWireSession.accept(ByteBuf input, GitRawSink rawSink, GitWireOutput output)
+boolean GitWireSession.accept(ByteBuf input, GitRawSink rawSink, GitWireOutput output)
 ```
 
-The transport/session boundary owns accepted input buffers and releases them
-after all readable bytes in that input have either been consumed, copied into
-bounded control state, or handed to a downstream sink. Lower-level control
-readers must not release inbound buffers or expose copied frame objects. They
-advance `readerIndex` over the exact control bytes they consume and return parser
-state such as `NEEDS_MORE_CONTROL`, `CONTROL_COMPLETE`, or `ALREADY_COMPLETE`.
-Buffer ownership and any decision to copy consumed control bytes into structural
-state remain with the calling state machine. Calling a completed control reader
-should not be a fatal protocol error by itself; it should preserve the input and
-return an already-complete result so the owner can route the buffer to the next
-phase. Stream, channel, socket, SSH, and HTTP adapters may exist outside the
-core, but they should adapt into `ByteBuf` chunks before invoking wire parsing.
+The transport/session boundary coordinates accepted input buffer lifecycle. The
+wire session consumes readable bytes, copies bounded fragmented control state
+when needed, hands retained raw slices to downstream sinks, and returns whether
+the caller should release the original input reference after `accept`. Lower-level
+readers must not release inbound buffers. They advance `readerIndex` over bytes
+they consume, keep incomplete state internally, and expose completed outputs
+through methods that throw if called before the output is ready. Readers return a
+narrow read state for the current `accept` call, and the session uses that state
+for input lifecycle decisions without storing borrowed input state. Once
+complete, the session derives control bytes from the reader-owned retained slice
+for no-copy frames, or from the reader-owned lazy buffer for fragmented frames.
+Calling `accept` on a completed control reader is an illegal state and must not
+consume the new input. Stream, channel, socket, SSH, and HTTP adapters may exist
+outside the core, but they should adapt into `ByteBuf` chunks before invoking
+wire parsing.
 
 Rationale:
 
@@ -259,8 +274,11 @@ Rationale:
 
 ## Structural Buffer and Raw Bypass
 
-Each Git wire session owns one fixed-size structural buffer, initially 32 KiB.
-This buffer is only for protocol/control structures:
+Git wire sessions should not allocate structural storage on creation. Structural
+storage is allocated only when a protocol/control structure is fragmented and
+some consumed bytes must survive until a later input. The maximum pkt-line frame
+length is the Git protocol limit of 65,520 bytes; services may impose stricter
+limits for specific sections. Structural storage is only for:
 
 - initial service request;
 - pkt-line headers and bounded text payloads;
@@ -278,18 +296,24 @@ contract.
 The accumulator should prefer a simple merged `ByteBuf` for structural data.
 If a complete control structure is available in the current inbound `ByteBuf`,
 the parser can read it directly from that buffer without copying. If the control
-structure is incomplete and the parser must wait for later input, the owning
-state machine copies only the bounded consumed control fragment into the session
-structural buffer. Release a fragmented inbound buffer only after the state
-machine has consumed or copied all bytes it needs from that input. If completing
-the control structure leaves unread bytes in the same inbound buffer, preserve
-that buffer until the remaining bytes have been parsed by the next phase. Do not
-retain a large pooled inbound buffer only to preserve a small incomplete control
-tail.
+structure is incomplete and the parser must wait for later input, the bounded
+byte reader copies only the consumed control fragment into lazy structural
+storage. Release a fragmented inbound buffer only after the reader has consumed
+or copied all bytes it needs from that input. If completing the control
+structure leaves unread bytes in the same inbound buffer, the session continues
+through later phases in the same `accept` call while the input remains readable.
+If a no-copy control frame completes without raw tail, the reader may keep a
+retained control slice until the control bytes have been handed to the next sink
+or until session close, while the caller can release the original input
+reference according to the session's release decision. Do not retain a large
+pooled inbound buffer only to preserve a small incomplete control tail. The
+current prototype does not fragment the four-byte pkt-line header; split header
+support is deferred until the real pkt-line reader is introduced.
 
 This gives the common path zero copy for complete structures while keeping memory
 bounded for slow or fragmented clients. It should reject control payloads that
-exceed the configured structural limit rather than expanding without bound.
+exceed the Git pkt-line limit or a stricter service limit rather than expanding
+without bound.
 
 The connection-level parser should be a small state machine around the specific
 control and raw branches. It should create downstream sinks lazily, only when the
@@ -297,6 +321,9 @@ state first observes bytes that actually need that sink. For example, reading a
 complete control frame with no raw tail should not create a raw sink; the sink is
 created when the next inbound buffer contains raw bytes or when the current
 buffer has a preserved readable tail after control parsing.
+Control slices passed to sink factories are call-scoped borrows; after factory
+creation returns, the session may release the retained inbound buffer or
+fragmented structural storage.
 
 `CompositeByteBuf` can be used internally only when it measurably improves an
 edge case. It should not be the default control-path representation because
@@ -616,7 +643,7 @@ payloads, or hidden ref names in user-facing messages.
 
 Add protocol limits:
 
-- structural buffer size, default 32 KiB per connection;
+- fixed Git pkt-line frame maximum, 65,520 bytes;
 - maximum pkt-line payload size;
 - maximum packet count per section;
 - maximum capability count;
@@ -765,10 +792,12 @@ code has no JGit dependency. Add the minimal Netty buffer dependency needed for
 Phase 2: ByteBuf session and structural buffer.
 
 Implement `GitWireSession`, `GitStructuralBuffer`, `GitRawSink`, and
-`GitWireOutput`. Add tests for input ownership, release behavior, fixed 32 KiB
-structural capacity, direct no-copy parsing when a control structure is complete
-in the inbound buffer, fragmented-control copying into the structural buffer,
-bounded preview diagnostics, and raw bypass handoff.
+`GitWireOutput`. Add tests for input ownership, release behavior, fixed Git
+pkt-line maximum length, no structural allocation when a control structure is
+complete in the inbound buffer, reader-owned fragmented-control copying into
+lazy structural storage, output methods throwing before readiness, absence of
+reader state enums in session state, bounded preview diagnostics, and raw bypass
+handoff.
 
 Phase 3: Pkt-line codec.
 
@@ -835,16 +864,18 @@ Cover at least these cases:
 - production wire protocol module has no JGit dependency;
 - production wire protocol module depends on Netty buffer APIs without pulling in
   `netty-all`;
-- session parser accepts `ByteBuf` chunks and releases consumed input buffers;
+- session parser accepts `ByteBuf` chunks and releases consumed input buffers,
+  except when a no-copy complete control frame must be held until raw sink
+  creation or session close;
 - complete control structures available in one inbound `ByteBuf` are parsed
-  directly without copying into the structural buffer, and the control reader
-  leaves the borrowed inbound buffer owned by the caller;
-- fragmented control structures are copied into the fixed structural buffer and
-  the original inbound buffers are released only when fully consumed;
+  directly without copying into the structural buffer, and the state machine
+  continues using the same input range based on the advanced `readerIndex`;
+- fragmented control structures are copied into lazy structural storage and the
+  original inbound buffers are released only when fully consumed;
 - fragmented control completion preserves the completing inbound buffer when it
   still contains readable bytes for the next phase;
-- structural buffer keeps bounded control data within the configured 32 KiB
-  limit;
+- structural storage keeps bounded control data within the fixed Git pkt-line
+  limit and is not allocated for complete no-copy frames;
 - raw pack payload bypasses the structural buffer and reaches `GitRawSink`;
 - pkt-line codec handles data, flush, delimiter, response-end, binary payloads,
   malformed hex, short lengths, oversized packets, and truncation;

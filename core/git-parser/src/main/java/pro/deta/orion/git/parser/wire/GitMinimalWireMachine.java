@@ -2,93 +2,69 @@ package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import pro.deta.orion.lifecycle.state.TestOnly;
 
-import java.util.Arrays;
 import java.util.Objects;
 
-/**
- * Minimal connection-level state machine for the ByteBuf control/raw ownership
- * model. It reads one fixed-size control frame, switches to raw mode, and lazily
- * creates the raw sink only when raw bytes are actually available.
- */
 public final class GitMinimalWireMachine implements AutoCloseable {
     private final GitFixedControlFrameReader controlReader;
-    private final ByteBuf controlBuffer;
     private final RawSinkFactory rawSinkFactory;
-    private byte[] controlBytes;
     private RawSink rawSink;
     private Phase phase = Phase.CONTROL;
 
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
-            int controlFrameSize,
-            int structuralCapacity,
             RawSinkFactory rawSinkFactory) {
-        if (structuralCapacity < controlFrameSize) {
-            throw new IllegalArgumentException("Structural capacity must fit one frame");
-        }
-        controlReader = new GitFixedControlFrameReader(controlFrameSize);
-        controlBuffer = Objects.requireNonNull(allocator, "allocator").buffer(structuralCapacity, structuralCapacity);
+        controlReader = new GitFixedControlFrameReader(Objects.requireNonNull(allocator, "allocator"));
         this.rawSinkFactory = Objects.requireNonNull(rawSinkFactory, "rawSinkFactory");
     }
 
-    public void accept(ByteBuf input) {
+    public boolean accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
-        if (phase == Phase.CONTROL) {
-            int controlStart = input.readerIndex();
-            GitFixedControlFrameReader.ControlReadState result = controlReader.accept(input);
-            int controlLength = input.readerIndex() - controlStart;
-            if (controlLength > 0) {
-                controlBuffer.writeBytes(input, controlStart, controlLength);
-            }
-            if (result == GitFixedControlFrameReader.ControlReadState.NEEDS_MORE_CONTROL) {
-                input.release();
-                return;
-            }
-            if (result == GitFixedControlFrameReader.ControlReadState.CONTROL_COMPLETE) {
-                controlBytes = controlBytesFromBuffer();
-                controlBuffer.clear();
+        while (input.isReadable()) {
+            if (phase == Phase.CONTROL) {
+                GitFixedControlFrameReader.ControlReadState state = controlReader.accept(input);
+                if (state == GitFixedControlFrameReader.ControlReadState.NEEDS_MORE_DATA) {
+                    return true;
+                }
                 phase = Phase.RAW;
+                continue;
             }
-            if (!input.isReadable()) {
-                input.release();
-                return;
+            if (phase == Phase.RAW) {
+                forwardRaw(input);
+                return true;
             }
         }
-        forwardRaw(input);
+        return true;
     }
 
-    public byte[] controlBytes() {
-        if (controlBytes == null) {
-            return null;
-        }
-        return Arrays.copyOf(controlBytes, controlBytes.length);
-    }
-
-    private byte[] controlBytesFromBuffer() {
-        byte[] bytes = new byte[controlBuffer.readableBytes()];
-        controlBuffer.getBytes(controlBuffer.readerIndex(), bytes);
-        return bytes;
+    @TestOnly
+    ComposedState state() {
+        return new ComposedState(
+                phase,
+                rawSink != null,
+                controlReader.bufferedBytes());
     }
 
     private void forwardRaw(ByteBuf input) {
         if (!input.isReadable()) {
-            input.release();
             return;
         }
+        RawSink sink = rawSink();
         ByteBuf raw = input.readRetainedSlice(input.readableBytes());
-        try {
-            rawSink().accept(raw);
-        } finally {
-            input.release();
-        }
+        sink.accept(raw);
     }
 
     private RawSink rawSink() {
         if (rawSink == null) {
-            rawSink = Objects.requireNonNull(rawSinkFactory.create(controlBytes()), "rawSink");
+            rawSink = Objects.requireNonNull(rawSinkFactory.create(control()), "rawSink");
+            controlReader.releaseCompletedStorage();
         }
         return rawSink;
+    }
+
+    private ByteBuf control() {
+        return controlReader.bytes();
     }
 
     @Override
@@ -98,18 +74,24 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 rawSink.close();
             }
         } finally {
-            controlBuffer.release();
+            controlReader.close();
         }
     }
 
-    private enum Phase {
+    enum Phase {
         CONTROL,
         RAW
     }
 
+    record ComposedState(
+            Phase phase,
+            boolean rawSinkCreated,
+            int bufferedControlBytes) {
+    }
+
     @FunctionalInterface
     public interface RawSinkFactory {
-        RawSink create(byte[] controlBytes);
+        RawSink create(ByteBuf control);
     }
 
     public interface RawSink extends AutoCloseable {
