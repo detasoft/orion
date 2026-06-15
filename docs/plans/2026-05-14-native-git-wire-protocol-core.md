@@ -112,11 +112,11 @@ Current prototype zones:
   `0000`, `0001`, and `0002`, rejects invalid lengths, and leaves payload or raw
   tail bytes in the original input buffer. If the header is complete in the
   current input, it advances `readerIndex` without copying. If the header is
-  fragmented, it uses `CachingByteBuf` in buffered mode to own one fixed
-  four-byte cache until the header completes. Its `accept` result is
-  `ControlState`: `MoreDataNeeded` while fragmented input is pending, or
-  `Success(type, length)` where `length` is the pkt-line wire length. Calling
-  `accept` again after completion is an illegal state.
+  fragmented, it returns a `ControlState.MoreDataNeeded` carrying a bounded
+  `CachingByteBuf` fragment owned by the caller state. The reader itself is
+  stateless: callers pass the previous `ControlState` into `accept`, and the
+  reader returns the next `ControlState`. Completed output is
+  `Success(type, length)` where `length` is the pkt-line wire length.
 - `CachingByteBuf` is a generic fixed-size cache for fragmented structural
   reads. `BufferedCaching` copies bytes into one owned buffer; `CompositeCaching`
   retains input slices in a composite buffer. Each use case chooses the strategy
@@ -125,20 +125,23 @@ Current prototype zones:
   forwards retained slices from inbound buffers to a sink until the declared
   byte count reaches zero.
 - `GitMinimalWireMachine` processes accepted inbound buffers and returns whether
-  the caller should release the original input reference after `accept`. It
-  tracks the current phase, owns the readers, routes on `ControlState`, and
-  forwards exactly `length - 4` pkt-line payload bytes to the raw sink before
-  returning to header reading. It does not store borrowed input buffers and does
-  not manually advance `readerIndex` for control bytes. The current prototype
-  accepts Git's fixed 65,520 byte pkt-line maximum rather than a per-machine
-  structural capacity parameter.
-- `GitMinimalWireMachine` owns lazy sink creation. A complete control frame with
-  no raw tail must not create a raw sink; the raw sink is created only when raw
-  bytes are actually observed. The raw sink factory receives `ControlSuccess`
-  metadata from the reader, not a control byte buffer.
-- `GitMinimalWireMachine.RawSink` owns the retained raw slices passed to it. The
-  caller releases the original inbound buffer when the state machine returns a
-  positive release decision.
+  the caller should release the original input reference after `accept`. It owns
+  all durable wire state in one place: current phase, current control state,
+  lazy raw payload state, and raw target creation state. Readers and `RawSink`
+  are stateless helpers called by the machine. The machine routes on
+  `ControlState` and forwards exactly `length - 4` pkt-line payload bytes to the
+  raw target before returning to header reading. It does not store borrowed input
+  buffers and does not manually advance `readerIndex` for control bytes. The
+  current prototype accepts Git's fixed 65,520 byte pkt-line maximum rather than
+  a per-machine structural capacity parameter.
+- `GitMinimalWireMachine` owns lazy raw target creation. A complete control frame
+  with no raw tail must not create a raw target; the raw target is created only
+  when raw bytes are actually observed. The raw target factory receives
+  `ControlSuccess` metadata from the reader, not a control byte buffer.
+- `RawSink` is a final stateless helper. It forwards retained raw slices to the
+  caller-owned raw target and owns no durable state. The raw target owns the
+  retained raw slices passed to it. The caller releases the original inbound
+  buffer when the state machine returns a positive release decision.
 
 Planned production zones:
 
@@ -148,31 +151,37 @@ Planned production zones:
   metadata.
 - `GitWireSession` is the connection-level state machine. It owns inbound buffer
   lifecycle after `accept`, phase transitions, structural buffer use, lazy raw
-  sink creation, and routing between control readers, pkt-line readers, raw
-  payload bridges, and service-specific handlers.
-- Control readers are small stateful cursors. Header readers consume only their
-  headers and expose typed metadata. Bounded byte readers consume exactly known
-  remaining structure bytes, own copy/no-copy decisions for fragmented input,
-  and leave lifecycle and routing decisions to `GitWireSession`.
+  target creation, reader states, raw payload state, and routing between control
+  readers, pkt-line readers, raw payload bridges, and service-specific handlers.
+  All durable parser state must be inspectable through this session/machine
+  state, not hidden inside individual readers.
+- Control readers are stateless helpers. Header readers consume only their
+  headers and return typed state transitions. Bounded byte readers consume
+  exactly known remaining structure bytes, make copy/no-copy decisions for
+  fragmented input, and return the next caller-owned state. They leave lifecycle,
+  durable state storage, and routing decisions to `GitWireSession`.
 - `GitStructuralBuffer` is session-owned bounded storage for fragmented control
   data. It should be the only default place where small control fragments are
   copied across inbound buffers.
-- `GitPktLineReader` owns pkt-line length/header state and bounded control
-  payload parsing. It must not materialize large raw payloads; when pkt-line
-  framing carries raw data, it should expose consumed ranges or stream retained
-  slices through the session's raw bridge.
+- `GitPktLineReader` parses pkt-line length/header transitions from caller-owned
+  state and bounded control payload state owned by `GitWireSession`. It must not
+  materialize large raw payloads; when pkt-line framing carries raw data, it
+  should expose consumed ranges or stream retained slices through the session's
+  raw bridge.
 - `GitRawPayloadBridge` owns transitions from structured parsing into raw byte
   forwarding, including pack bodies and side-band band-1 payloads. It should
-  forward retained slices to `GitRawSink` without copying complete raw packets
-  into heap arrays.
-- `GitRawSink` owns raw byte ingestion into the next subsystem, such as pack
+  forward retained slices through the stateless `GitRawSink` helper without
+  copying complete raw packets into heap arrays.
+- `GitRawSink` is a final stateless raw forwarding helper. It owns no durable
+  state and accepts caller-owned raw target state plus retained input slices.
+- `GitRawTarget` owns raw byte ingestion into the next subsystem, such as pack
   indexing, disk writes, quarantine storage, or test capture. It must explicitly
   define whether it consumes retained slices synchronously or asynchronously.
 - Wire writers own outbound `ByteBuf` creation and packet framing. Service
   layers provide semantic commands or response data, not raw packet formatting.
 - Upload-pack and receive-pack service layers own negotiation, authorization
   decisions, ref policy, pack creation or ingestion, and report-status semantics.
-  They should consume wire primitives and raw sinks rather than depending on
+  They should consume wire primitives and raw targets rather than depending on
   transport buffers directly.
 - Repository storage, pack indexing, object validation, ACL, and authorization
   remain outside the wire core.
@@ -198,6 +207,7 @@ Introduce wire-level models:
 - `GitWireSession`;
 - `GitStructuralBuffer`;
 - `GitRawSink`;
+- `GitRawTarget`;
 - `GitWireOutput`;
 - `GitProtocolLimits`.
 
@@ -228,8 +238,8 @@ Decoder requirements:
 - distinguish clean flush from unexpected end-of-stream;
 - parse bounded control payloads through lazy structural storage only when an
   input fragment must survive until later input;
-- stream raw payloads through `GitRawSink` without copying the whole packet into
-  a second byte array.
+- stream raw payloads through the stateless `GitRawSink` helper to
+  `GitRawTarget` without copying the whole packet into a second byte array.
 
 Encoder requirements:
 
@@ -248,24 +258,23 @@ Use `ByteBuf` as the core parser boundary.
 The core should expose a chunk-driven session API:
 
 ```text
-boolean GitWireSession.accept(ByteBuf input, GitRawSink rawSink, GitWireOutput output)
+boolean GitWireSession.accept(ByteBuf input, GitRawTarget rawTarget, GitWireOutput output)
 ```
 
 The transport/session boundary coordinates accepted input buffer lifecycle. The
 wire session consumes readable bytes, copies bounded fragmented control state
-when needed, hands retained raw slices to downstream sinks, and returns whether
+when needed, hands retained raw slices to downstream raw targets, and returns whether
 the caller should release the original input reference after `accept`. Lower-level
-readers must not release inbound buffers. They advance `readerIndex` over bytes
-they consume, keep incomplete state internally, and expose completed outputs
-through methods that throw if called before the output is ready. Readers return a
-narrow read state for the current `accept` call, and the session uses that state
-for input lifecycle decisions without storing borrowed input state. Once
-complete, the session derives control bytes from the reader-owned retained slice
-for no-copy frames, or from the reader-owned lazy buffer for fragmented frames.
-Calling `accept` on a completed control reader is an illegal state and must not
-consume the new input. Stream, channel, socket, SSH, and HTTP adapters may exist
-outside the core, but they should adapt into `ByteBuf` chunks before invoking
-wire parsing.
+readers must not release inbound buffers or hide durable protocol state. They
+advance `readerIndex` over bytes they consume and return a narrow read state for
+the current `accept` call. The wire session owns and stores that state between
+calls, including incomplete fragmented-control state, so the whole parser mode is
+visible in one session/machine object. Once complete, the session derives control
+metadata from the caller-owned state for fragmented frames or from the current
+input for no-copy frames. Calling a reader with a completed control state is an
+invalid caller transition and must not consume the new input. Stream, channel,
+socket, SSH, and HTTP adapters may exist outside the core, but they should adapt
+into `ByteBuf` chunks before invoking wire parsing.
 
 Rationale:
 
@@ -296,8 +305,8 @@ limits for specific sections. Structural storage is only for:
 
 Raw pack data, blob data, and large side-band band-1 payloads must not be
 retained in the structural buffer. Once the parser reaches a raw phase, readable
-input slices are forwarded to `GitRawSink` and released according to the sink
-contract.
+input slices are forwarded through `GitRawSink` to `GitRawTarget` and released
+according to the target contract.
 
 The accumulator should prefer a simple merged `ByteBuf` for structural data.
 If a complete control structure is available in the current inbound `ByteBuf`,
@@ -308,11 +317,12 @@ storage. Release a fragmented inbound buffer only after the reader has consumed
 or copied all bytes it needs from that input. If completing the control
 structure leaves unread bytes in the same inbound buffer, the session continues
 through later phases in the same `accept` call while the input remains readable.
-If a no-copy control frame completes without raw tail, the reader may keep a
-retained control slice until the control bytes have been handed to the next sink
-or until session close, while the caller can release the original input
-reference according to the session's release decision. Do not retain a large
-pooled inbound buffer only to preserve a small incomplete control tail. The
+If a no-copy control frame completes without raw tail, the session may keep
+caller-owned state with a retained control slice until the control bytes have
+been handed to the next target or until session close, while the caller can
+release the original input reference according to the session's release decision.
+Do not retain a large pooled inbound buffer only to preserve a small incomplete
+control tail. The
 current prototype does not fragment the four-byte pkt-line header; split header
 support is deferred until the real pkt-line reader is introduced.
 
@@ -322,12 +332,12 @@ exceed the Git pkt-line limit or a stricter service limit rather than expanding
 without bound.
 
 The connection-level parser should be a small state machine around the specific
-control and raw branches. It should create downstream sinks lazily, only when the
-state first observes bytes that actually need that sink. For example, reading a
-complete control frame with no raw tail should not create a raw sink; the sink is
-created when the next inbound buffer contains raw bytes or when the current
-buffer has a preserved readable tail after control parsing.
-Control slices passed to sink factories are call-scoped borrows; after factory
+control and raw branches. It should create downstream raw targets lazily, only
+when the state first observes bytes that actually need that target. For example,
+reading a complete control frame with no raw tail should not create a raw target;
+the target is created when the next inbound buffer contains raw bytes or when the
+current buffer has a preserved readable tail after control parsing.
+Control slices passed to target factories are call-scoped borrows; after factory
 creation returns, the session may release the retained inbound buffer or
 fragmented structural storage.
 
@@ -365,7 +375,7 @@ the parsing state machine should live below it and should not depend on
 
 ## Packet Readers and Writers
 
-Add small stateful readers/writers:
+Add small stateless readers and stateful session/writer components:
 
 - `GitWireSession`;
 - `GitStructuralBuffer`;
@@ -375,6 +385,7 @@ Add small stateful readers/writers:
 - `GitPacketSequenceWriter`;
 - `GitRawPayloadBridge`;
 - `GitRawSink`;
+- `GitRawTarget`;
 - `GitWireOutput`.
 
 The raw payload bridge is needed for phases where the stream changes from
@@ -382,11 +393,14 @@ pkt-line framing to raw pack bytes or side-band packet streams.
 
 Readers should expose:
 
-- packet count;
-- bytes read;
-- current phase;
-- limit state;
-- cancellation/timeout hook.
+- a method that accepts caller-owned state plus input;
+- the next caller-owned read state;
+- typed completion metadata;
+- consumed bytes through the advanced `readerIndex`.
+
+Readers must not own packet count, current phase, or fragmented-control state.
+Those values belong to `GitWireSession`, so diagnostics and debugging can inspect
+one composed state rather than chasing hidden reader fields.
 
 Writers should expose:
 
@@ -573,7 +587,8 @@ Bands:
 
 Decoder requirements:
 
-- reconstruct exact band-1 bytes by streaming them to `GitRawSink`;
+- reconstruct exact band-1 bytes by streaming them through `GitRawSink` to
+  `GitRawTarget`;
 - capture band-2 progress separately;
 - turn band-3 payload into a typed fatal error;
 - reject unknown band ids;
@@ -583,9 +598,10 @@ Decoder requirements:
 Side-band packets use pkt-line framing, but band-1 payload is raw Git data after
 the one-byte band id has been parsed. The decoder should read the pkt-line
 length and band id as control data, then forward the remaining band-1 payload to
-`GitRawSink` in available `ByteBuf` slices. It must not accumulate the whole
-side-band-64k payload in the structural buffer. Band-2 progress and band-3 fatal
-messages are control data and must remain bounded by protocol limits.
+`GitRawTarget` through `GitRawSink` in available `ByteBuf` slices. It must not
+accumulate the whole side-band-64k payload in the structural buffer. Band-2
+progress and band-3 fatal messages are control data and must remain bounded by
+protocol limits.
 
 Encoder requirements:
 
@@ -660,9 +676,9 @@ Add protocol limits:
 - maximum report-status lines.
 
 Do not add a default maximum "raw pack bytes retained in memory" knob. Raw pack
-payloads should bypass the structural buffer and be bridged to `GitRawSink` as
-`ByteBuf` slices. Any caller that deliberately records raw pack bytes for a
-fixture or debug dump must opt in with an explicit byte limit.
+payloads should bypass the structural buffer and be bridged through `GitRawSink`
+to `GitRawTarget` as `ByteBuf` slices. Any caller that deliberately records raw
+pack bytes for a fixture or debug dump must opt in with an explicit byte limit.
 
 Service layers can add stricter limits for upload-pack wants/haves or
 receive-pack command counts.
@@ -797,13 +813,12 @@ code has no JGit dependency. Add the minimal Netty buffer dependency needed for
 
 Phase 2: ByteBuf session and structural buffer.
 
-Implement `GitWireSession`, `GitStructuralBuffer`, `GitRawSink`, and
-`GitWireOutput`. Add tests for input ownership, release behavior, fixed Git
+Implement `GitWireSession`, `GitStructuralBuffer`, `GitRawSink`, `GitRawTarget`,
+and `GitWireOutput`. Add tests for input ownership, release behavior, fixed Git
 pkt-line maximum length, no structural allocation when a control structure is
-complete in the inbound buffer, reader-owned fragmented-control copying into
-lazy structural storage, output methods throwing before readiness, absence of
-reader state enums in session state, bounded preview diagnostics, and raw bypass
-handoff.
+complete in the inbound buffer, session-owned fragmented-control copying into
+lazy structural storage, output methods throwing before readiness, visible
+composed session state, bounded preview diagnostics, and raw bypass handoff.
 
 Phase 3: Pkt-line codec.
 
@@ -840,7 +855,7 @@ response-end with limits.
 Phase 9: Side-band core.
 
 Implement side-band and side-band-64k encoder/decoder. Stream exact band-1 bytes
-to `GitRawSink`; keep progress and fatal messages bounded.
+through `GitRawSink` to `GitRawTarget`; keep progress and fatal messages bounded.
 
 Phase 10: Report-status core.
 
@@ -871,7 +886,7 @@ Cover at least these cases:
 - production wire protocol module depends on Netty buffer APIs without pulling in
   `netty-all`;
 - session parser accepts `ByteBuf` chunks and releases consumed input buffers,
-  except when a no-copy complete control frame must be held until raw sink
+  except when a no-copy complete control frame must be held until raw target
   creation or session close;
 - complete control structures available in one inbound `ByteBuf` are parsed
   directly without copying into the structural buffer, and the state machine
@@ -882,7 +897,8 @@ Cover at least these cases:
   still contains readable bytes for the next phase;
 - structural storage keeps bounded control data within the fixed Git pkt-line
   limit and is not allocated for complete no-copy frames;
-- raw pack payload bypasses the structural buffer and reaches `GitRawSink`;
+- raw pack payload bypasses the structural buffer and reaches `GitRawTarget`
+  through `GitRawSink`;
 - pkt-line codec handles data, flush, delimiter, response-end, binary payloads,
   malformed hex, short lengths, oversized packets, and truncation;
 - encoder preserves payload bytes and only adds LF through explicit text helper;

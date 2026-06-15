@@ -3,6 +3,7 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.utils.RawSink;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
@@ -10,35 +11,34 @@ import java.util.Objects;
 public final class GitMinimalWireMachine implements AutoCloseable {
 
     private final ByteBufAllocator allocator;
-    private final RawSinkFactory rawSinkFactory;
-    private GitFixedControlFrameReader controlReader;
+    private final RawTargetFactory rawTargetFactory;
+    private final GitFixedControlFrameReader controlReader;
+    private final RawSink rawSink = new RawSink();
+
+    private ControlState currentControlState = ControlState.ControlEmpty.INSTANCE;
     private RawPayload rawPayload;
     private Phase phase = Phase.CONTROL;
 
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
-            RawSinkFactory rawSinkFactory) {
+            RawTargetFactory rawTargetFactory) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
-        controlReader = new GitFixedControlFrameReader(this.allocator);
-        this.rawSinkFactory = Objects.requireNonNull(rawSinkFactory, "rawSinkFactory");
+        this.controlReader = new GitFixedControlFrameReader(this.allocator);
+        this.rawTargetFactory = Objects.requireNonNull(rawTargetFactory, "rawTargetFactory");
     }
 
     public boolean accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
         while (input.isReadable()) {
             if (phase == Phase.CONTROL) {
-                ControlState state = controlReader.accept(input);
-                if (state instanceof ControlState.MoreDataNeeded) {
+                currentControlState = controlReader.accept(currentControlState, input);
+                if (currentControlState instanceof ControlState.MoreDataNeeded) {
                     return true;
-                }
-                ControlState.ControlSuccess control = (ControlState.ControlSuccess) state;
-                resetControlReader();
-                int payloadLength = control.payloadLength();
-                if (payloadLength > 0) {
-                    rawPayload = new RawPayload(control, payloadLength);
+                } else if (currentControlState instanceof ControlState.ControlSuccess controlSuccess) {
+                    currentControlState = ControlState.ControlEmpty.INSTANCE;
+                    rawPayload = new RawPayload(controlSuccess);
                     phase = Phase.RAW;
                 }
-                continue;
             }
             if (phase == Phase.RAW) {
                 forwardRawPayload(input);
@@ -55,7 +55,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     ComposedState state() {
         return new ComposedState(
                 phase,
-                rawPayload != null && rawPayload.sinkCreated());
+                rawPayload != null && rawPayload.targetCreated());
     }
 
     private void forwardRawPayload(ByteBuf input) {
@@ -73,10 +73,6 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         phase = Phase.CONTROL;
     }
 
-    private void resetControlReader() {
-        controlReader = new GitFixedControlFrameReader(allocator);
-    }
-
     @Override
     public void close() {
         if (rawPayload != null) {
@@ -91,56 +87,50 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     record ComposedState(
             Phase phase,
-            boolean rawSinkCreated) {
+            boolean rawTargetCreated) {
     }
 
     @FunctionalInterface
-    public interface RawSinkFactory {
-        RawSink create(ControlState.ControlSuccess control);
+    public interface RawTargetFactory {
+        RawSink.Target create(ControlState.ControlSuccess control);
     }
 
-    public interface RawSink extends AutoCloseable {
-        void accept(ByteBuf input);
-
-        @Override
-        default void close() {
-        }
-    }
 
     private final class RawPayload implements AutoCloseable {
         private final ControlState.ControlSuccess control;
         private final FixedByteBufForwarder forwarder;
-        private RawSink sink;
+        private RawSink.Target target;
 
-        private RawPayload(ControlState.ControlSuccess control, int length) {
+        private RawPayload(ControlState.ControlSuccess control) {
             this.control = control;
-            forwarder = new FixedByteBufForwarder(length);
+            forwarder = new FixedByteBufForwarder(control.payloadLength());
         }
 
         private void forward(ByteBuf input) {
-            forwarder.forward(input, sink()::accept);
+            if (forwarder.isComplete()) {
+                return;
+            }
+            forwarder.forward(input, slice -> rawSink.accept(target(), slice));
         }
 
         private boolean isComplete() {
             return forwarder.isComplete();
         }
 
-        private boolean sinkCreated() {
-            return sink != null;
+        private boolean targetCreated() {
+            return target != null;
         }
 
-        private RawSink sink() {
-            if (sink == null) {
-                sink = Objects.requireNonNull(rawSinkFactory.create(control), "rawSink");
+        private RawSink.Target target() {
+            if (target == null) {
+                target = Objects.requireNonNull(rawTargetFactory.create(control), "rawTarget");
             }
-            return sink;
+            return target;
         }
 
         @Override
         public void close() {
-            if (sink != null) {
-                sink.close();
-            }
+            rawSink.close(target);
         }
     }
 }

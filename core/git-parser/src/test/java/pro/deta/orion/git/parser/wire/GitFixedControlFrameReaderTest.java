@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFixedControlFrameReaderTest {
     @Test
@@ -15,14 +14,14 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii("000aabcdef");
         try {
-            assertThat(reader.accept(input))
+            ControlState state = reader.accept(ControlState.ControlEmpty.INSTANCE, input);
+            assertThat(state)
                     .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
 
             assertThat(input.readerIndex()).isEqualTo(4);
             assertThat(input.readableBytes()).isEqualTo(6);
             assertThat(input.refCnt()).isOne();
             assertThat(allocator.allocations()).isZero();
-            assertThat(reader.controlState()).isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
         } finally {
             input.release();
         }
@@ -34,7 +33,7 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
 
         ByteBuf first = ascii("00");
-        ControlState firstState = reader.accept(first);
+        ControlState firstState = reader.accept(ControlState.ControlEmpty.INSTANCE, first);
         assertThat(firstState).isInstanceOf(ControlState.MoreDataNeeded.class);
         ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
         assertThat(first.readerIndex()).isEqualTo(2);
@@ -51,7 +50,7 @@ class GitFixedControlFrameReaderTest {
 
         ByteBuf second = ascii("0aPACK");
         try {
-            assertThat(reader.accept(second))
+            assertThat(reader.accept(firstState, second))
                     .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
 
             assertThat(second.readerIndex()).isEqualTo(2);
@@ -70,7 +69,7 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
 
         ByteBuf first = ascii("0");
-        ControlState firstState = reader.accept(first);
+        ControlState firstState = reader.accept(ControlState.ControlEmpty.INSTANCE, first);
         ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
         first.release();
         assertThat(first.refCnt()).isZero();
@@ -78,7 +77,7 @@ class GitFixedControlFrameReaderTest {
         assertThat(allocator.allocations()).isOne();
 
         ByteBuf second = ascii("0");
-        ControlState secondState = reader.accept(second);
+        ControlState secondState = reader.accept(firstState, second);
         ByteBuf secondFragment = ((ControlState.MoreDataNeeded) secondState).fragment();
         second.release();
         assertThat(first.refCnt()).isZero();
@@ -90,7 +89,7 @@ class GitFixedControlFrameReaderTest {
 
         ByteBuf third = ascii("0aPACK");
         try {
-            assertThat(reader.accept(third))
+            assertThat(reader.accept(secondState, third))
                     .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
 
             assertThat(third.readerIndex()).isEqualTo(2);
@@ -109,7 +108,7 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
 
         ByteBuf first = ascii("0");
-        ControlState firstState = reader.accept(first);
+        ControlState firstState = reader.accept(ControlState.ControlEmpty.INSTANCE, first);
         assertThat(firstState).isInstanceOf(ControlState.MoreDataNeeded.class);
         ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
         first.release();
@@ -117,7 +116,7 @@ class GitFixedControlFrameReaderTest {
         assertThat(firstFragment.refCnt()).isOne();
 
         ByteBuf second = ascii("0");
-        ControlState secondState = reader.accept(second);
+        ControlState secondState = reader.accept(firstState, second);
         assertThat(secondState).isInstanceOf(ControlState.MoreDataNeeded.class);
         ByteBuf secondFragment = ((ControlState.MoreDataNeeded) secondState).fragment();
         second.release();
@@ -127,7 +126,7 @@ class GitFixedControlFrameReaderTest {
         assertThat(allocator.allocations()).isOne();
 
         ByteBuf third = ascii("0");
-        ControlState thirdState = reader.accept(third);
+        ControlState thirdState = reader.accept(secondState, third);
         assertThat(thirdState).isInstanceOf(ControlState.MoreDataNeeded.class);
         ByteBuf thirdFragment = ((ControlState.MoreDataNeeded) thirdState).fragment();
         third.release();
@@ -138,7 +137,7 @@ class GitFixedControlFrameReaderTest {
 
         ByteBuf fourth = ascii("aPACK");
         try {
-            assertThat(reader.accept(fourth))
+            assertThat(reader.accept(thirdState, fourth))
                     .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
 
             assertThat(fourth.readerIndex()).isEqualTo(1);
@@ -158,7 +157,7 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
 
         ByteBuf first = ascii("z");
-        ControlState firstState = reader.accept(first);
+        ControlState firstState = reader.accept(ControlState.ControlEmpty.INSTANCE, first);
         assertThat(firstState).isInstanceOf(ControlState.MoreDataNeeded.class);
         ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
         first.release();
@@ -166,7 +165,7 @@ class GitFixedControlFrameReaderTest {
         assertThat(firstFragment.refCnt()).isOne();
 
         ByteBuf second = ascii("z");
-        ControlState secondState = reader.accept(second);
+        ControlState secondState = reader.accept(firstState, second);
         assertThat(secondState).isInstanceOf(ControlState.MoreDataNeeded.class);
         ByteBuf secondFragment = ((ControlState.MoreDataNeeded) secondState).fragment();
         second.release();
@@ -176,7 +175,7 @@ class GitFixedControlFrameReaderTest {
         assertThat(allocator.allocations()).isOne();
 
         ByteBuf third = ascii("z");
-        ControlState thirdState = reader.accept(third);
+        ControlState thirdState = reader.accept(secondState, third);
         assertThat(thirdState).isInstanceOf(ControlState.MoreDataNeeded.class);
         ByteBuf thirdFragment = ((ControlState.MoreDataNeeded) thirdState).fragment();
         third.release();
@@ -187,9 +186,8 @@ class GitFixedControlFrameReaderTest {
 
         ByteBuf fourth = ascii("zPACK");
         try {
-            assertThatThrownBy(() -> reader.accept(fourth))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Pkt-line length contains non-hex byte");
+            assertThat(reader.accept(thirdState, fourth))
+                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
 
             assertThat(fourth.readerIndex()).isEqualTo(1);
             assertThat(fourth.readableBytes()).isEqualTo(4);
@@ -198,7 +196,6 @@ class GitFixedControlFrameReaderTest {
             assertThat(thirdFragment.refCnt()).isZero();
             assertThat(fourth.refCnt()).isEqualTo(1);
             assertThat(allocator.allocations()).isOne();
-            assertThat(reader.controlState()).isSameAs(ControlState.ControlEmpty.INSTANCE);
         } finally {
             fourth.release();
         }
@@ -210,8 +207,8 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf first = ascii("000aabcdef");
         try {
-            assertThat(reader.accept(first))
-                    .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+            ControlState state = reader.accept(ControlState.ControlEmpty.INSTANCE, first);
+            assertThat(state).isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
         } finally {
             first.release();
         }
@@ -219,9 +216,8 @@ class GitFixedControlFrameReaderTest {
         ByteBuf second = ascii("x");
         try {
             int readableBefore = second.readableBytes();
-            assertThatThrownBy(() -> reader.accept(second))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("Control frame is already complete");
+            assertThat(reader.accept(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), second))
+                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
             assertThat(second.readableBytes()).isEqualTo(readableBefore);
         } finally {
             second.release();
@@ -241,9 +237,8 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii("zzzz");
         try {
-            assertThatThrownBy(() -> reader.accept(input))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Pkt-line length contains non-hex byte");
+            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, input))
+                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
         } finally {
             input.release();
         }
@@ -255,7 +250,7 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
 
         ByteBuf first = ascii("zz");
-        ControlState firstState = reader.accept(first);
+        ControlState firstState = reader.accept(ControlState.ControlEmpty.INSTANCE, first);
         ByteBuf firstFragment = ((ControlState.MoreDataNeeded) firstState).fragment();
         first.release();
         assertThat(first.refCnt()).isZero();
@@ -263,19 +258,17 @@ class GitFixedControlFrameReaderTest {
 
         ByteBuf second = ascii("zzPACK");
         try {
-            assertThatThrownBy(() -> reader.accept(second))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Pkt-line length contains non-hex byte");
+            assertThat(reader.accept(firstState, second))
+                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
 
             assertThat(firstFragment.refCnt()).isZero();
-            assertThat(reader.controlState()).isSameAs(ControlState.ControlEmpty.INSTANCE);
         } finally {
             second.release();
         }
 
         ByteBuf third = ascii("000aPACK");
         try {
-            assertThat(reader.accept(third))
+            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, third))
                     .isEqualTo(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
             assertThat(third.readerIndex()).isEqualTo(4);
             assertThat(third.readableBytes()).isEqualTo(4);
@@ -290,9 +283,8 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii("0003");
         try {
-            assertThatThrownBy(() -> reader.accept(input))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Pkt-line length 0003 is reserved");
+            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, input))
+                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
         } finally {
             input.release();
         }
@@ -304,9 +296,8 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii("fff1");
         try {
-            assertThatThrownBy(() -> reader.accept(input))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Pkt-line length exceeds Git pkt-line limit");
+            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, input))
+                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
         } finally {
             input.release();
         }
@@ -317,7 +308,7 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii(header + "tail");
         try {
-            assertThat(reader.accept(input))
+            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, input))
                     .isEqualTo(new ControlState.ControlSuccess(type, 4));
 
             assertThat(input.readerIndex()).isEqualTo(4);

@@ -5,6 +5,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.utils.RawSink;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -279,10 +280,10 @@ class GitMinimalWireMachineTest {
 
     private static GitMinimalWireMachine.ComposedState state(
             GitMinimalWireMachine.Phase phase,
-            boolean rawSinkCreated) {
+            boolean rawTargetCreated) {
         return new GitMinimalWireMachine.ComposedState(
                 phase,
-                rawSinkCreated);
+                rawTargetCreated);
     }
 
     private static boolean acceptAndRelease(GitMinimalWireMachine machine, ByteBuf input) {
@@ -328,7 +329,7 @@ class GitMinimalWireMachineTest {
         return bytes;
     }
 
-    private static final class RecordingRawSink implements GitMinimalWireMachine.RawSink {
+    private static final class RecordingRawSink implements RawSink.Target {
         private final List<ControlState.ControlSuccess> controls = new ArrayList<>();
         private final List<byte[]> chunks = new ArrayList<>();
 

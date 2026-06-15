@@ -10,32 +10,30 @@ import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADE
 
 public final class GitFixedControlFrameReader {
     static final int MAX_PKT_LINE_LENGTH = 65_520;
-
     private final ByteBufAllocator allocator;
-    private ControlState controlState = ControlState.ControlEmpty.INSTANCE;
 
     public GitFixedControlFrameReader(ByteBufAllocator allocator) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
     }
 
-    public ControlState controlState() {
-        return controlState;
-    }
-
-    public ControlState accept(ByteBuf input) {
+    public ControlState accept(ControlState controlState, ByteBuf input) {
         Objects.requireNonNull(input, "input");
-        controlState = switch (controlState) {
-            case ControlState.ControlSuccess _ignored ->
-                    throw new IllegalStateException("Control frame is already complete");
+        try {
+            controlState = switch (controlState) {
+                case ControlState.ControlSuccess _ignored ->
+                        throw new IllegalStateException("Control frame is already complete");
 
-            case ControlState.ControlEmpty _ignored -> readEmpty(input);
+                case ControlState.ControlEmpty _ignored -> readEmpty(controlState, input);
 
-            case ControlState.MoreDataNeeded prevData -> readMore(prevData.fragment(), input);
-        };
+                case ControlState.MoreDataNeeded prevData -> readMore(prevData.fragment(), input);
+            };
+        } catch (Exception e) {
+            return ControlState.ControlEmpty.INSTANCE;
+        }
         return controlState;
     }
 
-    private ControlState readEmpty(ByteBuf input) {
+    private ControlState readEmpty(ControlState controlState, ByteBuf input) {
         if (!input.isReadable()) {
             return controlState;
         }
@@ -55,7 +53,6 @@ public final class GitFixedControlFrameReader {
         try {
             return buildControlState(previousFragment);
         } catch (RuntimeException | Error e) {
-            controlState = ControlState.ControlEmpty.INSTANCE;
             throw e;
         } finally {
             previousFragment.release();
