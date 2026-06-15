@@ -13,31 +13,32 @@ class CachingByteBufTest {
     void bufferedModeCachesBytesInSingleOwnedBuffer() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
         ByteBuf first = ascii("0");
-        ByteBuf output = CachingByteBuf.start(allocator, first, 4, CachingByteBuf.Mode.BUFFERED);
+        CachingByteBuf output = new CachingByteBuf(allocator, first, 4, CachingByteBuf.Mode.BUFFERED);
+        ByteBuf byteBuf = output;
         first.release();
         try {
-            assertThat(readableString(output)).isEqualTo("0");
+            assertThat(readableString(byteBuf)).isEqualTo("0");
             assertThat(first.refCnt()).isZero();
             assertThat(output.refCnt()).isOne();
-            assertThat(CachingByteBuf.isComplete(output, 4)).isFalse();
+            assertThat(output.isComplete()).isFalse();
 
             ByteBuf second = ascii("0");
-            int secondConsumed = CachingByteBuf.append(output, second, 4, CachingByteBuf.Mode.BUFFERED);
+            int secondConsumed = output.append(second);
             second.release();
 
             assertThat(secondConsumed).isOne();
             assertThat(readableString(output)).isEqualTo("00");
-            assertThat(CachingByteBuf.isComplete(output, 4)).isFalse();
+            assertThat(output.isComplete()).isFalse();
             assertThat(allocator.allocations()).isOne();
 
             ByteBuf third = ascii("0aPACK");
             try {
-                int thirdConsumed = CachingByteBuf.append(output, third, 4, CachingByteBuf.Mode.BUFFERED);
+                int thirdConsumed = output.append(third);
 
                 assertThat(thirdConsumed).isEqualTo(2);
                 assertThat(readableString(output)).isEqualTo("000a");
                 assertThat(readableString(third)).isEqualTo("PACK");
-                assertThat(CachingByteBuf.isComplete(output, 4)).isTrue();
+                assertThat(output.isComplete()).isTrue();
                 assertThat(allocator.allocations()).isOne();
             } finally {
                 third.release();
@@ -51,17 +52,18 @@ class CachingByteBufTest {
     void compositeModeCachesRetainedSlicesWithoutCopyingIntoOwnedBuffer() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
         ByteBuf first = ascii("0");
-        ByteBuf output = CachingByteBuf.start(allocator, first, 4, CachingByteBuf.Mode.COMPOSITE);
+        CachingByteBuf output = new CachingByteBuf(allocator, first, 4, CachingByteBuf.Mode.COMPOSITE);
+        ByteBuf byteBuf = output;
         assertThat(first.refCnt()).isEqualTo(2);
         first.release();
         try {
             assertThat(first.refCnt()).isOne();
-            assertThat(readableString(output)).isEqualTo("0");
-            assertThat(CachingByteBuf.isComplete(output, 4)).isFalse();
+            assertThat(readableString(byteBuf)).isEqualTo("0");
+            assertThat(output.isComplete()).isFalse();
             assertThat(allocator.allocations()).isZero();
 
             ByteBuf second = ascii("00aPACK");
-            int consumed = CachingByteBuf.append(output, second, 4, CachingByteBuf.Mode.COMPOSITE);
+            int consumed = output.append(second);
             assertThat(second.refCnt()).isEqualTo(2);
             assertThat(readableString(second)).isEqualTo("PACK");
             second.release();
@@ -69,7 +71,7 @@ class CachingByteBufTest {
             assertThat(consumed).isEqualTo(3);
             assertThat(second.refCnt()).isOne();
             assertThat(readableString(output)).isEqualTo("000a");
-            assertThat(CachingByteBuf.isComplete(output, 4)).isTrue();
+            assertThat(output.isComplete()).isTrue();
             assertThat(allocator.allocations()).isZero();
 
             output.release();

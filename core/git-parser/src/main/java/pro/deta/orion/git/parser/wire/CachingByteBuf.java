@@ -3,43 +3,45 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.WrappedByteBuf;
 
 import java.util.Objects;
 
-public final class CachingByteBuf {
-    private CachingByteBuf() {
-    }
+public final class CachingByteBuf extends WrappedByteBuf {
+    private final int fixedCapacity;
+    private final Append append;
 
-    public static ByteBuf start(ByteBufAllocator allocator, ByteBuf input, int capacity, Mode mode) {
-        Objects.requireNonNull(allocator, "allocator");
-        Objects.requireNonNull(input, "input");
-        Objects.requireNonNull(mode, "mode");
-        validateCapacity(capacity);
-
-        Caching caching = mode.caching;
-        ByteBuf output = caching.allocate(allocator, input, capacity);
+    public CachingByteBuf(ByteBufAllocator allocator, ByteBuf input, int fixedCapacity, Mode mode) {
+        super(newBackingBuffer(allocator, input, fixedCapacity, mode));
+        this.fixedCapacity = fixedCapacity;
+        this.append = mode.append;
         try {
-            append(output, input, capacity, mode);
-            return output;
+            append(input);
         } catch (RuntimeException | Error e) {
-            output.release();
+            release();
             throw e;
         }
     }
 
-    public static int append(ByteBuf output, ByteBuf input, int capacity, Mode mode) {
-        Objects.requireNonNull(output, "output");
+    public int append(ByteBuf input) {
+        Objects.requireNonNull(input, "input");
+
+        return append.append(buf, input, fixedCapacity);
+    }
+
+    public boolean isComplete() {
+        return readableBytes() >= fixedCapacity;
+    }
+
+    private static ByteBuf newBackingBuffer(ByteBufAllocator allocator, ByteBuf input, int capacity, Mode mode) {
+        Objects.requireNonNull(allocator, "allocator");
         Objects.requireNonNull(input, "input");
         Objects.requireNonNull(mode, "mode");
         validateCapacity(capacity);
-
-        return mode.caching.append(output, input, capacity);
-    }
-
-    public static boolean isComplete(ByteBuf output, int capacity) {
-        Objects.requireNonNull(output, "output");
-        validateCapacity(capacity);
-        return output.readableBytes() >= capacity;
+        return switch (mode) {
+            case BUFFERED -> allocator.buffer(Math.min(input.readableBytes(), capacity), capacity);
+            case COMPOSITE -> allocator.compositeBuffer();
+        };
     }
 
     private static int appendLength(ByteBuf output, ByteBuf input, int capacity) {
@@ -57,28 +59,21 @@ public final class CachingByteBuf {
     }
 
     public enum Mode {
-        BUFFERED(new BufferedCaching()),
-        COMPOSITE(new CompositeCaching());
+        BUFFERED(new BufferedAppend()),
+        COMPOSITE(new CompositeAppend());
 
-        private final Caching caching;
+        private final Append append;
 
-        Mode(Caching caching) {
-            this.caching = caching;
+        Mode(Append append) {
+            this.append = append;
         }
     }
 
-    private interface Caching {
-        ByteBuf allocate(ByteBufAllocator allocator, ByteBuf input, int capacity);
-
+    private interface Append {
         int append(ByteBuf output, ByteBuf input, int capacity);
     }
 
-    private static final class BufferedCaching implements Caching {
-        @Override
-        public ByteBuf allocate(ByteBufAllocator allocator, ByteBuf input, int capacity) {
-            return allocator.buffer(Math.min(input.readableBytes(), capacity), capacity);
-        }
-
+    private static final class BufferedAppend implements Append {
         @Override
         public int append(ByteBuf output, ByteBuf input, int capacity) {
             int length = appendLength(output, input, capacity);
@@ -87,12 +82,7 @@ public final class CachingByteBuf {
         }
     }
 
-    private static final class CompositeCaching implements Caching {
-        @Override
-        public ByteBuf allocate(ByteBufAllocator allocator, ByteBuf input, int capacity) {
-            return allocator.compositeBuffer();
-        }
-
+    private static final class CompositeAppend implements Append {
         @Override
         public int append(ByteBuf output, ByteBuf input, int capacity) {
             if (!(output instanceof CompositeByteBuf composite)) {

@@ -121,13 +121,17 @@ Current prototype zones:
   reads. `BufferedCaching` copies bytes into one owned buffer; `CompositeCaching`
   retains input slices in a composite buffer. Each use case chooses the strategy
   based on whether small-copy simplicity or no-copy slice retention is better.
+- `FixedByteBufForwarder` is a generic fixed-length forwarding cursor. It
+  forwards retained slices from inbound buffers to a sink until the declared
+  byte count reaches zero.
 - `GitMinimalWireMachine` processes accepted inbound buffers and returns whether
   the caller should release the original input reference after `accept`. It
   tracks the current phase, owns the readers, routes on `ControlState`, and
-  forwards raw tails to the raw sink. It does not store borrowed input buffers
-  and does not manually advance `readerIndex` for control bytes. The current
-  prototype accepts Git's fixed 65,520 byte pkt-line maximum rather than a
-  per-machine structural capacity parameter.
+  forwards exactly `length - 4` pkt-line payload bytes to the raw sink before
+  returning to header reading. It does not store borrowed input buffers and does
+  not manually advance `readerIndex` for control bytes. The current prototype
+  accepts Git's fixed 65,520 byte pkt-line maximum rather than a per-machine
+  structural capacity parameter.
 - `GitMinimalWireMachine` owns lazy sink creation. A complete control frame with
   no raw tail must not create a raw sink; the raw sink is created only when raw
   bytes are actually observed. The raw sink factory receives `ControlSuccess`
