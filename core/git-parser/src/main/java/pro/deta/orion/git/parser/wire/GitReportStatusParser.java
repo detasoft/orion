@@ -2,13 +2,9 @@ package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
-
-import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
 
 public final class GitReportStatusParser {
     private static final String UNPACK_PREFIX = "unpack ";
@@ -23,7 +19,7 @@ public final class GitReportStatusParser {
         ParserState state = new ParserState();
         long packetIndex = 0;
         while (input.isReadable()) {
-            Packet packet = readPacket(input, packetIndex);
+            GitPktLineReader.Packet packet = GitPktLineReader.read(input, packetIndex);
             packetIndex++;
             switch (packet.kind()) {
                 case FLUSH -> {
@@ -49,103 +45,12 @@ public final class GitReportStatusParser {
                 "Report-status ended before flush packet");
     }
 
-    private static Packet readPacket(ByteBuf input, long packetIndex) {
-        int headerIndex = input.readerIndex();
-        if (input.readableBytes() < PKT_LINE_HEADER_SIZE) {
-            throw GitWireException.of(
-                    GitWireError.Kind.INCOMPLETE_HEADER,
-                    GitWireError.Phase.CONTROL_HEADER,
-                    packetIndex,
-                    headerIndex,
-                    "Incomplete report-status pkt-line header");
-        }
-        int packetLength = GitNativeUtils.packetLength(
-                input,
-                headerIndex,
-                GitWireError.Phase.CONTROL_HEADER,
-                packetIndex,
-                headerIndex);
-        return switch (packetLength) {
-            case 0 -> {
-                input.skipBytes(PKT_LINE_HEADER_SIZE);
-                yield new Packet(PacketKind.FLUSH, "", packetIndex, headerIndex);
-            }
-            case 1 -> {
-                input.skipBytes(PKT_LINE_HEADER_SIZE);
-                yield new Packet(PacketKind.DELIMITER, "", packetIndex, headerIndex);
-            }
-            case 2 -> {
-                input.skipBytes(PKT_LINE_HEADER_SIZE);
-                yield new Packet(PacketKind.RESPONSE_END, "", packetIndex, headerIndex);
-            }
-            case 3 -> throw GitWireException.of(
-                    GitWireError.Kind.RESERVED_LENGTH,
-                    GitWireError.Phase.CONTROL_HEADER,
-                    packetIndex,
-                    headerIndex,
-                    "Report-status pkt-line uses reserved length");
-            default -> readDataPacket(input, packetLength, packetIndex, headerIndex);
-        };
-    }
-
-    private static Packet readDataPacket(ByteBuf input, int packetLength, long packetIndex, int headerIndex) {
-        if (packetLength < PKT_LINE_HEADER_SIZE) {
-            throw GitWireException.of(
-                    GitWireError.Kind.RESERVED_LENGTH,
-                    GitWireError.Phase.CONTROL_HEADER,
-                    packetIndex,
-                    headerIndex,
-                    "Report-status data packet length is invalid");
-        }
-        if (packetLength > GitFixedControlFrameReader.MAX_PKT_LINE_LENGTH) {
-            throw GitWireException.of(
-                    GitWireError.Kind.LENGTH_EXCEEDS_LIMIT,
-                    GitWireError.Phase.CONTROL_HEADER,
-                    packetIndex,
-                    headerIndex,
-                    "Report-status packet exceeds Git pkt-line limit");
-        }
-        if (input.readableBytes() < packetLength) {
-            throw GitWireException.of(
-                    GitWireError.Kind.INCOMPLETE_PAYLOAD,
-                    GitWireError.Phase.STRUCTURED_PAYLOAD,
-                    packetIndex,
-                    headerIndex + PKT_LINE_HEADER_SIZE,
-                    "Incomplete report-status pkt-line payload");
-        }
-        int payloadLength = packetLength - PKT_LINE_HEADER_SIZE;
-        input.skipBytes(PKT_LINE_HEADER_SIZE);
-        String payload = input.readCharSequence(payloadLength, StandardCharsets.UTF_8).toString();
-        return new Packet(PacketKind.DATA, stripLineEnding(payload), packetIndex, headerIndex + PKT_LINE_HEADER_SIZE);
-    }
-
     private static GitWireException semanticError(
             GitWireError.Kind kind,
             long packetIndex,
             long byteOffset,
             String message) {
         return GitWireException.of(kind, GitWireError.Phase.STRUCTURED_PAYLOAD, packetIndex, byteOffset, message);
-    }
-
-    private static String stripLineEnding(String payload) {
-        if (!payload.endsWith("\n")) {
-            return payload;
-        }
-        String stripped = payload.substring(0, payload.length() - 1);
-        if (stripped.endsWith("\r")) {
-            return stripped.substring(0, stripped.length() - 1);
-        }
-        return stripped;
-    }
-
-    private enum PacketKind {
-        DATA,
-        FLUSH,
-        DELIMITER,
-        RESPONSE_END
-    }
-
-    private record Packet(PacketKind kind, String payload, long packetIndex, long byteOffset) {
     }
 
     private static final class ParserState {

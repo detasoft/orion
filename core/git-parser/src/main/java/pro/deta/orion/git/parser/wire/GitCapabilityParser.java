@@ -41,17 +41,6 @@ public final class GitCapabilityParser {
 
     public GitCapability parseProtocolV2Line(String line) {
         Objects.requireNonNull(line, "line");
-        return GitCapability.parse(stripLineEnding(line));
-    }
-
-    private static String stripLineEnding(String line) {
-        if (!line.endsWith("\n")) {
-            return line;
-        }
-        String stripped = line.substring(0, line.length() - 1);
-        if (stripped.endsWith("\r")) {
-            return stripped.substring(0, stripped.length() - 1);
-        }
-        return stripped;
+        return GitCapability.parse(GitPktLineReader.stripLineEnding(line));
     }
 }
