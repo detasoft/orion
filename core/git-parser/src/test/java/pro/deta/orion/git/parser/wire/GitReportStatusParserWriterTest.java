@@ -133,6 +133,28 @@ class GitReportStatusParserWriterTest {
         }
     }
 
+    @Test
+    void reportsErrorOffsetsRelativeToReportStatusStartWhenInputReaderIndexIsShifted() {
+        ByteBuf input = shiftedInput(
+                packets(
+                        data("unpack ok"),
+                        data("ng refs/heads/main"),
+                        flush()));
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_REPORT_STATUS_LINE,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    1,
+                                    18,
+                                    "Rejected ref status must include a reason")));
+        } finally {
+            input.release();
+        }
+    }
+
     private ByteBuf packets(ByteBuf... packets) {
         ByteBuf input = Unpooled.buffer();
         for (ByteBuf packet : packets) {
@@ -143,6 +165,18 @@ class GitReportStatusParserWriterTest {
             }
         }
         return input;
+    }
+
+    private ByteBuf shiftedInput(ByteBuf reportStatus) {
+        ByteBuf input = Unpooled.buffer();
+        try {
+            input.writeBytes(new byte[]{'x', 'y', 'z'});
+            input.writeBytes(reportStatus, reportStatus.readerIndex(), reportStatus.readableBytes());
+            input.readerIndex(3);
+            return input;
+        } finally {
+            reportStatus.release();
+        }
     }
 
     private ByteBuf data(String line) {
