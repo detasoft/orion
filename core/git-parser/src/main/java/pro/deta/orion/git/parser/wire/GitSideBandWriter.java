@@ -8,18 +8,13 @@ import java.util.List;
 import java.util.Objects;
 
 public final class GitSideBandWriter {
-    private static final byte[] HEX_DIGITS = new byte[]{
-            '0', '1', '2', '3',
-            '4', '5', '6', '7',
-            '8', '9', 'a', 'b',
-            'c', 'd', 'e', 'f'
-    };
-
     private final ByteBufAllocator allocator;
+    private final GitPktLineWriter pktLineWriter;
     private final GitSideBandMode mode;
 
     public GitSideBandWriter(ByteBufAllocator allocator, GitSideBandMode mode) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
+        this.pktLineWriter = new GitPktLineWriter(this.allocator);
         this.mode = Objects.requireNonNull(mode, "mode");
     }
 
@@ -33,11 +28,7 @@ public final class GitSideBandWriter {
         try {
             while (remaining > 0) {
                 int chunkLength = Math.min(remaining, mode.maxDataBytesPerPacket());
-                ByteBuf packet = allocator.buffer(chunkLength + 5, chunkLength + 5);
-                writeLengthHeader(packet, chunkLength + 5);
-                packet.writeByte(band.id());
-                packet.writeBytes(payload, payloadIndex, chunkLength);
-                packets.add(packet);
+                packets.add(writePacket(band, payload, payloadIndex, chunkLength));
                 payloadIndex += chunkLength;
                 remaining -= chunkLength;
             }
@@ -50,10 +41,14 @@ public final class GitSideBandWriter {
         }
     }
 
-    private static void writeLengthHeader(ByteBuf output, int packetLength) {
-        output.writeByte(HEX_DIGITS[(packetLength >>> 12) & 0x0f]);
-        output.writeByte(HEX_DIGITS[(packetLength >>> 8) & 0x0f]);
-        output.writeByte(HEX_DIGITS[(packetLength >>> 4) & 0x0f]);
-        output.writeByte(HEX_DIGITS[packetLength & 0x0f]);
+    private ByteBuf writePacket(GitSideBandBand band, ByteBuf payload, int payloadIndex, int chunkLength) {
+        ByteBuf sideBandPayload = allocator.buffer(chunkLength + 1, chunkLength + 1);
+        try {
+            sideBandPayload.writeByte(band.id());
+            sideBandPayload.writeBytes(payload, payloadIndex, chunkLength);
+            return pktLineWriter.writeData(sideBandPayload);
+        } finally {
+            sideBandPayload.release();
+        }
     }
 }
