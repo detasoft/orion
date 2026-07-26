@@ -5,38 +5,39 @@ import java.util.Optional;
 
 public record GitCapability(
         String name,
-        String rawValue,
+        Optional<String> rawValue,
         String rawToken) {
 
     public GitCapability {
         name = validateName(name);
-        rawValue = validateValue(rawValue);
+        rawValue = Objects.requireNonNull(rawValue, "rawValue")
+                .map(GitCapability::validateValue);
         Objects.requireNonNull(rawToken, "rawToken");
     }
 
     public static GitCapability bare(String name) {
-        return new GitCapability(name, null, validateName(name));
+        return new GitCapability(name, Optional.empty(), validateName(name));
     }
 
     public static GitCapability of(String name, String value) {
         String checkedName = validateName(name);
         String checkedValue = validateValue(Objects.requireNonNull(value, "value"));
-        return new GitCapability(checkedName, checkedValue, checkedName + "=" + checkedValue);
+        return new GitCapability(checkedName, Optional.of(checkedValue), checkedName + "=" + checkedValue);
     }
 
     static GitCapability parse(String token) {
         String checkedToken = Objects.requireNonNull(token, "token");
         int valueSeparator = checkedToken.indexOf('=');
         if (valueSeparator < 0) {
-            return new GitCapability(checkedToken, null, checkedToken);
+            return new GitCapability(checkedToken, Optional.empty(), checkedToken);
         }
         String name = checkedToken.substring(0, valueSeparator);
         String value = checkedToken.substring(valueSeparator + 1);
-        return new GitCapability(name, value, checkedToken);
+        return new GitCapability(name, Optional.of(value), checkedToken);
     }
 
     public Optional<String> value() {
-        return Optional.ofNullable(rawValue);
+        return rawValue;
     }
 
     private static String validateName(String name) {
@@ -58,9 +59,7 @@ public record GitCapability(
     }
 
     private static String validateValue(String value) {
-        if (value == null) {
-            return null;
-        }
+        Objects.requireNonNull(value, "value");
         if (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0) {
             throw new IllegalArgumentException("Capability value must not contain line endings");
         }

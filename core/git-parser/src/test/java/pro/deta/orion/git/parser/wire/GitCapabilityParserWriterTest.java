@@ -55,6 +55,12 @@ class GitCapabilityParserWriterTest {
     }
 
     @Test
+    void exposesRawValueAsOptionalRecordComponent() {
+        assertThat(GitCapability.bare("multi_ack").rawValue()).isEmpty();
+        assertThat(GitCapability.of("object-format", "sha256").rawValue()).contains("sha256");
+    }
+
+    @Test
     void writesV0AdvertisementLineWithCapabilitiesAfterNul() {
         String advertisement = writer.writeAdvertisementLine(
                 "1111111111111111111111111111111111111111 HEAD",
