@@ -3,6 +3,9 @@ package pro.deta.orion.git;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,6 +55,20 @@ class GitCommandTest {
     }
 
     @Test
+    @DisplayName("initial socket parser leaves later stream bytes unread")
+    void initialSocketParserLeavesLaterStreamBytesUnread() {
+        ByteArrayInputStream input = new ByteArrayInputStream(bytes(
+                pktLine("git-receive-pack /project.git\0host=git.example.com\0"),
+                "pack".getBytes(StandardCharsets.US_ASCII)));
+
+        GitCommand command = GitInternalService.parse(input);
+
+        assertThat(command.getRepositoryName()).isEqualTo("project");
+        assertThat(command.isWrite()).isTrue();
+        assertThat(input.readAllBytes()).isEqualTo("pack".getBytes(StandardCharsets.US_ASCII));
+    }
+
+    @Test
     @DisplayName("malformed commands fail with an argument error")
     void malformedCommandsFailWithArgumentError() {
         for (String command : List.of("", "   ", "git-upload-pack", "git-upload-pack\0host=git.example.com")) {
@@ -59,5 +76,19 @@ class GitCommandTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Malformed git command");
         }
+    }
+
+    private static byte[] pktLine(String payload) {
+        byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
+        byte[] header = "%04x".formatted(payloadBytes.length + 4).getBytes(StandardCharsets.US_ASCII);
+        return bytes(header, payloadBytes);
+    }
+
+    private static byte[] bytes(byte[]... chunks) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        for (byte[] chunk : chunks) {
+            output.writeBytes(chunk);
+        }
+        return output.toByteArray();
     }
 }

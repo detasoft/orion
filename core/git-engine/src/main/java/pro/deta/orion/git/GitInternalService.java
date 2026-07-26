@@ -23,7 +23,8 @@ import pro.deta.orion.util.Result;
 import pro.deta.orion.util.Result.Failure;
 import pro.deta.orion.util.stream.StandardStreams;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.*;
 import java.util.function.Function;
 
@@ -146,6 +147,7 @@ public class GitInternalService {
     }
 
     public static GitCommand parse(InputStream inputStream) {
+        Objects.requireNonNull(inputStream, "inputStream");
         String cmd = "";
         try {
             PacketLineIn packetLineIn = new PacketLineIn(inputStream);
@@ -168,8 +170,7 @@ public class GitInternalService {
             throw new IllegalArgumentException("Malformed git command: " + commandPart);
         }
         GitCommand.Command command = GitCommand.Command.parseFrom(commands[0]);
-        String locator = commands[1];
-        locator = locator.replaceAll("[^a-zA-Z0-9\\-_\\.\\/]","");
+        String locator = sanitizeRepositoryLocator(commands[1]);
         if (locator.isBlank()) {
             throw new IllegalArgumentException("Malformed git command: empty repository locator");
         }
@@ -205,5 +206,9 @@ public class GitInternalService {
             return;
         }
         gcmd.addProperty(name, parts.substring(separator + 1));
+    }
+
+    private static String sanitizeRepositoryLocator(String locator) {
+        return locator.replaceAll("[^a-zA-Z0-9\\-_\\.\\/]","");
     }
 }

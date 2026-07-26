@@ -9,10 +9,14 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`.
 - [ ] Implement `docs/plans/2026-05-14-native-git-wire-protocol-core.md`:
       `f21b309` models `GitMinimalWireMachine` durable parser state as phase
-      objects and documents its prototype role. Verification baseline is green
-      with root `mvn test -Pdev`. Next, replace the current Git transport parser
-      path with a JGit-free streaming pkt-line reader that does not buffer whole
-      packets or raw pack tails in additional memory.
+      objects and documents its prototype role. Current work adds a
+      `ByteBuf`-only `GitInitialServiceRequestParser` in `git-parser` that
+      parses the initial data pkt-line by byte ranges without materializing a
+      raw command string. The old `GitInternalService.parse(InputStream)` path
+      temporarily keeps JGit `PacketLineIn` until a native transport/session can
+      feed `ByteBuf` chunks into the wire core. Next, extend the native
+      streaming path beyond the initial request without buffering whole packets
+      or raw pack tails in additional memory.
 
 ## Next
 

@@ -68,8 +68,10 @@ registry that lets unsupported extensions be omitted or rejected clearly.
 
 Do not shell out to the `git` executable in production code.
 
-Do not depend on JGit in production code. Tests may compare packet sequences with
-Git CLI or JGit fixtures.
+Do not depend on JGit in production wire core code. Existing legacy service
+entry points may keep temporary JGit compatibility until their transport
+boundary is converted to feed `ByteBuf` chunks into the native core. Tests may
+compare packet sequences with Git CLI or JGit fixtures.
 
 ## Module Boundary
 
@@ -143,6 +145,15 @@ Current prototype zones:
   caller-owned raw target and owns no durable state. The raw target owns the
   retained raw slices passed to it. The caller releases the original inbound
   buffer when the state machine returns a positive release decision.
+- `GitInitialServiceRequestParser` is the first native service request parser in
+  `git-parser`. It reads exactly one socket-style data pkt-line from a `ByteBuf`,
+  scans the payload as byte ranges, validates supported `git-upload-pack` and
+  `git-receive-pack` services, extracts repository path and NUL-separated
+  parameters without materializing a raw command string, and leaves subsequent
+  buffer bytes for upload-pack or receive-pack. The old
+  `GitInternalService.parse(InputStream)` path temporarily keeps JGit
+  `PacketLineIn` until the production transport/session boundary can feed
+  `ByteBuf` chunks into the native wire core.
 
 Planned production zones:
 
@@ -440,8 +451,12 @@ Validation:
 - path normalization remains outside this module but receives raw path and host;
 - oversized initial request fails before repository lookup.
 
-`GitInternalService` can then use this parser before authorization and repository
-opening.
+The native parser itself accepts `ByteBuf` only. Do not add `InputStream`,
+`byte[]`, or packet-wrapper compatibility overloads to the parser; adapters
+belong at the transport/session edge. The existing
+`GitInternalService.parse(InputStream)` production path may temporarily keep JGit
+`PacketLineIn` before authorization and repository opening until that edge is
+converted to `ByteBuf`.
 
 ## Protocol Version Negotiation
 
@@ -831,8 +846,9 @@ without materializing raw payloads.
 
 Phase 4: Initial service request parser.
 
-Replace JGit helper use for parsing `git-upload-pack` and `git-receive-pack`
-initial commands in a native-compatible path.
+Implement `ByteBuf`-only parsing for `git-upload-pack` and `git-receive-pack`
+initial commands in the native core. Keep legacy `InputStream` service parsing
+on JGit until the native transport/session boundary can supply `ByteBuf` input.
 
 Phase 5: Capability registry.
 
@@ -935,14 +951,17 @@ Cover at least these cases:
   access;
 - user-visible protocol errors are sanitized.
 
+## Resolved Decisions
+
+The first server integration should replace JGit pkt-line use in
+`GitInternalService` only after a native transport/session boundary can feed
+`ByteBuf` input into the wire core.
+
 ## Open Questions
 
 Should the existing client-focused protocol plan be renamed or refactored after
 this shared core exists, or should it remain as a client feature plan that
 depends on the core?
-
-Should the first server integration replace JGit pkt-line use in
-`GitInternalService` immediately, or only inside native backend feature flags?
 
 How much protocol v0/v1 upload-pack support should live in shared helpers versus
 the upload-pack service state machine?
