@@ -21,8 +21,10 @@ designs and implementation steps in `docs/plans/`.
   - [x] Extend the existing `GitMinimalWireMachine` with observable pkt-line
         control events and close-time validation instead of adding a parallel
         session API.
-  - [ ] Separate structured pkt-line payload handling from raw pack payload
+  - [x] Separate structured pkt-line payload handling from raw pack payload
         forwarding in the existing native wire machine.
+  - [ ] Add typed Git wire errors with phase, offset or packet index, and
+        malformed pkt-line error kinds.
 
 ## Next
 

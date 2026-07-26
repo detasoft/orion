@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
@@ -16,62 +17,85 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitMinimalWireMachineTest {
     @Test
-    void emitsCompletedControlEventsBeforeForwardingDataPayloads() {
-        RecordingRawSink rawSink = new RecordingRawSink();
-        List<ControlState.ControlSuccess> controls = new ArrayList<>();
-        AtomicInteger sinkCreations = new AtomicInteger();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                controls::add,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
+    void deliversStructuredDataPayloadsWithoutCreatingRawSink() {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(handlers)) {
+            ByteBuf input = ascii("000bcommand0009value0000");
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+
+            assertThat(input.refCnt()).isZero();
+            assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
+            assertThat(handlers.controls).containsExactly(
+                    new ControlState.ControlSuccess(ControlState.ControlType.DATA, 11),
+                    new ControlState.ControlSuccess(ControlState.ControlType.DATA, 9),
+                    new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4));
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes("command"), asciiBytes("value"));
+            assertThat(handlers.sinkCreations).hasValue(0);
+        }
+    }
+
+    @Test
+    void forwardsRawPackBytesAfterControlHandlerRequestsRawPayloadForwarding() {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        handlers.forwardRawAfterFlush = true;
+        try (GitMinimalWireMachine machine = machine(handlers)) {
+            ByteBuf input = asciiWithTail("0009cmd=10000", 'P', 'A', 'C', 'K', 0, 0, 1, 2);
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+
+            assertThat(input.refCnt()).isZero();
+            assertRawStreamPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4), true);
+            assertThat(handlers.controls).containsExactly(
+                    new ControlState.ControlSuccess(ControlState.ControlType.DATA, 9),
+                    new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4));
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes("cmd=1"));
+            assertThat(handlers.sinkCreations).hasValue(1);
+            assertThat(handlers.rawSink.controls)
+                    .containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4));
+            assertThat(handlers.rawSink.chunks).containsExactly(new byte[]{'P', 'A', 'C', 'K', 0, 0, 1, 2});
+        }
+    }
+
+    @Test
+    void emitsCompletedControlEventsBeforeDeliveringStructuredDataPayloads() {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(handlers)) {
             ByteBuf input = ascii("0012command=fetch\n00010010agent=orion\n0000");
             assertThat(acceptAndRelease(machine, input)).isTrue();
 
             assertThat(input.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(controls).containsExactly(
+            assertThat(handlers.controls).containsExactly(
                     new ControlState.ControlSuccess(ControlState.ControlType.DATA, 18),
                     new ControlState.ControlSuccess(ControlState.ControlType.DELIMITER, 4),
                     new ControlState.ControlSuccess(ControlState.ControlType.DATA, 16),
                     new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4));
-            assertThat(sinkCreations).hasValue(2);
-            assertThat(rawSink.chunks).containsExactly(asciiBytes("command=fetch\n"), asciiBytes("agent=orion\n"));
+            assertThat(handlers.structuredPayloads)
+                    .containsExactly(asciiBytes("command=fetch\n"), asciiBytes("agent=orion\n"));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 
     @Test
     void emitsSpecialControlEventsWithoutCreatingRawSink() {
-        List<ControlState.ControlSuccess> controls = new ArrayList<>();
-        AtomicInteger sinkCreations = new AtomicInteger();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                controls::add,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    return new RecordingRawSink();
-                })) {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(handlers)) {
             ByteBuf input = ascii("000000010002");
             assertThat(acceptAndRelease(machine, input)).isTrue();
 
             assertThat(input.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(controls).containsExactly(
+            assertThat(handlers.controls).containsExactly(
                     new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4),
                     new ControlState.ControlSuccess(ControlState.ControlType.DELIMITER, 4),
                     new ControlState.ControlSuccess(ControlState.ControlType.RESPONSE_END, 4));
-            assertThat(sinkCreations).hasValue(0);
+            assertThat(handlers.structuredPayloads).isEmpty();
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 
     @Test
     void closeFailsWhenHeaderIsIncomplete() {
-        GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> new RecordingRawSink());
+        GitMinimalWireMachine machine = machine(new RecordingWireHandlers());
         ByteBuf input = ascii("00");
 
         assertThat(acceptAndRelease(machine, input)).isTrue();
@@ -84,9 +108,7 @@ class GitMinimalWireMachineTest {
 
     @Test
     void closeFailsWhenPayloadIsIncomplete() {
-        GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> new RecordingRawSink());
+        GitMinimalWireMachine machine = machine(new RecordingWireHandlers());
         ByteBuf input = ascii("000aabc");
 
         assertThat(acceptAndRelease(machine, input)).isTrue();
@@ -98,155 +120,116 @@ class GitMinimalWireMachineTest {
     }
 
     @Test
-    void createsRawSinkOnlyWhenRawBytesArriveAfterControl() {
+    void createsRawSinkOnlyWhenRawStreamBytesArriveAfterFlushControl() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                allocator,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        handlers.forwardRawAfterFlush = true;
+        try (GitMinimalWireMachine machine = machine(allocator, handlers)) {
             assertThat(allocator.allocations()).isZero();
 
-            ByteBuf controlOnly = ascii("000a");
+            ByteBuf controlOnly = ascii("0000");
             assertThat(acceptAndRelease(machine, controlOnly)).isTrue();
             assertThat(controlOnly.refCnt()).isZero();
             assertThat(allocator.allocations()).isZero();
-            assertRawPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), 6, false);
-            assertThat(sinkCreations).hasValue(0);
+            assertRawStreamPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4), false);
+            assertThat(handlers.sinkCreations).hasValue(0);
 
             ByteBuf raw = buffer(10, 11, 12);
             assertThat(acceptAndRelease(machine, raw)).isTrue();
-            assertThat(controlOnly.refCnt()).isZero();
             assertThat(raw.refCnt()).isZero();
             assertThat(allocator.allocations()).isZero();
-            assertRawPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), 3, true);
-            assertThat(sinkCreations).hasValue(1);
-            assertThat(rawSink.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10, 11, 12});
+            assertRawStreamPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4), true);
+            assertThat(handlers.sinkCreations).hasValue(1);
+            assertThat(handlers.rawSink.controls)
+                    .containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4));
+            assertThat(handlers.rawSink.chunks).containsExactly(new byte[]{10, 11, 12});
 
             ByteBuf remaining = buffer(13, 14, 15);
             assertThat(acceptAndRelease(machine, remaining)).isTrue();
             assertThat(remaining.refCnt()).isZero();
-            assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10, 11, 12}, new byte[]{13, 14, 15});
+            assertRawStreamPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4), true);
+            assertThat(handlers.sinkCreations).hasValue(1);
+            assertThat(handlers.rawSink.chunks).containsExactly(new byte[]{10, 11, 12}, new byte[]{13, 14, 15});
         }
     }
 
     @Test
-    void closeFailsAfterCompleteControlWhenPayloadNeverArrives() {
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
+    void closeFailsAfterCompleteDataControlWhenStructuredPayloadNeverArrives() {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
         ByteBuf controlOnly = ascii("000a");
-        GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                });
+        GitMinimalWireMachine machine = machine(handlers);
         try {
             assertThat(acceptAndRelease(machine, controlOnly)).isTrue();
             assertThat(controlOnly.refCnt()).isZero();
-            assertThat(sinkCreations).hasValue(0);
+            assertThat(handlers.structuredPayloads).isEmpty();
             assertThatThrownBy(machine::close)
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Incomplete Git pkt-line payload");
-            assertThat(rawSink.controls).isEmpty();
+            assertThat(handlers.sinkCreations).hasValue(0);
         } finally {
             machine.close();
         }
     }
 
     @Test
-    void forwardsRawRemainderFromSameInputAfterControl() {
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
-            ByteBuf input = asciiWithTail("000a", 10, 11);
+    void deliversStructuredPayloadAcrossMultipleInputChunks() {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(handlers)) {
+            ByteBuf input = asciiWithTail("000a", 'a', 'b');
             assertThat(acceptAndRelease(machine, input)).isTrue();
 
             assertThat(input.refCnt()).isZero();
-            assertRawPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), 4, true);
-            assertThat(sinkCreations).hasValue(1);
-            assertThat(rawSink.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10, 11});
+            assertStructuredPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), 4);
+            assertThat(handlers.structuredPayloads).isEmpty();
 
-            ByteBuf remaining = buffer(12, 13, 14, 15);
+            ByteBuf remaining = ascii("cdef");
             assertThat(acceptAndRelease(machine, remaining)).isTrue();
             assertThat(remaining.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10, 11}, new byte[]{12, 13, 14, 15});
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes("abcdef"));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 
     @Test
-    void forwardsOnlyDeclaredPayloadBeforeReadingNextPktLineInSameInput() {
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
+    void deliversOnlyDeclaredStructuredPayloadBeforeReadingNextPktLineInSameInput() {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(handlers)) {
             ByteBuf input = ascii("000aabcdef0007xyz");
             assertThat(acceptAndRelease(machine, input)).isTrue();
 
             assertThat(input.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(sinkCreations).hasValue(2);
-            assertThat(rawSink.controls).containsExactly(
+            assertThat(handlers.controls).containsExactly(
                     new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10),
                     new ControlState.ControlSuccess(ControlState.ControlType.DATA, 7));
-            assertThat(rawSink.chunks).containsExactly(asciiBytes("abcdef"), asciiBytes("xyz"));
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes("abcdef"), asciiBytes("xyz"));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 
     @Test
     void skipsSpecialPktLineBeforeReadingNextPktLineInSameInput() {
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(handlers)) {
             ByteBuf input = ascii("00000007xyz");
             assertThat(acceptAndRelease(machine, input)).isTrue();
 
             assertThat(input.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(sinkCreations).hasValue(1);
-            assertThat(rawSink.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 7));
-            assertThat(rawSink.chunks).containsExactly(asciiBytes("xyz"));
+            assertThat(handlers.controls).containsExactly(
+                    new ControlState.ControlSuccess(ControlState.ControlType.FLUSH, 4),
+                    new ControlState.ControlSuccess(ControlState.ControlType.DATA, 7));
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes("xyz"));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 
     @Test
-    void forwardsRawRemainderWhenFragmentedControlCompletes() {
+    void deliversStructuredPayloadWhenFragmentedHeaderCompletesWithPayloadTail() {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                allocator,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(allocator, handlers)) {
             assertThat(allocator.allocations()).isZero();
 
             ByteBuf first = ascii("00");
@@ -258,114 +241,70 @@ class GitMinimalWireMachineTest {
             assertThat(machine.state().phase()).isInstanceOfSatisfying(
                     GitMinimalWireMachine.ControlPhase.class,
                     phase -> assertThat(phase.state()).isInstanceOf(ControlState.MoreDataNeeded.class));
-            assertThat(sinkCreations).hasValue(0);
+            assertThat(handlers.structuredPayloads).isEmpty();
 
-            ByteBuf second = asciiWithTail("0a", 10, 11);
+            ByteBuf second = ascii("0aabcdef");
             assertThat(acceptAndRelease(machine, second)).isTrue();
             assertThat(second.refCnt()).isZero();
             assertThat(allocator.allocations()).isOne();
-            assertRawPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), 4, true);
-            assertThat(sinkCreations).hasValue(1);
-            assertThat(rawSink.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10, 11});
-
-            ByteBuf remaining = buffer(12, 13, 14, 15);
-            assertThat(acceptAndRelease(machine, remaining)).isTrue();
-            assertThat(remaining.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10, 11}, new byte[]{12, 13, 14, 15});
-        }
-    }
-
-    @Test
-    void reusesRawSinkForLaterRawInputs() {
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
-            ByteBuf first = asciiWithTail("000a", 10);
-            assertThat(acceptAndRelease(machine, first)).isTrue();
-
-            ByteBuf second = buffer(11, 12);
-            assertThat(acceptAndRelease(machine, second)).isTrue();
-
-            assertThat(first.refCnt()).isZero();
-            assertThat(second.refCnt()).isZero();
-            assertRawPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), 3, true);
-            assertThat(sinkCreations).hasValue(1);
-            assertThat(rawSink.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10}, new byte[]{11, 12});
-
-            ByteBuf third = buffer(13, 14, 15);
-            assertThat(acceptAndRelease(machine, third)).isTrue();
-            assertThat(third.refCnt()).isZero();
-            assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(rawSink.chunks).containsExactly(new byte[]{10}, new byte[]{11, 12}, new byte[]{13, 14, 15});
+            assertThat(handlers.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10));
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes("abcdef"));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 
     @Test
     void passesUploadPackWantPktLineInSingleInputChunk() {
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
         String wantPacket = "0032want 0123456789012345678901234567890123456789\n";
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
+        try (GitMinimalWireMachine machine = machine(handlers)) {
             ByteBuf input = ascii(wantPacket);
             assertThat(acceptAndRelease(machine, input)).isTrue();
 
             assertThat(input.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(sinkCreations).hasValue(1);
-            assertThat(rawSink.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 50));
-            assertThat(rawSink.chunks).containsExactly(asciiBytes(wantPacket.substring(4)));
+            assertThat(handlers.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 50));
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes(wantPacket.substring(4)));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 
     @Test
     void passesUploadPackWantPktLineAcrossMultipleInputChunks() {
-        AtomicInteger sinkCreations = new AtomicInteger();
-        RecordingRawSink rawSink = new RecordingRawSink();
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
         String wantPacket = "0032want 0123456789012345678901234567890123456789\n";
-        try (GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                UnpooledByteBufAllocator.DEFAULT,
-                control -> {
-                    sinkCreations.incrementAndGet();
-                    rawSink.controls.add(control);
-                    return rawSink;
-                })) {
+        try (GitMinimalWireMachine machine = machine(handlers)) {
             ByteBuf first = ascii("00");
             assertThat(acceptAndRelease(machine, first)).isTrue();
             assertThat(first.refCnt()).isZero();
             assertThat(machine.state().phase()).isInstanceOfSatisfying(
                     GitMinimalWireMachine.ControlPhase.class,
                     phase -> assertThat(phase.state()).isInstanceOf(ControlState.MoreDataNeeded.class));
-            assertThat(sinkCreations).hasValue(0);
+            assertThat(handlers.structuredPayloads).isEmpty();
 
             ByteBuf second = ascii("32");
             assertThat(acceptAndRelease(machine, second)).isTrue();
             assertThat(second.refCnt()).isZero();
-            assertRawPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 50), 46, false);
-            assertThat(sinkCreations).hasValue(0);
+            assertStructuredPhase(machine, new ControlState.ControlSuccess(ControlState.ControlType.DATA, 50), 46);
+            assertThat(handlers.structuredPayloads).isEmpty();
 
             ByteBuf third = ascii(wantPacket.substring(4));
             assertThat(acceptAndRelease(machine, third)).isTrue();
             assertThat(third.refCnt()).isZero();
             assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
-            assertThat(sinkCreations).hasValue(1);
-            assertThat(rawSink.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 50));
-            assertThat(rawSink.chunks).containsExactly(asciiBytes(wantPacket.substring(4)));
+            assertThat(handlers.controls).containsExactly(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 50));
+            assertThat(handlers.structuredPayloads).containsExactly(asciiBytes(wantPacket.substring(4)));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
+    }
+
+    private static GitMinimalWireMachine machine(RecordingWireHandlers handlers) {
+        return machine(UnpooledByteBufAllocator.DEFAULT, handlers);
+    }
+
+    private static GitMinimalWireMachine machine(ByteBufAllocator allocator, RecordingWireHandlers handlers) {
+        return new GitMinimalWireMachine(allocator, handlers, handlers, handlers);
     }
 
     private static void assertControlPhase(
@@ -375,16 +314,26 @@ class GitMinimalWireMachineTest {
                 new GitMinimalWireMachine.ControlPhase(expectedState)));
     }
 
-    private static void assertRawPhase(
+    private static void assertStructuredPhase(
             GitMinimalWireMachine machine,
             ControlState.ControlSuccess control,
-            int remaining,
-            boolean targetCreated) {
+            int remaining) {
         assertThat(machine.state().phase()).isInstanceOfSatisfying(
-                GitMinimalWireMachine.RawSinkPhase.class,
+                GitMinimalWireMachine.StructuredPayloadPhase.class,
                 phase -> {
                     assertThat(phase.control()).isEqualTo(control);
                     assertThat(phase.remaining()).isEqualTo(remaining);
+                });
+    }
+
+    private static void assertRawStreamPhase(
+            GitMinimalWireMachine machine,
+            ControlState.ControlSuccess control,
+            boolean targetCreated) {
+        assertThat(machine.state().phase()).isInstanceOfSatisfying(
+                GitMinimalWireMachine.RawStreamPhase.class,
+                phase -> {
+                    assertThat(phase.control()).isEqualTo(control);
                     assertThat(phase.targetCreated()).isEqualTo(targetCreated);
                 });
     }
@@ -430,6 +379,47 @@ class GitMinimalWireMachineTest {
             bytes[i] = (byte) value.charAt(i);
         }
         return bytes;
+    }
+
+    private static byte[] readAndRelease(ByteBuf input) {
+        try {
+            byte[] bytes = new byte[input.readableBytes()];
+            input.readBytes(bytes);
+            return bytes;
+        } finally {
+            input.release();
+        }
+    }
+
+    private static final class RecordingWireHandlers implements
+            GitMinimalWireMachine.FrameConsumer,
+            GitMinimalWireMachine.StructuredPayloadConsumer,
+            GitMinimalWireMachine.RawTargetFactory {
+        private final List<ControlState.ControlSuccess> controls = new ArrayList<>();
+        private final List<byte[]> structuredPayloads = new ArrayList<>();
+        private final AtomicInteger sinkCreations = new AtomicInteger();
+        private final RecordingRawSink rawSink = new RecordingRawSink();
+        private boolean forwardRawAfterFlush;
+
+        @Override
+        public void accept(ControlState.ControlSuccess control, GitMinimalWireMachine.FlowControl flow) {
+            controls.add(control);
+            if (forwardRawAfterFlush && control.type() == ControlState.ControlType.FLUSH) {
+                flow.forwardRawPayload();
+            }
+        }
+
+        @Override
+        public void accept(ControlState.ControlSuccess control, ByteBuf payload) {
+            structuredPayloads.add(readAndRelease(payload));
+        }
+
+        @Override
+        public RawSink.Target create(ControlState.ControlSuccess control) {
+            sinkCreations.incrementAndGet();
+            rawSink.controls.add(control);
+            return rawSink;
+        }
     }
 
     private static final class RecordingRawSink implements RawSink.Target {

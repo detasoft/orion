@@ -2,25 +2,27 @@ package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.utils.RawSink;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
-import java.util.function.Consumer;
 
 /**
  * Minimal streaming pkt-line machine used to prove the native Git wire parser
  * boundary before the production session API is introduced. The machine owns
  * the durable parser phase, delegates fixed control-frame reads to stateless
- * helpers, and forwards declared pkt-line payload bytes to a lazily created raw
- * target without buffering whole raw packets.
+ * helpers, routes structured pkt-line payload bytes through a bounded
+ * structured callback, and forwards raw stream bytes to a lazily created raw
+ * target only after the control callback requests the raw phase.
  */
 public final class GitMinimalWireMachine implements AutoCloseable {
 
     private final ByteBufAllocator allocator;
     private final RawTargetFactory rawTargetFactory;
-    private final Consumer<ControlState.ControlSuccess> frameConsumer;
+    private final FrameConsumer frameConsumer;
+    private final StructuredPayloadConsumer structuredPayloadConsumer;
     private final GitFixedControlFrameReader controlReader;
     private final RawSink rawSink = new RawSink();
 
@@ -28,17 +30,13 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
-            RawTargetFactory rawTargetFactory) {
-        this(allocator, _control -> {}, rawTargetFactory);
-    }
-
-    public GitMinimalWireMachine(
-            ByteBufAllocator allocator,
-            Consumer<ControlState.ControlSuccess> frameConsumer,
+            FrameConsumer frameConsumer,
+            StructuredPayloadConsumer structuredPayloadConsumer,
             RawTargetFactory rawTargetFactory) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
         this.controlReader = new GitFixedControlFrameReader(this.allocator);
         this.frameConsumer = Objects.requireNonNull(frameConsumer, "frameConsumer");
+        this.structuredPayloadConsumer = Objects.requireNonNull(structuredPayloadConsumer, "structuredPayloadConsumer");
         this.rawTargetFactory = Objects.requireNonNull(rawTargetFactory, "rawTargetFactory");
     }
 
@@ -51,22 +49,39 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                     phase = new ControlPhase(nextControlState);
                     return true;
                 } else if (nextControlState instanceof ControlState.ControlSuccess controlSuccess) {
-                    frameConsumer.accept(controlSuccess);
-                    phase = new RawSinkPhase(controlSuccess);
+                    CallbackFlowControl flowControl = new CallbackFlowControl();
+                    frameConsumer.accept(controlSuccess, flowControl);
+                    phase = phaseAfterControl(controlSuccess, flowControl);
                 } else {
                     phase = new ControlPhase(nextControlState);
                 }
             }
-            if (phase instanceof RawSinkPhase rawSinkPhase) {
-                rawSinkPhase.forward(input);
-                if (!rawSinkPhase.isComplete()) {
+            if (phase instanceof StructuredPayloadPhase structuredPayloadPhase) {
+                structuredPayloadPhase.read(input);
+                if (!structuredPayloadPhase.isComplete()) {
                     return true;
                 }
-                rawSinkPhase.close();
                 phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+            }
+            if (phase instanceof RawStreamPhase rawStreamPhase) {
+                rawStreamPhase.forward(input);
+                return true;
             }
         }
         return true;
+    }
+
+    private Phase phaseAfterControl(ControlState.ControlSuccess control, CallbackFlowControl flowControl) {
+        if (flowControl.forwardRawPayload) {
+            if (control.type() == ControlState.ControlType.DATA) {
+                throw new IllegalStateException("Raw payload forwarding cannot start before a DATA payload is handled");
+            }
+            return new RawStreamPhase(control);
+        }
+        if (control.type() != ControlState.ControlType.DATA) {
+            return new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+        }
+        return new StructuredPayloadPhase(control);
     }
 
     @TestOnly
@@ -82,16 +97,20 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
             throw new IllegalStateException("Incomplete Git pkt-line header");
         }
-        if (phase instanceof RawSinkPhase rawSinkPhase) {
-            rawSinkPhase.close();
-            if (!rawSinkPhase.isComplete()) {
+        if (phase instanceof StructuredPayloadPhase structuredPayloadPhase) {
+            structuredPayloadPhase.close();
+            if (!structuredPayloadPhase.isComplete()) {
                 phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
                 throw new IllegalStateException("Incomplete Git pkt-line payload");
             }
         }
+        if (phase instanceof RawStreamPhase rawStreamPhase) {
+            rawStreamPhase.close();
+            phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+        }
     }
 
-    sealed interface Phase permits ControlPhase, RawSinkPhase {
+    sealed interface Phase permits ControlPhase, RawStreamPhase, StructuredPayloadPhase {
     }
 
     record ControlPhase(ControlState state) implements Phase {
@@ -106,26 +125,75 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         RawSink.Target create(ControlState.ControlSuccess control);
     }
 
+    @FunctionalInterface
+    public interface FrameConsumer {
+        void accept(ControlState.ControlSuccess control, FlowControl flow);
+    }
 
-    final class RawSinkPhase implements Phase, AutoCloseable {
+    @FunctionalInterface
+    public interface StructuredPayloadConsumer {
+        void accept(ControlState.ControlSuccess control, ByteBuf payload);
+    }
+
+    public interface FlowControl {
+        void forwardRawPayload();
+    }
+
+    private static final class CallbackFlowControl implements FlowControl {
+        private boolean forwardRawPayload;
+
+        @Override
+        public void forwardRawPayload() {
+            forwardRawPayload = true;
+        }
+    }
+
+    final class StructuredPayloadPhase implements Phase, AutoCloseable {
         private final ControlState.ControlSuccess control;
-        private final FixedByteBufForwarder forwarder;
-        private RawSink.Target target;
+        private CachingByteBuf fragment;
+        private boolean complete;
 
-        private RawSinkPhase(ControlState.ControlSuccess control) {
+        private StructuredPayloadPhase(ControlState.ControlSuccess control) {
             this.control = control;
-            forwarder = new FixedByteBufForwarder(control.payloadLength());
         }
 
-        private void forward(ByteBuf input) {
-            if (forwarder.isComplete()) {
+        private void read(ByteBuf input) {
+            if (complete) {
                 return;
             }
-            forwarder.forward(input, slice -> rawSink.accept(target(), slice));
+            int payloadLength = control.payloadLength();
+            if (payloadLength == 0) {
+                deliver(Unpooled.EMPTY_BUFFER.retainedDuplicate());
+                return;
+            }
+            if (fragment == null && input.readableBytes() >= payloadLength) {
+                deliver(input.readRetainedSlice(payloadLength));
+                return;
+            }
+            if (fragment == null) {
+                fragment = new CachingByteBuf(allocator, input, payloadLength, CachingByteBuf.Mode.BUFFERED);
+            } else {
+                fragment.append(input);
+            }
+            if (fragment.isComplete()) {
+                CachingByteBuf completedFragment = fragment;
+                fragment = null;
+                deliver(completedFragment);
+            }
+        }
+
+        private void deliver(ByteBuf payload) {
+            try {
+                structuredPayloadConsumer.accept(control, payload);
+            } catch (RuntimeException | Error e) {
+                payload.release();
+                throw e;
+            }
+            complete = true;
         }
 
         private boolean isComplete() {
-            return forwarder.isComplete();
+            return complete;
         }
 
         ControlState.ControlSuccess control() {
@@ -133,7 +201,47 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
 
         int remaining() {
-            return forwarder.remaining();
+            if (complete) {
+                return 0;
+            }
+            if (fragment == null) {
+                return control.payloadLength();
+            }
+            return control.payloadLength() - fragment.readableBytes();
+        }
+
+        @Override
+        public void close() {
+            if (fragment != null) {
+                fragment.release();
+                fragment = null;
+            }
+        }
+    }
+
+    final class RawStreamPhase implements Phase, AutoCloseable {
+        private final ControlState.ControlSuccess control;
+        private RawSink.Target target;
+
+        private RawStreamPhase(ControlState.ControlSuccess control) {
+            this.control = control;
+        }
+
+        private void forward(ByteBuf input) {
+            if (!input.isReadable()) {
+                return;
+            }
+            ByteBuf slice = input.readRetainedSlice(input.readableBytes());
+            try {
+                rawSink.accept(target(), slice);
+            } catch (RuntimeException | Error e) {
+                slice.release();
+                throw e;
+            }
+        }
+
+        ControlState.ControlSuccess control() {
+            return control;
         }
 
         boolean targetCreated() {
