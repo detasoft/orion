@@ -1,7 +1,11 @@
 package pro.deta.orion.git.parser.wire;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -10,6 +14,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitCapabilityParserWriterTest {
     private final GitCapabilityParser parser = new GitCapabilityParser();
     private final GitCapabilityWriter writer = new GitCapabilityWriter();
+    private final GitPktLineWriter pktLineWriter = new GitPktLineWriter(UnpooledByteBufAllocator.DEFAULT);
 
     @Test
     void parsesV0AdvertisementCapabilitiesAfterNul() {
@@ -76,9 +81,65 @@ class GitCapabilityParserWriterTest {
     }
 
     @Test
+    void writesV0AdvertisementPktLineWithCapabilities() {
+        ByteBuf packet = writer.writeAdvertisementPacket(
+                pktLineWriter,
+                "1111111111111111111111111111111111111111 HEAD",
+                List.of(
+                        GitCapability.bare("multi_ack"),
+                        GitCapability.of("object-format", "sha256")));
+
+        try {
+            assertThat(ascii(packet)).isEqualTo(pktLine(
+                    "1111111111111111111111111111111111111111 HEAD\0multi_ack object-format=sha256\n"));
+        } finally {
+            packet.release();
+        }
+    }
+
+    @Test
+    void writesProtocolV2CapabilityPktLines() {
+        List<ByteBuf> packets = writer.writeProtocolV2Packets(
+                pktLineWriter,
+                List.of(
+                        GitCapability.bare("version 2"),
+                        GitCapability.bare("ls-refs"),
+                        GitCapability.of("fetch", "shallow filter")));
+
+        try {
+            assertThat(ascii(packets)).containsExactly(
+                    pktLine("version 2\n"),
+                    pktLine("ls-refs\n"),
+                    pktLine("fetch=shallow filter\n"));
+        } finally {
+            for (ByteBuf packet : packets) {
+                packet.release();
+            }
+        }
+    }
+
+    @Test
     void rejectsInvalidCapabilityName() {
         assertThatThrownBy(() -> GitCapability.of("bad name", "value"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Capability name must not contain whitespace or '='");
+    }
+
+    private static List<String> ascii(List<ByteBuf> packets) {
+        List<String> values = new ArrayList<>();
+        for (ByteBuf packet : packets) {
+            values.add(ascii(packet));
+        }
+        return List.copyOf(values);
+    }
+
+    private static String ascii(ByteBuf packet) {
+        byte[] bytes = new byte[packet.readableBytes()];
+        packet.getBytes(packet.readerIndex(), bytes);
+        return new String(bytes, StandardCharsets.US_ASCII);
+    }
+
+    private static String pktLine(String payload) {
+        return "%04x%s".formatted(payload.length() + 4, payload);
     }
 }

@@ -1,5 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
+import io.netty.buffer.ByteBuf;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -16,6 +18,14 @@ public final class GitCapabilityWriter {
             return advertisementLine;
         }
         return advertisementLine + '\0' + writeCapabilityList(capabilities);
+    }
+
+    public ByteBuf writeAdvertisementPacket(
+            GitPktLineWriter pktLineWriter,
+            String advertisementLine,
+            List<GitCapability> capabilities) {
+        Objects.requireNonNull(pktLineWriter, "pktLineWriter");
+        return pktLineWriter.writeTextLine(writeAdvertisementLine(advertisementLine, capabilities));
     }
 
     public String writeCapabilityList(List<GitCapability> capabilities) {
@@ -39,5 +49,14 @@ public final class GitCapabilityWriter {
             lines.add(capability.rawToken() + '\n');
         }
         return List.copyOf(lines);
+    }
+
+    public List<ByteBuf> writeProtocolV2Packets(GitPktLineWriter pktLineWriter, List<GitCapability> capabilities) {
+        Objects.requireNonNull(pktLineWriter, "pktLineWriter");
+        List<ByteBuf> packets = new ArrayList<>();
+        for (String line : writeProtocolV2Lines(capabilities)) {
+            packets.add(pktLineWriter.writeText(line));
+        }
+        return List.copyOf(packets);
     }
 }
