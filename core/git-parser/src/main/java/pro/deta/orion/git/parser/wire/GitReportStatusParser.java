@@ -16,10 +16,11 @@ public final class GitReportStatusParser {
 
     public static GitReportStatus read(ByteBuf input) {
         Objects.requireNonNull(input, "input");
+        int startReaderIndex = input.readerIndex();
         ParserState state = new ParserState();
         long packetIndex = 0;
         while (input.isReadable()) {
-            GitPktLineReader.Packet packet = GitPktLineReader.read(input, packetIndex);
+            GitPktLineReader.Packet packet = readPacket(input, packetIndex, startReaderIndex);
             packetIndex++;
             switch (packet.kind()) {
                 case FLUSH -> {
@@ -41,8 +42,31 @@ public final class GitReportStatusParser {
         throw semanticError(
                 GitWireError.Kind.UNEXPECTED_PACKET,
                 GitWireError.UNKNOWN_INDEX,
-                input.readerIndex(),
+                input.readerIndex() - startReaderIndex,
                 "Report-status ended before flush packet");
+    }
+
+    private static GitPktLineReader.Packet readPacket(ByteBuf input, long packetIndex, int startReaderIndex) {
+        try {
+            GitPktLineReader.Packet packet = GitPktLineReader.read(input, packetIndex);
+            return new GitPktLineReader.Packet(
+                    packet.kind(),
+                    packet.payload(),
+                    packet.packetIndex(),
+                    packet.byteOffset() - startReaderIndex);
+        } catch (GitWireException e) {
+            throw relativeError(e, startReaderIndex);
+        }
+    }
+
+    private static GitWireException relativeError(GitWireException e, int startReaderIndex) {
+        GitWireError error = e.error();
+        return new GitWireException(new GitWireError(
+                error.kind(),
+                error.phase(),
+                error.packetIndex(),
+                error.byteOffset() - startReaderIndex,
+                error.message()));
     }
 
     private static GitWireException semanticError(
