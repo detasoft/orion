@@ -30,7 +30,7 @@ designs and implementation steps in `docs/plans/`.
   - [x] Add capability parsing and writing for v0/v1 advertisement lines and
         protocol v2 capability lines, preserving unknown capabilities and
         values.
-  - [ ] Add a protocol v2 section parser for command, argument, delimiter,
+  - [x] Add a protocol v2 section parser for command, argument, delimiter,
         flush, response-end, and protocol error packets.
   - [ ] Add side-band and side-band-64k helpers that demultiplex pack data,
         progress, and fatal error bands without buffering pack payloads as

@@ -1,0 +1,162 @@
+package pro.deta.orion.git.parser.wire;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.buffer.UnpooledByteBufAllocator;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class GitProtocolV2SectionParserTest {
+    private final GitPktLineWriter writer = new GitPktLineWriter(UnpooledByteBufAllocator.DEFAULT);
+
+    @Test
+    void parsesLsRefsRequestFromProtocolV2Fixture() {
+        ByteBuf input = request(
+                data("command=ls-refs"),
+                delimiter(),
+                data("peel"),
+                data("symrefs"),
+                data("ref-prefix HEAD"),
+                data("ref-prefix refs/heads/"),
+                data("ref-prefix refs/tags/"),
+                flush());
+
+        try {
+            GitProtocolV2Request request = GitProtocolV2SectionParser.read(input);
+
+            assertThat(request.command()).isEqualTo("ls-refs");
+            assertThat(request.capabilities()).isEmpty();
+            assertThat(request.arguments()).extracting(GitProtocolV2Line::rawLine)
+                    .containsExactly(
+                            "peel",
+                            "symrefs",
+                            "ref-prefix HEAD",
+                            "ref-prefix refs/heads/",
+                            "ref-prefix refs/tags/");
+            assertThat(request.terminal()).isEqualTo(GitProtocolV2Request.Terminal.FLUSH);
+            assertThat(request.protocolError()).isEmpty();
+            assertThat(input.isReadable()).isFalse();
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void parsesFetchRequestWithCommandCapabilitiesAndArguments() {
+        ByteBuf input = request(
+                data("command=fetch"),
+                data("agent=git/2.42.0"),
+                data("object-format=sha1"),
+                delimiter(),
+                data("thin-pack"),
+                data("ofs-delta"),
+                data("want 1111111111111111111111111111111111111111"),
+                data("have 2222222222222222222222222222222222222222"),
+                data("done"),
+                flush());
+
+        try {
+            GitProtocolV2Request request = GitProtocolV2SectionParser.read(input);
+
+            assertThat(request.command()).isEqualTo("fetch");
+            assertThat(request.capabilities()).extracting(GitProtocolV2Line::rawLine)
+                    .containsExactly("agent=git/2.42.0", "object-format=sha1");
+            assertThat(request.arguments()).extracting(GitProtocolV2Line::rawLine)
+                    .containsExactly(
+                            "thin-pack",
+                            "ofs-delta",
+                            "want 1111111111111111111111111111111111111111",
+                            "have 2222222222222222222222222222222222222222",
+                            "done");
+            assertThat(request.terminal()).isEqualTo(GitProtocolV2Request.Terminal.FLUSH);
+            assertThat(request.protocolError()).isEmpty();
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void stopsAtResponseEndPacketAndLeavesFollowingBytesUnread() {
+        ByteBuf input = request(
+                data("command=ls-refs"),
+                delimiter(),
+                data("ref-prefix HEAD"),
+                responseEnd(),
+                data("command=fetch"));
+
+        try {
+            GitProtocolV2Request request = GitProtocolV2SectionParser.read(input);
+
+            assertThat(request.command()).isEqualTo("ls-refs");
+            assertThat(request.arguments()).extracting(GitProtocolV2Line::rawLine)
+                    .containsExactly("ref-prefix HEAD");
+            assertThat(request.terminal()).isEqualTo(GitProtocolV2Request.Terminal.RESPONSE_END);
+            assertThat(input.isReadable()).isTrue();
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void parsesProtocolErrorPacket() {
+        ByteBuf input = request(data("ERR unsupported command"));
+
+        try {
+            GitProtocolV2Request request = GitProtocolV2SectionParser.read(input);
+
+            assertThat(request.command()).isEmpty();
+            assertThat(request.capabilities()).isEmpty();
+            assertThat(request.arguments()).isEmpty();
+            assertThat(request.terminal()).isEqualTo(GitProtocolV2Request.Terminal.ERROR);
+            assertThat(request.protocolError()).contains("unsupported command");
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsArgumentBeforeDelimiter() {
+        ByteBuf input = request(
+                data("command=fetch"),
+                data("want 1111111111111111111111111111111111111111"),
+                flush());
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Protocol v2 arguments must follow a delimiter packet");
+        } finally {
+            input.release();
+        }
+    }
+
+    private ByteBuf request(ByteBuf... packets) {
+        ByteBuf input = Unpooled.buffer();
+        for (ByteBuf packet : packets) {
+            try {
+                input.writeBytes(packet, packet.readerIndex(), packet.readableBytes());
+            } finally {
+                packet.release();
+            }
+        }
+        return input;
+    }
+
+    private ByteBuf data(String line) {
+        return writer.writeTextLine(line);
+    }
+
+    private ByteBuf delimiter() {
+        return writer.writeDelimiter();
+    }
+
+    private ByteBuf flush() {
+        return writer.writeFlush();
+    }
+
+    private ByteBuf responseEnd() {
+        return writer.writeResponseEnd();
+    }
+}
