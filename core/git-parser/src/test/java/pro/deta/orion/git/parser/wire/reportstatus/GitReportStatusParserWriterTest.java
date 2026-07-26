@@ -185,11 +185,11 @@ class GitReportStatusParserWriterTest {
             assertThatThrownBy(() -> GitReportStatusParser.read(input))
                     .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
                             .isEqualTo(new GitWireError(
-                                    GitWireError.Kind.INVALID_REPORT_STATUS_LINE,
+                                    GitWireError.Kind.MISSING_UNPACK_STATUS,
                                     GitWireError.Phase.STRUCTURED_PAYLOAD,
                                     0,
                                     4,
-                                    "Unpack error reason must not be blank")));
+                                    "Report-status must include unpack status")));
         } finally {
             input.release();
         }

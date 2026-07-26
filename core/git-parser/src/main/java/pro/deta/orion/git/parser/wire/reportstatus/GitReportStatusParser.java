@@ -129,10 +129,10 @@ public final class GitReportStatusParser {
             }
             if (value.isBlank()) {
                 throw semanticError(
-                        GitWireError.Kind.INVALID_REPORT_STATUS_LINE,
+                        GitWireError.Kind.MISSING_UNPACK_STATUS,
                         packetIndex,
                         byteOffset,
-                        "Unpack error reason must not be blank");
+                        "Report-status must include unpack status");
             }
             unpackSeen = true;
             unpackOk = false;
