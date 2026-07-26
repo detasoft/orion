@@ -21,12 +21,15 @@ public record GitWireError(
         RESERVED_LENGTH,
         LENGTH_EXCEEDS_LIMIT,
         INCOMPLETE_HEADER,
-        INCOMPLETE_PAYLOAD
+        INCOMPLETE_PAYLOAD,
+        INVALID_SIDE_BAND,
+        SIDE_BAND_FATAL
     }
 
     public enum Phase {
         CONTROL_HEADER,
         STRUCTURED_PAYLOAD,
-        RAW_STREAM
+        RAW_STREAM,
+        SIDE_BAND
     }
 }

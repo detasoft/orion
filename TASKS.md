@@ -32,10 +32,10 @@ designs and implementation steps in `docs/plans/`.
         values.
   - [x] Add a protocol v2 section parser for command, argument, delimiter,
         flush, response-end, and protocol error packets.
-  - [ ] Add side-band and side-band-64k helpers that demultiplex pack data,
+  - [x] Add side-band and side-band-64k helpers that demultiplex pack data,
         progress, and fatal error bands without buffering pack payloads as
         structured text.
-  - [ ] Add report-status parsing and writing for unpack status plus ok/ng
+  - [x] Add report-status parsing and writing for unpack status plus ok/ng
         per-ref command results.
 
 ## Next
