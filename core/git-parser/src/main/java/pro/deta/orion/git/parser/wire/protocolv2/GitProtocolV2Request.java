@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.protocolv2;
 
 import java.util.List;
 import java.util.Objects;

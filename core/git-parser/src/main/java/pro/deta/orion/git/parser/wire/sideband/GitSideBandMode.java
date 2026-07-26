@@ -1,4 +1,6 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.sideband;
+
+import pro.deta.orion.git.parser.wire.GitFixedControlFrameReader;
 
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
 

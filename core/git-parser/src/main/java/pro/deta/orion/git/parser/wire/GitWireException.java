@@ -14,7 +14,7 @@ public final class GitWireException extends RuntimeException {
         return error;
     }
 
-    static GitWireException of(
+    public static GitWireException of(
             GitWireError.Kind kind,
             GitWireError.Phase phase,
             long packetIndex,

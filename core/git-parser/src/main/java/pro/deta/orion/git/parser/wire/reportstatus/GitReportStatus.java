@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.reportstatus;
 
 import java.util.List;
 import java.util.Objects;

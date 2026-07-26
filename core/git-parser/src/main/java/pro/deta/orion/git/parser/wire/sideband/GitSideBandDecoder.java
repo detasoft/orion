@@ -1,7 +1,11 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.sideband;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import pro.deta.orion.git.parser.wire.CachingByteBuf;
+import pro.deta.orion.git.parser.wire.GitFixedControlFrameReader;
+import pro.deta.orion.git.parser.wire.GitWireError;
+import pro.deta.orion.git.parser.wire.GitWireException;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.utils.RawSink;
 
@@ -181,7 +185,11 @@ public final class GitSideBandDecoder implements AutoCloseable {
             if (!input.isReadable()) {
                 return this;
             }
-            GitSideBandBand band = GitSideBandBand.fromId(input.readUnsignedByte(), packetIndex, byteOffset);
+            GitSideBandBand band = GitSideBandBand.fromId(
+                    input.getUnsignedByte(input.readerIndex()),
+                    packetIndex,
+                    byteOffset + ControlState.PKT_LINE_HEADER_SIZE);
+            input.skipBytes(1);
             int payloadLength = control.payloadLength() - 1;
             if (band == GitSideBandBand.DATA) {
                 if (payloadLength == 0) {

@@ -1,4 +1,7 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.sideband;
+
+import pro.deta.orion.git.parser.wire.GitWireError;
+import pro.deta.orion.git.parser.wire.GitWireException;
 
 public enum GitSideBandBand {
     DATA(1),

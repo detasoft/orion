@@ -1,8 +1,11 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.sideband;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
+import pro.deta.orion.git.parser.wire.GitNativeUtils;
+import pro.deta.orion.git.parser.wire.GitWireError;
+import pro.deta.orion.git.parser.wire.GitWireException;
 import pro.deta.orion.git.parser.wire.utils.RawSink;
 import org.junit.jupiter.api.Test;
 
@@ -70,8 +73,9 @@ class GitSideBandTest {
                                     GitWireError.Kind.INVALID_SIDE_BAND,
                                     GitWireError.Phase.SIDE_BAND,
                                     0,
-                                    0,
+                                    4,
                                     "Invalid Git side-band id 4")));
+            assertThat(input.readerIndex()).isEqualTo(4);
         } finally {
             decoder.close();
             input.release();

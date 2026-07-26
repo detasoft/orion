@@ -1,9 +1,12 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.protocolv2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.parser.wire.GitWireError;
+import pro.deta.orion.git.parser.wire.GitWireException;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

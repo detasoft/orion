@@ -9,7 +9,7 @@ import java.util.Objects;
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
 
 public final class GitFixedControlFrameReader {
-    static final int MAX_PKT_LINE_LENGTH = 65_520;
+    public static final int MAX_PKT_LINE_LENGTH = 65_520;
     private final ByteBufAllocator allocator;
 
     public GitFixedControlFrameReader(ByteBufAllocator allocator) {

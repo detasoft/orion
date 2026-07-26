@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.capability;
 
 import java.util.ArrayList;
 import java.util.List;

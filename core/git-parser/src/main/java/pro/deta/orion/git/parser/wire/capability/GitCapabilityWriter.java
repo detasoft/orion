@@ -1,6 +1,7 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.git.parser.wire.capability;
 
 import io.netty.buffer.ByteBuf;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
 
 import java.util.ArrayList;
 import java.util.List;
