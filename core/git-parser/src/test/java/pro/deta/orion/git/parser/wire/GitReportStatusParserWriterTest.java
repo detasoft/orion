@@ -134,6 +134,137 @@ class GitReportStatusParserWriterTest {
     }
 
     @Test
+    void rejectsFlushOnlyReportWithMissingUnpackStatus() {
+        ByteBuf input = packets(flush());
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.MISSING_UNPACK_STATUS,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    0,
+                                    0,
+                                    "Report-status must include unpack status")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsDuplicateUnpackStatus() {
+        ByteBuf input = packets(
+                data("unpack ok"),
+                data("unpack ok"),
+                flush());
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.DUPLICATE_UNPACK_STATUS,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    1,
+                                    18,
+                                    "Report-status must contain only one unpack status")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsUnpackWithBlankReason() {
+        ByteBuf input = packets(
+                data("unpack "),
+                flush());
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_REPORT_STATUS_LINE,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    0,
+                                    4,
+                                    "Unpack error reason must not be blank")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsReservedPktLineLength() {
+        ByteBuf input = raw("0003");
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.RESERVED_LENGTH,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Pkt-line length 0003 is reserved")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsPktLineLengthAboveGitLimit() {
+        ByteBuf input = raw("ffff");
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.LENGTH_EXCEEDS_LIMIT,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Pkt-line length exceeds Git pkt-line limit")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsIncompletePktLineHeader() {
+        ByteBuf input = raw("00");
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INCOMPLETE_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Incomplete pkt-line header")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsTruncatedPktLinePayload() {
+        ByteBuf input = raw("0010unpack");
+
+        try {
+            assertThatThrownBy(() -> GitReportStatusParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INCOMPLETE_PAYLOAD,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    0,
+                                    4,
+                                    "Incomplete pkt-line payload")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
     void reportsErrorOffsetsRelativeToReportStatusStartWhenInputReaderIndexIsShifted() {
         ByteBuf input = shiftedInput(
                 packets(
@@ -185,6 +316,12 @@ class GitReportStatusParserWriterTest {
 
     private ByteBuf flush() {
         return pktLineWriter.writeFlush();
+    }
+
+    private static ByteBuf raw(String ascii) {
+        ByteBuf input = Unpooled.buffer();
+        input.writeBytes(ascii.getBytes(StandardCharsets.US_ASCII));
+        return input;
     }
 
     private static List<String> ascii(List<ByteBuf> packets) {
