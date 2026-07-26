@@ -44,7 +44,12 @@ public final class GitSideBandDecoder implements AutoCloseable {
 
     @Override
     public void close() {
+        if (complete) {
+            return;
+        }
         phase.close();
+        complete = true;
+        phase = new DonePhase();
     }
 
     private ControlPhase newControlPhase() {

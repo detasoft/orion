@@ -129,6 +129,34 @@ class GitSideBandTest {
     }
 
     @Test
+    void decoderRejectsReadableInputAfterCloseDuringBufferedPayload() {
+        RecordingRawTarget target = new RecordingRawTarget();
+        GitSideBandDecoder decoder = new GitSideBandDecoder(
+                UnpooledByteBufAllocator.DEFAULT,
+                GitSideBandMode.SIDE_BAND,
+                target,
+                _progress -> {
+                });
+        ByteBuf input = sideBandStream(packet(GitSideBandBand.PROGRESS, "counting\n".getBytes(StandardCharsets.UTF_8)));
+        ByteBuf first = input.readRetainedSlice(7);
+        ByteBuf second = input.readRetainedSlice(input.readableBytes());
+
+        try {
+            decoder.accept(first);
+            decoder.close();
+
+            assertThat(decoder.isComplete()).isTrue();
+            assertThatThrownBy(() -> decoder.accept(second))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Git side-band stream is already complete");
+        } finally {
+            first.release();
+            second.release();
+            input.release();
+        }
+    }
+
+    @Test
     void writerSplitsBandOnePayloadAtReferenceGitPacketLimit() {
         ByteBuf payload = repeated('a', GitSideBandMode.SIDE_BAND.maxDataBytesPerPacket() + 1);
 
