@@ -19,10 +19,11 @@ public final class GitProtocolV2SectionParser {
 
     public static GitProtocolV2Request read(ByteBuf input) {
         Objects.requireNonNull(input, "input");
+        int startReaderIndex = input.readerIndex();
         ParserState state = new ParserState();
         long packetIndex = 0;
         while (input.isReadable()) {
-            GitPktLineReader.Packet packet = GitPktLineReader.read(input, packetIndex);
+            GitPktLineReader.Packet packet = GitPktLineReader.read(input, packetIndex, startReaderIndex);
             packetIndex++;
             switch (packet.kind()) {
                 case FLUSH -> {
@@ -45,7 +46,7 @@ public final class GitProtocolV2SectionParser {
         }
         throw semanticError(
                 GitWireError.UNKNOWN_INDEX,
-                input.readerIndex(),
+                input.readerIndex() - startReaderIndex,
                 "Protocol v2 request ended before a terminal packet");
     }
 

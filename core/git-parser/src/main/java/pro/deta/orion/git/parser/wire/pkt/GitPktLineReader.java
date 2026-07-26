@@ -21,14 +21,19 @@ public final class GitPktLineReader {
     }
 
     public static Packet read(ByteBuf input, long packetIndex) {
+        return read(input, packetIndex, 0);
+    }
+
+    public static Packet read(ByteBuf input, long packetIndex, int startReaderIndex) {
         Objects.requireNonNull(input, "input");
         int headerIndex = input.readerIndex();
+        long headerOffset = headerIndex - (long) startReaderIndex;
         if (input.readableBytes() < PKT_LINE_HEADER_SIZE) {
             throw GitWireException.of(
                     GitWireError.Kind.INCOMPLETE_HEADER,
                     GitWireError.Phase.CONTROL_HEADER,
                     packetIndex,
-                    headerIndex,
+                    headerOffset,
                     "Incomplete pkt-line header");
         }
         int packetLength = GitNativeUtils.packetLength(
@@ -36,27 +41,27 @@ public final class GitPktLineReader {
                 headerIndex,
                 GitWireError.Phase.CONTROL_HEADER,
                 packetIndex,
-                headerIndex);
+                headerOffset);
         return switch (packetLength) {
             case 0 -> {
                 input.skipBytes(PKT_LINE_HEADER_SIZE);
-                yield new Packet(Kind.FLUSH, "", packetIndex, headerIndex);
+                yield new Packet(Kind.FLUSH, "", packetIndex, headerOffset);
             }
             case 1 -> {
                 input.skipBytes(PKT_LINE_HEADER_SIZE);
-                yield new Packet(Kind.DELIMITER, "", packetIndex, headerIndex);
+                yield new Packet(Kind.DELIMITER, "", packetIndex, headerOffset);
             }
             case 2 -> {
                 input.skipBytes(PKT_LINE_HEADER_SIZE);
-                yield new Packet(Kind.RESPONSE_END, "", packetIndex, headerIndex);
+                yield new Packet(Kind.RESPONSE_END, "", packetIndex, headerOffset);
             }
             case 3 -> throw GitWireException.of(
                     GitWireError.Kind.RESERVED_LENGTH,
                     GitWireError.Phase.CONTROL_HEADER,
                     packetIndex,
-                    headerIndex,
+                    headerOffset,
                     "Pkt-line length 0003 is reserved");
-            default -> readData(input, packetLength, packetIndex, headerIndex);
+            default -> readData(input, packetLength, packetIndex, headerIndex, startReaderIndex);
         };
     }
 
@@ -72,13 +77,19 @@ public final class GitPktLineReader {
         return stripped;
     }
 
-    private static Packet readData(ByteBuf input, int packetLength, long packetIndex, int headerIndex) {
+    private static Packet readData(
+            ByteBuf input,
+            int packetLength,
+            long packetIndex,
+            int headerIndex,
+            int startReaderIndex) {
+        long headerOffset = headerIndex - (long) startReaderIndex;
         if (packetLength < PKT_LINE_HEADER_SIZE) {
             throw GitWireException.of(
                     GitWireError.Kind.RESERVED_LENGTH,
                     GitWireError.Phase.CONTROL_HEADER,
                     packetIndex,
-                    headerIndex,
+                    headerOffset,
                     "Pkt-line data packet length is invalid");
         }
         if (packetLength > GitFixedControlFrameReader.MAX_PKT_LINE_LENGTH) {
@@ -86,7 +97,7 @@ public final class GitPktLineReader {
                     GitWireError.Kind.LENGTH_EXCEEDS_LIMIT,
                     GitWireError.Phase.CONTROL_HEADER,
                     packetIndex,
-                    headerIndex,
+                    headerOffset,
                     "Pkt-line length exceeds Git pkt-line limit");
         }
         if (input.readableBytes() < packetLength) {
@@ -94,13 +105,13 @@ public final class GitPktLineReader {
                     GitWireError.Kind.INCOMPLETE_PAYLOAD,
                     GitWireError.Phase.STRUCTURED_PAYLOAD,
                     packetIndex,
-                    headerIndex + PKT_LINE_HEADER_SIZE,
+                    headerOffset + PKT_LINE_HEADER_SIZE,
                     "Incomplete pkt-line payload");
         }
         int payloadLength = packetLength - PKT_LINE_HEADER_SIZE;
         input.skipBytes(PKT_LINE_HEADER_SIZE);
         String payload = input.readCharSequence(payloadLength, StandardCharsets.UTF_8).toString();
-        return new Packet(Kind.DATA, stripLineEnding(payload), packetIndex, headerIndex + PKT_LINE_HEADER_SIZE);
+        return new Packet(Kind.DATA, stripLineEnding(payload), packetIndex, headerOffset + PKT_LINE_HEADER_SIZE);
     }
 
     public enum Kind {

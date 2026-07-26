@@ -81,10 +81,58 @@ class GitInitialServiceRequestParserTest {
         }
     }
 
+    @Test
+    void reportsControlErrorOffsetsRelativeToRequestStartWhenInputReaderIndexIsShifted() {
+        ByteBuf input = shiftedInput(ascii("003"));
+
+        try {
+            assertThatThrownBy(() -> GitInitialServiceRequestParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INCOMPLETE_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Incomplete initial service request header")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void reportsStructuredErrorOffsetsRelativeToRequestStartWhenInputReaderIndexIsShifted() {
+        ByteBuf input = shiftedInput(requestBuffer("git-archive /project.git\0"));
+
+        try {
+            assertThatThrownBy(() -> GitInitialServiceRequestParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_INITIAL_SERVICE_REQUEST,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    0,
+                                    4,
+                                    "Unsupported Git service: git-archive")));
+        } finally {
+            input.release();
+        }
+    }
+
     private static ByteBuf requestBuffer(String payload) {
         ByteBuf buffer = Unpooled.buffer();
         writePktLine(buffer, payload);
         return buffer;
+    }
+
+    private static ByteBuf shiftedInput(ByteBuf request) {
+        ByteBuf input = Unpooled.buffer();
+        try {
+            input.writeBytes(new byte[]{'x', 'y', 'z'});
+            input.writeBytes(request, request.readerIndex(), request.readableBytes());
+            input.readerIndex(3);
+            return input;
+        } finally {
+            request.release();
+        }
     }
 
     private static ByteBuf ascii(String value) {

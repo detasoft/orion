@@ -161,6 +161,45 @@ class GitProtocolV2SectionParserTest {
         }
     }
 
+    @Test
+    void reportsPacketErrorOffsetsRelativeToRequestStartWhenInputReaderIndexIsShifted() {
+        ByteBuf input = shiftedRequest(request(
+                data("command=fetch"),
+                data("want 1111111111111111111111111111111111111111"),
+                flush()));
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    1,
+                                    22,
+                                    "Protocol v2 arguments must follow a delimiter packet")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void reportsEndOffsetRelativeToRequestStartWhenInputReaderIndexIsShifted() {
+        ByteBuf input = shiftedRequest(request(data("command=fetch")));
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    GitWireError.UNKNOWN_INDEX,
+                                    18,
+                                    "Protocol v2 request ended before a terminal packet")));
+        } finally {
+            input.release();
+        }
+    }
+
     private ByteBuf request(ByteBuf... packets) {
         ByteBuf input = Unpooled.buffer();
         for (ByteBuf packet : packets) {
@@ -171,6 +210,18 @@ class GitProtocolV2SectionParserTest {
             }
         }
         return input;
+    }
+
+    private ByteBuf shiftedRequest(ByteBuf request) {
+        ByteBuf input = Unpooled.buffer();
+        try {
+            input.writeBytes(new byte[]{'x', 'y', 'z'});
+            input.writeBytes(request, request.readerIndex(), request.readableBytes());
+            input.readerIndex(3);
+            return input;
+        } finally {
+            request.release();
+        }
     }
 
     private ByteBuf data(String line) {
