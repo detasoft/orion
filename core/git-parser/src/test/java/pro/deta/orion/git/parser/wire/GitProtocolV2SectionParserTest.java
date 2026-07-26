@@ -125,8 +125,34 @@ class GitProtocolV2SectionParserTest {
 
         try {
             assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Protocol v2 arguments must follow a delimiter packet");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    1,
+                                    22,
+                                    "Protocol v2 arguments must follow a delimiter packet")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsDelimiterBeforeCommandAsWireError() {
+        ByteBuf input = request(
+                delimiter(),
+                data("command=fetch"),
+                flush());
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    0,
+                                    0,
+                                    "Protocol v2 delimiter cannot appear before command packet")));
         } finally {
             input.release();
         }
