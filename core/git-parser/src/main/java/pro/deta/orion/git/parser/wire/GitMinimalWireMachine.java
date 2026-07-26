@@ -7,6 +7,7 @@ import pro.deta.orion.git.parser.wire.utils.RawSink;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * Minimal streaming pkt-line machine used to prove the native Git wire parser
@@ -19,6 +20,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     private final ByteBufAllocator allocator;
     private final RawTargetFactory rawTargetFactory;
+    private final Consumer<ControlState.ControlSuccess> frameConsumer;
     private final GitFixedControlFrameReader controlReader;
     private final RawSink rawSink = new RawSink();
 
@@ -27,8 +29,16 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
             RawTargetFactory rawTargetFactory) {
+        this(allocator, _control -> {}, rawTargetFactory);
+    }
+
+    public GitMinimalWireMachine(
+            ByteBufAllocator allocator,
+            Consumer<ControlState.ControlSuccess> frameConsumer,
+            RawTargetFactory rawTargetFactory) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
         this.controlReader = new GitFixedControlFrameReader(this.allocator);
+        this.frameConsumer = Objects.requireNonNull(frameConsumer, "frameConsumer");
         this.rawTargetFactory = Objects.requireNonNull(rawTargetFactory, "rawTargetFactory");
     }
 
@@ -41,6 +51,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                     phase = new ControlPhase(nextControlState);
                     return true;
                 } else if (nextControlState instanceof ControlState.ControlSuccess controlSuccess) {
+                    frameConsumer.accept(controlSuccess);
                     phase = new RawSinkPhase(controlSuccess);
                 } else {
                     phase = new ControlPhase(nextControlState);
@@ -65,8 +76,18 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     @Override
     public void close() {
+        if (phase instanceof ControlPhase controlPhase
+                && controlPhase.state() instanceof ControlState.MoreDataNeeded moreDataNeeded) {
+            moreDataNeeded.fragment().release();
+            phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+            throw new IllegalStateException("Incomplete Git pkt-line header");
+        }
         if (phase instanceof RawSinkPhase rawSinkPhase) {
             rawSinkPhase.close();
+            if (!rawSinkPhase.isComplete()) {
+                phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+                throw new IllegalStateException("Incomplete Git pkt-line payload");
+            }
         }
     }
 

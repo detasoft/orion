@@ -18,18 +18,14 @@ public final class GitFixedControlFrameReader {
 
     public ControlState accept(ControlState controlState, ByteBuf input) {
         Objects.requireNonNull(input, "input");
-        try {
-            controlState = switch (controlState) {
-                case ControlState.ControlSuccess _ignored ->
-                        throw new IllegalStateException("Control frame is already complete");
+        controlState = switch (controlState) {
+            case ControlState.ControlSuccess _ignored ->
+                    throw new IllegalStateException("Control frame is already complete");
 
-                case ControlState.ControlEmpty _ignored -> readEmpty(controlState, input);
+            case ControlState.ControlEmpty _ignored -> readEmpty(controlState, input);
 
-                case ControlState.MoreDataNeeded prevData -> readMore(prevData.fragment(), input);
-            };
-        } catch (Exception e) {
-            return ControlState.ControlEmpty.INSTANCE;
-        }
+            case ControlState.MoreDataNeeded prevData -> readMore(prevData.fragment(), input);
+        };
         return controlState;
     }
 

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitFixedControlFrameReaderTest {
     @Test
@@ -186,8 +187,9 @@ class GitFixedControlFrameReaderTest {
 
         ByteBuf fourth = ascii("zPACK");
         try {
-            assertThat(reader.accept(thirdState, fourth))
-                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
+            assertThatThrownBy(() -> reader.accept(thirdState, fourth))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("non-hex");
 
             assertThat(fourth.readerIndex()).isEqualTo(1);
             assertThat(fourth.readableBytes()).isEqualTo(4);
@@ -216,8 +218,9 @@ class GitFixedControlFrameReaderTest {
         ByteBuf second = ascii("x");
         try {
             int readableBefore = second.readableBytes();
-            assertThat(reader.accept(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), second))
-                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
+            assertThatThrownBy(() -> reader.accept(new ControlState.ControlSuccess(ControlState.ControlType.DATA, 10), second))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("already complete");
             assertThat(second.readableBytes()).isEqualTo(readableBefore);
         } finally {
             second.release();
@@ -237,8 +240,9 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii("zzzz");
         try {
-            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, input))
-                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
+            assertThatThrownBy(() -> reader.accept(ControlState.ControlEmpty.INSTANCE, input))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("non-hex");
         } finally {
             input.release();
         }
@@ -258,8 +262,9 @@ class GitFixedControlFrameReaderTest {
 
         ByteBuf second = ascii("zzPACK");
         try {
-            assertThat(reader.accept(firstState, second))
-                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
+            assertThatThrownBy(() -> reader.accept(firstState, second))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("non-hex");
 
             assertThat(firstFragment.refCnt()).isZero();
         } finally {
@@ -283,8 +288,9 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii("0003");
         try {
-            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, input))
-                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
+            assertThatThrownBy(() -> reader.accept(ControlState.ControlEmpty.INSTANCE, input))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("reserved");
         } finally {
             input.release();
         }
@@ -296,8 +302,9 @@ class GitFixedControlFrameReaderTest {
         GitFixedControlFrameReader reader = new GitFixedControlFrameReader(allocator);
         ByteBuf input = ascii("fff1");
         try {
-            assertThat(reader.accept(ControlState.ControlEmpty.INSTANCE, input))
-                    .isSameAs(ControlState.ControlEmpty.INSTANCE);
+            assertThatThrownBy(() -> reader.accept(ControlState.ControlEmpty.INSTANCE, input))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("exceeds");
         } finally {
             input.release();
         }
