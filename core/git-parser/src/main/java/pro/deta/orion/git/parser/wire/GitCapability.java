@@ -44,6 +44,7 @@ public record GitCapability(
         if (checkedName.isEmpty()) {
             throw new IllegalArgumentException("Capability name must not be empty");
         }
+        // Git wire protocol v2 uses this space-containing header before regular capabilities.
         if ("version 2".equals(checkedName)) {
             return checkedName;
         }
