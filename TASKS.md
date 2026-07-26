@@ -8,9 +8,11 @@ designs and implementation steps in `docs/plans/`.
 
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`.
 - [ ] Implement `docs/plans/2026-05-14-native-git-wire-protocol-core.md`:
-      first replace the current Git transport parser path with a JGit-free
-      streaming pkt-line reader that does not buffer whole packets or raw pack
-      tails in additional memory.
+      `f21b309` models `GitMinimalWireMachine` durable parser state as phase
+      objects and documents its prototype role. Verification baseline is green
+      with root `mvn test -Pdev`. Next, replace the current Git transport parser
+      path with a JGit-free streaming pkt-line reader that does not buffer whole
+      packets or raw pack tails in additional memory.
 
 ## Next
 

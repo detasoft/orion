@@ -8,6 +8,13 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
 
+/**
+ * Minimal streaming pkt-line machine used to prove the native Git wire parser
+ * boundary before the production session API is introduced. The machine owns
+ * the durable parser phase, delegates fixed control-frame reads to stateless
+ * helpers, and forwards declared pkt-line payload bytes to a lazily created raw
+ * target without buffering whole raw packets.
+ */
 public final class GitMinimalWireMachine implements AutoCloseable {
 
     private final ByteBufAllocator allocator;
@@ -15,9 +22,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     private final GitFixedControlFrameReader controlReader;
     private final RawSink rawSink = new RawSink();
 
-    private ControlState currentControlState = ControlState.ControlEmpty.INSTANCE;
-    private RawPayload rawPayload;
-    private Phase phase = Phase.CONTROL;
+    private Phase phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
 
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
@@ -30,22 +35,24 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     public boolean accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
         while (input.isReadable()) {
-            if (phase == Phase.CONTROL) {
-                currentControlState = controlReader.accept(currentControlState, input);
-                if (currentControlState instanceof ControlState.MoreDataNeeded) {
+            if (phase instanceof ControlPhase controlPhase) {
+                ControlState nextControlState = controlReader.accept(controlPhase.state(), input);
+                if (nextControlState instanceof ControlState.MoreDataNeeded) {
+                    phase = new ControlPhase(nextControlState);
                     return true;
-                } else if (currentControlState instanceof ControlState.ControlSuccess controlSuccess) {
-                    currentControlState = ControlState.ControlEmpty.INSTANCE;
-                    rawPayload = new RawPayload(controlSuccess);
-                    phase = Phase.RAW;
+                } else if (nextControlState instanceof ControlState.ControlSuccess controlSuccess) {
+                    phase = new RawSinkPhase(controlSuccess);
+                } else {
+                    phase = new ControlPhase(nextControlState);
                 }
             }
-            if (phase == Phase.RAW) {
-                forwardRawPayload(input);
-                if (rawPayload != null && !rawPayload.isComplete()) {
+            if (phase instanceof RawSinkPhase rawSinkPhase) {
+                rawSinkPhase.forward(input);
+                if (!rawSinkPhase.isComplete()) {
                     return true;
                 }
-                completeRawPayload();
+                rawSinkPhase.close();
+                phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
             }
         }
         return true;
@@ -53,41 +60,24 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     @TestOnly
     ComposedState state() {
-        return new ComposedState(
-                phase,
-                rawPayload != null && rawPayload.targetCreated());
-    }
-
-    private void forwardRawPayload(ByteBuf input) {
-        if (!input.isReadable()) {
-            return;
-        }
-        rawPayload.forward(input);
-    }
-
-    private void completeRawPayload() {
-        if (rawPayload != null) {
-            rawPayload.close();
-            rawPayload = null;
-        }
-        phase = Phase.CONTROL;
+        return new ComposedState(phase);
     }
 
     @Override
     public void close() {
-        if (rawPayload != null) {
-            rawPayload.close();
+        if (phase instanceof RawSinkPhase rawSinkPhase) {
+            rawSinkPhase.close();
         }
     }
 
-    enum Phase {
-        CONTROL,
-        RAW
+    sealed interface Phase permits ControlPhase, RawSinkPhase {
+    }
+
+    record ControlPhase(ControlState state) implements Phase {
     }
 
     record ComposedState(
-            Phase phase,
-            boolean rawTargetCreated) {
+            Phase phase) {
     }
 
     @FunctionalInterface
@@ -96,12 +86,12 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     }
 
 
-    private final class RawPayload implements AutoCloseable {
+    final class RawSinkPhase implements Phase, AutoCloseable {
         private final ControlState.ControlSuccess control;
         private final FixedByteBufForwarder forwarder;
         private RawSink.Target target;
 
-        private RawPayload(ControlState.ControlSuccess control) {
+        private RawSinkPhase(ControlState.ControlSuccess control) {
             this.control = control;
             forwarder = new FixedByteBufForwarder(control.payloadLength());
         }
@@ -117,7 +107,15 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             return forwarder.isComplete();
         }
 
-        private boolean targetCreated() {
+        ControlState.ControlSuccess control() {
+            return control;
+        }
+
+        int remaining() {
+            return forwarder.remaining();
+        }
+
+        boolean targetCreated() {
             return target != null;
         }
 

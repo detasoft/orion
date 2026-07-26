@@ -126,14 +126,15 @@ Current prototype zones:
   byte count reaches zero.
 - `GitMinimalWireMachine` processes accepted inbound buffers and returns whether
   the caller should release the original input reference after `accept`. It owns
-  all durable wire state in one place: current phase, current control state,
-  lazy raw payload state, and raw target creation state. Readers and `RawSink`
-  are stateless helpers called by the machine. The machine routes on
-  `ControlState` and forwards exactly `length - 4` pkt-line payload bytes to the
-  raw target before returning to header reading. It does not store borrowed input
-  buffers and does not manually advance `readerIndex` for control bytes. The
-  current prototype accepts Git's fixed 65,520 byte pkt-line maximum rather than
-  a per-machine structural capacity parameter.
+  all durable wire state through one current phase object. `ControlPhase` carries
+  the current `ControlState`; `RawSinkPhase` carries the completed
+  `ControlSuccess`, fixed raw forwarding cursor, and lazy raw target creation
+  state. Readers and `RawSink` are stateless helpers called by the machine. The
+  machine routes on the current phase and forwards exactly `length - 4` pkt-line
+  payload bytes to the raw target before returning to header reading. It does
+  not store borrowed input buffers and does not manually advance `readerIndex`
+  for control bytes. The current prototype accepts Git's fixed 65,520 byte
+  pkt-line maximum rather than a per-machine structural capacity parameter.
 - `GitMinimalWireMachine` owns lazy raw target creation. A complete control frame
   with no raw tail must not create a raw target; the raw target is created only
   when raw bytes are actually observed. The raw target factory receives
@@ -322,9 +323,10 @@ caller-owned state with a retained control slice until the control bytes have
 been handed to the next target or until session close, while the caller can
 release the original input reference according to the session's release decision.
 Do not retain a large pooled inbound buffer only to preserve a small incomplete
-control tail. The
-current prototype does not fragment the four-byte pkt-line header; split header
-support is deferred until the real pkt-line reader is introduced.
+control tail. The current prototype already supports split four-byte pkt-line
+headers by copying the consumed header fragment into bounded structural storage
+and continuing from the same input when the header completes with readable tail
+bytes.
 
 This gives the common path zero copy for complete structures while keeping memory
 bounded for slow or fragmented clients. It should reject control payloads that
