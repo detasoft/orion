@@ -25,6 +25,18 @@ designs and implementation steps in `docs/plans/`.
         forwarding in the existing native wire machine.
   - [ ] Add typed Git wire errors with phase, offset or packet index, and
         malformed pkt-line error kinds.
+  - [ ] Add a native pkt-line writer for data, flush, delimiter, and
+        response-end packets, with binary payload and explicit text helpers.
+  - [ ] Add capability parsing and writing for v0/v1 advertisement lines and
+        protocol v2 capability lines, preserving unknown capabilities and
+        values.
+  - [ ] Add a protocol v2 section parser for command, argument, delimiter,
+        flush, response-end, and protocol error packets.
+  - [ ] Add side-band and side-band-64k helpers that demultiplex pack data,
+        progress, and fatal error bands without buffering pack payloads as
+        structured text.
+  - [ ] Add report-status parsing and writing for unpack status plus ok/ng
+        per-ref command results.
 
 ## Next
 
