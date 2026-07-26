@@ -132,8 +132,13 @@ class GitMinimalWireMachineTest {
         assertThat(input.refCnt()).isZero();
 
         assertThatThrownBy(machine::close)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Incomplete Git pkt-line header");
+                .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                        .isEqualTo(new GitWireError(
+                                GitWireError.Kind.INCOMPLETE_HEADER,
+                                GitWireError.Phase.CONTROL_HEADER,
+                                0,
+                                0,
+                                "Incomplete Git pkt-line header")));
     }
 
     @Test
@@ -145,8 +150,53 @@ class GitMinimalWireMachineTest {
         assertThat(input.refCnt()).isZero();
 
         assertThatThrownBy(machine::close)
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Incomplete Git pkt-line payload");
+                .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                        .isEqualTo(new GitWireError(
+                                GitWireError.Kind.INCOMPLETE_PAYLOAD,
+                                GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                0,
+                                0,
+                                "Incomplete Git pkt-line payload")));
+    }
+
+    @Test
+    void invalidHeaderFailsWithTypedWireError() {
+        GitMinimalWireMachine machine = machine(new RecordingWireHandlers());
+        ByteBuf input = ascii("zzzz");
+
+        try {
+            assertThatThrownBy(() -> machine.accept(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_HEX_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Pkt-line length contains non-hex byte")));
+        } finally {
+            input.release();
+            machine.close();
+        }
+    }
+
+    @Test
+    void invalidHeaderAfterCompletedPacketReportsPacketPosition() {
+        GitMinimalWireMachine machine = machine(new RecordingWireHandlers());
+        ByteBuf input = ascii("0007onezzzz");
+
+        try {
+            assertThatThrownBy(() -> machine.accept(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_HEX_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    1,
+                                    7,
+                                    "Pkt-line length contains non-hex byte")));
+        } finally {
+            input.release();
+            machine.close();
+        }
     }
 
     @Test
@@ -193,8 +243,8 @@ class GitMinimalWireMachineTest {
             assertThat(controlOnly.refCnt()).isZero();
             assertThat(handlers.structuredPayloads).isEmpty();
             assertThatThrownBy(machine::close)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("Incomplete Git pkt-line payload");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error().kind())
+                            .isEqualTo(GitWireError.Kind.INCOMPLETE_PAYLOAD));
             assertThat(handlers.sinkCreations).hasValue(0);
         } finally {
             machine.close();

@@ -34,7 +34,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 Objects.requireNonNull(frameConsumer, "frameConsumer"),
                 Objects.requireNonNull(structuredPayloadConsumer, "structuredPayloadConsumer"),
                 new GitFixedControlFrameReader(checkedAllocator));
-        this.phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+        this.phase = newControlPhase();
     }
 
     public boolean accept(ByteBuf input) {
@@ -45,21 +45,31 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         return true;
     }
 
-    private Phase phaseAfterControl(ControlState.ControlSuccess control, CallbackFlowControl flowControl) {
+    private Phase phaseAfterControl(
+            ControlState.ControlSuccess control,
+            CallbackFlowControl flowControl,
+            long packetIndex,
+            long byteOffset) {
         if (flowControl.forwardRawPayload) {
             if (control.type() == ControlState.ControlType.DATA) {
                 throw new IllegalStateException("Raw payload forwarding cannot start before a DATA payload is handled");
             }
+            context.completePacket(control);
             return new RawStreamPhase(control);
         }
         if (control.type() != ControlState.ControlType.DATA) {
-            return new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+            context.completePacket(control);
+            return newControlPhase();
         }
-        StructuredPayloadPhase structuredPayloadPhase = new StructuredPayloadPhase(control);
+        StructuredPayloadPhase structuredPayloadPhase = new StructuredPayloadPhase(control, packetIndex, byteOffset);
         if (control.payloadLength() == 0) {
             return structuredPayloadPhase.accept(Unpooled.EMPTY_BUFFER);
         }
         return structuredPayloadPhase;
+    }
+
+    private ControlPhase newControlPhase() {
+        return new ControlPhase(ControlState.ControlEmpty.INSTANCE, context.nextPacketIndex(), context.nextByteOffset());
     }
 
     @TestOnly
@@ -72,16 +82,48 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         try {
             phase.close();
         } finally {
-            phase = new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+            phase = newControlPhase();
         }
     }
 
-    private record Context(
-            ByteBufAllocator allocator,
-            RawTargetFactory rawTargetFactory,
-            FrameConsumer frameConsumer,
-            StructuredPayloadConsumer structuredPayloadConsumer,
-            GitFixedControlFrameReader controlReader) {
+    private static final class Context {
+        private final ByteBufAllocator allocator;
+        private final RawTargetFactory rawTargetFactory;
+        private final FrameConsumer frameConsumer;
+        private final StructuredPayloadConsumer structuredPayloadConsumer;
+        private final GitFixedControlFrameReader controlReader;
+        private long nextPacketIndex;
+        private long nextByteOffset;
+
+        private Context(
+                ByteBufAllocator allocator,
+                RawTargetFactory rawTargetFactory,
+                FrameConsumer frameConsumer,
+                StructuredPayloadConsumer structuredPayloadConsumer,
+                GitFixedControlFrameReader controlReader) {
+            this.allocator = allocator;
+            this.rawTargetFactory = rawTargetFactory;
+            this.frameConsumer = frameConsumer;
+            this.structuredPayloadConsumer = structuredPayloadConsumer;
+            this.controlReader = controlReader;
+        }
+
+        private long nextPacketIndex() {
+            return nextPacketIndex;
+        }
+
+        private long nextByteOffset() {
+            return nextByteOffset;
+        }
+
+        private void completePacket(ControlState.ControlSuccess control) {
+            nextPacketIndex++;
+            nextByteOffset += control.length();
+        }
+
+        private void forwardRawBytes(int length) {
+            nextByteOffset += length;
+        }
     }
 
     sealed interface Phase extends AutoCloseable permits ControlPhase, RawStreamPhase, StructuredPayloadPhase {
@@ -126,23 +168,27 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     final class ControlPhase implements Phase {
         private final ControlState state;
+        private final long packetIndex;
+        private final long byteOffset;
 
-        private ControlPhase(ControlState state) {
+        private ControlPhase(ControlState state, long packetIndex, long byteOffset) {
             this.state = state;
+            this.packetIndex = packetIndex;
+            this.byteOffset = byteOffset;
         }
 
         @Override
         public Phase accept(ByteBuf input) {
-            ControlState nextControlState = context.controlReader.accept(state, input);
+            ControlState nextControlState = context.controlReader.accept(state, input, packetIndex, byteOffset);
             if (nextControlState instanceof ControlState.MoreDataNeeded) {
-                return new ControlPhase(nextControlState);
+                return new ControlPhase(nextControlState, packetIndex, byteOffset);
             }
             if (nextControlState instanceof ControlState.ControlSuccess controlSuccess) {
                 CallbackFlowControl flowControl = new CallbackFlowControl();
                 context.frameConsumer.accept(controlSuccess, flowControl);
-                return phaseAfterControl(controlSuccess, flowControl);
+                return phaseAfterControl(controlSuccess, flowControl, packetIndex, byteOffset);
             }
-            return new ControlPhase(nextControlState);
+            return new ControlPhase(nextControlState, packetIndex, byteOffset);
         }
 
         ControlState state() {
@@ -153,18 +199,27 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         public void close() {
             if (state instanceof ControlState.MoreDataNeeded moreDataNeeded) {
                 moreDataNeeded.fragment().release();
-                throw new IllegalStateException("Incomplete Git pkt-line header");
+                throw GitWireException.of(
+                        GitWireError.Kind.INCOMPLETE_HEADER,
+                        GitWireError.Phase.CONTROL_HEADER,
+                        packetIndex,
+                        byteOffset,
+                        "Incomplete Git pkt-line header");
             }
         }
     }
 
     final class StructuredPayloadPhase implements Phase {
         private final ControlState.ControlSuccess control;
+        private final long packetIndex;
+        private final long byteOffset;
         private CachingByteBuf fragment;
         private boolean complete;
 
-        private StructuredPayloadPhase(ControlState.ControlSuccess control) {
+        private StructuredPayloadPhase(ControlState.ControlSuccess control, long packetIndex, long byteOffset) {
             this.control = control;
+            this.packetIndex = packetIndex;
+            this.byteOffset = byteOffset;
         }
 
         @Override
@@ -173,7 +228,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             if (!complete) {
                 return this;
             }
-            return new ControlPhase(ControlState.ControlEmpty.INSTANCE);
+            return newControlPhase();
         }
 
         private void read(ByteBuf input) {
@@ -208,6 +263,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 payload.release();
                 throw e;
             }
+            context.completePacket(control);
             complete = true;
         }
 
@@ -232,7 +288,12 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 fragment = null;
             }
             if (!complete) {
-                throw new IllegalStateException("Incomplete Git pkt-line payload");
+                throw GitWireException.of(
+                        GitWireError.Kind.INCOMPLETE_PAYLOAD,
+                        GitWireError.Phase.STRUCTURED_PAYLOAD,
+                        packetIndex,
+                        byteOffset,
+                        "Incomplete Git pkt-line payload");
             }
         }
     }
@@ -251,12 +312,14 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 return this;
             }
             ByteBuf slice = input.readRetainedSlice(input.readableBytes());
+            int length = slice.readableBytes();
             try {
                 target().accept(slice);
             } catch (RuntimeException | Error e) {
                 slice.release();
                 throw e;
             }
+            context.forwardRawBytes(length);
             return this;
         }
 

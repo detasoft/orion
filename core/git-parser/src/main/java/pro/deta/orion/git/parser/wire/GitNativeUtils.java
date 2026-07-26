@@ -12,7 +12,22 @@ public final class GitNativeUtils {
     }
 
     public static int packetLength(ByteBuf input, int headerIndex) {
+        return packetLength(
+                input,
+                headerIndex,
+                GitWireError.Phase.CONTROL_HEADER,
+                GitWireError.UNKNOWN_INDEX,
+                headerIndex);
+    }
+
+    public static int packetLength(
+            ByteBuf input,
+            int headerIndex,
+            GitWireError.Phase phase,
+            long packetIndex,
+            long byteOffset) {
         Objects.requireNonNull(input, "input");
+        Objects.requireNonNull(phase, "phase");
 
         int header = input.getInt(headerIndex);
         int h0 = HEX_VALUES[(header >>> 24) & 0xff];
@@ -20,7 +35,12 @@ public final class GitNativeUtils {
         int h2 = HEX_VALUES[(header >>> 8) & 0xff];
         int h3 = HEX_VALUES[header & 0xff];
         if ((h0 | h1 | h2 | h3) < 0) {
-            throw new IllegalArgumentException("Pkt-line length contains non-hex byte");
+            throw GitWireException.of(
+                    GitWireError.Kind.INVALID_HEX_HEADER,
+                    phase,
+                    packetIndex,
+                    byteOffset,
+                    "Pkt-line length contains non-hex byte");
         }
         return (h0 << 12) | (h1 << 8) | (h2 << 4) | h3;
     }

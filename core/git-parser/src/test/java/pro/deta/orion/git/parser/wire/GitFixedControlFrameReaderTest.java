@@ -188,8 +188,13 @@ class GitFixedControlFrameReaderTest {
         ByteBuf fourth = ascii("zPACK");
         try {
             assertThatThrownBy(() -> reader.accept(thirdState, fourth))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("non-hex");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_HEX_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    GitWireError.UNKNOWN_INDEX,
+                                    0,
+                                    "Pkt-line length contains non-hex byte")));
 
             assertThat(fourth.readerIndex()).isEqualTo(1);
             assertThat(fourth.readableBytes()).isEqualTo(4);
@@ -241,8 +246,13 @@ class GitFixedControlFrameReaderTest {
         ByteBuf input = ascii("zzzz");
         try {
             assertThatThrownBy(() -> reader.accept(ControlState.ControlEmpty.INSTANCE, input))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("non-hex");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_HEX_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    GitWireError.UNKNOWN_INDEX,
+                                    0,
+                                    "Pkt-line length contains non-hex byte")));
         } finally {
             input.release();
         }
@@ -263,8 +273,8 @@ class GitFixedControlFrameReaderTest {
         ByteBuf second = ascii("zzPACK");
         try {
             assertThatThrownBy(() -> reader.accept(firstState, second))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("non-hex");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error().kind())
+                            .isEqualTo(GitWireError.Kind.INVALID_HEX_HEADER));
 
             assertThat(firstFragment.refCnt()).isZero();
         } finally {
@@ -289,8 +299,13 @@ class GitFixedControlFrameReaderTest {
         ByteBuf input = ascii("0003");
         try {
             assertThatThrownBy(() -> reader.accept(ControlState.ControlEmpty.INSTANCE, input))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("reserved");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.RESERVED_LENGTH,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    GitWireError.UNKNOWN_INDEX,
+                                    0,
+                                    "Pkt-line length 0003 is reserved")));
         } finally {
             input.release();
         }
@@ -303,8 +318,13 @@ class GitFixedControlFrameReaderTest {
         ByteBuf input = ascii("fff1");
         try {
             assertThatThrownBy(() -> reader.accept(ControlState.ControlEmpty.INSTANCE, input))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("exceeds");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.LENGTH_EXCEEDS_LIMIT,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    GitWireError.UNKNOWN_INDEX,
+                                    0,
+                                    "Pkt-line length exceeds Git pkt-line limit")));
         } finally {
             input.release();
         }

@@ -37,8 +37,13 @@ class GitNativeUtilsTest {
         ByteBuf input = ascii("00g1");
         try {
             assertThatThrownBy(() -> GitNativeUtils.packetLength(input, 0))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Pkt-line length contains non-hex byte");
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INVALID_HEX_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    GitWireError.UNKNOWN_INDEX,
+                                    0,
+                                    "Pkt-line length contains non-hex byte")));
         } finally {
             input.release();
         }

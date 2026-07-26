@@ -23,7 +23,7 @@ designs and implementation steps in `docs/plans/`.
         session API.
   - [x] Separate structured pkt-line payload handling from raw pack payload
         forwarding in the existing native wire machine.
-  - [ ] Add typed Git wire errors with phase, offset or packet index, and
+  - [x] Add typed Git wire errors with phase, offset or packet index, and
         malformed pkt-line error kinds.
   - [x] Add a native pkt-line writer for data, flush, delimiter, and
         response-end packets, with binary payload and explicit text helpers.
