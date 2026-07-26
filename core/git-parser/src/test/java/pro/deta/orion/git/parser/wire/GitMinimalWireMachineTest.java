@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.utils.RawSink;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -16,6 +18,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitMinimalWireMachineTest {
+    @Test
+    void keepsOnlyContextAndPhaseAsMachineState() {
+        List<String> fieldNames = new ArrayList<>();
+        for (Field field : GitMinimalWireMachine.class.getDeclaredFields()) {
+            if (!Modifier.isStatic(field.getModifiers())) {
+                fieldNames.add(field.getName());
+            }
+        }
+
+        assertThat(fieldNames).containsExactlyInAnyOrder("context", "phase");
+    }
+
     @Test
     void deliversStructuredDataPayloadsWithoutCreatingRawSink() {
         RecordingWireHandlers handlers = new RecordingWireHandlers();
@@ -89,6 +103,22 @@ class GitMinimalWireMachineTest {
                     new ControlState.ControlSuccess(ControlState.ControlType.DELIMITER, 4),
                     new ControlState.ControlSuccess(ControlState.ControlType.RESPONSE_END, 4));
             assertThat(handlers.structuredPayloads).isEmpty();
+            assertThat(handlers.sinkCreations).hasValue(0);
+        }
+    }
+
+    @Test
+    void deliversEmptyStructuredDataPayloadWithoutWaitingForMoreInput() {
+        RecordingWireHandlers handlers = new RecordingWireHandlers();
+        try (GitMinimalWireMachine machine = machine(handlers)) {
+            ByteBuf input = ascii("0004");
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+
+            assertThat(input.refCnt()).isZero();
+            assertControlPhase(machine, ControlState.ControlEmpty.INSTANCE);
+            assertThat(handlers.controls).containsExactly(
+                    new ControlState.ControlSuccess(ControlState.ControlType.DATA, 4));
+            assertThat(handlers.structuredPayloads).containsExactly(new byte[0]);
             assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
@@ -310,8 +340,9 @@ class GitMinimalWireMachineTest {
     private static void assertControlPhase(
             GitMinimalWireMachine machine,
             ControlState expectedState) {
-        assertThat(machine.state()).isEqualTo(new GitMinimalWireMachine.ComposedState(
-                new GitMinimalWireMachine.ControlPhase(expectedState)));
+        assertThat(machine.state().phase()).isInstanceOfSatisfying(
+                GitMinimalWireMachine.ControlPhase.class,
+                phase -> assertThat(phase.state()).isEqualTo(expectedState));
     }
 
     private static void assertStructuredPhase(
