@@ -67,6 +67,16 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 });
     }
 
+    public static GitMinimalWireMachine forV2LsRefsResponse(ByteBufAllocator allocator) {
+        return new GitMinimalWireMachine(
+                allocator,
+                pro.deta.orion.git.parser.wire.protocolv2.response.GitLsRefsResponse.class,
+                GitLsRefsResponsePhases.rows(),
+                _control -> {
+                    throw new IllegalStateException("Ls-refs response parser cannot enter raw forwarding");
+                });
+    }
+
     public boolean accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
         try {
