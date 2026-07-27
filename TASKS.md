@@ -22,6 +22,7 @@ designs and implementation steps in `docs/plans/`.
       feed `ByteBuf` chunks into the wire core. Next, extend the native
       streaming path beyond the initial request without buffering whole packets
       or raw pack tails in additional memory.
+  - Owner: codex, started 2026-07-27 19:30 Europe/Amsterdam.
   - [x] Extend the existing `GitMinimalWireMachine` with observable pkt-line
         control events and close-time validation instead of adding a parallel
         session API.
