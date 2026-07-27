@@ -18,6 +18,32 @@ contract:
 
 ## Core Concepts
 
+### Streaming phase machines
+
+`PhaseMachine` is the minimal state holder for streaming or event-driven
+protocols whose durable state belongs to one current phase:
+
+```java
+sealed interface ProtocolPhase
+        extends PhaseMachine.Phase<ProtocolEvent, ProtocolPhase> {
+}
+
+PhaseMachine<ProtocolEvent, ProtocolPhase> machine =
+        new PhaseMachine<>(new ReadingHeader());
+machine.accept(new BytesAvailable(buffer));
+```
+
+Each phase handles one event and returns the next phase. The machine rejects
+null transitions, events after a terminal phase, and events after close.
+Closing is idempotent and closes only the current phase. A phase that owns
+resources must transfer or release them while transitioning because previous
+phases are not closed automatically.
+
+`PhaseMachine` deliberately provides no transition graph, action scheduler,
+thread synchronization, or domain-specific events. Use the lifecycle
+`StateMachine` below for declarative service lifecycle transitions and
+`PhaseMachine` for compact phase-object protocols.
+
 `StateMachineDefinition` is the lifecycle contract. It declares transitions
 before a service is wired into the runtime:
 

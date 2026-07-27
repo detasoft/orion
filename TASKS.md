@@ -51,6 +51,9 @@ designs and implementation steps in `docs/plans/`.
 - [x] Establish the JGit-free native Git protocol client and repository
       boundaries: a dedicated Maven module, transport/session contracts,
       independent refs/content ports, scripted fixtures, and dependency tests.
+- [x] Add a minimal reusable `PhaseMachine` abstraction that owns one current
+      phase, validates transitions and terminal/closed behavior, and closes the
+      current phase idempotently.
 
 ## Next
 
