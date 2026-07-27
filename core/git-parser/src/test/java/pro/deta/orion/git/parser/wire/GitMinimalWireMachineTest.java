@@ -10,8 +10,10 @@ import pro.deta.orion.git.parser.wire.utils.RawSink;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -379,12 +381,89 @@ class GitMinimalWireMachineTest {
         }
     }
 
+    @Test
+    void semanticPhasePassesACompletedValueThroughTheMachineStack() {
+        GitMinimalWireMachine.SemanticPhase terminalPhase = (control, payload, values) -> {
+            assertThat(control.type()).isEqualTo(ControlState.ControlType.FLUSH);
+            return new GitMinimalWireMachine.SemanticTransition.Complete<>(
+                    String.class,
+                    values.pop(String.class) + "-complete");
+        };
+        GitMinimalWireMachine.SemanticPhase valuePhase = (control, payload, values) -> {
+            values.push(String.class, payload.toString(StandardCharsets.UTF_8));
+            return new GitMinimalWireMachine.SemanticTransition.Next(terminalPhase);
+        };
+        try (GitMinimalWireMachine machine = semanticMachine(String.class, valuePhase)) {
+            ByteBuf input = ascii("0009value0000");
+
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+
+            assertThat(machine.outcome(String.class))
+                    .contains(new GitWireOutcome.Success<>("value-complete"));
+            assertThat(machine.result(String.class)).isEqualTo("value-complete");
+            assertThat(machine.state().phase()).isInstanceOf(GitMinimalWireMachine.CompletedPhase.class);
+        }
+    }
+
+    @Test
+    void semanticFailureIsRetainedAsATerminalMachineOutcome() {
+        GitWireError expected = new GitWireError(
+                GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST,
+                GitWireError.Phase.STRUCTURED_PAYLOAD,
+                0,
+                4,
+                "bad semantic value");
+        GitMinimalWireMachine.SemanticPhase failingPhase = (_control, _payload, _values) -> {
+            throw new GitWireException(expected);
+        };
+        try (GitMinimalWireMachine machine = semanticMachine(String.class, failingPhase)) {
+            ByteBuf input = ascii("0009value");
+
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+
+            assertThat(machine.outcome(String.class))
+                    .contains(new GitWireOutcome.Failure<>(new GitWireFailure(expected)));
+            assertThat(machine.state().phase()).isInstanceOf(GitMinimalWireMachine.FailedPhase.class);
+            assertThatThrownBy(() -> machine.result(String.class))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(expected));
+        }
+    }
+
+    @Test
+    void semanticResultIsUnavailableBeforeTerminalTransition() {
+        GitMinimalWireMachine.SemanticPhase waitingPhase =
+                (_control, _payload, _values) -> new GitMinimalWireMachine.SemanticTransition.Next(
+                        (_nextControl, _nextPayload, _nextValues) ->
+                                new GitMinimalWireMachine.SemanticTransition.Complete<>(String.class, "done"));
+        try (GitMinimalWireMachine machine = semanticMachine(String.class, waitingPhase)) {
+            ByteBuf input = ascii("0009value");
+
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+
+            assertThat(machine.outcome(String.class)).isEqualTo(Optional.empty());
+            assertThatThrownBy(() -> machine.result(String.class))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("not complete");
+        }
+    }
+
     private static GitMinimalWireMachine machine(RecordingWireHandlers handlers) {
         return machine(UnpooledByteBufAllocator.DEFAULT, handlers);
     }
 
     private static GitMinimalWireMachine machine(ByteBufAllocator allocator, RecordingWireHandlers handlers) {
         return new GitMinimalWireMachine(allocator, handlers, handlers, handlers);
+    }
+
+    private static <T> GitMinimalWireMachine semanticMachine(
+            Class<T> resultType,
+            GitMinimalWireMachine.SemanticPhase initialPhase) {
+        return new GitMinimalWireMachine(
+                UnpooledByteBufAllocator.DEFAULT,
+                resultType,
+                initialPhase,
+                _control -> new RecordingRawSink());
     }
 
     private static void assertControlPhase(
