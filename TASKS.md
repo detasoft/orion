@@ -48,10 +48,16 @@ designs and implementation steps in `docs/plans/`.
         optional symref and peeled fields) and `fetch` response (sectioned
         acknowledgments, shallow-info, wanted-refs, and packfile side-band
         entry point), terminated by response-end packet.
+- [x] Establish the JGit-free native Git protocol client and repository
+      boundaries: a dedicated Maven module, transport/session contracts,
+      independent refs/content ports, scripted fixtures, and dependency tests.
 
 ## Next
 
-- [ ] Native Git remote fetch and push support.
+- [ ] Implement production repository backends for the independent native
+      `GitRepositoryRefs` and `GitRepositoryContents` ports.
+- [ ] Add the first real native Git client transport and end-to-end remote
+      fetch/push compatibility tests.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`.
 - [ ] GitHub mirror administration and manual sync.
 - [ ] GitHub webhook-driven inbound synchronization.
