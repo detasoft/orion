@@ -6,6 +6,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.common.GitReceiveRequest;
+import pro.deta.orion.git.common.GitRefUpdate;
+import pro.deta.orion.git.common.GitRefUpdateResult;
+import pro.deta.orion.git.common.GitRefUpdateType;
 import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
@@ -24,8 +28,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -76,6 +82,45 @@ class NativeGitCloneCompatibilityTest {
             assertThat(result.exitCode()).as(result.output()).isZero();
             assertThat(Files.exists(cloneDir.resolve(".git"))).isTrue();
         }
+    }
+
+    @Test
+    void gitCliCanPushFirstCommitToNativeReceivePack() throws Exception {
+        TestRepository fixture = TestRepository.empty();
+        Path source = tempDir.resolve("source");
+        List<GitRefUpdate> updates = new ArrayList<>();
+
+        assertThat(runGit("git", "init", source.toString()).exitCode()).isZero();
+        assertThat(runGit("git", "-C", source.toString(), "config", "user.email", "native@example.test").exitCode())
+                .isZero();
+        assertThat(runGit("git", "-C", source.toString(), "config", "user.name", "Native Test").exitCode())
+                .isZero();
+        Files.writeString(source.resolve("README.md"), "pushed through native receive-pack\n");
+        assertThat(runGit("git", "-C", source.toString(), "add", "README.md").exitCode()).isZero();
+        assertThat(runGit("git", "-C", source.toString(), "commit", "-m", "initial").exitCode()).isZero();
+        assertThat(runGit("git", "-C", source.toString(), "branch", "-M", "main").exitCode()).isZero();
+
+        try (NativeGitServer server = NativeGitServer.start(fixture.repository(), updates)) {
+            ProcessResult result = runGit(
+                    "git",
+                    "-C",
+                    source.toString(),
+                    "push",
+                    server.url(),
+                    "main:refs/heads/main");
+
+            assertThat(result.exitCode()).as(result.output()).isZero();
+        }
+
+        GitObjectId main = fixture.refs().read("refs/heads/main").orElseThrow();
+        assertThat(fixture.objects().read(main))
+                .get()
+                .satisfies(commit -> assertThat(commit.type()).isEqualTo(ObjectType.COMMIT));
+        assertThat(updates).singleElement().satisfies(update -> {
+            assertThat(update.refName()).isEqualTo("refs/heads/main");
+            assertThat(update.type()).isEqualTo(GitRefUpdateType.CREATE);
+            assertThat(update.result()).isEqualTo(GitRefUpdateResult.OK);
+        });
     }
 
     private ProcessResult runGit(String... command) throws Exception {
@@ -151,14 +196,20 @@ class NativeGitCloneCompatibilityTest {
 
         private NativeGitServer(
                 ServerSocket serverSocket,
-                NativeGitRepository repository) {
+                NativeGitRepository repository,
+                List<GitRefUpdate> receiveUpdates) {
             this.serverSocket = serverSocket;
-            this.server = CompletableFuture.runAsync(() -> serveOneClient(serverSocket, repository));
+            this.server = CompletableFuture.runAsync(() -> serveOneClient(serverSocket, repository, receiveUpdates));
         }
 
         static NativeGitServer start(NativeGitRepository repository) throws IOException {
+            return start(repository, new ArrayList<>());
+        }
+
+        static NativeGitServer start(NativeGitRepository repository, List<GitRefUpdate> receiveUpdates)
+                throws IOException {
             ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
-            return new NativeGitServer(socket, repository);
+            return new NativeGitServer(socket, repository, receiveUpdates);
         }
 
         String url() {
@@ -175,13 +226,20 @@ class NativeGitCloneCompatibilityTest {
 
         private static void serveOneClient(
                 ServerSocket serverSocket,
-                NativeGitRepository repository) {
+                NativeGitRepository repository,
+                List<GitRefUpdate> receiveUpdates) {
             try (Socket socket = serverSocket.accept()) {
                 GitInitialServiceRequest request = readInitialRequest(socket.getInputStream());
                 if (request.service() == GitInitialServiceRequest.Service.UPLOAD_PACK) {
                     repository.upload(
                             new GitUploadRequest(0, extraParameters(request), _stats -> {
                             }),
+                            socket.getInputStream(),
+                            socket.getOutputStream(),
+                            socket.getOutputStream());
+                } else if (request.service() == GitInitialServiceRequest.Service.RECEIVE_PACK) {
+                    repository.receive(
+                            new GitReceiveRequest(0, receiveUpdates::addAll),
                             socket.getInputStream(),
                             socket.getOutputStream(),
                             socket.getOutputStream());

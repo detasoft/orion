@@ -16,10 +16,14 @@ public record ReceivePackCommand(
     }
 
     public boolean isCreate() {
-        return NULL_ID.equals(oldId);
+        return NULL_ID.equals(oldId) && !isDelete();
     }
 
     public boolean isUpdate() {
-        return !NULL_ID.equals(oldId);
+        return !NULL_ID.equals(oldId) && !isDelete();
+    }
+
+    public boolean isDelete() {
+        return NULL_ID.equals(newId);
     }
 }

@@ -152,52 +152,52 @@ class ReceivePackCommandParserTest {
     }
 
     @Test
-    void rejectsDeleteCommand() {
+    void parsesDeleteCommand() {
         ByteBuf input = packets(
                 data(SHA1_A + " " + NULL_ID + " refs/heads/main\0report-status"),
                 flush());
 
         try {
-            assertThatThrownBy(() -> parser.read(input))
-                    .isInstanceOfSatisfying(GitWireException.class, error -> {
-                        assertThat(error.error().kind())
-                                .isEqualTo(GitWireError.Kind.INVALID_RECEIVE_PACK_COMMAND);
-                        assertThat(error.getMessage()).contains("Delete");
-                    });
+            ReceivePackCommandSection section = parser.read(input);
+
+            assertThat(section.commands()).hasSize(1);
+            ReceivePackCommand command = section.commands().get(0);
+            assertThat(command.isDelete()).isTrue();
+            assertThat(command.isCreate()).isFalse();
+            assertThat(command.isUpdate()).isFalse();
         } finally {
             input.release();
         }
     }
 
     @Test
-    void rejectsTagRefUpdate() {
+    void parsesTagRefUpdate() {
         ByteBuf input = packets(
                 data(NULL_ID + " " + SHA1_A + " refs/tags/v1.0\0report-status"),
                 flush());
 
         try {
-            assertThatThrownBy(() -> parser.read(input))
-                    .isInstanceOfSatisfying(GitWireException.class, error -> {
-                        assertThat(error.error().kind())
-                                .isEqualTo(GitWireError.Kind.INVALID_RECEIVE_PACK_COMMAND);
-                        assertThat(error.getMessage()).contains("Tag");
-                    });
+            ReceivePackCommandSection section = parser.read(input);
+
+            assertThat(section.commands()).hasSize(1);
+            assertThat(section.commands().get(0).refName()).isEqualTo("refs/tags/v1.0");
+            assertThat(section.commands().get(0).isCreate()).isTrue();
         } finally {
             input.release();
         }
     }
 
     @Test
-    void rejectsNonHeadsRef() {
+    void parsesNonHeadRefUnderRefsNamespace() {
         ByteBuf input = packets(
                 data(NULL_ID + " " + SHA1_A + " refs/remotes/origin/main\0report-status"),
                 flush());
 
         try {
-            assertThatThrownBy(() -> parser.read(input))
-                    .isInstanceOfSatisfying(GitWireException.class, error ->
-                            assertThat(error.error().kind())
-                                    .isEqualTo(GitWireError.Kind.INVALID_RECEIVE_PACK_COMMAND));
+            ReceivePackCommandSection section = parser.read(input);
+
+            assertThat(section.commands()).hasSize(1);
+            assertThat(section.commands().get(0).refName()).isEqualTo("refs/remotes/origin/main");
         } finally {
             input.release();
         }
@@ -299,6 +299,22 @@ class ReceivePackCommandParserTest {
         try {
             ReceivePackCommandSection section = parser.read(input);
             assertThat(section.commands().get(0).oldId()).isEqualTo(upperCaseId);
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsRefOutsideRefsNamespace() {
+        ByteBuf input = packets(
+                data(NULL_ID + " " + SHA1_A + " HEAD\0report-status"),
+                flush());
+
+        try {
+            assertThatThrownBy(() -> parser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error ->
+                            assertThat(error.error().kind())
+                                    .isEqualTo(GitWireError.Kind.INVALID_RECEIVE_PACK_COMMAND));
         } finally {
             input.release();
         }

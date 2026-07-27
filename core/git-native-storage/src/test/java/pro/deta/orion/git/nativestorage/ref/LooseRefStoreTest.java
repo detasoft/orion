@@ -60,6 +60,16 @@ class LooseRefStoreTest {
     }
 
     @Test
+    void deletesRefWithMatchingOldId() {
+        store.update("refs/heads/main", NULL_ID, SHA1_A);
+
+        RefUpdateResult result = store.update("refs/heads/main", SHA1_A, NULL_ID);
+
+        assertThat(result).isEqualTo(RefUpdateResult.DELETED);
+        assertThat(store.read("refs/heads/main")).isEmpty();
+    }
+
+    @Test
     void updateNonExistentRefWithNonNullOldIdIsStale() {
         RefUpdateResult result = store.update("refs/heads/main", SHA1_A, SHA1_B);
 
@@ -133,6 +143,23 @@ class LooseRefStoreTest {
 
         assertThat(results).containsExactly(RefUpdateResult.STALE);
         assertThat(objectsPublished).isFalse();
+        assertThat(store.read("refs/heads/main")).contains(GitObjectId.of(SHA1_A));
+    }
+
+    @Test
+    void batchDoesNotApplyAnyRefWhenOneUpdateIsStale() {
+        store.update("refs/heads/main", NULL_ID, SHA1_A);
+        AtomicBoolean objectsPublished = new AtomicBoolean();
+
+        List<RefUpdateResult> results = store.updateAll(
+                List.of(
+                        new LooseRefStore.Update("refs/heads/feature", NULL_ID, SHA1_B),
+                        new LooseRefStore.Update("refs/heads/main", SHA1_C, SHA1_B)),
+                () -> objectsPublished.set(true));
+
+        assertThat(results).containsExactly(RefUpdateResult.CREATED, RefUpdateResult.STALE);
+        assertThat(objectsPublished).isFalse();
+        assertThat(store.read("refs/heads/feature")).isEmpty();
         assertThat(store.read("refs/heads/main")).contains(GitObjectId.of(SHA1_A));
     }
 }

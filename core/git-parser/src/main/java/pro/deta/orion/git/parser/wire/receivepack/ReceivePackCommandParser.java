@@ -110,16 +110,8 @@ public final class ReceivePackCommandParser {
         validateObjectId(newId, packetIndex, byteOffset);
         validateRefName(refName, packetIndex, byteOffset);
 
-        if (ReceivePackCommand.NULL_ID.equals(newId)) {
-            throw commandError(packetIndex, byteOffset, "Delete commands are not supported");
-        }
-
-        if (refName.startsWith("refs/tags/")) {
-            throw commandError(packetIndex, byteOffset, "Tag ref updates are not supported");
-        }
-
-        if (!refName.startsWith("refs/heads/")) {
-            throw commandError(packetIndex, byteOffset, "Only refs/heads/* are supported");
+        if (ReceivePackCommand.NULL_ID.equals(oldId) && ReceivePackCommand.NULL_ID.equals(newId)) {
+            throw commandError(packetIndex, byteOffset, "Receive-pack command cannot have two zero object ids");
         }
 
         return new ReceivePackCommand(oldId, newId, refName);
@@ -152,6 +144,9 @@ public final class ReceivePackCommandParser {
     private static void validateRefName(String refName, long packetIndex, long byteOffset) {
         if (refName.isEmpty()) {
             throw commandError(packetIndex, byteOffset, "Ref name must not be empty");
+        }
+        if (!refName.startsWith("refs/")) {
+            throw commandError(packetIndex, byteOffset, "Ref name must start with refs/: " + refName);
         }
         if (refName.startsWith("/") || refName.endsWith("/")) {
             throw commandError(packetIndex, byteOffset, "Invalid ref name: " + refName);

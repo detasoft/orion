@@ -7,6 +7,11 @@ import java.util.Optional;
 public enum ReceivePackCapability {
     REPORT_STATUS("report-status", false, true, true, null),
     SIDE_BAND_64K("side-band-64k", false, true, true, null),
+    DELETE_REFS("delete-refs", false, true, true, null),
+    OFS_DELTA("ofs-delta", false, true, true, null),
+    ATOMIC("atomic", false, true, true, null),
+    PUSH_OPTIONS("push-options", false, false, true, null),
+    QUIET("quiet", false, false, false, null),
     OBJECT_FORMAT("object-format", true, true, false, "sha1"),
     AGENT("agent", true, true, false, "orion-native/0.1");
 

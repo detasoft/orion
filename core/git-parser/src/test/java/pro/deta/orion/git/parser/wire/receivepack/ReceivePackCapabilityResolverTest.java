@@ -16,31 +16,47 @@ class ReceivePackCapabilityResolverTest {
     private static final Set<ReceivePackCapability> ALL_ADVERTISED = EnumSet.of(
             ReceivePackCapability.REPORT_STATUS,
             ReceivePackCapability.SIDE_BAND_64K,
+            ReceivePackCapability.DELETE_REFS,
+            ReceivePackCapability.OFS_DELTA,
+            ReceivePackCapability.ATOMIC,
             ReceivePackCapability.OBJECT_FORMAT,
             ReceivePackCapability.AGENT);
 
     @Test
     void selectsKnownSupportedCapabilities() {
-        GitCapabilitySet client = parse("report-status side-band-64k");
+        GitCapabilitySet client = parse("report-status side-band-64k delete-refs ofs-delta atomic");
 
         ReceivePackCapabilityResolution resolution = resolver.resolve(ALL_ADVERTISED, client);
 
         assertThat(resolution.accepted()).isTrue();
         assertThat(resolution.selected()).containsExactly(
                 ReceivePackCapability.REPORT_STATUS,
-                ReceivePackCapability.SIDE_BAND_64K);
+                ReceivePackCapability.SIDE_BAND_64K,
+                ReceivePackCapability.DELETE_REFS,
+                ReceivePackCapability.OFS_DELTA,
+                ReceivePackCapability.ATOMIC);
         assertThat(resolution.ignored()).isEmpty();
         assertThat(resolution.rejected()).isEmpty();
     }
 
     @Test
-    void selectsObjectFormatWithArbitraryClientValue() {
+    void selectsSha1ObjectFormatValue() {
         GitCapabilitySet client = parse("object-format=sha1");
 
         ReceivePackCapabilityResolution resolution = resolver.resolve(ALL_ADVERTISED, client);
 
         assertThat(resolution.accepted()).isTrue();
         assertThat(resolution.selected()).containsExactly(ReceivePackCapability.OBJECT_FORMAT);
+    }
+
+    @Test
+    void rejectsUnsupportedObjectFormatValue() {
+        GitCapabilitySet client = parse("object-format=sha256");
+
+        ReceivePackCapabilityResolution resolution = resolver.resolve(ALL_ADVERTISED, client);
+
+        assertThat(resolution.accepted()).isFalse();
+        assertThat(resolution.rejected()).containsExactly("object-format=sha256");
     }
 
     @Test
@@ -78,23 +94,34 @@ class ReceivePackCapabilityResolverTest {
     }
 
     @Test
-    void rejectsUnknownCapability() {
-        GitCapabilitySet client = parse("atomic");
+    void rejectsKnownCapabilityWhenServerDoesNotAdvertiseIt() {
+        GitCapabilitySet client = parse("push-options");
 
         ReceivePackCapabilityResolution resolution = resolver.resolve(ALL_ADVERTISED, client);
 
         assertThat(resolution.accepted()).isFalse();
-        assertThat(resolution.rejected()).containsExactly("atomic");
+        assertThat(resolution.rejected()).containsExactly("push-options");
     }
 
     @Test
-    void rejectsMultipleUnknownCapabilities() {
-        GitCapabilitySet client = parse("atomic push-options quiet");
+    void selectsSupportedAndRejectsUnsupportedCapabilities() {
+        GitCapabilitySet client = parse("atomic push-options unknown-cap");
 
         ReceivePackCapabilityResolution resolution = resolver.resolve(ALL_ADVERTISED, client);
 
         assertThat(resolution.accepted()).isFalse();
-        assertThat(resolution.rejected()).containsExactly("atomic", "push-options", "quiet");
+        assertThat(resolution.selected()).containsExactly(ReceivePackCapability.ATOMIC);
+        assertThat(resolution.rejected()).containsExactly("push-options", "unknown-cap");
+    }
+
+    @Test
+    void ignoresQuietWhenUnsupported() {
+        GitCapabilitySet client = parse("quiet");
+
+        ReceivePackCapabilityResolution resolution = resolver.resolve(ALL_ADVERTISED, client);
+
+        assertThat(resolution.accepted()).isTrue();
+        assertThat(resolution.ignored()).containsExactly("quiet");
     }
 
     @Test

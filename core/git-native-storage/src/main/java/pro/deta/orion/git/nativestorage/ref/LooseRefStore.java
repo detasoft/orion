@@ -37,18 +37,21 @@ public final class LooseRefStore {
 
         Map<String, String> updatedRefs = new HashMap<>(refs);
         List<RefUpdateResult> results = new ArrayList<>(updates.size());
-        boolean anyAccepted = false;
+        boolean anyStale = false;
+        boolean anyChanged = false;
         for (Update update : updates) {
             Objects.requireNonNull(update, "update");
             RefUpdateResult result =
                     applyUpdate(updatedRefs, update.refName(), update.expectedOldId(), update.newId());
             results.add(result);
-            if (result != RefUpdateResult.STALE) {
-                anyAccepted = true;
+            if (result == RefUpdateResult.STALE) {
+                anyStale = true;
+            } else if (result != RefUpdateResult.NO_OP) {
+                anyChanged = true;
             }
         }
 
-        if (anyAccepted) {
+        if (!anyStale && anyChanged) {
             beforeUpdates.run();
             refs.clear();
             refs.putAll(updatedRefs);
@@ -62,6 +65,9 @@ public final class LooseRefStore {
             String expectedOldId,
             String newId) {
         if (NULL_ID.equals(expectedOldId)) {
+            if (NULL_ID.equals(newId)) {
+                return RefUpdateResult.NO_OP;
+            }
             String existing = targetRefs.putIfAbsent(refName, newId);
             if (existing == null) {
                 return RefUpdateResult.CREATED;
@@ -75,6 +81,10 @@ public final class LooseRefStore {
         String current = targetRefs.get(refName);
         if (current == null || !current.equals(expectedOldId)) {
             return RefUpdateResult.STALE;
+        }
+        if (NULL_ID.equals(newId)) {
+            targetRefs.remove(refName);
+            return RefUpdateResult.DELETED;
         }
         if (current.equals(newId)) {
             return RefUpdateResult.NO_OP;

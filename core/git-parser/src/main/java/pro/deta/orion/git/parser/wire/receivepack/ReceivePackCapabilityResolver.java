@@ -26,7 +26,11 @@ public final class ReceivePackCapabilityResolver {
             if (known.isPresent()) {
                 ReceivePackCapability serverCap = known.get();
                 if (serverSupported.contains(serverCap)) {
-                    selected.add(serverCap);
+                    if (isClientValueAccepted(serverCap, cap)) {
+                        selected.add(serverCap);
+                    } else {
+                        rejected.add(cap.rawToken());
+                    }
                 } else if (serverCap.requiresExplicitRequest()) {
                     rejected.add(cap.name());
                 } else {
@@ -38,5 +42,15 @@ public final class ReceivePackCapabilityResolver {
         }
 
         return new ReceivePackCapabilityResolution(selected, ignored, rejected);
+    }
+
+    private static boolean isClientValueAccepted(ReceivePackCapability serverCap, GitCapability cap) {
+        if (!serverCap.valueCapable() && cap.value().isPresent()) {
+            return false;
+        }
+        if (serverCap == ReceivePackCapability.OBJECT_FORMAT) {
+            return cap.value().map("sha1"::equals).orElse(true);
+        }
+        return true;
     }
 }
