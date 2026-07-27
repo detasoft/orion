@@ -54,6 +54,9 @@ designs and implementation steps in `docs/plans/`.
 - [x] Add a minimal reusable `PhaseMachine` abstraction that owns one current
       phase, validates transitions and terminal/closed behavior, and closes the
       current phase idempotently.
+- [ ] Add native upload-pack and receive-pack client state machines on top of
+      the protocol session transport and existing `git-parser` wire machine.
+  - Owner: codex, started 2026-07-27 18:41 Europe/Amsterdam.
 
 ## Next
 

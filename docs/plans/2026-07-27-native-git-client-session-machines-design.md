@@ -34,6 +34,8 @@ GitProtocolSessionMachine
 GitUploadPackClientMachine / GitReceivePackClientMachine
                 |
 GitWireMachine
+                |
+PhaseMachine<Event, Phase>
 ```
 
 The public clients are thin synchronous facades. They construct a
@@ -55,10 +57,30 @@ owns durable inbound wire phases, pkt-line framing, structured payload routing,
 and transitions to raw pack forwarding. The client machines compose it instead
 of parsing packet boundaries themselves.
 
-The existing general-purpose `lifecycle-state-machine` module is not used for
-the per-chunk protocol path. It models synchronous service lifecycle
-transitions, while Git protocol processing needs the streaming phase-object
-model already established by `GitMinimalWireMachine`.
+The declarative lifecycle `StateMachine` is not used for the per-chunk protocol
+path. Its module also provides the smaller `PhaseMachine`, which is the shared
+state holder used by the session, client, and wire machines.
+
+## Shared Phase Machine Contract
+
+`PhaseMachine<E, P>` owns one current phase. A phase accepts one event and
+returns the next phase. It exposes whether it is terminal and releases any
+currently owned resources when closed.
+
+The shared abstraction enforces these rules:
+
+- the initial phase, events, and returned phases are non-null;
+- a terminal phase cannot receive another event;
+- a closed machine cannot receive another event;
+- close is idempotent and closes only the current phase;
+- previous phases are not closed automatically, so a transition must transfer
+  or release resources it owns;
+- the abstraction provides no scheduler, transport, threading, Git, or
+  `ByteBuf` policy.
+
+Each Git machine composes `PhaseMachine` with its own sealed event and phase
+families. Actions such as read, write, complete, and fail remain part of the
+client-machine contract instead of the reusable phase abstraction.
 
 ## Machine Boundary
 
@@ -180,4 +202,3 @@ native clients. It consumes wire parsers from `git-parser` and does not
 duplicate their work. It does not add a real network transport, production
 repository backend, pack builder, pack parser, clone, checkout, merge, or
 working-tree behavior.
-
