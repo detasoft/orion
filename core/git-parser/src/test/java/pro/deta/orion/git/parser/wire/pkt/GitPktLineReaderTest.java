@@ -16,6 +16,44 @@ class GitPktLineReaderTest {
     private final GitPktLineWriter writer = new GitPktLineWriter(UnpooledByteBufAllocator.DEFAULT);
 
     @Test
+    void readsHeaderWithoutConsumingInput() {
+        ByteBuf input = shiftedInput(writer.writeTextLine("hello"));
+
+        try {
+            int readerIndex = input.readerIndex();
+
+            GitPktLineReader.Header header = GitPktLineReader.readHeader(input, 7, 1);
+
+            assertThat(header).isEqualTo(new GitPktLineReader.Header(input.readableBytes(), 7, readerIndex, 2));
+            assertThat(input.readerIndex()).isEqualTo(readerIndex);
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void reportsHeaderErrorsWithCustomMessage() {
+        ByteBuf input = shiftedInput(raw("003"));
+
+        try {
+            assertThatThrownBy(() -> GitPktLineReader.readHeader(
+                    input,
+                    7,
+                    3,
+                    "Incomplete initial service request header"))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INCOMPLETE_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    7,
+                                    0,
+                                    "Incomplete initial service request header")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
     void readsPacketOffsetsRelativeToStartReaderIndex() {
         ByteBuf input = shiftedInput(writer.writeTextLine("hello"));
 

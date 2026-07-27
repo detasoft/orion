@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLineReader;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -22,58 +23,49 @@ public final class GitInitialServiceRequestParser {
 
     public static GitInitialServiceRequest read(ByteBuf input) {
         Objects.requireNonNull(input, "input");
-        int headerIndex = input.readerIndex();
-        int startReaderIndex = headerIndex;
-        if (input.readableBytes() < PKT_LINE_HEADER_SIZE) {
-            throw GitWireException.of(
-                    GitWireError.Kind.INCOMPLETE_HEADER,
-                    GitWireError.Phase.CONTROL_HEADER,
-                    INITIAL_PACKET_INDEX,
-                    headerIndex - startReaderIndex,
-                    "Incomplete initial service request header");
-        }
-        int packetLength = GitNativeUtils.packetLength(
+        int startReaderIndex = input.readerIndex();
+        GitPktLineReader.Header header = GitPktLineReader.readHeader(
                 input,
-                headerIndex,
-                GitWireError.Phase.CONTROL_HEADER,
                 INITIAL_PACKET_INDEX,
-                headerIndex - startReaderIndex);
-        int payloadLength = payloadLength(packetLength, headerIndex, startReaderIndex);
-        if (input.readableBytes() < packetLength) {
+                startReaderIndex,
+                "Incomplete initial service request header");
+        int payloadLength = payloadLength(header, startReaderIndex);
+        if (input.readableBytes() < header.packetLength()) {
             throw GitWireException.of(
                     GitWireError.Kind.INCOMPLETE_PAYLOAD,
                     GitWireError.Phase.STRUCTURED_PAYLOAD,
                     INITIAL_PACKET_INDEX,
-                    headerIndex + PKT_LINE_HEADER_SIZE - startReaderIndex,
+                    header.byteOffset() + PKT_LINE_HEADER_SIZE,
                     "Incomplete initial service request payload");
         }
         GitInitialServiceRequest request = parsePayload(
                 input,
-                headerIndex + PKT_LINE_HEADER_SIZE,
-                headerIndex + PKT_LINE_HEADER_SIZE + payloadLength,
+                header.headerIndex() + PKT_LINE_HEADER_SIZE,
+                header.headerIndex() + PKT_LINE_HEADER_SIZE + payloadLength,
                 startReaderIndex);
-        input.readerIndex(headerIndex + PKT_LINE_HEADER_SIZE + payloadLength);
+        input.readerIndex(header.headerIndex() + PKT_LINE_HEADER_SIZE + payloadLength);
         return request;
     }
 
-    private static int payloadLength(int packetLength, int headerIndex, int startReaderIndex) {
+    private static int payloadLength(GitPktLineReader.Header header, int startReaderIndex) {
+        int packetLength = header.packetLength();
         if (packetLength == 3) {
             throw GitWireException.of(
                     GitWireError.Kind.RESERVED_LENGTH,
                     GitWireError.Phase.CONTROL_HEADER,
                     INITIAL_PACKET_INDEX,
-                    headerIndex - startReaderIndex,
+                    header.byteOffset(),
                     "Pkt-line length 0003 is reserved");
         }
         if (packetLength < PKT_LINE_HEADER_SIZE) {
-            throw semanticError(headerIndex, startReaderIndex, "Initial service request must be a data pkt-line");
+            throw semanticError(header.headerIndex(), startReaderIndex, "Initial service request must be a data pkt-line");
         }
         if (packetLength > GitFixedControlFrameReader.MAX_PKT_LINE_LENGTH) {
             throw GitWireException.of(
                     GitWireError.Kind.LENGTH_EXCEEDS_LIMIT,
                     GitWireError.Phase.CONTROL_HEADER,
                     INITIAL_PACKET_INDEX,
-                    headerIndex - startReaderIndex,
+                    header.byteOffset(),
                     "Initial service request exceeds Git pkt-line limit");
         }
         return packetLength - PKT_LINE_HEADER_SIZE;
