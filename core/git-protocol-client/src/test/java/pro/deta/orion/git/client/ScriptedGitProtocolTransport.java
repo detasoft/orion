@@ -12,6 +12,8 @@ import java.util.List;
 final class ScriptedGitProtocolTransport implements GitProtocolTransport {
     private final Deque<byte[]> expectedWrites;
     private final Deque<byte[]> reads;
+    private final GitProtocolTransportException openFailure;
+    private final GitProtocolTransportException writeFailure;
     private final GitProtocolTransportException readFailure;
     private GitProtocolService openedService;
     private URI openedUri;
@@ -19,15 +21,26 @@ final class ScriptedGitProtocolTransport implements GitProtocolTransport {
     private Session session;
 
     ScriptedGitProtocolTransport(List<byte[]> expectedWrites, List<byte[]> reads) {
-        this(expectedWrites, reads, null);
+        this(expectedWrites, reads, null, null, null);
     }
 
     ScriptedGitProtocolTransport(
             List<byte[]> expectedWrites,
             List<byte[]> reads,
             GitProtocolTransportException readFailure) {
+        this(expectedWrites, reads, null, null, readFailure);
+    }
+
+    ScriptedGitProtocolTransport(
+            List<byte[]> expectedWrites,
+            List<byte[]> reads,
+            GitProtocolTransportException openFailure,
+            GitProtocolTransportException writeFailure,
+            GitProtocolTransportException readFailure) {
         this.expectedWrites = copies(expectedWrites);
         this.reads = copies(reads);
+        this.openFailure = openFailure;
+        this.writeFailure = writeFailure;
         this.readFailure = readFailure;
     }
 
@@ -35,7 +48,10 @@ final class ScriptedGitProtocolTransport implements GitProtocolTransport {
     public GitProtocolSession open(
             GitProtocolService service,
             URI remoteUri,
-            GitProtocolTransportOptions options) {
+            GitProtocolTransportOptions options) throws GitProtocolTransportException {
+        if (openFailure != null) {
+            throw openFailure;
+        }
         openedService = service;
         openedUri = remoteUri;
         openedOptions = options;
@@ -65,11 +81,16 @@ final class ScriptedGitProtocolTransport implements GitProtocolTransport {
 
     private final class Session implements GitProtocolSession {
         private boolean closed;
+        private boolean writeFailed;
         private boolean readFailed;
         private int closeCalls;
 
         @Override
         public void write(ByteBuf chunk) throws GitProtocolTransportException {
+            if (writeFailure != null && !writeFailed) {
+                writeFailed = true;
+                throw writeFailure;
+            }
             byte[] actual = new byte[chunk.readableBytes()];
             chunk.getBytes(chunk.readerIndex(), actual);
             byte[] expected = expectedWrites.pollFirst();
@@ -92,12 +113,18 @@ final class ScriptedGitProtocolTransport implements GitProtocolTransport {
         }
 
         @Override
-        public void close() {
+        public void close() throws GitProtocolTransportException {
             if (closed) {
                 return;
             }
             closed = true;
             closeCalls++;
+            if (!expectedWrites.isEmpty()) {
+                throw new GitProtocolTransportException(
+                        GitProtocolTransportException.Phase.CLOSE,
+                        false,
+                        "Scripted exchange closed before all writes");
+            }
         }
     }
 

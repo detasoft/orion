@@ -87,7 +87,7 @@ final class InMemoryGitRepositoryContents implements GitRepositoryContents {
         public ByteBuf read() throws GitRepositoryAccessException {
             if (closed) {
                 throw new GitRepositoryAccessException(
-                        GitRepositoryAccessException.Operation.OPEN_PACK,
+                        GitRepositoryAccessException.Operation.READ_PACK,
                         false,
                         "Pack reader is closed");
             }

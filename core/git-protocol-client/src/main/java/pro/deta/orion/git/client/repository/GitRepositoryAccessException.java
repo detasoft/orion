@@ -43,6 +43,7 @@ public final class GitRepositoryAccessException extends Exception {
         RESOLVE_REF,
         UPDATE_REF,
         OPEN_PACK,
+        READ_PACK,
         WRITE_PACK
     }
 }

@@ -104,6 +104,66 @@ class GitProtocolTransportContractTest {
     }
 
     @Test
+    void scriptedOpenAndWriteFailuresPreserveTheirPhase() throws Exception {
+        GitProtocolTransportException openFailure = new GitProtocolTransportException(
+                GitProtocolTransportException.Phase.OPEN,
+                true,
+                "Scripted open failure");
+        ScriptedGitProtocolTransport openTransport = new ScriptedGitProtocolTransport(
+                List.of(),
+                List.of(),
+                openFailure,
+                null,
+                null);
+
+        assertThatThrownBy(() -> openTransport.open(
+                GitProtocolService.UPLOAD_PACK,
+                URI.create("git://example.test/repository"),
+                options())).isSameAs(openFailure);
+
+        GitProtocolTransportException writeFailure = new GitProtocolTransportException(
+                GitProtocolTransportException.Phase.WRITE,
+                false,
+                "Scripted write failure");
+        ScriptedGitProtocolTransport writeTransport = new ScriptedGitProtocolTransport(
+                List.of(),
+                List.of(),
+                null,
+                writeFailure,
+                null);
+        assertThatThrownBy(() -> {
+            try (GitProtocolSession session = writeTransport.open(
+                    GitProtocolService.RECEIVE_PACK,
+                    URI.create("git://example.test/repository"),
+                    options())) {
+                ByteBuf chunk = Unpooled.wrappedBuffer(new byte[]{1});
+                try {
+                    session.write(chunk);
+                } finally {
+                    chunk.release();
+                }
+            }
+        }).isSameAs(writeFailure);
+        assertThat(writeTransport.closed()).isTrue();
+    }
+
+    @Test
+    void closeRejectsAnIncompleteScriptedExchange() throws Exception {
+        ScriptedGitProtocolTransport transport =
+                new ScriptedGitProtocolTransport(List.of(new byte[]{1}), List.of());
+        GitProtocolSession session = transport.open(
+                GitProtocolService.RECEIVE_PACK,
+                URI.create("git://example.test/repository"),
+                options());
+
+        assertThatThrownBy(session::close)
+                .isInstanceOfSatisfying(GitProtocolTransportException.class, failure ->
+                        assertThat(failure.phase())
+                                .isEqualTo(GitProtocolTransportException.Phase.CLOSE));
+        assertThat(transport.closed()).isTrue();
+    }
+
+    @Test
     void repeatedCloseClosesUnderlyingSessionOnce() throws Exception {
         ScriptedGitProtocolTransport transport =
                 new ScriptedGitProtocolTransport(List.of(), List.of());

@@ -63,6 +63,22 @@ class GitRepositoryContentsContractTest {
                 });
     }
 
+    @Test
+    void readingClosedPackReturnsReadFailure() throws Exception {
+        InMemoryGitRepositoryContents contents = new InMemoryGitRepositoryContents();
+        GitPackId packId;
+        try (GitPackWriter writer = contents.beginPack()) {
+            packId = writer.complete();
+        }
+        GitPackReader reader = contents.openPack(packId);
+        reader.close();
+
+        assertThatThrownBy(reader::read)
+                .isInstanceOfSatisfying(GitRepositoryAccessException.class, failure ->
+                        assertThat(failure.operation())
+                                .isEqualTo(GitRepositoryAccessException.Operation.READ_PACK));
+    }
+
     private static byte[] readAll(
             InMemoryGitRepositoryContents contents,
             GitPackId packId) throws Exception {
