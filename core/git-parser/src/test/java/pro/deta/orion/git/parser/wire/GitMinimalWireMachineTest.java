@@ -383,13 +383,13 @@ class GitMinimalWireMachineTest {
 
     @Test
     void semanticPhasePassesACompletedValueThroughTheMachineStack() {
-        GitMinimalWireMachine.SemanticPhase terminalPhase = (control, payload, values) -> {
+        GitMinimalWireMachine.SemanticPhase terminalPhase = (control, payload, _packetIndex, _byteOffset, values) -> {
             assertThat(control.type()).isEqualTo(ControlState.ControlType.FLUSH);
             return new GitMinimalWireMachine.SemanticTransition.Complete<>(
                     String.class,
                     values.pop(String.class) + "-complete");
         };
-        GitMinimalWireMachine.SemanticPhase valuePhase = (control, payload, values) -> {
+        GitMinimalWireMachine.SemanticPhase valuePhase = (control, payload, _packetIndex, _byteOffset, values) -> {
             values.push(String.class, payload.toString(StandardCharsets.UTF_8));
             return new GitMinimalWireMachine.SemanticTransition.Next(terminalPhase);
         };
@@ -413,7 +413,8 @@ class GitMinimalWireMachineTest {
                 0,
                 4,
                 "bad semantic value");
-        GitMinimalWireMachine.SemanticPhase failingPhase = (_control, _payload, _values) -> {
+        GitMinimalWireMachine.SemanticPhase failingPhase =
+                (_control, _payload, _packetIndex, _byteOffset, _values) -> {
             throw new GitWireException(expected);
         };
         try (GitMinimalWireMachine machine = semanticMachine(String.class, failingPhase)) {
@@ -433,8 +434,9 @@ class GitMinimalWireMachineTest {
     @Test
     void semanticResultIsUnavailableBeforeTerminalTransition() {
         GitMinimalWireMachine.SemanticPhase waitingPhase =
-                (_control, _payload, _values) -> new GitMinimalWireMachine.SemanticTransition.Next(
-                        (_nextControl, _nextPayload, _nextValues) ->
+                (_control, _payload, _packetIndex, _byteOffset, _values) ->
+                        new GitMinimalWireMachine.SemanticTransition.Next(
+                        (_nextControl, _nextPayload, _nextPacketIndex, _nextByteOffset, _nextValues) ->
                                 new GitMinimalWireMachine.SemanticTransition.Complete<>(String.class, "done"));
         try (GitMinimalWireMachine machine = semanticMachine(String.class, waitingPhase)) {
             ByteBuf input = ascii("0009value");

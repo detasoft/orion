@@ -57,6 +57,16 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         this.phase = newControlPhase();
     }
 
+    public static GitMinimalWireMachine forV1Advertisement(ByteBufAllocator allocator) {
+        return new GitMinimalWireMachine(
+                allocator,
+                pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement.class,
+                GitV1AdvertisementPhases.firstLine(),
+                _control -> {
+                    throw new IllegalStateException("V1 advertisement parser cannot enter raw forwarding");
+                });
+    }
+
     public boolean accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
         try {
@@ -140,10 +150,31 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     @Override
     public void close() {
+        if (context.hasSemanticContext()) {
+            closeSemanticMachine();
+            return;
+        }
         try {
             phase.close();
         } finally {
             phase = newControlPhase();
+        }
+    }
+
+    private void closeSemanticMachine() {
+        if (context.semanticContext.outcome != null) {
+            phase.close();
+            return;
+        }
+        try {
+            phase.close();
+            context.semanticContext.phase.close(
+                    context.semanticContext.values,
+                    context.nextPacketIndex(),
+                    context.nextByteOffset());
+        } catch (GitWireException e) {
+            context.semanticContext.fail(e.error());
+            phase = new FailedPhase();
         }
     }
 
@@ -280,6 +311,8 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         SemanticTransition accept(
                 ControlState.ControlSuccess control,
                 ByteBuf payload,
+                long packetIndex,
+                long byteOffset,
                 GitWireValueStack values);
 
         default void close(GitWireValueStack values, long packetIndex, long byteOffset) {
@@ -350,7 +383,12 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 return structuredPayloadPhase;
             }
             SemanticTransition transition =
-                    context.semanticContext.phase.accept(control, Unpooled.EMPTY_BUFFER, context.semanticContext.values);
+                    context.semanticContext.phase.accept(
+                            control,
+                            Unpooled.EMPTY_BUFFER,
+                            packetIndex,
+                            byteOffset,
+                            context.semanticContext.values);
             context.completePacket(control);
             return phaseAfterSemanticTransition(transition);
         }
@@ -432,7 +470,12 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             if (context.hasSemanticContext()) {
                 try {
                     SemanticTransition transition =
-                            context.semanticContext.phase.accept(control, payload, context.semanticContext.values);
+                            context.semanticContext.phase.accept(
+                                    control,
+                                    payload,
+                                    packetIndex,
+                                    byteOffset,
+                                    context.semanticContext.values);
                     context.completePacket(control);
                     complete = true;
                     nextPhase = phaseAfterSemanticTransition(transition);
