@@ -8,6 +8,8 @@ import pro.deta.orion.git.parser.wire.GitWireError;
 import pro.deta.orion.git.parser.wire.GitWireException;
 import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
 
+import java.nio.charset.StandardCharsets;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -162,6 +164,78 @@ class GitProtocolV2SectionParserTest {
     }
 
     @Test
+    void rejectsReservedPktLineLength() {
+        ByteBuf input = raw("0003");
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.RESERVED_LENGTH,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Pkt-line length 0003 is reserved")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsPktLineLengthAboveGitLimit() {
+        ByteBuf input = raw("ffff");
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.LENGTH_EXCEEDS_LIMIT,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Pkt-line length exceeds Git pkt-line limit")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsIncompletePktLineHeader() {
+        ByteBuf input = raw("00");
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INCOMPLETE_HEADER,
+                                    GitWireError.Phase.CONTROL_HEADER,
+                                    0,
+                                    0,
+                                    "Incomplete pkt-line header")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
+    void rejectsTruncatedPktLinePayload() {
+        ByteBuf input = raw("0010command");
+
+        try {
+            assertThatThrownBy(() -> GitProtocolV2SectionParser.read(input))
+                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
+                            .isEqualTo(new GitWireError(
+                                    GitWireError.Kind.INCOMPLETE_PAYLOAD,
+                                    GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                    0,
+                                    4,
+                                    "Incomplete pkt-line payload")));
+        } finally {
+            input.release();
+        }
+    }
+
+    @Test
     void reportsPacketErrorOffsetsRelativeToRequestStartWhenInputReaderIndexIsShifted() {
         ByteBuf input = shiftedRequest(request(
                 data("command=fetch"),
@@ -238,5 +312,11 @@ class GitProtocolV2SectionParserTest {
 
     private ByteBuf responseEnd() {
         return writer.writeResponseEnd();
+    }
+
+    private static ByteBuf raw(String ascii) {
+        ByteBuf input = Unpooled.buffer();
+        input.writeBytes(ascii.getBytes(StandardCharsets.US_ASCII));
+        return input;
     }
 }
