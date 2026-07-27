@@ -6,6 +6,8 @@ designs and implementation steps in `docs/plans/`.
 
 ## Current
 
+- [ ] Native receive-pack/push vertical slice: ref atomic updates, quarantine,
+      pack ingestion, and Git CLI push compatibility tests. Active next task.
 - [ ] Implement the first native Git clone vertical slice from
       `docs/plans/2026-07-26-native-git-end-to-end-backend.md`: native
       upload-pack, read-only ref/object access, response pack building, one
@@ -39,11 +41,16 @@ designs and implementation steps in `docs/plans/`.
         structured text.
   - [x] Add report-status parsing and writing for unpack status plus ok/ng
         per-ref command results.
+  - [ ] Add a reference advertisement parser for the v1 wire protocol:
+        first-line `<sha1> <ref>\0<caps>`, subsequent ref lines, peeled tags,
+        and empty-repository sentinel, backed by `GitCapabilityParser`.
+  - [ ] Add protocol v2 response parsers: `ls-refs` response (ref list with
+        optional symref and peeled fields) and `fetch` response (sectioned
+        acknowledgments, shallow-info, wanted-refs, and packfile side-band
+        entry point), terminated by response-end packet.
 
 ## Next
 
-- [ ] Native receive-pack/push vertical slice: ref atomic updates, quarantine,
-      pack ingestion, and Git CLI push compatibility tests.
 - [ ] Native Git remote fetch and push support.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`.
 - [ ] GitHub mirror administration and manual sync.
