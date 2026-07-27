@@ -25,6 +25,7 @@
         <module>common</module>
         <module>lifecycle-state-machine</module>
         <module>git-parser</module>
+        <module>git-protocol-client</module>
         <module>git-common</module>
         <module>git-native-storage</module>
         <module>git-storage</module>
