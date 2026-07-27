@@ -56,6 +56,58 @@ class GitSideBandTest {
     }
 
     @Test
+    void decoderAcceptsEmptyBandOnePayload() {
+        RecordingRawTarget target = new RecordingRawTarget();
+        List<String> progress = new ArrayList<>();
+        GitSideBandDecoder decoder = new GitSideBandDecoder(
+                UnpooledByteBufAllocator.DEFAULT,
+                GitSideBandMode.SIDE_BAND,
+                target,
+                progress::add);
+        ByteBuf input = sideBandStream(
+                packet(GitSideBandBand.DATA, new byte[0]),
+                flush());
+
+        try {
+            decoder.accept(input);
+
+            assertThat(target.bytes()).isEmpty();
+            assertThat(target.sliceSizes()).isEmpty();
+            assertThat(progress).isEmpty();
+            assertThat(decoder.isComplete()).isTrue();
+        } finally {
+            decoder.close();
+            input.release();
+        }
+    }
+
+    @Test
+    void decoderAcceptsEmptyProgressPayload() {
+        RecordingRawTarget target = new RecordingRawTarget();
+        List<String> progress = new ArrayList<>();
+        GitSideBandDecoder decoder = new GitSideBandDecoder(
+                UnpooledByteBufAllocator.DEFAULT,
+                GitSideBandMode.SIDE_BAND,
+                target,
+                progress::add);
+        ByteBuf input = sideBandStream(
+                packet(GitSideBandBand.PROGRESS, new byte[0]),
+                flush());
+
+        try {
+            decoder.accept(input);
+
+            assertThat(target.bytes()).isEmpty();
+            assertThat(target.sliceSizes()).isEmpty();
+            assertThat(progress).containsExactly("");
+            assertThat(decoder.isComplete()).isTrue();
+        } finally {
+            decoder.close();
+            input.release();
+        }
+    }
+
+    @Test
     void decoderRejectsUnknownBandId() {
         RecordingRawTarget target = new RecordingRawTarget();
         GitSideBandDecoder decoder = new GitSideBandDecoder(

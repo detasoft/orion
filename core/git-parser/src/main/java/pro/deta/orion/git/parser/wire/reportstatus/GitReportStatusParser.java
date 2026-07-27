@@ -137,7 +137,7 @@ public final class GitReportStatusParser {
 
         private static GitReportStatusRef parseRejectedRef(String payload, long packetIndex, long byteOffset) {
             int reasonStart = payload.indexOf(' ');
-            if (reasonStart < 0 || reasonStart == payload.length() - 1) {
+            if (reasonStart < 0) {
                 throw semanticError(
                         GitWireError.Kind.INVALID_REPORT_STATUS_LINE,
                         packetIndex,
