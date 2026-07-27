@@ -4,11 +4,14 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.sideband.GitSideBandDecoder;
+import pro.deta.orion.git.parser.wire.sideband.GitSideBandMode;
 import pro.deta.orion.git.parser.wire.utils.RawSink;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Minimal streaming pkt-line machine used to prove the native Git wire parser
@@ -77,6 +80,18 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 });
     }
 
+    public static GitMinimalWireMachine forV2FetchResponse(
+            ByteBufAllocator allocator,
+            RawTargetFactory rawTargetFactory,
+            Consumer<String> progressConsumer) {
+        Objects.requireNonNull(progressConsumer, "progressConsumer");
+        return new GitMinimalWireMachine(
+                allocator,
+                pro.deta.orion.git.parser.wire.protocolv2.response.GitFetchResponse.class,
+                GitFetchResponsePhases.firstHeader(progressConsumer),
+                rawTargetFactory);
+    }
+
     public boolean accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
         try {
@@ -143,10 +158,16 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         return new ControlPhase(ControlState.ControlEmpty.INSTANCE, context.nextPacketIndex(), context.nextByteOffset());
     }
 
-    private Phase phaseAfterSemanticTransition(SemanticTransition transition) {
+    private Phase phaseAfterSemanticTransition(
+            SemanticTransition transition,
+            ControlState.ControlSuccess transitionControl) {
         if (transition instanceof SemanticTransition.Next next) {
             context.semanticContext.phase = next.phase();
             return newControlPhase();
+        }
+        if (transition instanceof SemanticTransition.EnterSideBand enterSideBand) {
+            context.semanticContext.phase = enterSideBand.afterSideBand();
+            return new SideBandPhase(transitionControl, enterSideBand.progressConsumer());
         }
         SemanticTransition.Complete<?> complete = (SemanticTransition.Complete<?>) transition;
         context.semanticContext.complete(complete);
@@ -281,7 +302,8 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     }
 
     sealed interface Phase extends AutoCloseable
-            permits CompletedPhase, ControlPhase, FailedPhase, RawStreamPhase, StructuredPayloadPhase {
+            permits CompletedPhase, ControlPhase, FailedPhase, RawStreamPhase, SideBandPhase,
+            StructuredPayloadPhase {
         Phase accept(ByteBuf input);
 
         default void abort() {
@@ -330,7 +352,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     }
 
     sealed interface SemanticTransition
-            permits SemanticTransition.Complete, SemanticTransition.Next {
+            permits SemanticTransition.Complete, SemanticTransition.EnterSideBand, SemanticTransition.Next {
 
         record Next(SemanticPhase phase) implements SemanticTransition {
             public Next {
@@ -342,6 +364,15 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             public Complete {
                 Objects.requireNonNull(type, "type");
                 Objects.requireNonNull(value, "value");
+            }
+        }
+
+        record EnterSideBand(
+                SemanticPhase afterSideBand,
+                Consumer<String> progressConsumer) implements SemanticTransition {
+            public EnterSideBand {
+                Objects.requireNonNull(afterSideBand, "afterSideBand");
+                Objects.requireNonNull(progressConsumer, "progressConsumer");
             }
         }
     }
@@ -400,7 +431,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                             byteOffset,
                             context.semanticContext.values);
             context.completePacket(control);
-            return phaseAfterSemanticTransition(transition);
+            return phaseAfterSemanticTransition(transition, control);
         }
 
         ControlState state() {
@@ -488,7 +519,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                                     context.semanticContext.values);
                     context.completePacket(control);
                     complete = true;
-                    nextPhase = phaseAfterSemanticTransition(transition);
+                    nextPhase = phaseAfterSemanticTransition(transition, control);
                 } finally {
                     payload.release();
                 }
@@ -588,6 +619,79 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         public void close() {
             if (target != null) {
                 target.close();
+            }
+        }
+    }
+
+    final class SideBandPhase implements Phase {
+        private final LazyRawTarget target;
+        private final GitSideBandDecoder decoder;
+
+        private SideBandPhase(
+                ControlState.ControlSuccess control,
+                Consumer<String> progressConsumer) {
+            this.target = new LazyRawTarget(control);
+            this.decoder = new GitSideBandDecoder(
+                    context.allocator,
+                    GitSideBandMode.SIDE_BAND_64K,
+                    target,
+                    progressConsumer);
+        }
+
+        @Override
+        public Phase accept(ByteBuf input) {
+            int readerIndex = input.readerIndex();
+            decoder.accept(input);
+            context.forwardRawBytes(input.readerIndex() - readerIndex);
+            if (decoder.isComplete()) {
+                close();
+                return newControlPhase();
+            }
+            return this;
+        }
+
+        @Override
+        public void close() {
+            try {
+                decoder.close();
+            } finally {
+                target.close();
+            }
+        }
+
+        private final class LazyRawTarget implements RawSink.Target {
+            private final ControlState.ControlSuccess control;
+            private RawSink.Target delegate;
+            private boolean closed;
+
+            private LazyRawTarget(ControlState.ControlSuccess control) {
+                this.control = control;
+            }
+
+            @Override
+            public void accept(ByteBuf input) {
+                target().accept(input);
+            }
+
+            @Override
+            public void close() {
+                if (closed) {
+                    return;
+                }
+                closed = true;
+                if (delegate != null) {
+                    delegate.close();
+                }
+            }
+
+            private RawSink.Target target() {
+                if (closed) {
+                    throw new IllegalStateException("Git side-band raw target is closed");
+                }
+                if (delegate == null) {
+                    delegate = Objects.requireNonNull(context.rawTargetFactory.create(control), "rawTarget");
+                }
+                return delegate;
             }
         }
     }
