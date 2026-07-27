@@ -29,7 +29,8 @@ public record GitWireError(
         DUPLICATE_UNPACK_STATUS,
         INVALID_REPORT_STATUS_LINE,
         INVALID_SIDE_BAND,
-        SIDE_BAND_FATAL
+        SIDE_BAND_FATAL,
+        INVALID_RECEIVE_PACK_COMMAND
     }
 
     public enum Phase {
