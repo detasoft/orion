@@ -29,7 +29,7 @@ public final class GitInitialServiceRequestParser {
                 INITIAL_PACKET_INDEX,
                 startReaderIndex,
                 "Incomplete initial service request header");
-        int payloadLength = payloadLength(header, startReaderIndex);
+        int payloadLength = payloadLength(header);
         if (input.readableBytes() < header.packetLength()) {
             throw GitWireException.of(
                     GitWireError.Kind.INCOMPLETE_PAYLOAD,
@@ -47,7 +47,7 @@ public final class GitInitialServiceRequestParser {
         return request;
     }
 
-    private static int payloadLength(GitPktLineReader.Header header, int startReaderIndex) {
+    private static int payloadLength(GitPktLineReader.Header header) {
         int packetLength = header.packetLength();
         if (packetLength == 3) {
             throw GitWireException.of(
@@ -58,7 +58,7 @@ public final class GitInitialServiceRequestParser {
                     "Pkt-line length 0003 is reserved");
         }
         if (packetLength < PKT_LINE_HEADER_SIZE) {
-            throw semanticError(header.headerIndex(), startReaderIndex, "Initial service request must be a data pkt-line");
+            throw semanticError(header.byteOffset(), "Initial service request must be a data pkt-line");
         }
         if (packetLength > GitFixedControlFrameReader.MAX_PKT_LINE_LENGTH) {
             throw GitWireException.of(
@@ -77,7 +77,7 @@ public final class GitInitialServiceRequestParser {
             int payloadEnd,
             int startReaderIndex) {
         if (isBlank(input, payloadStart, payloadEnd)) {
-            throw semanticError(payloadStart, startReaderIndex, "Malformed initial service request: empty command");
+            throw semanticError(payloadStart - startReaderIndex, "Malformed initial service request: empty command");
         }
 
         int commandFieldEnd = findByte(input, payloadStart, payloadEnd, 0);
@@ -88,11 +88,11 @@ public final class GitInitialServiceRequestParser {
         int commandEnd = trimEnd(input, commandStart, commandFieldEnd);
         int serviceEnd = findWhitespace(input, commandStart, commandEnd);
         if (serviceEnd < 0) {
-            throw semanticError(commandStart, startReaderIndex, "Malformed initial service request");
+            throw semanticError(commandStart - startReaderIndex, "Malformed initial service request");
         }
         int pathStart = trimStart(input, serviceEnd, commandEnd);
         if (pathStart >= commandEnd) {
-            throw semanticError(serviceEnd, startReaderIndex, "Malformed initial service request");
+            throw semanticError(serviceEnd - startReaderIndex, "Malformed initial service request");
         }
 
         String serviceName = string(input, commandStart, serviceEnd);
@@ -100,29 +100,26 @@ public final class GitInitialServiceRequestParser {
 
         Map<String, String> parameters = new LinkedHashMap<>();
         return new GitInitialServiceRequest(
-                parseService(serviceName, commandStart, startReaderIndex),
+                parseService(serviceName, commandStart - startReaderIndex),
                 repositoryPath,
                 parseParameters(input, commandFieldEnd + 1, payloadEnd, parameters));
     }
 
-    private static GitInitialServiceRequest.Service parseService(
-            String serviceName,
-            int byteOffset,
-            int startReaderIndex) {
+    private static GitInitialServiceRequest.Service parseService(String serviceName, long byteOffset) {
         for (GitInitialServiceRequest.Service service : GitInitialServiceRequest.Service.values()) {
             if (service.wireName().equals(serviceName)) {
                 return service;
             }
         }
-        throw semanticError(byteOffset, startReaderIndex, "Unsupported Git service: " + serviceName);
+        throw semanticError(byteOffset, "Unsupported Git service: " + serviceName);
     }
 
-    private static GitWireException semanticError(long byteOffset, int startReaderIndex, String message) {
+    private static GitWireException semanticError(long byteOffset, String message) {
         return GitWireException.of(
                 GitWireError.Kind.INVALID_INITIAL_SERVICE_REQUEST,
                 GitWireError.Phase.STRUCTURED_PAYLOAD,
                 INITIAL_PACKET_INDEX,
-                byteOffset - startReaderIndex,
+                byteOffset,
                 message);
     }
 
