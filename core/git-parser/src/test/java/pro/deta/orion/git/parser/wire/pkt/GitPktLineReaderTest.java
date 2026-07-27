@@ -32,22 +32,18 @@ class GitPktLineReaderTest {
     }
 
     @Test
-    void reportsHeaderErrorsWithCustomMessage() {
+    void reportsIncompleteHeaderRelativeToStartReaderIndex() {
         ByteBuf input = shiftedInput(raw("003"));
 
         try {
-            assertThatThrownBy(() -> GitPktLineReader.readHeader(
-                    input,
-                    7,
-                    3,
-                    "Incomplete initial service request header"))
+            assertThatThrownBy(() -> GitPktLineReader.readHeader(input, 7, 3))
                     .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
                             .isEqualTo(new GitWireError(
                                     GitWireError.Kind.INCOMPLETE_HEADER,
                                     GitWireError.Phase.CONTROL_HEADER,
                                     7,
                                     0,
-                                    "Incomplete initial service request header")));
+                                    "Incomplete pkt-line header")));
         } finally {
             input.release();
         }

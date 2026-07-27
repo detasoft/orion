@@ -57,7 +57,7 @@ class GitInitialServiceRequestParserTest {
                                     GitWireError.Phase.CONTROL_HEADER,
                                     0,
                                     0,
-                                    "Incomplete initial service request header")));
+                                    "Incomplete pkt-line header")));
         } finally {
             input.release();
         }
@@ -93,7 +93,7 @@ class GitInitialServiceRequestParserTest {
                                     GitWireError.Phase.CONTROL_HEADER,
                                     0,
                                     0,
-                                    "Incomplete initial service request header")));
+                                    "Incomplete pkt-line header")));
         } finally {
             input.release();
         }

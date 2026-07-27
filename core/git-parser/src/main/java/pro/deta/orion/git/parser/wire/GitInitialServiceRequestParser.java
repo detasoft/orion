@@ -27,8 +27,7 @@ public final class GitInitialServiceRequestParser {
         GitPktLineReader.Header header = GitPktLineReader.readHeader(
                 input,
                 INITIAL_PACKET_INDEX,
-                startReaderIndex,
-                "Incomplete initial service request header");
+                startReaderIndex);
         int payloadLength = payloadLength(header);
         if (input.readableBytes() < header.packetLength()) {
             throw GitWireException.of(

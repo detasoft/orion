@@ -54,16 +54,7 @@ public final class GitPktLineReader {
     }
 
     public static Header readHeader(ByteBuf input, long packetIndex, int startReaderIndex) {
-        return readHeader(input, packetIndex, startReaderIndex, "Incomplete pkt-line header");
-    }
-
-    public static Header readHeader(
-            ByteBuf input,
-            long packetIndex,
-            int startReaderIndex,
-            String incompleteHeaderMessage) {
         Objects.requireNonNull(input, "input");
-        Objects.requireNonNull(incompleteHeaderMessage, "incompleteHeaderMessage");
         int headerIndex = input.readerIndex();
         long headerOffset = headerIndex - (long) startReaderIndex;
         if (input.readableBytes() < PKT_LINE_HEADER_SIZE) {
@@ -72,7 +63,7 @@ public final class GitPktLineReader {
                     GitWireError.Phase.CONTROL_HEADER,
                     packetIndex,
                     headerOffset,
-                    incompleteHeaderMessage);
+                    "Incomplete pkt-line header");
         }
         int packetLength = GitNativeUtils.packetLength(
                 input,
