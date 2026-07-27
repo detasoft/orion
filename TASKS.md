@@ -22,7 +22,6 @@ designs and implementation steps in `docs/plans/`.
       feed `ByteBuf` chunks into the wire core. Next, extend the native
       streaming path beyond the initial request without buffering whole packets
       or raw pack tails in additional memory.
-  - Owner: codex, started 2026-07-27 19:30 Europe/Amsterdam.
   - [x] Extend the existing `GitMinimalWireMachine` with observable pkt-line
         control events and close-time validation instead of adding a parallel
         session API.
@@ -42,10 +41,10 @@ designs and implementation steps in `docs/plans/`.
         structured text.
   - [x] Add report-status parsing and writing for unpack status plus ok/ng
         per-ref command results.
-  - [ ] Add a reference advertisement parser for the v1 wire protocol:
+  - [x] Add a reference advertisement parser for the v1 wire protocol:
         first-line `<sha1> <ref>\0<caps>`, subsequent ref lines, peeled tags,
         and empty-repository sentinel, backed by `GitCapabilityParser`.
-  - [ ] Add protocol v2 response parsers: `ls-refs` response (ref list with
+  - [x] Add protocol v2 response parsers: `ls-refs` response (ref list with
         optional symref and peeled fields) and `fetch` response (sectioned
         acknowledgments, shallow-info, wanted-refs, and packfile side-band
         entry point), terminated by response-end packet.
