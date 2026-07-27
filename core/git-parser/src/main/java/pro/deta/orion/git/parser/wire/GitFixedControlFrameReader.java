@@ -52,8 +52,6 @@ public final class GitFixedControlFrameReader {
         }
         try {
             return buildControlState(previousFragment, packetIndex, byteOffset);
-        } catch (RuntimeException | Error e) {
-            throw e;
         } finally {
             previousFragment.release();
         }
