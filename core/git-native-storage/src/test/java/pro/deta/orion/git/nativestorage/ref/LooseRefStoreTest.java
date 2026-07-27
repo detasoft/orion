@@ -3,6 +3,9 @@ package pro.deta.orion.git.nativestorage.ref;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.common.GitObjectId;
 
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LooseRefStoreTest {
@@ -101,5 +104,35 @@ class LooseRefStoreTest {
         RefUpdateResult result = store.update("refs/heads/main", SHA1_A, SHA1_A);
 
         assertThat(result).isEqualTo(RefUpdateResult.NO_OP);
+    }
+
+    @Test
+    void batchPublishesObjectsBeforeMakingSuccessfulRefsVisible() {
+        AtomicBoolean objectsPublished = new AtomicBoolean();
+
+        List<RefUpdateResult> results = store.updateAll(
+                List.of(new LooseRefStore.Update("refs/heads/main", NULL_ID, SHA1_A)),
+                () -> {
+                    assertThat(store.read("refs/heads/main")).isEmpty();
+                    objectsPublished.set(true);
+                });
+
+        assertThat(results).containsExactly(RefUpdateResult.CREATED);
+        assertThat(objectsPublished).isTrue();
+        assertThat(store.read("refs/heads/main")).contains(GitObjectId.of(SHA1_A));
+    }
+
+    @Test
+    void batchDoesNotPublishObjectsWhenEveryUpdateIsStale() {
+        store.update("refs/heads/main", NULL_ID, SHA1_A);
+        AtomicBoolean objectsPublished = new AtomicBoolean();
+
+        List<RefUpdateResult> results = store.updateAll(
+                List.of(new LooseRefStore.Update("refs/heads/main", SHA1_B, SHA1_C)),
+                () -> objectsPublished.set(true));
+
+        assertThat(results).containsExactly(RefUpdateResult.STALE);
+        assertThat(objectsPublished).isFalse();
+        assertThat(store.read("refs/heads/main")).contains(GitObjectId.of(SHA1_A));
     }
 }

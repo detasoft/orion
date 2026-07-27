@@ -96,11 +96,8 @@ class NativeReceivePackServiceTest {
         assertThat(refStore.read("refs/heads/main")).isEmpty();
     }
 
-    // C3: objectStore.putAll(quarantine) happens before the ref-update loop.
-    // When a ref update returns STALE the new objects are permanently written to
-    // the shared store with no ref pointing at them, and packAccepted is still true.
     @Test
-    void newObjectsAreStoredEvenWhenRefUpdateIsStale() {
+    void leavesNewObjectsQuarantinedWhenEveryRefUpdateIsStale() {
         byte[] existing = "existing".getBytes();
         byte[] incoming = "incoming".getBytes();
         String existingId = blobSha1(existing);
@@ -109,7 +106,6 @@ class NativeReceivePackServiceTest {
         objectStore.write(ObjectType.BLOB, existing);
         refStore.update("refs/heads/main", NULL_ID, existingId);
 
-        // Command claims wrong old-id → STALE
         byte[] pack = buildPackWithBlob(incoming);
         ReceivePackCommandSection section = commandSection(
                 new ReceivePackCommand("b".repeat(40), incomingId, "refs/heads/main"));
@@ -118,18 +114,13 @@ class NativeReceivePackServiceTest {
 
         assertThat(result.packAccepted()).isTrue();
         assertThat(result.refResults().get(0).ok()).isFalse();
-        // Dangling object: stored despite the ref not being updated
-        assertThat(objectStore.contains(GitObjectId.of(incomingId))).isTrue();
+        assertThat(objectStore.contains(GitObjectId.of(incomingId))).isFalse();
         assertThat(refStore.read("refs/heads/main").map(id -> id.value()))
-                .hasValue(existingId); // ref unchanged
+                .hasValue(existingId);
     }
 
-    // C8: NativeReceivePackService accepts any ReceivePackCommandSection directly,
-    // bypassing the parser guard. A delete command (newId = NULL_ID) falls through
-    // to the object-presence check and produces a misleading "missing object 000…"
-    // error instead of an explicit "delete not supported" message.
     @Test
-    void deleteCommandReportsMissingObjectInsteadOfExplicitRejection() {
+    void explicitlyRejectsDeleteCommand() {
         byte[] pack = buildPackWithBlob("data".getBytes());
         ReceivePackCommandSection section = commandSection(
                 new ReceivePackCommand("a".repeat(40), NULL_ID, "refs/heads/main"));
@@ -137,21 +128,16 @@ class NativeReceivePackServiceTest {
         ReceiveResult result = service.receive(section, new ByteArrayInputStream(pack));
 
         assertThat(result.packAccepted()).isFalse();
-        assertThat(result.packError()).contains("missing object " + NULL_ID);
+        assertThat(result.packError()).isEqualTo("delete commands are not supported");
     }
 
-    // C9: ReceivePackCapabilityResolver is never called by NativeReceivePackService.
-    // A client requesting 'atomic' expects all-or-nothing ref semantics: if any
-    // update is STALE, no ref should be changed. The service ignores the capability
-    // and applies each ref update independently.
     @Test
-    void atomicCapabilityIsNotEnforcedAndFirstRefIsUpdatedEvenWhenSecondIsStale() {
+    void rejectsUnsupportedAtomicCapabilityBeforeUpdatingRefs() {
         byte[] blob1 = "one".getBytes();
         byte[] blob2 = "two".getBytes();
         String id1 = blobSha1(blob1);
         String id2 = blobSha1(blob2);
 
-        // id2 already in objectStore; feature ref at a different commit → second command will be STALE
         objectStore.write(ObjectType.BLOB, blob2);
         refStore.update("refs/heads/feature", NULL_ID, "f".repeat(40));
 
@@ -164,11 +150,10 @@ class NativeReceivePackServiceTest {
 
         ReceiveResult result = service.receive(section, new ByteArrayInputStream(pack));
 
-        // Atomic mode should make the entire push fail-or-succeed together, but:
-        assertThat(result.refResults().get(0).ok()).isTrue();  // main was created
-        assertThat(result.refResults().get(1).ok()).isFalse(); // feature STALE
-        // Bug: main should not have been updated when atomic semantics apply
-        assertThat(refStore.read("refs/heads/main")).isPresent();
+        assertThat(result.packAccepted()).isFalse();
+        assertThat(result.packError()).isEqualTo("unsupported capabilities: atomic");
+        assertThat(result.refResults()).isEmpty();
+        assertThat(refStore.read("refs/heads/main")).isEmpty();
     }
 
     private static ReceivePackCommandSection commandSection(ReceivePackCommand... commands) {
