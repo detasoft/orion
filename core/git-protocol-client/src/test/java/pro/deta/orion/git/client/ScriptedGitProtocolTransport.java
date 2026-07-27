@@ -9,39 +9,51 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 
-final class ScriptedGitProtocolTransport implements GitProtocolTransport {
+public final class ScriptedGitProtocolTransport implements GitProtocolTransport {
     private final Deque<byte[]> expectedWrites;
     private final Deque<byte[]> reads;
     private final GitProtocolTransportException openFailure;
     private final GitProtocolTransportException writeFailure;
     private final GitProtocolTransportException readFailure;
+    private final GitProtocolTransportException closeFailure;
     private GitProtocolService openedService;
     private URI openedUri;
     private GitProtocolTransportOptions openedOptions;
     private Session session;
 
-    ScriptedGitProtocolTransport(List<byte[]> expectedWrites, List<byte[]> reads) {
+    public ScriptedGitProtocolTransport(List<byte[]> expectedWrites, List<byte[]> reads) {
         this(expectedWrites, reads, null, null, null);
     }
 
-    ScriptedGitProtocolTransport(
+    public ScriptedGitProtocolTransport(
             List<byte[]> expectedWrites,
             List<byte[]> reads,
             GitProtocolTransportException readFailure) {
         this(expectedWrites, reads, null, null, readFailure);
     }
 
-    ScriptedGitProtocolTransport(
+    public ScriptedGitProtocolTransport(
             List<byte[]> expectedWrites,
             List<byte[]> reads,
             GitProtocolTransportException openFailure,
             GitProtocolTransportException writeFailure,
             GitProtocolTransportException readFailure) {
+        this(expectedWrites, reads, openFailure, writeFailure, readFailure, null);
+    }
+
+    public ScriptedGitProtocolTransport(
+            List<byte[]> expectedWrites,
+            List<byte[]> reads,
+            GitProtocolTransportException openFailure,
+            GitProtocolTransportException writeFailure,
+            GitProtocolTransportException readFailure,
+            GitProtocolTransportException closeFailure) {
         this.expectedWrites = copies(expectedWrites);
         this.reads = copies(reads);
         this.openFailure = openFailure;
         this.writeFailure = writeFailure;
         this.readFailure = readFailure;
+        this.closeFailure = closeFailure;
     }
 
     @Override
@@ -59,23 +71,23 @@ final class ScriptedGitProtocolTransport implements GitProtocolTransport {
         return session;
     }
 
-    GitProtocolService openedService() {
+    public GitProtocolService openedService() {
         return openedService;
     }
 
-    URI openedUri() {
+    public URI openedUri() {
         return openedUri;
     }
 
-    GitProtocolTransportOptions openedOptions() {
+    public GitProtocolTransportOptions openedOptions() {
         return openedOptions;
     }
 
-    boolean closed() {
+    public boolean closed() {
         return session != null && session.closed;
     }
 
-    int closeCalls() {
+    public int closeCalls() {
         return session == null ? 0 : session.closeCalls;
     }
 
@@ -119,6 +131,10 @@ final class ScriptedGitProtocolTransport implements GitProtocolTransport {
             }
             closed = true;
             closeCalls++;
+            reads.clear(); // discard any unread scripted inbound entries
+            if (closeFailure != null) {
+                throw closeFailure;
+            }
             if (!expectedWrites.isEmpty()) {
                 throw new GitProtocolTransportException(
                         GitProtocolTransportException.Phase.CLOSE,

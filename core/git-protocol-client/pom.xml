@@ -23,6 +23,10 @@
             <artifactId>git-parser</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>lifecycle-state-machine</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-buffer</artifactId>
             <version>4.2.1.Final</version>
