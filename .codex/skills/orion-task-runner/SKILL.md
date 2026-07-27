@@ -18,25 +18,43 @@ Use this skill to choose one high-level Orion task from `TASKS.md`, mark it as o
 
 ## Task Selection
 
-Prefer this order:
+First classify tasks as claimed or unclaimed. Treat a task as claimed when its
+block has any of these signals:
 
-1. A task the user explicitly names or describes.
-2. An unchecked task in `## Current` that says `Active next task`.
-3. The first unchecked task in `## Current` that matches the user's request.
-4. The first unchecked task in `## Next`, moved or copied into `## Current` only when starting it.
+- any `Owner:` line, including `Owner: codex`;
+- an explicit activity marker such as `Active next task`, `Current work`, `in
+  progress`, `started`, or `paused`;
+- checked implementation subtasks under an otherwise unchecked parent task,
+  unless the block explicitly says the work is available.
 
-Ask a concise question before proceeding when two or more tasks match equally well, when the requested work is absent from `TASKS.md`, or when the matching task already has a non-Codex owner line.
+Claimed means occupied by another session or person. Never select, continue,
+update, or replace the owner of a claimed task unless the user explicitly names
+that task and asks to take it over.
+
+For a generic request such as "take a new task", prefer this order:
+
+1. The first unclaimed unchecked task in `## Current`.
+2. The first unclaimed unchecked task in `## Next`, moved or copied into
+   `## Current` only when starting it.
+
+When the user explicitly names or describes a task, select it only if it is
+unclaimed. Ask a concise question before proceeding when two or more unclaimed
+tasks match equally well, when the requested work is absent from `TASKS.md`,
+when the named task is claimed, or when no unclaimed task remains.
 
 ## Claim Format
 
-Before substantial code, doc, or test edits, update only the selected task block in `TASKS.md`:
+Before substantial code, doc, or test edits, update only the selected unclaimed
+task block in `TASKS.md`:
 
 ```markdown
 - [ ] Task title and short context.
   - Owner: codex, started YYYY-MM-DD HH:MM Europe/Amsterdam.
 ```
 
-Use the current local date and time. If a Codex owner line already exists for the selected task, update that line instead of adding another one. Keep the file high-level; put detailed design or implementation notes in `docs/plans/`.
+Use the current local date and time. An existing owner line means the task is
+claimed; do not update it without an explicit user-requested takeover. Keep the
+file high-level; put detailed design or implementation notes in `docs/plans/`.
 
 ## Execution Rules
 
