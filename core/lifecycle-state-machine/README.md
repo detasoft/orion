@@ -18,31 +18,47 @@ contract:
 
 ## Core Concepts
 
-### Streaming phase machines
+### Continuation runtimes
 
-`PhaseMachine` is the minimal state holder for streaming or event-driven
-protocols whose durable state belongs to one current phase:
+`ContinuationRuntime` is the minimal state holder for input-driven protocols
+whose durable state belongs to one current continuation:
 
 ```java
-sealed interface ProtocolPhase
-        extends PhaseMachine.Phase<ProtocolEvent, ProtocolPhase> {
+final class ReadingHeader implements Continuation<ByteBuf> {
+    @Override
+    public ContinuationFlow<ByteBuf> process(ByteBuf input) {
+        if (!headerAvailable(input)) {
+            return ContinuationFlow.await();
+        }
+        Header header = readHeader(input);
+        return ContinuationFlow.transition(new ReadingPayload(header));
+    }
 }
 
-PhaseMachine<ProtocolEvent, ProtocolPhase> machine =
-        new PhaseMachine<>(new ReadingHeader());
-machine.accept(new BytesAvailable(buffer));
+ContinuationRuntime<ByteBuf> runtime = new GitWireRuntime(new ReadingHeader());
+runtime.accept(buffer);
 ```
 
-Each phase handles one event and returns the next phase. The machine rejects
-null transitions, events after a terminal phase, and events after close.
-Closing is idempotent and closes only the current phase. A phase that owns
-resources must transfer or release them while transitioning because previous
-phases are not closed automatically.
+Each continuation handles one input step and returns a `ContinuationFlow`:
 
-`PhaseMachine` deliberately provides no transition graph, action scheduler,
-thread synchronization, or domain-specific events. Use the lifecycle
-`StateMachine` below for declarative service lifecycle transitions and
-`PhaseMachine` for compact phase-object protocols.
+- `Continue` keeps the same continuation and continues the runtime loop;
+- `Await` stops until the next external input or tick;
+- `Transition` replaces the current continuation and continues the runtime loop.
+
+Terminal success and error states are ordinary terminal continuations created
+with `Continuation.completedSuccess(...)` and
+`Continuation.completedError(...)`. Entering a terminal state is just another
+transition, so subclasses can observe it through the same transition hook.
+
+The runtime stores only the current continuation. It does not store intermediate
+values or event history; subclasses can observe transition events through hooks
+when tests or bounded diagnostics need them.
+
+`TimedContinuation` adds a per-continuation timeout duration.
+`TimedContinuationRuntime` owns the clock and applies that timeout from the last
+accepted input. Use the lifecycle `StateMachine` below for declarative service
+lifecycle transitions and continuation runtimes for compact input-driven
+protocols.
 
 `StateMachineDefinition` is the lifecycle contract. It declares transitions
 before a service is wired into the runtime:

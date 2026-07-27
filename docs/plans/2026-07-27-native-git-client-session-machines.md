@@ -11,21 +11,25 @@ machine.
 from a `GitClientMachine<R>`, while upload-pack and receive-pack machines own
 their semantic protocol phases and compose the production evolution of
 `GitMinimalWireMachine` for inbound framing and raw pack routing. Every session,
-client, and wire machine stores its current phase in the reusable
-`PhaseMachine<E, P>` abstraction.
+client, and wire machine stores its current continuation in the reusable
+`ContinuationRuntime<I>` abstraction and advances through `ContinuationFlow`.
 
 **Tech Stack:** Java 21, Maven, Netty `ByteBuf`, JUnit 5, AssertJ
 
 ---
 
-### Implemented foundation: Minimal phase state holder
+### Implemented foundation: Continuation runtime
 
-`core/lifecycle-state-machine` now provides `PhaseMachine<E, P>`. It enforces a
-non-null current phase and transition, terminal and closed event rejection,
-idempotent close, and current-phase-only resource closing.
+`core/lifecycle-state-machine` now provides `Continuation<I>`,
+`ContinuationFlow<I>`, `ContinuationRuntime<I>`, and
+`TimedContinuation<I>`/`TimedContinuationRuntime<I>`. A continuation returns an
+explicit flow: continue, await, or transition. Success and error completion are
+terminal continuations. Timed continuations declare their own timeout duration,
+while the timed runtime owns the clock and timeout transition policy.
 
-The client implementation must compose this class rather than adding another
-mutable `phase` field or defining another generic state-machine abstraction.
+The client implementation should compose this runtime rather than adding another
+generic state-machine abstraction. Domain continuations pass intermediate values
+through fields and constructors; runtime hooks provide test/debug observation.
 
 ### Task 1: Define the client-machine action boundary
 
@@ -34,11 +38,13 @@ mutable `phase` field or defining another generic state-machine abstraction.
 - Create: `core/git-protocol-client/src/main/java/pro/deta/orion/git/client/machine/GitClientAction.java`
 - Create: `core/git-protocol-client/src/main/java/pro/deta/orion/git/client/machine/GitClientMachine.java`
 - Create: `core/git-protocol-client/src/main/java/pro/deta/orion/git/client/machine/GitProtocolClientException.java`
-- Test: `core/git-protocol-client/src/test/java/pro/deta/orion/git/client/machine/GitClientMachineContractTest.java`
+- Test: existing session-machine tests under
+  `core/git-protocol-client/src/test/java/pro/deta/orion/git/client/machine`
 
 **Step 1: Write the failing contract test**
 
-Define a small test machine with phase objects and verify this action sequence:
+Define a small test machine with continuation objects and verify this action
+sequence:
 
 ```text
 Write(request) -> Read -> Complete(result)
@@ -66,9 +72,9 @@ assertThat(machine.action()).isInstanceOf(GitClientAction.Read.class);
 original input reference, matching the current wire-machine ownership
 contract.
 
-The test machine must store its protocol state in
-`PhaseMachine<TestEvent, TestPhase>` and must not duplicate phase replacement,
-terminal checks, or close idempotency.
+The test machine should expose only the `GitClientMachine` action contract.
+Generic continuation ownership belongs to `ContinuationRuntime`, not to a
+separate contract test for the client interface.
 
 **Step 2: Run the focused test and verify RED**
 
@@ -76,11 +82,12 @@ Run:
 
 ```bash
 mvn test -Pdev -q -pl core/git-protocol-client -am \
-  -Dtest=GitClientMachineContractTest \
+  -Dtest=GitProtocolSessionMachineTest \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-Expected: compilation fails because the machine action types do not exist.
+Expected: compilation fails where session-machine action support is still
+missing.
 
 **Step 3: Implement the minimal action model**
 
@@ -113,10 +120,9 @@ public interface GitClientMachine<R> extends AutoCloseable {
 }
 ```
 
-Service-specific implementations of this interface compose a
-`PhaseMachine<GitClientEvent, GitClientPhase<R>>`. The interface defines the
-session-facing events and actions, while `PhaseMachine` owns and validates the
-current phase.
+Service-specific implementations of this interface compose continuations that
+return `ContinuationFlow`. The interface defines the session-facing events and
+actions, while the runtime owns the current continuation and terminal state.
 
 `GitProtocolClientException` is checked and contains:
 
@@ -187,8 +193,8 @@ Expected: compilation fails because `GitProtocolSessionMachine` does not exist.
 
 **Step 3: Implement the session phases and action loop**
 
-Store session lifecycle state in
-`PhaseMachine<GitSessionEvent<R>, GitSessionPhase<R>>` with explicit phases:
+Store session lifecycle state in a `ContinuationRuntime` with explicit
+continuations:
 
 ```text
 Open -> Exchange -> Closing -> Complete
@@ -204,9 +210,8 @@ Complete -> return result
 Fail     -> throw the typed client failure
 ```
 
-Each I/O outcome becomes a session event that advances the phase machine. The
-session machine must not inspect Git packet content or maintain a second
-independent phase field.
+Each I/O outcome advances the current continuation. The session runtime must not
+inspect Git packet content or maintain a second independent phase field.
 
 **Step 4: Run the happy-path test and verify GREEN**
 
@@ -303,8 +308,8 @@ Use explicit phase objects:
 Advertisement -> WriteLsRefs -> LsRefsResponse -> Complete
 ```
 
-Store these phases in `PhaseMachine<GitUploadPackEvent,
-GitUploadPackPhase>`.
+Store these phases as upload-pack continuations driven by
+`ContinuationRuntime`.
 Compose the final wire-core machine and parsers. Build outbound packets with
 `GitPktLineWriter`. Do not concatenate inbound transport chunks or parse raw
 lines in the client module.
@@ -344,7 +349,7 @@ Use explicit phase objects:
 Advertisement -> WriteFetch -> FetchSections -> Pack -> Complete
 ```
 
-Use the same upload-pack `PhaseMachine` instance for the entire operation.
+Use the same upload-pack continuation runtime for the entire operation.
 Let the wire machine switch to the raw or side-band target. Enforce
 `maximumPackBytes` while forwarding, without accumulating a second complete
 pack.
@@ -430,8 +435,8 @@ Use explicit phase objects:
 Advertisement -> WriteCommand -> WritePack -> ReportStatus -> Complete
 ```
 
-Store these phases in `PhaseMachine<GitReceivePackEvent,
-GitReceivePackPhase>`.
+Store these phases as receive-pack continuations driven by
+`ContinuationRuntime`.
 Require `report-status`. Select `side-band-64k` when available. Do not build or
 inspect pack contents.
 
@@ -530,8 +535,8 @@ Confirm:
 - service machines do not call `GitProtocolSession`;
 - `GitProtocolSessionMachine` does not parse Git packets;
 - no client module code duplicates advertisement or v2 response parsing.
-- session, upload-pack, receive-pack, and wire machines compose
-  `PhaseMachine` instead of duplicating generic phase ownership rules.
+- session, upload-pack, receive-pack, and wire machines compose continuation
+  runtimes instead of duplicating generic continuation ownership rules.
 
 **Step 4: Finish task tracking**
 

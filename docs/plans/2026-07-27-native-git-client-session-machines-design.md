@@ -35,12 +35,12 @@ GitUploadPackClientMachine / GitReceivePackClientMachine
                 |
 GitWireMachine
                 |
-PhaseMachine<Event, Phase>
+ContinuationRuntime<ByteBuf>
 ```
 
 The public clients are thin synchronous facades. They construct a
 service-specific client machine for one operation and ask the session machine
-to drive it to a terminal result.
+to advance it to a terminal result.
 
 `GitProtocolSessionMachine` owns the transport lifecycle. It opens the
 appropriate `GitProtocolSession`, executes actions requested by the client
@@ -58,29 +58,30 @@ and transitions to raw pack forwarding. The client machines compose it instead
 of parsing packet boundaries themselves.
 
 The declarative lifecycle `StateMachine` is not used for the per-chunk protocol
-path. Its module also provides the smaller `PhaseMachine`, which is the shared
-state holder used by the session, client, and wire machines.
+path. Its module also provides `ContinuationRuntime`, which owns the current
+continuation and interprets explicit `ContinuationFlow` results.
 
-## Shared Phase Machine Contract
+## Shared Continuation Runtime Contract
 
-`PhaseMachine<E, P>` owns one current phase. A phase accepts one event and
-returns the next phase. It exposes whether it is terminal and releases any
-currently owned resources when closed.
+`Continuation<I>` handles one input step and returns a `ContinuationFlow<I>`.
+The flow determines whether the runtime should continue, await another external
+signal, or transition to another continuation. Success and error completion are
+represented as terminal continuations, so they pass through the same transition
+path as ordinary phase changes.
 
 The shared abstraction enforces these rules:
 
-- the initial phase, events, and returned phases are non-null;
-- a terminal phase cannot receive another event;
-- a closed machine cannot receive another event;
-- close is idempotent and closes only the current phase;
-- previous phases are not closed automatically, so a transition must transfer
-  or release resources it owns;
-- the abstraction provides no scheduler, transport, threading, Git, or
-  `ByteBuf` policy.
+- the initial continuation, flow result, and transition target are non-null;
+- a terminal continuation makes later input and ticks no-ops;
+- transition hooks provide test/debug observation without retaining history by
+  default;
+- intermediate protocol data is passed through continuation fields and
+  constructors, not through a generic value stack;
+- the abstraction provides no transport, threading, Git, or `ByteBuf` policy.
 
-Each Git machine composes `PhaseMachine` with its own sealed event and phase
-families. Actions such as read, write, complete, and fail remain part of the
-client-machine contract instead of the reusable phase abstraction.
+Each Git machine composes a continuation runtime with its own continuation
+classes. Actions such as read, write, complete, and fail remain part of the
+client-machine contract instead of the reusable runtime abstraction.
 
 ## Machine Boundary
 
