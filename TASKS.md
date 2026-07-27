@@ -60,10 +60,16 @@ designs and implementation steps in `docs/plans/`.
 
 ## Next
 
-- [ ] Implement production repository backends for the independent native
-      `GitRepositoryRefs` and `GitRepositoryContents` ports.
+- [ ] Wire the native Git server path into transport adapters: feed native TCP,
+      SSH, and HTTP input through the `ByteBuf` wire core, route upload-pack and
+      receive-pack to native repository services, and add Git CLI clone/push
+      transport compatibility tests.
+- [ ] Implement production repository backends for native Git repository ports,
+      including refs, objects, pack indexes, delta reconstruction, pack building,
+      and projection parity.
 - [ ] Add the first real native Git client transport and end-to-end remote
-      fetch/push compatibility tests.
+      fetch/push compatibility tests after upload-pack and receive-pack client
+      machines land.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`.
 - [ ] GitHub mirror administration and manual sync.
 - [ ] GitHub webhook-driven inbound synchronization.
