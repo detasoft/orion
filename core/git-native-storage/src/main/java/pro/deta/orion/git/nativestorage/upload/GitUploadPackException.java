@@ -15,6 +15,9 @@ public final class GitUploadPackException extends RuntimeException {
     }
 
     public enum Kind {
+        INVALID_REQUEST,
+        UNSUPPORTED_FEATURE,
+        ACCESS_DENIED,
         MISSING_OBJECT
     }
 }

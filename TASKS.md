@@ -8,7 +8,7 @@ designs and implementation steps in `docs/plans/`.
 
 - [ ] Native receive-pack/push vertical slice: ref atomic updates, quarantine,
       pack ingestion, and Git CLI push compatibility tests. Active next task.
-- [ ] Implement the first native Git clone vertical slice from
+- [x] Implement the first native Git clone vertical slice from
       `docs/plans/2026-07-26-native-git-end-to-end-backend.md`: native
       upload-pack, read-only ref/object access, response pack building, one
       native transport path, and a Git CLI `clone` compatibility test.

@@ -24,16 +24,27 @@ public final class NativeLsRefsService {
             Optional<String> headTarget,
             boolean includeSymrefs,
             boolean includeUnborn) {
+        return advertise(refs, headTarget, includeSymrefs, includeUnborn, List.of());
+    }
+
+    public List<ByteBuf> advertise(
+            LooseRefStore refs,
+            Optional<String> headTarget,
+            boolean includeSymrefs,
+            boolean includeUnborn,
+            List<String> refPrefixes) {
         Objects.requireNonNull(refs, "refs");
         Objects.requireNonNull(headTarget, "headTarget");
+        Objects.requireNonNull(refPrefixes, "refPrefixes");
 
         Map<String, String> snapshot = refs.snapshot();
         List<ByteBuf> packets = new ArrayList<>();
-        addHead(packets, snapshot, headTarget, includeSymrefs, includeUnborn);
+        addHead(packets, snapshot, headTarget, includeSymrefs, includeUnborn, refPrefixes);
 
         List<String> refNames = new ArrayList<>();
         for (String refName : snapshot.keySet()) {
-            if (refName.startsWith("refs/heads/") || refName.startsWith("refs/tags/")) {
+            if ((refName.startsWith("refs/heads/") || refName.startsWith("refs/tags/"))
+                    && matchesAnyPrefix(refName, refPrefixes)) {
                 refNames.add(refName);
             }
         }
@@ -50,7 +61,11 @@ public final class NativeLsRefsService {
             Map<String, String> refs,
             Optional<String> headTarget,
             boolean includeSymrefs,
-            boolean includeUnborn) {
+            boolean includeUnborn,
+            List<String> refPrefixes) {
+        if (!matchesAnyPrefix("HEAD", refPrefixes)) {
+            return;
+        }
         if (headTarget.isEmpty()) {
             return;
         }
@@ -62,5 +77,17 @@ public final class NativeLsRefsService {
         } else if (includeUnborn) {
             packets.add(pktLineWriter.writeTextLine("unborn HEAD" + suffix));
         }
+    }
+
+    private static boolean matchesAnyPrefix(String refName, List<String> refPrefixes) {
+        if (refPrefixes.isEmpty()) {
+            return true;
+        }
+        for (String prefix : refPrefixes) {
+            if (refName.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
