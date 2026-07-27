@@ -6,8 +6,10 @@ designs and implementation steps in `docs/plans/`.
 
 ## Current
 
-- [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`.
-- [ ] Implement `docs/plans/2026-07-26-native-git-end-to-end-backend.md`.
+- [ ] Implement the first native Git clone vertical slice from
+      `docs/plans/2026-07-26-native-git-end-to-end-backend.md`: native
+      upload-pack, read-only ref/object access, response pack building, one
+      native transport path, and a Git CLI `clone` compatibility test.
 - [ ] Implement `docs/plans/2026-05-14-native-git-wire-protocol-core.md`:
       `f21b309` models `GitMinimalWireMachine` durable parser state as phase
       objects and documents its prototype role. Current work adds a
@@ -40,6 +42,9 @@ designs and implementation steps in `docs/plans/`.
 
 ## Next
 
+- [ ] Native receive-pack/push vertical slice: ref atomic updates, quarantine,
+      pack ingestion, and Git CLI push compatibility tests.
 - [ ] Native Git remote fetch and push support.
+- [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`.
 - [ ] GitHub mirror administration and manual sync.
 - [ ] GitHub webhook-driven inbound synchronization.
