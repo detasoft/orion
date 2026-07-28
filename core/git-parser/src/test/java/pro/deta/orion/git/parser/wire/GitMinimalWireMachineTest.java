@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.utils.RawSink;
 
@@ -29,7 +30,7 @@ class GitMinimalWireMachineTest {
             }
         }
 
-        assertThat(fieldNames).containsExactlyInAnyOrder("context", "phase");
+        assertThat(fieldNames).containsExactlyInAnyOrder("context", "wire");
     }
 
     @Test
@@ -167,14 +168,16 @@ class GitMinimalWireMachineTest {
         ByteBuf input = ascii("zzzz");
 
         try {
-            assertThatThrownBy(() -> machine.accept(input))
-                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
-                            .isEqualTo(new GitWireError(
-                                    GitWireError.Kind.INVALID_HEX_HEADER,
-                                    GitWireError.Phase.CONTROL_HEADER,
-                                    0,
-                                    0,
-                                    "Pkt-line length contains non-hex byte")));
+            machine.accept(input);
+            assertThat(machine.state().phase()).isInstanceOfSatisfying(Continuation.CompletedError.class,
+                    error -> assertThat(error.error())
+                            .isInstanceOfSatisfying(GitWireException.class, e -> assertThat(e.error())
+                                    .isEqualTo(new GitWireError(
+                                            GitWireError.Kind.INVALID_HEX_HEADER,
+                                            GitWireError.Phase.CONTROL_HEADER,
+                                            0,
+                                            0,
+                                            "Pkt-line length contains non-hex byte"))));
         } finally {
             input.release();
             machine.close();
@@ -187,14 +190,16 @@ class GitMinimalWireMachineTest {
         ByteBuf input = ascii("0007onezzzz");
 
         try {
-            assertThatThrownBy(() -> machine.accept(input))
-                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
-                            .isEqualTo(new GitWireError(
-                                    GitWireError.Kind.INVALID_HEX_HEADER,
-                                    GitWireError.Phase.CONTROL_HEADER,
-                                    1,
-                                    7,
-                                    "Pkt-line length contains non-hex byte")));
+            machine.accept(input);
+            assertThat(machine.state().phase()).isInstanceOfSatisfying(Continuation.CompletedError.class,
+                    error -> assertThat(error.error())
+                            .isInstanceOfSatisfying(GitWireException.class, e -> assertThat(e.error())
+                                    .isEqualTo(new GitWireError(
+                                            GitWireError.Kind.INVALID_HEX_HEADER,
+                                            GitWireError.Phase.CONTROL_HEADER,
+                                            1,
+                                            7,
+                                            "Pkt-line length contains non-hex byte"))));
         } finally {
             input.release();
             machine.close();
@@ -401,7 +406,7 @@ class GitMinimalWireMachineTest {
             assertThat(machine.outcome(String.class))
                     .contains(new GitWireOutcome.Success<>("value-complete"));
             assertThat(machine.result(String.class)).isEqualTo("value-complete");
-            assertThat(machine.state().phase()).isInstanceOf(GitMinimalWireMachine.CompletedPhase.class);
+            assertThat(machine.state().phase()).isInstanceOf(Continuation.CompletedSuccess.class);
         }
     }
 
@@ -424,7 +429,7 @@ class GitMinimalWireMachineTest {
 
             assertThat(machine.outcome(String.class))
                     .contains(new GitWireOutcome.Failure<>(new GitWireFailure(expected)));
-            assertThat(machine.state().phase()).isInstanceOf(GitMinimalWireMachine.FailedPhase.class);
+            assertThat(machine.state().phase()).isInstanceOf(Continuation.CompletedError.class);
             assertThatThrownBy(() -> machine.result(String.class))
                     .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
                             .isEqualTo(expected));

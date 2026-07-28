@@ -3,6 +3,10 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
+import pro.deta.orion.continuation.Closed;
+import pro.deta.orion.continuation.Continuation;
+import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.continuation.ContinuationRuntime;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.sideband.GitSideBandDecoder;
 import pro.deta.orion.git.parser.wire.sideband.GitSideBandMode;
@@ -24,7 +28,7 @@ import java.util.function.Consumer;
 public final class GitMinimalWireMachine implements AutoCloseable {
 
     private final Context context;
-    private Phase phase;
+    private final Wire wire;
 
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
@@ -39,7 +43,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 Objects.requireNonNull(structuredPayloadConsumer, "structuredPayloadConsumer"),
                 new GitFixedControlFrameReader(checkedAllocator),
                 null);
-        this.phase = newControlPhase();
+        this.wire = new Wire(newControlPhase());
     }
 
     <T> GitMinimalWireMachine(
@@ -57,7 +61,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                 new SemanticContext(
                         Objects.requireNonNull(resultType, "resultType"),
                         Objects.requireNonNull(initialPhase, "initialPhase")));
-        this.phase = newControlPhase();
+        this.wire = new Wire(newControlPhase());
     }
 
     public static GitMinimalWireMachine forV1Advertisement(ByteBufAllocator allocator) {
@@ -94,18 +98,7 @@ public final class GitMinimalWireMachine implements AutoCloseable {
 
     public boolean accept(ByteBuf input) {
         Objects.requireNonNull(input, "input");
-        try {
-            while (input.isReadable()) {
-                phase = phase.accept(input);
-            }
-        } catch (GitWireException e) {
-            if (!context.hasSemanticContext()) {
-                throw e;
-            }
-            phase.abort();
-            context.semanticContext.fail(e.error());
-            phase = new FailedPhase();
-        }
+        wire.accept(input);
         return true;
     }
 
@@ -131,36 +124,34 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         throw new GitWireException(failure.failure().error());
     }
 
-    private Phase phaseAfterControl(
+    private ContinuationFlow<ByteBuf> flowAfterControl(
             ControlState.ControlSuccess control,
             CallbackFlowControl flowControl,
             long packetIndex,
             long byteOffset) {
         if (flowControl.forwardRawPayload) {
             if (control.type() == ControlState.ControlType.DATA) {
-                throw new IllegalStateException("Raw payload forwarding cannot start before a DATA payload is handled");
+                return ContinuationFlow.transition(Continuation.completedError(
+                        new IllegalStateException("Raw payload forwarding cannot start before a DATA payload is handled")));
             }
             context.completePacket(control);
-            return new RawStreamPhase(control);
+            return ContinuationFlow.transition(new RawStreamPhase(control));
         }
         if (control.type() != ControlState.ControlType.DATA) {
             context.completePacket(control);
-            return newControlPhase();
+            return ContinuationFlow.transition(newControlPhase());
         }
-        StructuredPayloadPhase structuredPayloadPhase = new StructuredPayloadPhase(control, packetIndex, byteOffset);
-        if (control.payloadLength() == 0) {
-            return structuredPayloadPhase.accept(Unpooled.EMPTY_BUFFER);
-        }
-        return structuredPayloadPhase;
+        return ContinuationFlow.transition(new StructuredPayloadPhase(control));
     }
 
     private ControlPhase newControlPhase() {
         return new ControlPhase(ControlState.ControlEmpty.INSTANCE, context.nextPacketIndex(), context.nextByteOffset());
     }
 
-    private Phase phaseAfterSemanticTransition(
+    private Continuation<ByteBuf> continuationAfterSemanticTransition(
             SemanticTransition transition,
-            ControlState.ControlSuccess transitionControl) {
+            ControlState.ControlSuccess transitionControl,
+            Continuation<ByteBuf> self) {
         if (transition instanceof SemanticTransition.Next next) {
             context.semanticContext.phase = next.phase();
             return newControlPhase();
@@ -171,12 +162,19 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
         SemanticTransition.Complete<?> complete = (SemanticTransition.Complete<?>) transition;
         context.semanticContext.complete(complete);
-        return new CompletedPhase();
+        return Continuation.completedSuccess(self);
+    }
+
+    private ContinuationFlow<ByteBuf> flowAfterSemanticTransition(
+            SemanticTransition transition,
+            ControlState.ControlSuccess transitionControl,
+            Continuation<ByteBuf> self) {
+        return ContinuationFlow.transition(continuationAfterSemanticTransition(transition, transitionControl, self));
     }
 
     @TestOnly
     ComposedState state() {
-        return new ComposedState(phase);
+        return new ComposedState(wire.snapshot());
     }
 
     @Override
@@ -185,27 +183,40 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             closeSemanticMachine();
             return;
         }
-        try {
-            phase.close();
-        } finally {
-            phase = newControlPhase();
-        }
+        closeCurrent();
     }
 
     private void closeSemanticMachine() {
         if (context.semanticContext.outcome != null) {
-            phase.close();
             return;
         }
         try {
-            phase.close();
+            Continuation<ByteBuf> current = wire.snapshot();
+            if (current instanceof ControlPhase cp) {
+                cp.validateClose();
+            } else if (current instanceof StructuredPayloadPhase spp) {
+                spp.validateClose();
+            }
             context.semanticContext.phase.close(
                     context.semanticContext.values,
                     context.nextPacketIndex(),
                     context.nextByteOffset());
         } catch (GitWireException e) {
             context.semanticContext.fail(e.error());
-            phase = new FailedPhase();
+            wire.transitionToError(e);
+        }
+    }
+
+    private void closeCurrent() {
+        Continuation<ByteBuf> current = wire.snapshot();
+        try {
+            if (current instanceof ControlPhase cp) {
+                cp.validateClose();
+            } else if (current instanceof StructuredPayloadPhase spp) {
+                spp.validateClose();
+            }
+        } finally {
+            wire.resetTo(newControlPhase());
         }
     }
 
@@ -301,22 +312,25 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
     }
 
-    sealed interface Phase extends AutoCloseable
-            permits CompletedPhase, ControlPhase, FailedPhase, RawStreamPhase, SideBandPhase,
-            StructuredPayloadPhase {
-        Phase accept(ByteBuf input);
-
-        default void abort() {
-            close();
+    private final class Wire extends ContinuationRuntime<ByteBuf> {
+        Wire(Continuation<ByteBuf> initial) {
+            super(initial);
         }
 
-        @Override
-        default void close() {
+        Continuation<ByteBuf> snapshot() {
+            return current();
+        }
+
+        void transitionToError(GitWireException e) {
+            transitionTo(current(), ContinuationFlow.transition(Continuation.completedError(e)));
+        }
+
+        void resetTo(Continuation<ByteBuf> next) {
+            transitionTo(current(), ContinuationFlow.transition(next));
         }
     }
 
-    record ComposedState(
-            Phase phase) {
+    record ComposedState(Continuation<ByteBuf> phase) {
     }
 
     @FunctionalInterface
@@ -386,8 +400,8 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
     }
 
-    final class ControlPhase implements Phase {
-        private final ControlState state;
+    final class ControlPhase implements Continuation<ByteBuf> {
+        private ControlState state;
         private final long packetIndex;
         private final long byteOffset;
 
@@ -398,30 +412,37 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
 
         @Override
-        public Phase accept(ByteBuf input) {
-            ControlState nextControlState = context.controlReader.accept(state, input, packetIndex, byteOffset);
-            if (nextControlState instanceof ControlState.MoreDataNeeded) {
-                return new ControlPhase(nextControlState, packetIndex, byteOffset);
-            }
-            if (nextControlState instanceof ControlState.ControlSuccess controlSuccess) {
-                if (context.hasSemanticContext()) {
-                    return phaseAfterSemanticControl(controlSuccess);
+        public ContinuationFlow<ByteBuf> process(ByteBuf input) {
+            try {
+                ControlState old = this.state;
+                this.state = ControlState.ControlEmpty.INSTANCE;
+                ControlState next = context.controlReader.accept(old, input, packetIndex, byteOffset);
+                this.state = next;
+                if (next instanceof ControlState.MoreDataNeeded) {
+                    return ContinuationFlow.await();
                 }
-                CallbackFlowControl flowControl = new CallbackFlowControl();
-                context.frameConsumer.accept(controlSuccess, flowControl);
-                return phaseAfterControl(controlSuccess, flowControl, packetIndex, byteOffset);
+                if (next instanceof ControlState.ControlSuccess controlSuccess) {
+                    if (context.hasSemanticContext()) {
+                        return phaseAfterSemanticControl(controlSuccess);
+                    }
+                    CallbackFlowControl flowControl = new CallbackFlowControl();
+                    context.frameConsumer.accept(controlSuccess, flowControl);
+                    return flowAfterControl(controlSuccess, flowControl, packetIndex, byteOffset);
+                }
+                return ContinuationFlow.await();
+            } catch (GitWireException e) {
+                if (context.hasSemanticContext()) {
+                    context.semanticContext.fail(e.error());
+                }
+                return ContinuationFlow.transition(Continuation.completedError(e));
+            } catch (RuntimeException e) {
+                return ContinuationFlow.transition(Continuation.completedError(e));
             }
-            return new ControlPhase(nextControlState, packetIndex, byteOffset);
         }
 
-        private Phase phaseAfterSemanticControl(ControlState.ControlSuccess control) {
+        private ContinuationFlow<ByteBuf> phaseAfterSemanticControl(ControlState.ControlSuccess control) {
             if (control.type() == ControlState.ControlType.DATA) {
-                StructuredPayloadPhase structuredPayloadPhase =
-                        new StructuredPayloadPhase(control, packetIndex, byteOffset);
-                if (control.payloadLength() == 0) {
-                    return structuredPayloadPhase.accept(Unpooled.EMPTY_BUFFER);
-                }
-                return structuredPayloadPhase;
+                return ContinuationFlow.transition(new StructuredPayloadPhase(control));
             }
             SemanticTransition transition =
                     context.semanticContext.phase.accept(
@@ -431,15 +452,20 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                             byteOffset,
                             context.semanticContext.values);
             context.completePacket(control);
-            return phaseAfterSemanticTransition(transition, control);
+            return flowAfterSemanticTransition(transition, control, this);
         }
 
         ControlState state() {
             return state;
         }
 
-        @Override
-        public void close() {
+        void abort() {
+            if (state instanceof ControlState.MoreDataNeeded moreDataNeeded) {
+                moreDataNeeded.fragment().release();
+            }
+        }
+
+        void validateClose() {
             if (state instanceof ControlState.MoreDataNeeded moreDataNeeded) {
                 moreDataNeeded.fragment().release();
                 throw GitWireException.of(
@@ -450,36 +476,34 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                         "Incomplete Git pkt-line header");
             }
         }
-
-        @Override
-        public void abort() {
-            if (state instanceof ControlState.MoreDataNeeded moreDataNeeded) {
-                moreDataNeeded.fragment().release();
-            }
-        }
     }
 
-    final class StructuredPayloadPhase implements Phase {
+    final class StructuredPayloadPhase implements Continuation<ByteBuf>, Closed {
         private final ControlState.ControlSuccess control;
-        private final long packetIndex;
-        private final long byteOffset;
         private CachingByteBuf fragment;
         private boolean complete;
-        private Phase nextPhase;
+        private Continuation<ByteBuf> nextContinuation;
 
-        private StructuredPayloadPhase(ControlState.ControlSuccess control, long packetIndex, long byteOffset) {
+        private StructuredPayloadPhase(ControlState.ControlSuccess control) {
             this.control = control;
-            this.packetIndex = packetIndex;
-            this.byteOffset = byteOffset;
         }
 
         @Override
-        public Phase accept(ByteBuf input) {
-            read(input);
-            if (!complete) {
-                return this;
+        public ContinuationFlow<ByteBuf> process(ByteBuf input) {
+            try {
+                read(input);
+                if (!complete) {
+                    return ContinuationFlow.await();
+                }
+                return ContinuationFlow.transition(nextContinuation);
+            } catch (GitWireException e) {
+                if (context.hasSemanticContext()) {
+                    context.semanticContext.fail(e.error());
+                }
+                return ContinuationFlow.transition(Continuation.completedError(e));
+            } catch (RuntimeException e) {
+                return ContinuationFlow.transition(Continuation.completedError(e));
             }
-            return nextPhase;
         }
 
         private void read(ByteBuf input) {
@@ -514,12 +538,12 @@ public final class GitMinimalWireMachine implements AutoCloseable {
                             context.semanticContext.phase.accept(
                                     control,
                                     payload,
-                                    packetIndex,
-                                    byteOffset,
+                                    context.nextPacketIndex(),
+                                    context.nextByteOffset(),
                                     context.semanticContext.values);
                     context.completePacket(control);
                     complete = true;
-                    nextPhase = phaseAfterSemanticTransition(transition, control);
+                    nextContinuation = continuationAfterSemanticTransition(transition, control, this);
                 } finally {
                     payload.release();
                 }
@@ -533,7 +557,31 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             }
             context.completePacket(control);
             complete = true;
-            nextPhase = newControlPhase();
+            nextContinuation = newControlPhase();
+        }
+
+        @Override
+        public void close() {
+            if (fragment != null) {
+                fragment.release();
+                fragment = null;
+            }
+        }
+
+        void validateClose() {
+            if (fragment != null) {
+                CachingByteBuf f = fragment;
+                fragment = null;
+                f.release();
+            }
+            if (!complete) {
+                throw GitWireException.of(
+                        GitWireError.Kind.INCOMPLETE_PAYLOAD,
+                        GitWireError.Phase.STRUCTURED_PAYLOAD,
+                        context.nextPacketIndex(),
+                        context.nextByteOffset(),
+                        "Incomplete Git pkt-line payload");
+            }
         }
 
         ControlState.ControlSuccess control() {
@@ -549,33 +597,9 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             }
             return control.payloadLength() - fragment.readableBytes();
         }
-
-        @Override
-        public void close() {
-            if (fragment != null) {
-                fragment.release();
-                fragment = null;
-            }
-            if (!complete) {
-                throw GitWireException.of(
-                        GitWireError.Kind.INCOMPLETE_PAYLOAD,
-                        GitWireError.Phase.STRUCTURED_PAYLOAD,
-                        packetIndex,
-                        byteOffset,
-                        "Incomplete Git pkt-line payload");
-            }
-        }
-
-        @Override
-        public void abort() {
-            if (fragment != null) {
-                fragment.release();
-                fragment = null;
-            }
-        }
     }
 
-    final class RawStreamPhase implements Phase {
+    final class RawStreamPhase implements Continuation<ByteBuf>, Closed {
         private final ControlState.ControlSuccess control;
         private RawSink.Target target;
 
@@ -584,20 +608,27 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
 
         @Override
-        public Phase accept(ByteBuf input) {
+        public ContinuationFlow<ByteBuf> process(ByteBuf input) {
             if (!input.isReadable()) {
-                return this;
+                return ContinuationFlow.await();
             }
             ByteBuf slice = input.readRetainedSlice(input.readableBytes());
             int length = slice.readableBytes();
             try {
                 target().accept(slice);
-            } catch (RuntimeException | Error e) {
+            } catch (RuntimeException e) {
                 slice.release();
-                throw e;
+                return ContinuationFlow.transition(Continuation.completedError(e));
             }
             context.forwardRawBytes(length);
-            return this;
+            return ContinuationFlow.await();
+        }
+
+        @Override
+        public void close() {
+            if (target != null) {
+                target.close();
+            }
         }
 
         ControlState.ControlSuccess control() {
@@ -614,16 +645,9 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             }
             return target;
         }
-
-        @Override
-        public void close() {
-            if (target != null) {
-                target.close();
-            }
-        }
     }
 
-    final class SideBandPhase implements Phase {
+    final class SideBandPhase implements Continuation<ByteBuf>, Closed {
         private final LazyRawTarget target;
         private final GitSideBandDecoder decoder;
 
@@ -639,15 +663,23 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
 
         @Override
-        public Phase accept(ByteBuf input) {
-            int readerIndex = input.readerIndex();
-            decoder.accept(input);
-            context.forwardRawBytes(input.readerIndex() - readerIndex);
-            if (decoder.isComplete()) {
-                close();
-                return newControlPhase();
+        public ContinuationFlow<ByteBuf> process(ByteBuf input) {
+            try {
+                int readerIndex = input.readerIndex();
+                decoder.accept(input);
+                context.forwardRawBytes(input.readerIndex() - readerIndex);
+                if (decoder.isComplete()) {
+                    return ContinuationFlow.transition(newControlPhase());
+                }
+                return ContinuationFlow.await();
+            } catch (GitWireException e) {
+                if (context.hasSemanticContext()) {
+                    context.semanticContext.fail(e.error());
+                }
+                return ContinuationFlow.transition(Continuation.completedError(e));
+            } catch (RuntimeException e) {
+                return ContinuationFlow.transition(Continuation.completedError(e));
             }
-            return this;
         }
 
         @Override
@@ -696,17 +728,4 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
     }
 
-    final class CompletedPhase implements Phase {
-        @Override
-        public Phase accept(ByteBuf input) {
-            throw new IllegalStateException("Git wire machine is already complete");
-        }
-    }
-
-    final class FailedPhase implements Phase {
-        @Override
-        public Phase accept(ByteBuf input) {
-            throw new IllegalStateException("Git wire machine has failed");
-        }
-    }
 }
