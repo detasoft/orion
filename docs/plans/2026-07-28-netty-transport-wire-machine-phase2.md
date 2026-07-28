@@ -1,5 +1,10 @@
 # Netty Transport Wire Machine — Phase 2
 
+> Superseded by
+> `docs/plans/2026-07-28-native-git-in-memory-server.md`, which keeps all Git
+> protocol state in one server WireMachine and uses a permissive in-memory
+> native repository provider for the first runnable server.
+
 ## Goal
 
 Connect `GitNativeProtocolAdapter` to the native Git service layer so that a

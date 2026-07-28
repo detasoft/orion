@@ -7,10 +7,10 @@ designs and implementation steps in `docs/plans/`.
 ## Current
 
 - [ ] Complete
-      `docs/plans/2026-07-28-netty-transport-wire-machine-phase2.md`: connect
-      `GitNativeProtocolAdapter` to native repository services, stream
-      structured sections and pack data through the Continuation-based wire
-      machine, add lifecycle/DI wiring, and cover native `git://` clone and push.
+      `docs/plans/2026-07-28-native-git-in-memory-server.md`: make one server
+      WireMachine own the complete protocol conversation, back it with
+      automatically created in-memory native repositories, add lifecycle/DI
+      wiring, and cover native `git://` clone and push.
   - Owner: codex, started 2026-07-28 13:12 Europe/Amsterdam; implementing the
     WireMachine-centric in-memory server design from
     `docs/plans/2026-07-28-native-git-in-memory-server-design.md`.
