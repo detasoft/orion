@@ -11,13 +11,6 @@ designs and implementation steps in `docs/plans/`.
       `GitNativeProtocolAdapter` to native repository services, stream
       structured sections and pack data through the Continuation-based wire
       machine, add lifecycle/DI wiring, and cover native `git://` clone and push.
-- [ ] Add native upload-pack and receive-pack client state machines on top of
-      the protocol session transport and Continuation-based `git-parser` wire
-      machine.
-  - Owner: codex, paused 2026-07-27 19:17 Europe/Amsterdam; next: implement
-    upload-pack and receive-pack continuations using the completed typed
-    advertisement and protocol v2 response parsers.
-
 ## Next
 
 - [ ] Move native SSH and HTTP Git server paths onto `ByteBuf` transport
@@ -26,6 +19,10 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Implement production repository backends for native Git repository ports,
       including refs, objects, pack indexes, delta reconstruction, pack building,
       and projection parity.
+- [ ] Before remote replication work, add native upload-pack and receive-pack
+      client state machines on top of the Continuation-based `git-parser` wire
+      machine. This outbound client path is not required by the native Git
+      server clone/push work.
 - [ ] Add the first real native Git client transport and end-to-end remote
       fetch/push compatibility tests after upload-pack and receive-pack client
       machines land.
