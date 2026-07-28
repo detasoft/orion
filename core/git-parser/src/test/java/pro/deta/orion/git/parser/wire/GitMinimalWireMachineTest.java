@@ -127,39 +127,45 @@ class GitMinimalWireMachineTest {
     }
 
     @Test
-    void closeFailsWhenHeaderIsIncomplete() {
-        GitMinimalWireMachine machine = machine(new RecordingWireHandlers());
-        ByteBuf input = ascii("00");
+    void closeSetsErrorOnIncompleteHeader() {
+        try (GitMinimalWireMachine machine = machine(new RecordingWireHandlers())) {
+            ByteBuf input = ascii("00");
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+            assertThat(input.refCnt()).isZero();
 
-        assertThat(acceptAndRelease(machine, input)).isTrue();
-        assertThat(input.refCnt()).isZero();
+            machine.close();
 
-        assertThatThrownBy(machine::close)
-                .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
-                        .isEqualTo(new GitWireError(
-                                GitWireError.Kind.INCOMPLETE_HEADER,
-                                GitWireError.Phase.CONTROL_HEADER,
-                                0,
-                                0,
-                                "Incomplete Git pkt-line header")));
+            assertThat(machine.state().phase()).isInstanceOfSatisfying(Continuation.CompletedError.class,
+                    error -> assertThat(error.error())
+                            .isInstanceOfSatisfying(GitWireException.class, e -> assertThat(e.error())
+                                    .isEqualTo(new GitWireError(
+                                            GitWireError.Kind.INCOMPLETE_HEADER,
+                                            GitWireError.Phase.CONTROL_HEADER,
+                                            0,
+                                            0,
+                                            "Incomplete Git pkt-line header"))));
+        }
     }
 
     @Test
-    void closeFailsWhenPayloadIsIncomplete() {
-        GitMinimalWireMachine machine = machine(new RecordingWireHandlers());
-        ByteBuf input = ascii("000aabc");
+    void closeSetsErrorOnIncompletePayload() {
+        try (GitMinimalWireMachine machine = machine(new RecordingWireHandlers())) {
+            ByteBuf input = ascii("000aabc");
+            assertThat(acceptAndRelease(machine, input)).isTrue();
+            assertThat(input.refCnt()).isZero();
 
-        assertThat(acceptAndRelease(machine, input)).isTrue();
-        assertThat(input.refCnt()).isZero();
+            machine.close();
 
-        assertThatThrownBy(machine::close)
-                .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error())
-                        .isEqualTo(new GitWireError(
-                                GitWireError.Kind.INCOMPLETE_PAYLOAD,
-                                GitWireError.Phase.STRUCTURED_PAYLOAD,
-                                0,
-                                0,
-                                "Incomplete Git pkt-line payload")));
+            assertThat(machine.state().phase()).isInstanceOfSatisfying(Continuation.CompletedError.class,
+                    error -> assertThat(error.error())
+                            .isInstanceOfSatisfying(GitWireException.class, e -> assertThat(e.error())
+                                    .isEqualTo(new GitWireError(
+                                            GitWireError.Kind.INCOMPLETE_PAYLOAD,
+                                            GitWireError.Phase.STRUCTURED_PAYLOAD,
+                                            0,
+                                            0,
+                                            "Incomplete Git pkt-line payload"))));
+        }
     }
 
     @Test
@@ -241,20 +247,21 @@ class GitMinimalWireMachineTest {
     }
 
     @Test
-    void closeFailsAfterCompleteDataControlWhenStructuredPayloadNeverArrives() {
+    void closeSetsErrorAfterCompleteDataControlWhenStructuredPayloadNeverArrives() {
         RecordingWireHandlers handlers = new RecordingWireHandlers();
         ByteBuf controlOnly = ascii("000a");
-        GitMinimalWireMachine machine = machine(handlers);
-        try {
+        try (GitMinimalWireMachine machine = machine(handlers)) {
             assertThat(acceptAndRelease(machine, controlOnly)).isTrue();
             assertThat(controlOnly.refCnt()).isZero();
             assertThat(handlers.structuredPayloads).isEmpty();
-            assertThatThrownBy(machine::close)
-                    .isInstanceOfSatisfying(GitWireException.class, error -> assertThat(error.error().kind())
-                            .isEqualTo(GitWireError.Kind.INCOMPLETE_PAYLOAD));
-            assertThat(handlers.sinkCreations).hasValue(0);
-        } finally {
+
             machine.close();
+
+            assertThat(machine.state().phase()).isInstanceOfSatisfying(Continuation.CompletedError.class,
+                    error -> assertThat(error.error())
+                            .isInstanceOfSatisfying(GitWireException.class, e -> assertThat(e.error().kind())
+                                    .isEqualTo(GitWireError.Kind.INCOMPLETE_PAYLOAD)));
+            assertThat(handlers.sinkCreations).hasValue(0);
         }
     }
 

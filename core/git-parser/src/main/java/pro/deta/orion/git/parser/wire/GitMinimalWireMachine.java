@@ -161,6 +161,11 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             return new SideBandPhase(transitionControl, enterSideBand.progressConsumer());
         }
         SemanticTransition.Complete<?> complete = (SemanticTransition.Complete<?>) transition;
+        if (complete.type() != context.semanticContext.resultType) {
+            return Continuation.completedError(new IllegalStateException(
+                    "Git wire semantic phase completed " + complete.type().getSimpleName()
+                            + " but machine expects " + context.semanticContext.resultType.getSimpleName()));
+        }
         context.semanticContext.complete(complete);
         return Continuation.completedSuccess(self);
     }
@@ -190,13 +195,19 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         if (context.semanticContext.outcome != null) {
             return;
         }
+        Continuation<ByteBuf> current = wire.snapshot();
+        GitWireException fragmentError = null;
+        if (current instanceof ControlPhase cp) {
+            fragmentError = cp.releaseFragment();
+        } else if (current instanceof StructuredPayloadPhase spp) {
+            fragmentError = spp.releasePayload();
+        }
+        if (fragmentError != null) {
+            context.semanticContext.fail(fragmentError.error());
+            wire.transitionToError(fragmentError);
+            return;
+        }
         try {
-            Continuation<ByteBuf> current = wire.snapshot();
-            if (current instanceof ControlPhase cp) {
-                cp.validateClose();
-            } else if (current instanceof StructuredPayloadPhase spp) {
-                spp.validateClose();
-            }
             context.semanticContext.phase.close(
                     context.semanticContext.values,
                     context.nextPacketIndex(),
@@ -208,16 +219,24 @@ public final class GitMinimalWireMachine implements AutoCloseable {
     }
 
     private void closeCurrent() {
-        Continuation<ByteBuf> current = wire.snapshot();
-        try {
-            if (current instanceof ControlPhase cp) {
-                cp.validateClose();
-            } else if (current instanceof StructuredPayloadPhase spp) {
-                spp.validateClose();
-            }
-        } finally {
-            wire.resetTo(newControlPhase());
+        if (wire.terminal()) {
+            return;
         }
+        Continuation<ByteBuf> current = wire.snapshot();
+        if (current instanceof ControlPhase cp) {
+            GitWireException error = cp.releaseFragment();
+            if (error != null) {
+                wire.transitionToError(error);
+                return;
+            }
+        } else if (current instanceof StructuredPayloadPhase spp) {
+            GitWireException error = spp.releasePayload();
+            if (error != null) {
+                wire.transitionToError(error);
+                return;
+            }
+        }
+        wire.resetTo(newControlPhase());
     }
 
     private static final class Context {
@@ -292,11 +311,6 @@ public final class GitMinimalWireMachine implements AutoCloseable {
         }
 
         private void complete(SemanticTransition.Complete<?> complete) {
-            if (complete.type() != resultType) {
-                throw new IllegalStateException(
-                        "Git wire semantic phase completed " + complete.type().getSimpleName()
-                                + " but machine expects " + resultType.getSimpleName());
-            }
             pushCompleteValue(complete);
             outcome = new GitWireOutcome.Success<>(values.peek(resultType));
         }
@@ -459,22 +473,18 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             return state;
         }
 
-        void abort() {
+        GitWireException releaseFragment() {
             if (state instanceof ControlState.MoreDataNeeded moreDataNeeded) {
+                state = ControlState.ControlEmpty.INSTANCE;
                 moreDataNeeded.fragment().release();
-            }
-        }
-
-        void validateClose() {
-            if (state instanceof ControlState.MoreDataNeeded moreDataNeeded) {
-                moreDataNeeded.fragment().release();
-                throw GitWireException.of(
+                return GitWireException.of(
                         GitWireError.Kind.INCOMPLETE_HEADER,
                         GitWireError.Phase.CONTROL_HEADER,
                         packetIndex,
                         byteOffset,
                         "Incomplete Git pkt-line header");
             }
+            return null;
         }
     }
 
@@ -551,13 +561,14 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             }
             try {
                 context.structuredPayloadConsumer.accept(control, payload);
-            } catch (RuntimeException | Error e) {
+                context.completePacket(control);
+                complete = true;
+                nextContinuation = newControlPhase();
+            } catch (RuntimeException e) {
                 payload.release();
-                throw e;
+                complete = true;
+                nextContinuation = Continuation.completedError(e);
             }
-            context.completePacket(control);
-            complete = true;
-            nextContinuation = newControlPhase();
         }
 
         @Override
@@ -568,20 +579,17 @@ public final class GitMinimalWireMachine implements AutoCloseable {
             }
         }
 
-        void validateClose() {
-            if (fragment != null) {
-                CachingByteBuf f = fragment;
-                fragment = null;
-                f.release();
-            }
+        GitWireException releasePayload() {
+            close();
             if (!complete) {
-                throw GitWireException.of(
+                return GitWireException.of(
                         GitWireError.Kind.INCOMPLETE_PAYLOAD,
                         GitWireError.Phase.STRUCTURED_PAYLOAD,
                         context.nextPacketIndex(),
                         context.nextByteOffset(),
                         "Incomplete Git pkt-line payload");
             }
+            return null;
         }
 
         ControlState.ControlSuccess control() {
