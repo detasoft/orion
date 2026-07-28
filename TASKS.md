@@ -16,6 +16,13 @@ designs and implementation steps in `docs/plans/`.
     `docs/plans/2026-07-28-native-git-in-memory-server-design.md`.
 ## Next
 
+- [ ] Add authenticated native repository resolution around the server
+      WireMachine, including READ, WRITE, and CREATE checks before automatic
+      repository creation.
+- [ ] Connect receive-pack wire handling directly to the continuation-based
+      `PackIngestor`, streaming `ByteBuf` fragments into the in-memory
+      quarantine store and handing off the quarantine at the pack checksum
+      checkpoint.
 - [ ] Move native SSH and HTTP Git server paths onto `ByteBuf` transport
       adapters backed by the Continuation-based wire core, after the Netty
       `git://` path is complete.
