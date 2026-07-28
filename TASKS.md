@@ -11,6 +11,9 @@ designs and implementation steps in `docs/plans/`.
       `GitNativeProtocolAdapter` to native repository services, stream
       structured sections and pack data through the Continuation-based wire
       machine, add lifecycle/DI wiring, and cover native `git://` clone and push.
+  - Owner: codex, started 2026-07-28 13:12 Europe/Amsterdam; implementing the
+    WireMachine-centric in-memory server design from
+    `docs/plans/2026-07-28-native-git-in-memory-server-design.md`.
 ## Next
 
 - [ ] Move native SSH and HTTP Git server paths onto `ByteBuf` transport
