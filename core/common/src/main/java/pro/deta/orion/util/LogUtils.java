@@ -1,10 +1,6 @@
 package pro.deta.orion.util;
 
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.LoggerContext;
-import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
-import ch.qos.logback.classic.Logger;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 public class LogUtils {
