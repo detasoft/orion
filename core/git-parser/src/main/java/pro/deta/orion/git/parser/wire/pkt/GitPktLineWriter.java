@@ -8,14 +8,9 @@ import java.util.Objects;
 
 import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
+import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 
 public final class GitPktLineWriter {
-    private static final byte[] HEX_DIGITS = new byte[]{
-            '0', '1', '2', '3',
-            '4', '5', '6', '7',
-            '8', '9', 'a', 'b',
-            'c', 'd', 'e', 'f'
-    };
     private static final int MAX_PAYLOAD_LENGTH = MAX_PKT_LINE_LENGTH - PKT_LINE_HEADER_SIZE;
 
     private final ByteBufAllocator allocator;
@@ -81,9 +76,9 @@ public final class GitPktLineWriter {
     }
 
     private static void writeLengthHeader(ByteBuf output, int packetLength) {
-        output.writeByte(HEX_DIGITS[(packetLength >>> 12) & 0x0f]);
-        output.writeByte(HEX_DIGITS[(packetLength >>> 8) & 0x0f]);
-        output.writeByte(HEX_DIGITS[(packetLength >>> 4) & 0x0f]);
-        output.writeByte(HEX_DIGITS[packetLength & 0x0f]);
+        output.writeByte(hexDigit((packetLength >>> 12) & 0x0f));
+        output.writeByte(hexDigit((packetLength >>> 8) & 0x0f));
+        output.writeByte(hexDigit((packetLength >>> 4) & 0x0f));
+        output.writeByte(hexDigit(packetLength & 0x0f));
     }
 }

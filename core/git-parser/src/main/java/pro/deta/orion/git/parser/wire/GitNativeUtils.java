@@ -5,6 +5,23 @@ import java.util.Arrays;
 public final class GitNativeUtils {
 
     public static final int[] HEX_VALUES = hexValues();
+    private static final byte[] HEX_DIGITS = new byte[]{
+            '0', '1', '2', '3',
+            '4', '5', '6', '7',
+            '8', '9', 'a', 'b',
+            'c', 'd', 'e', 'f'
+    };
+
+    private GitNativeUtils() {
+    }
+
+    public static byte hexDigit(int value) {
+        if (value < 0 || value >= HEX_DIGITS.length) {
+            throw new IllegalArgumentException(
+                    "Hex digit value must be between 0 and 15");
+        }
+        return HEX_DIGITS[value];
+    }
 
     private static int[] hexValues() {
         int[] values = new int[256];
@@ -20,8 +37,4 @@ public final class GitNativeUtils {
         }
         return values;
     }
-
-
-
-
 }

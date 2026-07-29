@@ -20,9 +20,11 @@ public final class GitMinimalWireMachine {
     private final ContinuationRuntime<ByteBuf> runtime;
 
     public GitMinimalWireMachine(
-            ByteBufAllocator allocator) {
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput) {
         this.context = new Context(
-                Objects.requireNonNull(allocator, "allocator"));
+                Objects.requireNonNull(allocator, "allocator"),
+                Objects.requireNonNull(clientOutput, "clientOutput"));
         this.runtime = new ContinuationRuntime<ByteBuf>(
                 new ControlHeaderContinuation(context, ProtocolStage.INITIAL_REQUEST));
     }
@@ -42,15 +44,32 @@ public final class GitMinimalWireMachine {
 
     @TestOnly
     public static Context testContext(ByteBufAllocator allocator) {
-        return new Context(Objects.requireNonNull(allocator, "allocator"));
+        return new Context(
+                Objects.requireNonNull(allocator, "allocator"),
+                new GitNativeClientOutput(
+                        allocator.buffer(
+                                GitNativeClientOutput.BUFFER_CAPACITY,
+                                GitNativeClientOutput.BUFFER_CAPACITY)));
+    }
+
+    @TestOnly
+    public static Context testContext(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput) {
+        return new Context(
+                Objects.requireNonNull(allocator, "allocator"),
+                Objects.requireNonNull(clientOutput, "clientOutput"));
     }
 
     public static final class Context {
         public final ByteBufAllocator allocator;
+        public final GitNativeClientOutput clientOutput;
 
         Context(
-                ByteBufAllocator allocator) {
+                ByteBufAllocator allocator,
+                GitNativeClientOutput clientOutput) {
             this.allocator = allocator;
+            this.clientOutput = clientOutput;
         }
     }
 }
