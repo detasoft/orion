@@ -4,21 +4,55 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
+
+import java.util.Objects;
 
 public final class UploadPackContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
+    private final GitV1Advertisement advertisement;
+    private State state = State.SEND_ADVERTISEMENT;
 
     public UploadPackContinuation(
             GitMinimalWireMachine.Context context,
-            InitialRequestData data) {
-        this.context = context;
-        this.data = data;
+            InitialRequestData data,
+            GitV1Advertisement advertisement) {
+        this.context = Objects.requireNonNull(context, "context");
+        this.data = Objects.requireNonNull(data, "data");
+        this.advertisement = Objects.requireNonNull(
+                advertisement,
+                "advertisement");
     }
 
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
-        throw new IllegalStateException("Not implemented");
+        if (state == State.WAITING_FOR_STREAMING) {
+            return ContinuationFlow.transition(
+                    new UploadRequestContinuation(context, data));
+        }
+        try {
+            GitNativeClientOutput.SendResult result =
+                    context.clientOutput.sendAdvertisement(
+                            advertisement);
+            if (result instanceof
+                    GitNativeClientOutput.SendResult.Streaming streaming) {
+                state = State.WAITING_FOR_STREAMING;
+                return ContinuationFlow.yield(streaming.task());
+            }
+            return ContinuationFlow.transition(
+                    new UploadRequestContinuation(context, data));
+        } catch (RuntimeException error) {
+            return ContinuationFlow.completedError(
+                    "Failed to advertise native Git repository",
+                    error);
+        }
+    }
+
+    private enum State {
+        SEND_ADVERTISEMENT,
+        WAITING_FOR_STREAMING
     }
 }

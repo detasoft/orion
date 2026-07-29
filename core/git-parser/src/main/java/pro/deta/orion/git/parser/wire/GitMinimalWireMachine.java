@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationRuntime;
 import pro.deta.orion.continuation.RuntimeFlow;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
@@ -22,9 +23,23 @@ public final class GitMinimalWireMachine {
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput) {
+        this(
+                allocator,
+                clientOutput,
+                new InMemoryNativeGitRepositoryProvider());
+    }
+
+    public GitMinimalWireMachine(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput,
+            InMemoryNativeGitRepositoryProvider repositoryProvider) {
         this.context = new Context(
                 Objects.requireNonNull(allocator, "allocator"),
-                Objects.requireNonNull(clientOutput, "clientOutput"));
+                Objects.requireNonNull(clientOutput, "clientOutput"),
+                new GitNativeRepositoryService(
+                        Objects.requireNonNull(
+                                repositoryProvider,
+                                "repositoryProvider")));
         this.runtime = new ContinuationRuntime<ByteBuf>(
                 new ControlHeaderContinuation(context, ProtocolStage.INITIAL_REQUEST));
     }
@@ -49,27 +64,58 @@ public final class GitMinimalWireMachine {
                 new GitNativeClientOutput(
                         allocator.buffer(
                                 GitNativeClientOutput.BUFFER_CAPACITY,
-                                GitNativeClientOutput.BUFFER_CAPACITY)));
+                                GitNativeClientOutput.BUFFER_CAPACITY)),
+                new GitNativeRepositoryService(
+                        new InMemoryNativeGitRepositoryProvider()));
     }
 
     @TestOnly
     public static Context testContext(
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput) {
+        return testContext(
+                allocator,
+                clientOutput,
+                new GitNativeRepositoryService(
+                        new InMemoryNativeGitRepositoryProvider()));
+    }
+
+    @TestOnly
+    public static Context testContext(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput,
+            InMemoryNativeGitRepositoryProvider repositoryProvider) {
+        return testContext(
+                allocator,
+                clientOutput,
+                new GitNativeRepositoryService(repositoryProvider));
+    }
+
+    @TestOnly
+    public static Context testContext(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput,
+            GitNativeRepositoryService repositoryService) {
         return new Context(
                 Objects.requireNonNull(allocator, "allocator"),
-                Objects.requireNonNull(clientOutput, "clientOutput"));
+                Objects.requireNonNull(clientOutput, "clientOutput"),
+                Objects.requireNonNull(
+                        repositoryService,
+                        "repositoryService"));
     }
 
     public static final class Context {
         public final ByteBufAllocator allocator;
         public final GitNativeClientOutput clientOutput;
+        public final GitNativeRepositoryService repositoryService;
 
         Context(
                 ByteBufAllocator allocator,
-                GitNativeClientOutput clientOutput) {
+                GitNativeClientOutput clientOutput,
+                GitNativeRepositoryService repositoryService) {
             this.allocator = allocator;
             this.clientOutput = clientOutput;
+            this.repositoryService = repositoryService;
         }
     }
 }

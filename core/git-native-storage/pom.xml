@@ -20,10 +20,6 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>git-parser</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
             <artifactId>git-common</artifactId>
         </dependency>
         <dependency>
