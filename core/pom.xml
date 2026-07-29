@@ -23,6 +23,7 @@
         <module>bootstrap</module>
         <module>configuration</module>
         <module>common</module>
+        <module>common-runtime</module>
         <module>lifecycle-state-machine</module>
         <module>git-parser</module>
         <module>git-common</module>

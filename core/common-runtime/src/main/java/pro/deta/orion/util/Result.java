@@ -24,6 +24,10 @@ public sealed interface Result<T> {
         }
     }
 
+    static <T> Result<T> of(T control) {
+        return new Success<>(control);
+    }
+
     Result<T> onSuccess(Consumer<T> consumer);
 
     Result<T> onFailure(Consumer<Failure<T>> consumer);
@@ -85,6 +89,11 @@ public sealed interface Result<T> {
         public static <T> Failure<T> generalFailure(String message) {
             Logger.log.error(message);
             return new Failure<>(FailureCode.GENERAL, message);
+        }
+
+        public static <T> Failure<T> generalFailure(Throwable throwable) {
+            Logger.log.error(throwable.getMessage());
+            return new Failure<>(FailureCode.GENERAL, throwable);
         }
 
         public static <T> Failure<T> generalFailure(String message, Throwable throwable) {
