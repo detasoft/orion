@@ -23,6 +23,8 @@ designs and implementation steps in `docs/plans/`.
       WireMachine own the complete protocol conversation, back it with
       automatically created in-memory native repositories, add lifecycle/DI
       wiring, and cover native `git://` clone and push.
+  - Owner: codex, paused 2026-07-30 00:03 Europe/Amsterdam; next: replace
+    `StructuredPayloadContinuation` with service and protocol-version dispatch.
 - [ ] Add authenticated native repository resolution around the server
       WireMachine, including READ, WRITE, and CREATE checks before automatic
       repository creation.

@@ -2,11 +2,9 @@ package pro.deta.orion.git.parser.wire.continuation;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
-import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 
@@ -14,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class InitialRequestPayloadContinuationTest {
+class InitialRequestPayloadContinuationTest extends ByteBufContinuationTest {
     @Test
     void parsesInitialRequestOneByteAtATime() {
         ByteBuf request = Unpooled.copiedBuffer(
@@ -93,57 +91,17 @@ class InitialRequestPayloadContinuationTest {
 
     private static InitialRequestPayloadContinuation continuation(int payloadLength) {
         return new InitialRequestPayloadContinuation(
-                GitMinimalWireMachine.testContext(
-                        UnpooledByteBufAllocator.DEFAULT),
+                context(),
                 payloadLength);
-    }
-
-    private static ContinuationFlow<ByteBuf> processOneByteAtATime(
-            InitialRequestPayloadContinuation continuation,
-            ByteBuf request) {
-        ContinuationFlow<ByteBuf> flow = null;
-        while (request.isReadable()) {
-            boolean lastByte = request.readableBytes() == 1;
-            flow = process(
-                    continuation,
-                    request.readRetainedSlice(1));
-            if (!lastByte) {
-                assertThat(flow).isInstanceOf(ContinuationFlow.Await.class);
-            }
-        }
-        return flow;
-    }
-
-    private static ContinuationFlow<ByteBuf> process(
-            InitialRequestPayloadContinuation continuation,
-            ByteBuf input) {
-        try {
-            return continuation.process(input);
-        } finally {
-            input.release();
-        }
     }
 
     private static InitialRequestData completedData(
             ContinuationFlow<ByteBuf> flow) {
-        assertThat(flow).isInstanceOf(ContinuationFlow.Transition.class);
-        Continuation<ByteBuf> next =
-                ((ContinuationFlow.Transition<ByteBuf>) flow).next();
-        assertThat(next).isInstanceOf(StructuredPayloadContinuation.class);
-        return ((StructuredPayloadContinuation) next).initialRequestData();
-    }
-
-    private static void assertCompletedError(
-            ContinuationFlow<ByteBuf> flow,
-            String message) {
-        assertThat(flow).isInstanceOf(ContinuationFlow.Transition.class);
-        Continuation<ByteBuf> next =
-                ((ContinuationFlow.Transition<ByteBuf>) flow).next();
-        assertThat(next)
-                .isInstanceOfSatisfying(
-                        Continuation.CompletedError.class,
-                        error -> assertThat(error.throwable())
-                                .hasMessageContaining(message));
+        Continuation<ByteBuf> continuation = transitionedTo(flow);
+        assertThat(continuation)
+                .isInstanceOf(StructuredPayloadContinuation.class);
+        return ((StructuredPayloadContinuation) continuation)
+                .initialRequestData();
     }
 
     private static byte[] bytes(String value) {

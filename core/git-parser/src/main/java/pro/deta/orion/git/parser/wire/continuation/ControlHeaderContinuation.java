@@ -15,6 +15,8 @@ import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.SOME_NAME;
 public final class ControlHeaderContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
     private final ProtocolStage stage;
+    private int headerValue;
+    private int headerBytes;
 
     public ControlHeaderContinuation(
             GitMinimalWireMachine.Context context,
@@ -25,13 +27,15 @@ public final class ControlHeaderContinuation implements Continuation<ByteBuf> {
 
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
-        if (input.readableBytes() < PKT_LINE_HEADER_SIZE)
+        while (headerBytes < PKT_LINE_HEADER_SIZE && input.isReadable()) {
+            headerValue = (headerValue << 8) | input.readUnsignedByte();
+            headerBytes++;
+        }
+        if (headerBytes < PKT_LINE_HEADER_SIZE)
             return ContinuationFlow.await();
 
         Continuation<ByteBuf> next;
         try {
-
-            int headerValue = input.readInt();
             Result<ControlState> control = ControlState.readControlType(headerValue);
 
             switch (control) {
@@ -49,8 +53,9 @@ public final class ControlHeaderContinuation implements Continuation<ByteBuf> {
                                     Continuation.completedError(
                                             "Payload continuation is not implemented for stage " + stage);
                         };
-                        default ->
-                            Continuation.completedError("Not supported");
+                        case FLUSH, DELIMITER, RESPONSE_END ->
+                            Continuation.completedError(
+                                    state.type() + " is not supported for stage " + stage);
                     };
                 }
             }
