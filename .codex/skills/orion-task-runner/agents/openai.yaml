@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orion Task Runner"
+  short_description: "Pick and run Orion TASKS.md work"
+  default_prompt: "Use $orion-task-runner to pick the next matching Orion task from TASKS.md and run it."
