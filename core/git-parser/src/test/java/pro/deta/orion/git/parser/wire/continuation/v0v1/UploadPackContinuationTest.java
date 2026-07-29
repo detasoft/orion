@@ -45,7 +45,7 @@ class UploadPackContinuationTest {
     }
 
     @Test
-    void yieldsRealStreamingTaskThenTransitionsOnResume() {
+    void transitionsAndYieldsRealStreamingTask() {
         ByteBuf outbound = outputBuffer();
         outbound.writerIndex(outbound.capacity() - 1);
         ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
@@ -56,19 +56,13 @@ class UploadPackContinuationTest {
             UploadPackContinuation continuation =
                     continuation(output);
 
-            ContinuationFlow.Yield<ByteBuf> yield =
-                    (ContinuationFlow.Yield<ByteBuf>)
+            ContinuationFlow.TransitionAndYield<ByteBuf> flow =
+                    (ContinuationFlow.TransitionAndYield<ByteBuf>)
                             continuation.process(input);
-            yield.task().run();
-            ContinuationFlow<ByteBuf> resumed =
-                    continuation.process(input);
+            flow.task().run();
 
-            assertThat(resumed)
-                    .isInstanceOfSatisfying(
-                            ContinuationFlow.Transition.class,
-                            transition -> assertThat(transition.next())
-                                    .isInstanceOf(
-                                            UploadRequestContinuation.class));
+            assertThat(flow.next())
+                    .isInstanceOf(UploadRequestContinuation.class);
             assertThat(input.readerIndex()).isZero();
         } finally {
             input.release();

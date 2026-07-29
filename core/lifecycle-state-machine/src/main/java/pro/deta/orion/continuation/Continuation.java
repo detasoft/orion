@@ -18,6 +18,8 @@ import java.util.Objects;
  *       the same input chunk.</li>
  *   <li>{@link ContinuationFlow.Transition} — done with this step; hand off to another
  *       continuation, which is immediately re-driven with the same input.</li>
+ *   <li>{@link ContinuationFlow.TransitionAndYield} — hand off to another continuation
+ *       immediately, then suspend until an external task completes.</li>
  *   <li>{@link ContinuationFlow.Yield} — needs an external task to complete before it
  *       can proceed (analogous to {@code SSLEngineResult.HandshakeStatus.NEED_TASK});
  *       the runtime suspends until {@link ContinuationRuntime#resumeTask()} is called

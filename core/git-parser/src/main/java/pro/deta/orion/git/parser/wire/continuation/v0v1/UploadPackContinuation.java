@@ -14,7 +14,6 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
     private final GitV1Advertisement advertisement;
-    private State state = State.SEND_ADVERTISEMENT;
 
     public UploadPackContinuation(
             GitMinimalWireMachine.Context context,
@@ -29,18 +28,15 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
 
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
-        if (state == State.WAITING_FOR_STREAMING) {
-            return ContinuationFlow.transition(
-                    new UploadRequestContinuation(context, data));
-        }
         try {
             GitNativeClientOutput.SendResult result =
                     context.clientOutput.sendAdvertisement(
                             advertisement);
             if (result instanceof
                     GitNativeClientOutput.SendResult.Streaming streaming) {
-                state = State.WAITING_FOR_STREAMING;
-                return ContinuationFlow.yield(streaming.task());
+                return ContinuationFlow.transitionAndYield(
+                        new UploadRequestContinuation(context, data),
+                        streaming.task());
             }
             return ContinuationFlow.transition(
                     new UploadRequestContinuation(context, data));
@@ -49,10 +45,5 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
                     "Failed to advertise native Git repository",
                     error);
         }
-    }
-
-    private enum State {
-        SEND_ADVERTISEMENT,
-        WAITING_FOR_STREAMING
     }
 }

@@ -34,6 +34,10 @@ import static pro.deta.orion.continuation.RuntimeFlow.error;
  * drive loop with the frozen input. If the machine yields again, the cycle repeats —
  * the caller reads the {@code task()} off the newly returned {@code Yield}.
  *
+ * <p>{@link ContinuationFlow.TransitionAndYield} transitions and closes the active
+ * continuation before suspending. The caller still receives an ordinary {@code Yield},
+ * and resumption drives the new continuation with the frozen input.
+ *
  * <p>Example handler wiring (Netty):
  * <pre>{@code
  * // channelRead handler:
@@ -167,6 +171,11 @@ public class ContinuationRuntime<I> {
                     case ContinuationFlow.Await<I> a -> { return a; }
                     case ContinuationFlow.Continue<I> ignored -> {}
                     case ContinuationFlow.Transition<I> t -> transitionTo(active, t);
+                    case ContinuationFlow.TransitionAndYield<I> t -> {
+                        transitionTo(active, transition(t.next()));
+                        pendingInput = input;
+                        return ContinuationFlow.yield(t.task());
+                    }
                     case ContinuationFlow.Yield<I> y -> {
                         pendingInput = input;
                         return y;

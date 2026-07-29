@@ -103,6 +103,32 @@ class ContinuationRuntimeTest {
     }
 
     @Test
+    void transitionAndYieldSwitchesBeforeResumeAndResumesWithFrozenInput() {
+        List<String> log = new ArrayList<>();
+        ConsumeOne after = new ConsumeOne("after", log, ContinuationFlow.await());
+        RecordingContinuation before = new RecordingContinuation(
+                log,
+                ContinuationFlow.transitionAndYield(
+                        after,
+                        () -> log.add("task-ran")));
+        RecordingRuntime runtime = new RecordingRuntime(before);
+
+        RuntimeFlow flow = runtime.accept(new Input("a"));
+
+        assertThat(flow).isInstanceOf(ContinuationFlow.Yield.class);
+        assertThat(runtime.observedEvents)
+                .containsExactly("transition:RecordingContinuation->ConsumeOne");
+        assertThat(log).containsExactly("closed");
+        assertThat(runtime.isYielding()).isTrue();
+
+        pendingTaskOf(flow).run();
+        runtime.resumeTask();
+
+        assertThat(runtime.isYielding()).isFalse();
+        assertThat(log).containsExactly("closed", "task-ran", "after:a");
+    }
+
+    @Test
     void multipleSequentialYieldsEachRequireResumeBeforeNextAccept() {
         List<String> log = new ArrayList<>();
         YieldOnce second = new YieldOnce(() -> log.add("yield2"), ContinuationFlow.await());
@@ -230,6 +256,28 @@ class ContinuationRuntimeTest {
         public ContinuationFlow<Input> process(Input input) {
             events.add(name + ":" + input.read());
             return flow;
+        }
+    }
+
+    private static final class RecordingContinuation implements Continuation<Input> {
+        private final List<String> events;
+        private final ContinuationFlow<Input> flow;
+
+        private RecordingContinuation(
+                List<String> events,
+                ContinuationFlow<Input> flow) {
+            this.events = events;
+            this.flow = flow;
+        }
+
+        @Override
+        public ContinuationFlow<Input> process(Input input) {
+            return flow;
+        }
+
+        @Override
+        public void close() {
+            events.add("closed");
         }
     }
 

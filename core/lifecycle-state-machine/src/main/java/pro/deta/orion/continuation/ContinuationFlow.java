@@ -27,9 +27,13 @@ import java.util.Objects;
  *       must be scheduled by the caller, and {@link ContinuationRuntime#resumeTask()}
  *       called when done. Analogous to
  *       {@code SSLEngineResult.HandshakeStatus.NEED_TASK}.</li>
+ *
+ *   <li>{@link TransitionAndYield} — switch to a different continuation, then suspend
+ *       as for {@link Yield}. Resumption re-drives the new continuation with the same
+ *       input.</li>
  * </ul>
  *
- * <p>These are the only four directives a {@link Continuation#process(Object)}
+ * <p>These are the only five directives a {@link Continuation#process(Object)}
  * implementation may return — the type is sealed to exactly these. What {@link
  * ContinuationRuntime#accept(Object)} and {@link ContinuationRuntime#resumeTask()}
  * return to their own caller is the wider {@link RuntimeFlow}, which additionally
@@ -42,6 +46,7 @@ public sealed interface ContinuationFlow<I>
         permits ContinuationFlow.Await,
                 ContinuationFlow.Continue,
                 ContinuationFlow.Transition,
+                ContinuationFlow.TransitionAndYield,
                 ContinuationFlow.Yield {
 
     static <I> Continue<I> continueFlow() {
@@ -58,6 +63,12 @@ public sealed interface ContinuationFlow<I>
 
     static <I> Yield<I> yield(Runnable task) {
         return new Yield<>(task);
+    }
+
+    static <I> TransitionAndYield<I> transitionAndYield(
+            Continuation<I> next,
+            Runnable task) {
+        return new TransitionAndYield<>(next, task);
     }
 
     /**
@@ -95,6 +106,18 @@ public sealed interface ContinuationFlow<I>
     record Transition<I>(Continuation<I> next) implements ContinuationFlow<I> {
         public Transition {
             Objects.requireNonNull(next, "next");
+        }
+    }
+
+    /**
+     * Switch to the given continuation, then suspend until an external task completes.
+     */
+    record TransitionAndYield<I>(
+            Continuation<I> next,
+            Runnable task) implements ContinuationFlow<I> {
+        public TransitionAndYield {
+            Objects.requireNonNull(next, "next");
+            Objects.requireNonNull(task, "task");
         }
     }
 
