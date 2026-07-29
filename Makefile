@@ -16,7 +16,10 @@ ORION_CLONE_DIR ?= $(CURDIR)/target/orion-clone
 ORION_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_REPOSITORY)
 ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -i $(ORION_SERVER_IDENTITY_KEY) -p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: run-server issue-token issue-token-raw ssh-state ssh-status clone-repository clone-repo admin-acl admin-acl-with-token
+.PHONY: test run-server issue-token issue-token-raw ssh-state ssh-status clone-repository clone-repo admin-acl admin-acl-with-token
+
+test:
+	$(MAVEN) test -Pdev -T 4
 
 run-server:
 	$(MAVEN) -pl core/bootstrap -am -Prun-server process-classes
