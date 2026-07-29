@@ -71,11 +71,6 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.core</groupId>
-                <artifactId>git-protocol-client</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.core</groupId>
                 <artifactId>git-native-storage</artifactId>
                 <version>${project.version}</version>
             </dependency>
