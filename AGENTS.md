@@ -1,6 +1,8 @@
 # Agent Instructions
 
 - When the user asks to commit changes, for example by writing `commit` or `сделай коммит`, create the intended logical commit first, then run regular Maven tests for the whole project with `make test`.
+- Do not run tests after documentation-only commits, including commits that
+  change only Markdown files such as `TASKS.md` and files under `docs/`.
 - Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
 - Use `make test` for routine full-project tests and the commit workflow. For focused checks, use the `dev` Maven profile, for example `mvn test -Pdev -T 4 -q -pl ...`.
 - Do not run integration tests automatically after every commit; `make test` is enough for the commit workflow.
