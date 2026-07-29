@@ -381,8 +381,6 @@
           <plugin>
             <artifactId>maven-surefire-plugin</artifactId>
             <configuration>
-              <forkCount>0</forkCount>
-              <reuseForks>true</reuseForks>
               <redirectTestOutputToFile>true</redirectTestOutputToFile>
               <systemPropertyVariables>
                 <orion.testDurations.enabled>false</orion.testDurations.enabled>
@@ -396,8 +394,6 @@
           <plugin>
             <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
-              <forkCount>0</forkCount>
-              <reuseForks>true</reuseForks>
               <redirectTestOutputToFile>true</redirectTestOutputToFile>
               <systemPropertyVariables>
                 <orion.testDurations.enabled>false</orion.testDurations.enabled>
