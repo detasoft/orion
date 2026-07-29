@@ -16,7 +16,7 @@ public record GitWireError(
         INVALID_HEX_HEADER("Pkt-line length contains non-hex byte"),
         RESERVED_LENGTH("Pkt-line length 0003 is reserved"),
         LENGTH_EXCEEDS_LIMIT("Pkt-line length exceeds Git pkt-line limit"),
-        SOME_NAME("Failed to parse Git pkt-line header"),
+        PKT_LINE_HEADER_PARSE_FAILURE("Failed to parse Git pkt-line header"),
         INCOMPLETE_HEADER,
         INCOMPLETE_PAYLOAD,
         UNEXPECTED_PACKET,

@@ -10,7 +10,7 @@ import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.util.Result;
 
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
-import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.SOME_NAME;
+import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.PKT_LINE_HEADER_PARSE_FAILURE;
 
 public final class ControlHeaderContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
@@ -60,7 +60,7 @@ public final class ControlHeaderContinuation implements Continuation<ByteBuf> {
                 }
             }
         } catch (Throwable error) {
-            next = Continuation.completedError(SOME_NAME.getMessage(), new GitGeneralException(SOME_NAME));
+            next = Continuation.completedError(PKT_LINE_HEADER_PARSE_FAILURE.getMessage(), new GitGeneralException(PKT_LINE_HEADER_PARSE_FAILURE));
         }
         return ContinuationFlow.transition(next);
     }
