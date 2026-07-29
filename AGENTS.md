@@ -1,15 +1,15 @@
 # Agent Instructions
 
-- When the user asks to commit changes, for example by writing `commit` or `сделай коммит`, create the intended logical commit first, then run regular Maven tests for the whole project.
+- When the user asks to commit changes, for example by writing `commit` or `сделай коммит`, create the intended logical commit first, then run regular Maven tests for the whole project with `make test`.
 - Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
-- Use the `dev` Maven profile for routine local checks and the commit workflow, for example `mvn test -Pdev` or `mvn test -Pdev -q -pl ...`.
-- Do not run integration tests automatically after every commit; `mvn test -Pdev` is enough for the commit workflow.
-- Use `mvn verify -Pdev` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
+- Use `make test` for routine full-project tests and the commit workflow. For focused checks, use the `dev` Maven profile, for example `mvn test -Pdev -T 4 -q -pl ...`.
+- Do not run integration tests automatically after every commit; `make test` is enough for the commit workflow.
+- Use `mvn verify -Pdev -T 4` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
 - The project allows running `mvn verify` from the repository root without asking for additional confirmation when it is explicitly needed.
-- The project allows running `mvn test` with any Maven parameters without asking for additional confirmation.
+- The project allows running `make test` and `mvn test` with any Maven parameters without asking for additional confirmation.
 - Always run test commands outside the sandbox, because local tests may need to bind loopback sockets and sandboxed runs can fail with `Operation not permitted`.
 - When requesting approval for Maven commands, put the Maven phase immediately after `mvn`, then pass the remaining arguments, for example `mvn test -q -pl ...`.
-- After committing, run the Maven test command. If it fails and the failure is fixed, create the follow-up fix commit with the exact same commit message as the original commit so the commits can be squashed later.
+- After committing, run `make test`. If it fails and the failure is fixed, create the follow-up fix commit with the exact same commit message as the original commit so the commits can be squashed later.
 - If the Maven test command fails and cannot be fixed in the current turn, report the failure and the relevant error output.
 - If post-commit Maven tests fail because of unrelated or pre-existing working tree changes, do not debug those changes unless the user explicitly asks; report the failure and finish the requested commit task.
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
