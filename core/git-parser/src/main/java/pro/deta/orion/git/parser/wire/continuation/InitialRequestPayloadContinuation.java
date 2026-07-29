@@ -35,7 +35,7 @@ public final class InitialRequestPayloadContinuation implements Continuation<Byt
                 }
             }
             InitialRequestData data = requestParser.completeRequest();
-            return ContinuationFlow.transition(new StructuredPayloadContinuation(
+            return ContinuationFlow.transition(new InitialRequestDispatchContinuation(
                     context,
                     data));
         } catch (Throwable error) {

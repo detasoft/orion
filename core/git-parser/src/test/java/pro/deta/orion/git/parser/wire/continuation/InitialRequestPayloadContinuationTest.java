@@ -34,6 +34,8 @@ class InitialRequestPayloadContinuationTest extends ByteBufContinuationTest {
             assertThat(data.getParameters())
                     .containsEntry("version", "2")
                     .containsEntry("agent", "git/2.50");
+            assertThat(data.getProtocolVersion())
+                    .contains(InitialRequestData.ProtocolVersion.V2);
             assertThat(data.getParameters()).isUnmodifiable();
         } finally {
             request.release();
@@ -62,6 +64,7 @@ class InitialRequestPayloadContinuationTest extends ByteBufContinuationTest {
         assertThat(data.getRepositoryPath()).isEqualTo("/team/project.git");
         assertThat(data.getHost()).isNull();
         assertThat(data.getParameters()).isEmpty();
+        assertThat(data.getProtocolVersion()).isEmpty();
     }
 
     @Test
@@ -99,8 +102,8 @@ class InitialRequestPayloadContinuationTest extends ByteBufContinuationTest {
             ContinuationFlow<ByteBuf> flow) {
         Continuation<ByteBuf> continuation = transitionedTo(flow);
         assertThat(continuation)
-                .isInstanceOf(StructuredPayloadContinuation.class);
-        return ((StructuredPayloadContinuation) continuation)
+                .isInstanceOf(InitialRequestDispatchContinuation.class);
+        return ((InitialRequestDispatchContinuation) continuation)
                 .initialRequestData();
     }
 

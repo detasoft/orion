@@ -3,8 +3,11 @@ package pro.deta.orion.git.parser.wire.continuation.exchange;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 public final class InitialRequestData {
+    private static final String VERSION_PARAMETER = "version";
+
     private final InitialRequestService service;
     private final String repositoryPath;
     private final String host;
@@ -36,5 +39,40 @@ public final class InitialRequestData {
 
     public Map<String, String> getParameters() {
         return parameters;
+    }
+
+    public Optional<ProtocolVersion> getProtocolVersion() {
+        String version = parameters.get(VERSION_PARAMETER);
+        if (version == null) {
+            return Optional.empty();
+        }
+        return Optional.of(ProtocolVersion.fromWireValue(version));
+    }
+
+    public enum ProtocolVersion {
+        V1("1"),
+        V2("2");
+
+        private final String wireValue;
+
+        ProtocolVersion(String wireValue) {
+            this.wireValue = wireValue;
+        }
+
+        public String wireValue() {
+            return wireValue;
+        }
+
+        private static ProtocolVersion fromWireValue(String wireValue) {
+            for (ProtocolVersion version : values()) {
+                if (version.wireValue.equals(wireValue)) {
+                    return version;
+                }
+            }
+            throw new IllegalArgumentException(
+                    "Unsupported Git protocol version '"
+                            + wireValue
+                            + "'");
+        }
     }
 }
