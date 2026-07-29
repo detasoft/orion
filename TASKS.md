@@ -23,9 +23,8 @@ designs and implementation steps in `docs/plans/`.
       WireMachine own the complete protocol conversation, back it with
       automatically created in-memory native repositories, add lifecycle/DI
       wiring, and cover native `git://` clone and push.
-  - Owner: codex, paused 2026-07-30 00:54 Europe/Amsterdam; next: source the
-    typed legacy advertisement from the resolved repository and call
-    `GitNativeClientOutput` from `v0v1.UploadPackContinuation`.
+  - Owner: codex, paused 2026-07-30 01:43 Europe/Amsterdam; next: implement
+    legacy upload-pack request handling after the advertisement.
 - [ ] Add authenticated native repository resolution around the server
       WireMachine, including READ, WRITE, and CREATE checks before automatic
       repository creation.
@@ -36,6 +35,11 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Move native SSH and HTTP Git server paths onto `ByteBuf` transport
       adapters backed by the Continuation-based wire core, after the Netty
       `git://` path is complete.
+- [ ] Replace copied native client output chunks with the completion-aware
+      buffering contract from
+      `docs/plans/2026-07-30-completion-aware-native-client-output.md`: land
+      double buffering first, then add the ring-buffer coordinator as a
+      separate slice.
 - [ ] Implement production repository backends for native Git repository ports,
       including refs, objects, pack indexes, delta reconstruction, pack building,
       and projection parity.

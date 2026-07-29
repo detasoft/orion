@@ -57,14 +57,24 @@ normal outbound buffer for the transport's ordinary drain policy.
 
 ## Continuation Flow
 
-`v0v1.UploadPackContinuation` performs these steps:
+`GitNativeRepositoryService` is the wire layer's repository facade. It hides
+`InMemoryNativeGitRepositoryProvider` from the continuation context and can
+gain later typed repository operations without exposing the provider. Its
+legacy upload-pack operation performs these steps:
 
 1. resolve or create the requested repository;
 2. snapshot refs and HEAD;
-3. build the typed legacy advertisement;
-4. call `GitNativeClientOutput.sendAdvertisement`;
-5. transition immediately for a completed result;
-6. return `ContinuationFlow.Yield` with the streaming send task otherwise.
+3. build and return the typed legacy advertisement.
+
+`InitialRequestDispatchContinuation` gives the prepared value to
+`v0v1.UploadPackContinuation`. That continuation has no repository access and
+does not read the input buffer. It only:
+
+1. calls `GitNativeClientOutput.sendAdvertisement`;
+2. transitions immediately for a completed result;
+3. returns `ContinuationFlow.Yield` with the streaming send task otherwise;
+4. transitions to the upload-request continuation when the runtime re-enters
+   it after the task completes.
 
 The continuation does not repeat `sendAdvertisement` after the Yield. The
 next upload-pack request stage is introduced as an explicit
@@ -87,4 +97,3 @@ Focused tests cover:
 - preservation and cleanup of the streaming cursor;
 - rejection of a concurrent output operation;
 - propagation of the real send task through `ContinuationFlow.Yield`.
-

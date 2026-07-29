@@ -144,12 +144,16 @@ Expected: PASS.
 This step precedes tests because `AGENTS.md` explicitly exempts
 `Continuation` implementations from test-first TDD.
 
-Resolve the repository with `findOrCreate`, build deterministic advertised
-refs, and use a fixed legacy upload-pack capability list. Include HEAD first
-when its target exists; sort the remaining refs by name. For an empty
-repository, advertise the zero object ID under `capabilities^{}`.
+Add `GitNativeRepositoryService` as the repository facade held by the wire
+context. Resolve the repository with
+`findOrCreate`, build deterministic advertised refs, and use a fixed legacy
+upload-pack capability list. Include HEAD first when its target exists; sort
+the remaining refs by name. For an empty repository, advertise the zero object
+ID under `capabilities^{}`. Have initial request dispatch pass the prepared
+value into `UploadPackContinuation`.
 
-Convert output results as follows:
+Keep `UploadPackContinuation` limited to output coordination. Convert output
+results as follows:
 
 ```java
 Completed -> transition(nextUploadRequestContinuation)
@@ -215,4 +219,3 @@ Expected: no whitespace errors; only files belonging to this task are changed.
 
 Keep the larger Tasks 1–7 item open, remove the paused owner line for this
 completed slice, and record only the next high-level server slice if needed.
-
