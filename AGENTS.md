@@ -17,6 +17,10 @@
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
 - Do not use `git merge` or create merge commits when integrating `origin/main` or other upstream branches. Use `git rebase` instead, unless the user explicitly asks for a merge commit.
 - When adding or changing functionality, add or extend tests in the same change. Cover the straightforward happy path and at least one meaningful non-trivial scenario, such as overwrite/update behavior, missing or invalid state, reloads, multiple backends, or other edge cases relevant to the feature.
+- For implementations of `Continuation`, write the production continuation
+  logic first and add or update its tests afterward. Do not use test-first TDD
+  for `Continuation` classes. This exception does not remove the requirement to
+  cover continuation behavior with tests in the same change.
 - When replacing one behavior or concept with another, do not add or keep tests whose only purpose is to assert that the previous behavior is absent. Remove those legacy negative checks in a separate commit after the behavior-change commit.
 - Prefer ordinary loops and straightforward control flow over Java Stream API unless streams make the code noticeably more readable.
 - If a method is created only for use in tests and is not part of the public contract, mark it with `core/lifecycle-state-machine/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
