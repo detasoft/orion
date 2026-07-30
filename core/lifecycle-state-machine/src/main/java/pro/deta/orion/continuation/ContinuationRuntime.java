@@ -166,7 +166,19 @@ public class ContinuationRuntime<I> {
                 if (active.terminal())
                     return RuntimeFlow.terminal();
 
-                ContinuationFlow<I> flow = Objects.requireNonNull(active.process(input), "flow");
+                ContinuationFlow<I> flow;
+                try {
+                    flow = Objects.requireNonNull(
+                            active.process(input),
+                            "flow");
+                } catch (Throwable failure) {
+                    transitionTo(
+                            active,
+                            transition(completedError(
+                                    "Continuation processing failed",
+                                    failure)));
+                    continue;
+                }
                 switch (flow) {
                     case ContinuationFlow.Await<I> a -> { return a; }
                     case ContinuationFlow.Continue<I> ignored -> {}

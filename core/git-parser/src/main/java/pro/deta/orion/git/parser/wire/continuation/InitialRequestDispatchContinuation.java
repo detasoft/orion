@@ -40,20 +40,14 @@ public final class InitialRequestDispatchContinuation implements Continuation<By
         InitialRequestData.ProtocolVersion version =
                 data.getProtocolVersion().orElse(null);
         if (version == null || version == InitialRequestData.ProtocolVersion.V1) {
-            try {
-                return ContinuationFlow.transition(
-                        new pro.deta.orion.git.parser.wire.continuation.v0v1
-                                .UploadPackContinuation(
-                                    context,
-                                    data,
-                                    context.repositoryService
-                                            .legacyUploadPackAdvertisement(
-                                                    data)));
-            } catch (RuntimeException error) {
-                return ContinuationFlow.completedError(
-                        "Failed to prepare legacy upload-pack advertisement",
-                        error);
-            }
+            return ContinuationFlow.transition(
+                    new pro.deta.orion.git.parser.wire.continuation.v0v1
+                            .UploadPackContinuation(
+                                context,
+                                data,
+                                context.repositoryService
+                                        .legacyUploadPackAdvertisement(
+                                                data)));
         }
         if (version == InitialRequestData.ProtocolVersion.V2) {
             return ContinuationFlow.transition(
@@ -67,20 +61,14 @@ public final class InitialRequestDispatchContinuation implements Continuation<By
         InitialRequestData.ProtocolVersion version =
                 data.getProtocolVersion().orElse(null);
         if (version == null || version == InitialRequestData.ProtocolVersion.V1) {
-            try {
-                return ContinuationFlow.transition(
-                        new pro.deta.orion.git.parser.wire.continuation.v0v1
-                                .ReceivePackContinuation(
-                                    context,
-                                    data,
-                                    context.repositoryService
-                                            .legacyReceivePackAdvertisement(
-                                                    data)));
-            } catch (RuntimeException error) {
-                return ContinuationFlow.completedError(
-                        "Failed to prepare legacy receive-pack advertisement",
-                        error);
-            }
+            return ContinuationFlow.transition(
+                    new pro.deta.orion.git.parser.wire.continuation.v0v1
+                            .ReceivePackContinuation(
+                                context,
+                                data,
+                                context.repositoryService
+                                        .legacyReceivePackAdvertisement(
+                                                data)));
         }
         return unsupportedVersion(
                 new IllegalArgumentException(

@@ -72,6 +72,30 @@ class ContinuationRuntimeTest {
     }
 
     @Test
+    void unexpectedProcessFailureBecomesTerminalError() {
+        RuntimeException failure = new RuntimeException("boom");
+        RecordingRuntime runtime = new RecordingRuntime(
+                input -> {
+                    throw failure;
+                });
+
+        RuntimeFlow flow = runtime.accept(new Input("a"));
+
+        assertThat(flow).isInstanceOf(RuntimeFlow.Terminal.class);
+        assertThat(runtime.terminal()).isTrue();
+        assertThat(runtime.currentContinuation())
+                .isInstanceOfSatisfying(
+                        Continuation.CompletedError.class,
+                        error -> {
+                            assertThat(error.message())
+                                    .isEqualTo(
+                                            "Continuation processing failed");
+                            assertThat(error.throwable())
+                                    .isSameAs(failure);
+                        });
+    }
+
+    @Test
     void yieldSuspendsRuntimeAndExposesTask() {
         List<String> taskLog = new ArrayList<>();
         YieldOnce continuation = new YieldOnce(() -> taskLog.add("task-ran"), ContinuationFlow.await());
@@ -206,14 +230,28 @@ class ContinuationRuntimeTest {
 
         RecordingRuntime runtime = new RecordingRuntime(input -> null);
 
-        assertThatNullPointerException()
-                .isThrownBy(() -> runtime.accept(new Input("a")))
-                .withMessage("flow");
+        assertThat(runtime.accept(new Input("a")))
+                .isInstanceOf(RuntimeFlow.Terminal.class);
+        assertThat(runtime.currentContinuation())
+                .isInstanceOfSatisfying(
+                        Continuation.CompletedError.class,
+                        error -> assertThat(error.throwable())
+                                .isInstanceOfSatisfying(
+                                        NullPointerException.class,
+                                        failure -> assertThat(
+                                                failure.getMessage())
+                                                .isEqualTo("flow")));
         assertThat(runtime.accept(null))
-                .isInstanceOfSatisfying(RuntimeFlow.Error.class, error -> {
-                    assertThat(error.message()).isEqualTo("Continuation input must not be null");
-                    assertThat(error.throwable()).isInstanceOf(IllegalStateException.class);
-                });
+                .isInstanceOfSatisfying(
+                        RuntimeFlow.Error.class,
+                        error -> {
+                            assertThat(error.message())
+                                    .isEqualTo(
+                                            "Continuation input must not be null");
+                            assertThat(error.throwable())
+                                    .isInstanceOf(
+                                            IllegalStateException.class);
+                        });
     }
 
     private static Runnable pendingTaskOf(RuntimeFlow flow) {
