@@ -3,6 +3,7 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
+import io.netty.buffer.WrappedByteBuf;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,7 +77,7 @@ class GitNativeClientOutputTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "000cls-refs\n"
-                                    + "0012fetch=shallow\n"
+                                    + "000afetch\n"
                                     + "0012server-option\n"
                                     + "0000");
         } finally {
@@ -243,6 +245,350 @@ class GitNativeClientOutputTest {
                     StandardCharsets.US_ASCII))
                     .isEqualTo("0000");
         } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void interleavesOrderedProgressAndErrorBetweenPackData() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        byte[] pack = new byte[100_000];
+        java.util.Arrays.fill(pack, (byte) 'D');
+        GitNativeClientOutput.LegacySideBandResponse response =
+                output.beginLegacySideBand64k(
+                        producer(pack),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+
+        try {
+            GitNativeClientOutput.SendResult.Streaming first =
+                    (GitNativeClientOutput.SendResult.Streaming)
+                            response.advance();
+            first.task().run();
+
+            ByteBuf progress = Unpooled.copiedBuffer(
+                    "counting\n",
+                    StandardCharsets.UTF_8);
+            ByteBuf error = Unpooled.copiedBuffer(
+                    "recoverable warning\n",
+                    StandardCharsets.UTF_8);
+            try {
+                assertThat(response.progress(progress))
+                        .isInstanceOf(
+                                GitNativeClientOutput.SendResult.Completed.class);
+                assertThat(response.error(error))
+                        .isInstanceOf(
+                                GitNativeClientOutput.SendResult.Completed.class);
+            } finally {
+                progress.release();
+                error.release();
+            }
+
+            complete(response);
+
+            SideBandTranscript transcript = transcript(sent);
+            assertThat(transcript.channels())
+                    .containsExactly(1, 1, 2, 3, 1);
+            assertThat(transcript.data()).containsExactly(pack);
+            assertThat(new String(
+                    transcript.progress(),
+                    StandardCharsets.UTF_8))
+                    .isEqualTo("counting\n");
+            assertThat(new String(
+                    transcript.errors(),
+                    StandardCharsets.UTF_8))
+                    .isEqualTo("recoverable warning\n");
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void copiesFragmentsAndOrdersQueuedSideBandMessages() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        byte[] pack = {'P', 'A', 'C', 'K'};
+        byte[] largeProgress = new byte[70_000];
+        java.util.Arrays.fill(largeProgress, (byte) 'p');
+        GitNativeClientOutput.LegacySideBandResponse response =
+                output.beginLegacySideBand64k(
+                        producer(pack),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+        ByteBuf firstProgress = Unpooled.wrappedBuffer(
+                largeProgress.clone());
+        ByteBuf error = Unpooled.copiedBuffer(
+                "warning\n",
+                StandardCharsets.UTF_8);
+        ByteBuf finalProgress = Unpooled.copiedBuffer(
+                "done\n",
+                StandardCharsets.UTF_8);
+
+        try {
+            assertThat(response.progress(firstProgress))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(response.error(error))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(response.progress(finalProgress))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            firstProgress.setByte(0, 'x');
+            error.setByte(0, 'x');
+            finalProgress.setByte(0, 'x');
+
+            complete(response);
+
+            SideBandTranscript transcript = transcript(sent);
+            assertThat(transcript.channels())
+                    .containsExactly(2, 2, 2, 3, 2, 1);
+            ByteArrayOutputStream expectedProgress =
+                    new ByteArrayOutputStream();
+            expectedProgress.writeBytes(largeProgress);
+            expectedProgress.writeBytes(
+                    "done\n".getBytes(StandardCharsets.UTF_8));
+            assertThat(transcript.progress())
+                    .containsExactly(expectedProgress.toByteArray());
+            assertThat(new String(
+                    transcript.errors(),
+                    StandardCharsets.UTF_8))
+                    .isEqualTo("warning\n");
+            assertThat(transcript.data()).containsExactly(pack);
+        } finally {
+            firstProgress.release();
+            error.release();
+            finalProgress.release();
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void drainsMessageAcceptedWhileProducerCompletesBeforeFlush() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitNativeClientOutput.LegacySideBandResponse[] response =
+                new GitNativeClientOutput.LegacySideBandResponse[1];
+        NativePackProducer producer = new NativePackProducer() {
+            @Override
+            public Result produce(ByteBuf destination) {
+                destination.writeBytes(
+                        new byte[] {'P', 'A', 'C', 'K'});
+                ByteBuf progress = Unpooled.copiedBuffer(
+                        "done\n",
+                        StandardCharsets.UTF_8);
+                try {
+                    assertThat(response[0].progress(progress))
+                            .isInstanceOf(
+                                    GitNativeClientOutput.SendResult.Completed.class);
+                } finally {
+                    progress.release();
+                }
+                return Result.COMPLETED;
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        response[0] = output.beginLegacySideBand64k(
+                producer,
+                GitNativeClientOutput.SideBandChannel.DATA);
+
+        try {
+            complete(response[0]);
+
+            SideBandTranscript transcript = transcript(sent);
+            assertThat(transcript.channels()).containsExactly(1, 2);
+            assertThat(transcript.data())
+                    .containsExactly('P', 'A', 'C', 'K');
+            assertThat(new String(
+                    transcript.progress(),
+                    StandardCharsets.UTF_8))
+                    .isEqualTo("done\n");
+        } finally {
+            response[0].close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsOtherOutputWhileSideBandResponseIsActive() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput.LegacySideBandResponse response =
+                output.beginLegacySideBand64k(
+                        producer(new byte[] {'P', 'A', 'C', 'K'}),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+
+        try {
+            assertThat(output.sendNak())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .contains("already in progress"));
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rollsBackStagedResponseWhenPackProductionFails() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        outbound.writeCharSequence(
+                "prefix",
+                StandardCharsets.US_ASCII);
+        int initialWriterIndex = outbound.writerIndex();
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        TrackingCopyByteBuf message = new TrackingCopyByteBuf(
+                Unpooled.copiedBuffer(
+                        "queued before failure\n",
+                        StandardCharsets.UTF_8));
+        GitNativeClientOutput.LegacySideBandResponse[] response =
+                new GitNativeClientOutput.LegacySideBandResponse[1];
+        NativePackProducer producer = new NativePackProducer() {
+            @Override
+            public Result produce(ByteBuf destination) {
+                assertThat(response[0].progress(message))
+                        .isInstanceOf(
+                                GitNativeClientOutput.SendResult.Completed.class);
+                destination.writeByte('x');
+                throw new IllegalStateException("production failed");
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        response[0] = output.beginLegacySideBand64k(
+                        producer,
+                        GitNativeClientOutput.SideBandChannel.DATA);
+
+        try {
+            assertThat(response[0].advance())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.cause())
+                                    .hasMessage("production failed"));
+            assertThat(outbound.writerIndex())
+                    .isEqualTo(initialWriterIndex);
+            assertThat(outbound.toString(
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo("prefix");
+            assertThat(message.createdCopy().refCnt()).isZero();
+        } finally {
+            message.release();
+            response[0].close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void reportsSideBandDeliveryFailureAndClosesResponse() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        AtomicBoolean producerClosed = new AtomicBoolean();
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                outbound,
+                ignored -> {
+                    throw new IllegalStateException("send failed");
+                });
+        NativePackProducer producer = new NativePackProducer() {
+            private boolean produced;
+
+            @Override
+            public Result produce(ByteBuf destination) {
+                if (!produced) {
+                    destination.writeBytes(
+                            new byte[] {'P', 'A', 'C', 'K'});
+                    produced = true;
+                }
+                return Result.COMPLETED;
+            }
+
+            @Override
+            public void close() {
+                producerClosed.set(true);
+            }
+        };
+        GitNativeClientOutput.LegacySideBandResponse response =
+                output.beginLegacySideBand64k(
+                        producer,
+                        GitNativeClientOutput.SideBandChannel.DATA);
+
+        try {
+            GitNativeClientOutput.SendResult.Streaming streaming =
+                    (GitNativeClientOutput.SendResult.Streaming)
+                            response.advance();
+            streaming.task().run();
+
+            assertThat(response.advance())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> {
+                                assertThat(failed.message())
+                                        .contains("deliver");
+                                assertThat(failed.cause())
+                                        .hasMessage("send failed");
+                            });
+            assertThat(producerClosed).isTrue();
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void reportsInvalidSideBandMessageThroughSendResult() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput.LegacySideBandResponse response =
+                output.beginLegacySideBand64k(
+                        producer(new byte[] {'P', 'A', 'C', 'K'}),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+
+        try {
+            assertThat(response.progress(null))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.cause())
+                                    .isInstanceOf(
+                                            NullPointerException.class));
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void releasesQueuedMessageCopyWhenResponseCloses() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput.LegacySideBandResponse response =
+                output.beginLegacySideBand64k(
+                        producer(new byte[] {'P', 'A', 'C', 'K'}),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+        TrackingCopyByteBuf message = new TrackingCopyByteBuf(
+                Unpooled.copiedBuffer(
+                        "queued\n",
+                        StandardCharsets.UTF_8));
+
+        try {
+            assertThat(response.progress(message))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(message.createdCopy().refCnt()).isOne();
+
+            response.close();
+
+            assertThat(message.createdCopy().refCnt()).isZero();
+        } finally {
+            message.release();
+            response.close();
             outbound.release();
         }
     }
@@ -665,6 +1011,77 @@ class GitNativeClientOutputTest {
         expected.writeBytes(
                 "0000".getBytes(StandardCharsets.US_ASCII));
         return expected.toByteArray();
+    }
+
+    private static SideBandTranscript transcript(
+            List<byte[]> sent) {
+        ByteBuf wire = Unpooled.wrappedBuffer(
+                sent.toArray(byte[][]::new));
+        try {
+            assertThat(wire.readCharSequence(
+                    8,
+                    StandardCharsets.US_ASCII))
+                    .hasToString("0008NAK\n");
+            List<Integer> channels = new ArrayList<>();
+            ByteArrayOutputStream data = new ByteArrayOutputStream();
+            ByteArrayOutputStream progress = new ByteArrayOutputStream();
+            ByteArrayOutputStream errors = new ByteArrayOutputStream();
+            while (true) {
+                int length = Integer.parseInt(
+                        wire.readCharSequence(
+                                4,
+                                StandardCharsets.US_ASCII).toString(),
+                        16);
+                if (length == 0) {
+                    break;
+                }
+                int channel = wire.readUnsignedByte();
+                byte[] payload = new byte[length - 5];
+                wire.readBytes(payload);
+                channels.add(channel);
+                switch (channel) {
+                    case 1 -> data.writeBytes(payload);
+                    case 2 -> progress.writeBytes(payload);
+                    case 3 -> errors.writeBytes(payload);
+                    default -> throw new AssertionError(
+                            "Unexpected side-band channel " + channel);
+                }
+            }
+            assertThat(wire.isReadable()).isFalse();
+            return new SideBandTranscript(
+                    List.copyOf(channels),
+                    data.toByteArray(),
+                    progress.toByteArray(),
+                    errors.toByteArray());
+        } finally {
+            wire.release();
+        }
+    }
+
+    private record SideBandTranscript(
+            List<Integer> channels,
+            byte[] data,
+            byte[] progress,
+            byte[] errors) {
+    }
+
+    private static final class TrackingCopyByteBuf
+            extends WrappedByteBuf {
+        private ByteBuf createdCopy;
+
+        private TrackingCopyByteBuf(ByteBuf buffer) {
+            super(buffer);
+        }
+
+        @Override
+        public ByteBuf copy(int index, int length) {
+            createdCopy = super.copy(index, length);
+            return createdCopy;
+        }
+
+        private ByteBuf createdCopy() {
+            return createdCopy;
+        }
     }
 
     private static GitNativeClientOutput collectingOutput(

@@ -32,7 +32,8 @@ Run:
 
 ```bash
 mvn test -Pdev -T 4 -q -pl core/git-parser \
-  -Dtest=GitNativeClientOutputTest
+  -am -Dtest=GitNativeClientOutputTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Expected: compilation failure because `progress(ByteBuf)` and
@@ -97,7 +98,8 @@ Run:
 
 ```bash
 mvn test -Pdev -T 4 -q -pl core/git-parser \
-  -Dtest=GitNativeClientOutputTest,UploadResponseContinuationTest
+  -am -Dtest=GitNativeClientOutputTest,UploadResponseContinuationTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
 Expected: all selected tests pass.

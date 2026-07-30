@@ -38,6 +38,9 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Move native SSH and HTTP Git server paths onto `ByteBuf` transport
       adapters backed by the Continuation-based wire core, after the Netty
       `git://` path is complete.
+- [x] Multiplex native Git side-band channels in `GitNativeClientOutput`:
+      interleave DATA pack production with ordered PROGRESS and ERROR messages
+      through one backpressured response and one outbound transport.
 - [ ] Replace copied native client output chunks with the completion-aware
       buffering contract from
       `docs/plans/2026-07-30-completion-aware-native-client-output.md`: land
@@ -53,6 +56,9 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Add the first real native Git client transport and end-to-end remote
       fetch/push compatibility tests after upload-pack and receive-pack client
       machines land.
+- [ ] Extend protocol v2 server fetch beyond the base request: add annotated
+      tag inclusion, shallow history, object filters, ref-in-want,
+      sideband-all, wait-for-done negotiation, and packfile URI responses.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`, then add
       GitHub mirror administration, manual sync, and webhook-driven inbound
       synchronization.
