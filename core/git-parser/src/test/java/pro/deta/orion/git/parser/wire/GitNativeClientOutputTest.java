@@ -110,20 +110,24 @@ class GitNativeClientOutputTest {
     void omitsDisabledProtocolV2Capabilities() {
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
-                        false, false, false, false),
-                "000eversion 2\n"
-                        + "0000");
-        assertV2Advertisement(
-                new GitWireConfiguration.ProtocolV2(
-                        false, false, true, false),
+                        false, false, true, true),
                 "000eversion 2\n"
                         + "000afetch\n"
+                        + "0012server-option\n"
                         + "0000");
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
-                        false, false, false, true),
+                        true, true, false, true),
                 "000eversion 2\n"
+                        + "0013ls-refs=unborn\n"
                         + "0012server-option\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        true, true, true, false),
+                "000eversion 2\n"
+                        + "0013ls-refs=unborn\n"
+                        + "000afetch\n"
                         + "0000");
     }
 
