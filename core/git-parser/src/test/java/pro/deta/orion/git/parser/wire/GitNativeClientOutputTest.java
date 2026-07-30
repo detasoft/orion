@@ -80,6 +80,77 @@ class GitNativeClientOutputTest {
     }
 
     @Test
+    void streamsAckAfterExistingPartiallyFilledOutput() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        int initialWriterIndex = outbound.capacity() - 10;
+        outbound.writerIndex(initialWriterIndex);
+        outbound.setByte(initialWriterIndex - 1, 'x');
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+
+        GitNativeClientOutput.SendResult.Streaming streaming =
+                (GitNativeClientOutput.SendResult.Streaming)
+                        output.sendAck(
+                                GitObjectId.of(MAIN_ID),
+                                GitNativeClientOutput.AckStatus.READY);
+
+        try {
+            assertThatThrownBy(output::sendNak)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("already in progress");
+
+            streaming.task().run();
+
+            ByteArrayOutputStream allSent = new ByteArrayOutputStream();
+            for (byte[] chunk : sent) {
+                allSent.writeBytes(chunk);
+            }
+            byte[] bytes = allSent.toByteArray();
+            assertThat(bytes[initialWriterIndex - 1])
+                    .isEqualTo((byte) 'x');
+            assertThat(new String(
+                    bytes,
+                    initialWriterIndex,
+                    bytes.length - initialWriterIndex,
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "0037ACK " + MAIN_ID + " ready\n");
+            assertThat(output.sendNak())
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void streamsNakWhenOutputIsAlreadyFull() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        outbound.writerIndex(outbound.capacity());
+        outbound.setByte(outbound.writerIndex() - 1, 'x');
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+
+        GitNativeClientOutput.SendResult.Streaming streaming =
+                (GitNativeClientOutput.SendResult.Streaming)
+                        output.sendNak();
+        streaming.task().run();
+
+        try {
+            assertThat(sent).hasSize(2);
+            assertThat(sent.getFirst()).hasSize(outbound.capacity());
+            assertThat(sent.getFirst()[outbound.capacity() - 1])
+                    .isEqualTo((byte) 'x');
+            assertThat(new String(
+                    sent.getLast(),
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo("0008NAK\n");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
     void sendsTypedLegacyAdvertisementAsPktLines() {
         ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
         GitNativeClientOutput output = new GitNativeClientOutput(outbound);
@@ -359,5 +430,21 @@ class GitNativeClientOutputTest {
         expected.writeBytes(
                 "0000".getBytes(StandardCharsets.US_ASCII));
         return expected.toByteArray();
+    }
+
+    private static GitNativeClientOutput collectingOutput(
+            ByteBuf outbound,
+            List<byte[]> sent) {
+        return new GitNativeClientOutput(
+                outbound,
+                chunk -> {
+                    try {
+                        byte[] bytes = new byte[chunk.readableBytes()];
+                        chunk.readBytes(bytes);
+                        sent.add(bytes);
+                    } finally {
+                        chunk.release();
+                    }
+                });
     }
 }

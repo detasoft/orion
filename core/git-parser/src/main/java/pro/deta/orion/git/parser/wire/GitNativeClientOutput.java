@@ -21,7 +21,7 @@ public final class GitNativeClientOutput {
 
     private final ByteBuf output;
     private final Consumer<ByteBuf> sendToClient;
-    private Serialization serialization;
+    private OutputSerialization serialization;
 
     public GitNativeClientOutput(ByteBuf output) {
         this(
@@ -48,11 +48,15 @@ public final class GitNativeClientOutput {
     public SendResult sendAdvertisement(
             GitV1Advertisement advertisement) {
         Objects.requireNonNull(advertisement, "advertisement");
-        return sendPackets(encodePackets(advertisement));
+        return sendSerialization(
+                new PacketListSerialization(
+                        advertisement,
+                        encodePackets(advertisement)));
     }
 
     public SendResult sendNak() {
-        return sendPackets(List.of(encodePacket("NAK\n")));
+        return sendSerialization(
+                new PktLineSerialization(List.of("NAK\n")));
     }
 
     public SendResult sendAck(
@@ -60,20 +64,20 @@ public final class GitNativeClientOutput {
             AckStatus status) {
         Objects.requireNonNull(objectId, "objectId");
         Objects.requireNonNull(status, "status");
-        return sendPackets(List.of(encodePacket(
-                "ACK "
-                        + objectId
-                        + status.wireSuffix
-                        + "\n")));
+        return sendSerialization(new PktLineSerialization(List.of(
+                "ACK ",
+                objectId.value(),
+                status.wireSuffix,
+                "\n")));
     }
 
-    private SendResult sendPackets(List<byte[]> packets) {
+    private SendResult sendSerialization(
+            OutputSerialization operation) {
         if (serialization != null) {
             throw new IllegalStateException(
                     "Client output operation is already in progress");
         }
 
-        Serialization operation = new Serialization(packets);
         if (writeAvailable(operation)) {
             return new SendResult.Completed();
         }
@@ -82,7 +86,7 @@ public final class GitNativeClientOutput {
     }
 
     private void finishStreaming() {
-        Serialization operation = serialization;
+        OutputSerialization operation = serialization;
         if (operation == null) {
             throw new IllegalStateException(
                     "Client output operation is not in progress");
@@ -100,22 +104,8 @@ public final class GitNativeClientOutput {
         }
     }
 
-    private boolean writeAvailable(Serialization operation) {
-        while (operation.packetIndex < operation.packets.size()) {
-            byte[] packet = operation.packets.get(operation.packetIndex);
-            int remaining = packet.length - operation.packetOffset;
-            int writable = Math.min(output.writableBytes(), remaining);
-            output.writeBytes(packet, operation.packetOffset, writable);
-            operation.packetOffset += writable;
-            if (operation.packetOffset == packet.length) {
-                operation.packetIndex++;
-                operation.packetOffset = 0;
-            }
-            if (!output.isWritable()) {
-                return false;
-            }
-        }
-        return true;
+    private boolean writeAvailable(OutputSerialization operation) {
+        return operation.writeAvailable(output);
     }
 
     private void submitOutput() {
@@ -139,31 +129,23 @@ public final class GitNativeClientOutput {
             GitV1Advertisement advertisement) {
         List<byte[]> packets = new ArrayList<>();
         for (byte[] line : encodeLines(advertisement)) {
-            packets.add(encodePacket(line));
+            int packetLength = line.length + PKT_LINE_HEADER_SIZE;
+            if (packetLength > MAX_PKT_LINE_LENGTH) {
+                throw new IllegalArgumentException(
+                        "Advertisement line exceeds Git pkt-line limit");
+            }
+            byte[] packet = new byte[packetLength];
+            writeHeader(packet, packetLength);
+            System.arraycopy(
+                    line,
+                    0,
+                    packet,
+                    PKT_LINE_HEADER_SIZE,
+                    line.length);
+            packets.add(packet);
         }
         packets.add(new byte[] {'0', '0', '0', '0'});
         return List.copyOf(packets);
-    }
-
-    private static byte[] encodePacket(String payload) {
-        return encodePacket(payload.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static byte[] encodePacket(byte[] payload) {
-        int packetLength = payload.length + PKT_LINE_HEADER_SIZE;
-        if (packetLength > MAX_PKT_LINE_LENGTH) {
-            throw new IllegalArgumentException(
-                    "Git pkt-line exceeds maximum length");
-        }
-        byte[] packet = new byte[packetLength];
-        writeHeader(packet, packetLength);
-        System.arraycopy(
-                payload,
-                0,
-                packet,
-                PKT_LINE_HEADER_SIZE,
-                payload.length);
-        return packet;
     }
 
     private static List<byte[]> encodeLines(
@@ -234,13 +216,96 @@ public final class GitNativeClientOutput {
         }
     }
 
-    private static final class Serialization {
+    private interface OutputSerialization {
+        boolean writeAvailable(ByteBuf output);
+    }
+
+    private static final class PacketListSerialization
+            implements OutputSerialization {
+        @SuppressWarnings("unused")
+        private final GitV1Advertisement advertisement;
         private final List<byte[]> packets;
         private int packetIndex;
         private int packetOffset;
 
-        private Serialization(List<byte[]> packets) {
+        private PacketListSerialization(
+                GitV1Advertisement advertisement,
+                List<byte[]> packets) {
+            this.advertisement = advertisement;
             this.packets = packets;
+        }
+
+        @Override
+        public boolean writeAvailable(ByteBuf output) {
+            while (packetIndex < packets.size()) {
+                byte[] packet = packets.get(packetIndex);
+                int remaining = packet.length - packetOffset;
+                int writable = Math.min(
+                        output.writableBytes(),
+                        remaining);
+                output.writeBytes(packet, packetOffset, writable);
+                packetOffset += writable;
+                if (packetOffset == packet.length) {
+                    packetIndex++;
+                    packetOffset = 0;
+                }
+                if (!output.isWritable()) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    private static final class PktLineSerialization
+            implements OutputSerialization {
+        private final List<String> payloadParts;
+        private final int packetLength;
+        private int packetOffset;
+
+        private PktLineSerialization(List<String> payloadParts) {
+            this.payloadParts = List.copyOf(payloadParts);
+            int payloadLength = 0;
+            for (String part : payloadParts) {
+                for (int index = 0; index < part.length(); index++) {
+                    if (part.charAt(index) > 0x7f) {
+                        throw new IllegalArgumentException(
+                                "Git pkt-line response must be ASCII");
+                    }
+                }
+                payloadLength += part.length();
+            }
+            packetLength = payloadLength + PKT_LINE_HEADER_SIZE;
+            if (packetLength > MAX_PKT_LINE_LENGTH) {
+                throw new IllegalArgumentException(
+                        "Git pkt-line exceeds maximum length");
+            }
+        }
+
+        @Override
+        public boolean writeAvailable(ByteBuf output) {
+            while (packetOffset < packetLength
+                    && output.isWritable()) {
+                output.writeByte(byteAt(packetOffset));
+                packetOffset++;
+            }
+            return packetOffset == packetLength;
+        }
+
+        private byte byteAt(int offset) {
+            if (offset < PKT_LINE_HEADER_SIZE) {
+                int shift = (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
+                return hexDigit((packetLength >>> shift) & 0x0f);
+            }
+            int payloadOffset = offset - PKT_LINE_HEADER_SIZE;
+            for (String part : payloadParts) {
+                if (payloadOffset < part.length()) {
+                    return (byte) part.charAt(payloadOffset);
+                }
+                payloadOffset -= part.length();
+            }
+            throw new IllegalStateException(
+                    "Git pkt-line cursor exceeds payload");
         }
     }
 }
