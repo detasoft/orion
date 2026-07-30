@@ -8,50 +8,225 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadNegotiation;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadRequest;
+import pro.deta.orion.git.parser.wire.error.GitGeneralException;
+import pro.deta.orion.git.parser.wire.error.GitWireError;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.EMPTY_LEGACY_UPLOAD_NEGOTIATION_PACKET;
+import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.INVALID_LEGACY_UPLOAD_HAVE_OBJECT_ID;
+import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_COMMAND;
+import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_CONTROL;
 
 class UploadNegotiationContinuationTest {
-    @Test
-    void negotiationPlaceholderFailsWithoutConsumingInput() {
-        UploadNegotiationContinuation continuation =
-                new UploadNegotiationContinuation(context(), request());
-
-        assertPlaceholder(
-                continuation,
-                "negotiation is not implemented");
-    }
+    private static final String FIRST_ID = "1".repeat(40);
+    private static final String SECOND_ID = "a".repeat(40);
 
     @Test
-    void responsePlaceholderFailsWithoutConsumingInput() {
-        UploadResponseContinuation continuation =
-                new UploadNegotiationContinuation(context(), request())
-                        .responseBoundary();
+    void parsesHaveAndDoneAndLeavesTrailingBytesUnread() {
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "have " + FIRST_ID + "\n");
+        writeData(input, "done\n");
+        input.writeByte('x');
+        Driver driver = new Driver(context());
 
-        assertThat(continuation.request()).isEqualTo(request());
-        assertPlaceholder(
-                continuation,
-                "response is not implemented");
-    }
-
-    private static void assertPlaceholder(
-            Continuation<ByteBuf> continuation,
-            String message) {
-        ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
         ContinuationFlow<ByteBuf> flow;
         try {
-            flow = continuation.process(input);
-            assertThat(input.readerIndex()).isZero();
+            flow = driver.drive(input);
+            assertThat(input.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("x");
         } finally {
             input.release();
         }
 
+        LegacyUploadNegotiation negotiation =
+                completedNegotiation(flow);
+        assertThat(negotiation.request()).isEqualTo(request());
+        assertThat(negotiation.haves())
+                .containsExactly(GitObjectId.of(FIRST_ID));
+        assertThat(negotiation.haves()).isUnmodifiable();
+    }
+
+    @Test
+    void preservesOrderedDeduplicatedHavesAcrossFlushRounds() {
+        ByteBuf outbound = fixedOutput();
+        GitNativeClientOutput clientOutput =
+                new GitNativeClientOutput(outbound);
+        Driver driver = new Driver(context(clientOutput));
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "have " + FIRST_ID + "\n");
+        writeData(input, "have " + SECOND_ID + "\n");
+        writeFlush(input);
+        writeData(input, "have " + FIRST_ID + "\n");
+        writeData(input, "done");
+
+        ContinuationFlow<ByteBuf> flow;
+        try {
+            flow = driver.driveOneByteAtATime(input);
+        } finally {
+            input.release();
+        }
+
+        try {
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("0008NAK\n");
+            assertThat(completedNegotiation(flow).haves())
+                    .containsExactly(
+                            GitObjectId.of(FIRST_ID),
+                            GitObjectId.of(SECOND_ID));
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void yieldsWhenNakOutputNeedsStreaming() {
+        ByteBuf outbound = fixedOutput();
+        outbound.writerIndex(outbound.capacity());
+        List<ByteBuf> sent = new ArrayList<>();
+        GitNativeClientOutput clientOutput = new GitNativeClientOutput(
+                outbound,
+                sent::add);
+        UploadNegotiationContinuation negotiation =
+                new UploadNegotiationContinuation(
+                        context(clientOutput),
+                        request());
+        UploadNegotiationResponseContinuation response =
+                new UploadNegotiationResponseContinuation(
+                        context(clientOutput),
+                        negotiation);
+        ByteBuf input = Unpooled.buffer();
+
+        ContinuationFlow<ByteBuf> flow;
+        try {
+            flow = response.process(input);
+        } finally {
+            input.release();
+        }
+
+        try {
+            assertThat(flow)
+                    .isInstanceOfSatisfying(
+                            ContinuationFlow.TransitionAndYield.class,
+                            yielded -> {
+                                assertThat(yielded.next())
+                                        .isSameAs(negotiation);
+                                yielded.task().run();
+                            });
+            assertThat(sent).hasSize(2);
+            assertThat(sent.getLast()
+                    .toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("0008NAK\n");
+        } finally {
+            for (ByteBuf submitted : sent) {
+                submitted.release();
+            }
+            outbound.release();
+        }
+    }
+
+    @Test
+    void completesWithErrorWhenNakOutputRejectsOperation() {
+        ByteBuf outbound = fixedOutput();
+        outbound.writerIndex(outbound.capacity());
+        GitNativeClientOutput clientOutput = new GitNativeClientOutput(
+                outbound,
+                ByteBuf::release);
+        GitNativeClientOutput.SendResult active =
+                clientOutput.sendNak();
+        assertThat(active)
+                .isInstanceOf(
+                        GitNativeClientOutput.SendResult.Streaming.class);
+        UploadNegotiationContinuation negotiation =
+                new UploadNegotiationContinuation(
+                        context(clientOutput),
+                        request());
+        UploadNegotiationResponseContinuation response =
+                new UploadNegotiationResponseContinuation(
+                        context(clientOutput),
+                        negotiation);
+        ByteBuf input = Unpooled.buffer();
+
+        ContinuationFlow<ByteBuf> flow;
+        try {
+            flow = response.process(input);
+        } finally {
+            input.release();
+            outbound.release();
+        }
+
+        assertThat(flow)
+                .isInstanceOf(ContinuationFlow.Transition.class);
+        assertThat(((ContinuationFlow.Transition<?>) flow).next())
+                .isInstanceOfSatisfying(
+                        Continuation.CompletedError.class,
+                        error -> assertThat(error.message())
+                                .contains("already in progress"));
+    }
+
+    @Test
+    void rejectsMalformedHaveObjectId() {
+        assertError(
+                process(data("have not-an-object-id\n")),
+                INVALID_LEGACY_UPLOAD_HAVE_OBJECT_ID);
+    }
+
+    @Test
+    void rejectsUnsupportedCommand() {
+        assertError(
+                process(data("want " + FIRST_ID + "\n")),
+                UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_COMMAND);
+    }
+
+    @Test
+    void rejectsEmptyDataPacket() {
+        assertError(
+                process(control("0004")),
+                EMPTY_LEGACY_UPLOAD_NEGOTIATION_PACKET);
+    }
+
+    @Test
+    void rejectsDelimiterAndResponseEnd() {
+        assertError(
+                process(control("0001")),
+                UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_CONTROL);
+        assertError(
+                process(control("0002")),
+                UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_CONTROL);
+    }
+
+    private static ContinuationFlow<ByteBuf> process(ByteBuf input) {
+        try {
+            return new Driver(context()).drive(input);
+        } finally {
+            input.release();
+        }
+    }
+
+    private static LegacyUploadNegotiation completedNegotiation(
+            ContinuationFlow<ByteBuf> flow) {
+        assertThat(flow)
+                .isInstanceOf(ContinuationFlow.Transition.class);
+        Continuation<?> next =
+                ((ContinuationFlow.Transition<?>) flow).next();
+        assertThat(next)
+                .isInstanceOf(UploadResponseContinuation.class);
+        return ((UploadResponseContinuation) next).negotiation();
+    }
+
+    private static void assertError(
+            ContinuationFlow<ByteBuf> flow,
+            GitWireError.Kind kind) {
         assertThat(flow)
                 .isInstanceOf(ContinuationFlow.Transition.class);
         Continuation<?> next =
@@ -59,17 +234,58 @@ class UploadNegotiationContinuationTest {
         assertThat(next)
                 .isInstanceOfSatisfying(
                         Continuation.CompletedError.class,
-                        error -> assertThat(error.message())
-                                .contains(message));
+                        error -> {
+                            assertThat(error.message())
+                                    .isEqualTo(kind.getMessage());
+                            assertThat(error.throwable())
+                                    .isInstanceOf(GitGeneralException.class)
+                                    .hasMessageContaining(kind.name());
+                        });
     }
 
     private static GitMinimalWireMachine.Context context() {
+        return context(new GitNativeClientOutput(fixedOutput()));
+    }
+
+    private static GitMinimalWireMachine.Context context(
+            GitNativeClientOutput output) {
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT);
+                UnpooledByteBufAllocator.DEFAULT,
+                output);
+    }
+
+    private static ByteBuf fixedOutput() {
+        return Unpooled.buffer(
+                GitNativeClientOutput.BUFFER_CAPACITY,
+                GitNativeClientOutput.BUFFER_CAPACITY);
     }
 
     private static LegacyUploadRequest request() {
         return RequestHolder.VALUE;
+    }
+
+    private static ByteBuf data(String payload) {
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, payload);
+        return input;
+    }
+
+    private static ByteBuf control(String value) {
+        return Unpooled.copiedBuffer(
+                value,
+                StandardCharsets.US_ASCII);
+    }
+
+    private static void writeData(ByteBuf output, String value) {
+        byte[] payload = value.getBytes(StandardCharsets.US_ASCII);
+        output.writeCharSequence(
+                "%04x".formatted(payload.length + 4),
+                StandardCharsets.US_ASCII);
+        output.writeBytes(payload);
+    }
+
+    private static void writeFlush(ByteBuf output) {
+        output.writeCharSequence("0000", StandardCharsets.US_ASCII);
     }
 
     private static final class RequestHolder {
@@ -80,7 +296,52 @@ class UploadNegotiationContinuationTest {
                                 "/demo.git",
                                 "localhost",
                                 Map.of()),
-                        Set.of(GitObjectId.of("1".repeat(40))),
+                        Set.of(GitObjectId.of(FIRST_ID)),
                         Set.of("thin-pack"));
+    }
+
+    private static final class Driver {
+        private Continuation<ByteBuf> current;
+
+        private Driver(GitMinimalWireMachine.Context context) {
+            current = new UploadNegotiationContinuation(
+                    context,
+                    request());
+        }
+
+        private ContinuationFlow<ByteBuf> driveOneByteAtATime(
+                ByteBuf input) {
+            ContinuationFlow<ByteBuf> flow = null;
+            while (input.isReadable()) {
+                ByteBuf fragment = input.readRetainedSlice(1);
+                try {
+                    flow = drive(fragment);
+                } finally {
+                    fragment.release();
+                }
+            }
+            return flow;
+        }
+
+        private ContinuationFlow<ByteBuf> drive(ByteBuf input) {
+            while (true) {
+                ContinuationFlow<ByteBuf> flow =
+                        current.process(input);
+                if (flow instanceof
+                        ContinuationFlow.Transition<ByteBuf> transition) {
+                    current = transition.next();
+                    if (current instanceof UploadResponseContinuation
+                            || current instanceof
+                            Continuation.CompletedError<?>) {
+                        return flow;
+                    }
+                    continue;
+                }
+                if (flow instanceof ContinuationFlow.Continue<ByteBuf>) {
+                    continue;
+                }
+                return flow;
+            }
+        }
     }
 }

@@ -46,7 +46,17 @@ public record GitWireError(
         EMPTY_LEGACY_UPLOAD_CAPABILITY(
                 "Legacy upload capability must not be empty"),
         INVALID_LEGACY_UPLOAD_REQUEST(
-                "Failed to read legacy upload-pack request");
+                "Failed to read legacy upload-pack request"),
+        EMPTY_LEGACY_UPLOAD_NEGOTIATION_PACKET(
+                "Legacy upload negotiation contains an empty packet"),
+        UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_CONTROL(
+                "Control packet is not supported in legacy upload negotiation"),
+        UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_COMMAND(
+                "Legacy upload negotiation contains an unsupported command"),
+        INVALID_LEGACY_UPLOAD_HAVE_OBJECT_ID(
+                "Legacy upload have must contain a 40-digit hexadecimal object ID"),
+        INVALID_LEGACY_UPLOAD_NEGOTIATION(
+                "Failed to read legacy upload-pack negotiation");
 
         private String message;
 

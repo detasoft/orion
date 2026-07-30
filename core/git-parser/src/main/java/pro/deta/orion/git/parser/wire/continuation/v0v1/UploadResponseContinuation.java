@@ -4,20 +4,22 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadRequest;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadNegotiation;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
 
 final class UploadResponseContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
-    private final LegacyUploadRequest request;
+    private final LegacyUploadNegotiation negotiation;
 
     UploadResponseContinuation(
             GitMinimalWireMachine.Context context,
-            LegacyUploadRequest request) {
+            LegacyUploadNegotiation negotiation) {
         this.context = Objects.requireNonNull(context, "context");
-        this.request = Objects.requireNonNull(request, "request");
+        this.negotiation = Objects.requireNonNull(
+                negotiation,
+                "negotiation");
     }
 
     @Override
@@ -27,7 +29,7 @@ final class UploadResponseContinuation implements Continuation<ByteBuf> {
     }
 
     @TestOnly
-    LegacyUploadRequest request() {
-        return request;
+    LegacyUploadNegotiation negotiation() {
+        return negotiation;
     }
 }
