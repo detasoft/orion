@@ -75,15 +75,18 @@ public final class GitMinimalWireMachine {
 
     @TestOnly
     public static Context testContext(ByteBufAllocator allocator) {
-        return new Context(
-                Objects.requireNonNull(allocator, "allocator"),
+        ByteBufAllocator requiredAllocator =
+                Objects.requireNonNull(allocator, "allocator");
+        GitWireConfiguration configuration =
+                GitWireConfiguration.allSupported();
+        return testContext(
+                requiredAllocator,
                 new GitNativeClientOutput(
-                        allocator.buffer(
+                        requiredAllocator.buffer(
                                 GitNativeClientOutput.BUFFER_CAPACITY,
                                 GitNativeClientOutput.BUFFER_CAPACITY)),
-                new GitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()),
-                GitWireConfiguration.allSupported());
+                new InMemoryNativeGitRepositoryProvider(),
+                configuration);
     }
 
     @TestOnly
@@ -93,8 +96,7 @@ public final class GitMinimalWireMachine {
         return testContext(
                 allocator,
                 clientOutput,
-                new GitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()),
+                new InMemoryNativeGitRepositoryProvider(),
                 GitWireConfiguration.allSupported());
     }
 
@@ -106,7 +108,7 @@ public final class GitMinimalWireMachine {
         return testContext(
                 allocator,
                 clientOutput,
-                new GitNativeRepositoryService(repositoryProvider),
+                repositoryProvider,
                 GitWireConfiguration.allSupported());
     }
 
@@ -115,26 +117,31 @@ public final class GitMinimalWireMachine {
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             GitNativeRepositoryService repositoryService) {
-        return testContext(
-                allocator,
-                clientOutput,
-                repositoryService,
-                GitWireConfiguration.allSupported());
-    }
-
-    @TestOnly
-    public static Context testContext(
-            ByteBufAllocator allocator,
-            GitNativeClientOutput clientOutput,
-            GitNativeRepositoryService repositoryService,
-            GitWireConfiguration configuration) {
         return new Context(
                 Objects.requireNonNull(allocator, "allocator"),
                 Objects.requireNonNull(clientOutput, "clientOutput"),
                 Objects.requireNonNull(
                         repositoryService,
                         "repositoryService"),
-                Objects.requireNonNull(configuration, "configuration"));
+                repositoryService.configuration());
+    }
+
+    @TestOnly
+    public static Context testContext(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput,
+            InMemoryNativeGitRepositoryProvider repositoryProvider,
+            GitWireConfiguration configuration) {
+        Objects.requireNonNull(configuration, "configuration");
+        return new Context(
+                Objects.requireNonNull(allocator, "allocator"),
+                Objects.requireNonNull(clientOutput, "clientOutput"),
+                new GitNativeRepositoryService(
+                        Objects.requireNonNull(
+                                repositoryProvider,
+                                "repositoryProvider"),
+                        configuration),
+                configuration);
     }
 
     public static final class Context {

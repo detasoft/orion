@@ -4,6 +4,10 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
@@ -37,11 +41,14 @@ class GitMinimalWireMachineTest {
                     GitMinimalWireMachine.testContext(
                             UnpooledByteBufAllocator.DEFAULT,
                             output.clientOutput(),
-                            new GitNativeRepositoryService(
-                                    new InMemoryNativeGitRepositoryProvider()),
+                            new InMemoryNativeGitRepositoryProvider(),
                             configuration);
 
             assertThat(context.configuration).isSameAs(configuration);
+            assertThat(context.repositoryService
+                    .legacyReceivePackAdvertisement(receiveRequest())
+                    .capabilities())
+                    .isEmpty();
         } finally {
             output.outbound().release();
         }
@@ -89,6 +96,14 @@ class GitMinimalWireMachineTest {
         return new OutputFixture(
                 outbound,
                 new GitNativeClientOutput(outbound));
+    }
+
+    private static InitialRequestData receiveRequest() {
+        return new InitialRequestData(
+                InitialRequestService.RECEIVE_PACK,
+                "/demo.git",
+                "localhost",
+                Map.of());
     }
 
     private static GitWireConfiguration disabledConfiguration() {

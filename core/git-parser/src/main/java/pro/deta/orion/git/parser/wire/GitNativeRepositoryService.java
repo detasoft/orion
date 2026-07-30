@@ -19,6 +19,7 @@ import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommand;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
+import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;
@@ -60,6 +61,11 @@ public final class GitNativeRepositoryService {
         this.configuration = Objects.requireNonNull(
                 configuration,
                 "configuration");
+    }
+
+    @TestOnly
+    GitWireConfiguration configuration() {
+        return configuration;
     }
 
     public GitV1Advertisement legacyUploadPackAdvertisement(

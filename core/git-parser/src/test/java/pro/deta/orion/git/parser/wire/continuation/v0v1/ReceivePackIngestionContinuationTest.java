@@ -13,7 +13,6 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -167,13 +166,11 @@ class ReceivePackIngestionContinuationTest {
                 new InMemoryNativeGitRepositoryProvider();
         GitNativeClientOutput output =
                 new GitNativeClientOutput(outbound);
-        GitNativeRepositoryService repositoryService =
-                new GitNativeRepositoryService(provider, configuration);
         GitMinimalWireMachine.Context context =
                 GitMinimalWireMachine.testContext(
                         UnpooledByteBufAllocator.DEFAULT,
                         output,
-                        repositoryService,
+                        provider,
                         configuration);
         Continuation<ByteBuf> continuation =
                 ReceivePackIngestionContinuation.completeReceivePack(
