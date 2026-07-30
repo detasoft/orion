@@ -30,7 +30,23 @@ public record GitWireError(
         INVALID_REPORT_STATUS_LINE,
         INVALID_SIDE_BAND,
         SIDE_BAND_FATAL,
-        INVALID_RECEIVE_PACK_COMMAND;
+        INVALID_RECEIVE_PACK_COMMAND,
+        EMPTY_LEGACY_UPLOAD_PACKET(
+                "Legacy upload request contains an empty packet"),
+        UNSUPPORTED_LEGACY_UPLOAD_CONTROL(
+                "Control packet is not supported in a legacy upload request"),
+        MISSING_LEGACY_UPLOAD_WANT(
+                "Legacy upload request ended before the first want"),
+        UNSUPPORTED_LEGACY_UPLOAD_COMMAND(
+                "Legacy upload request contains an unsupported command"),
+        INVALID_LEGACY_UPLOAD_OBJECT_ID(
+                "Legacy upload want must contain a 40-digit hexadecimal object ID"),
+        LATE_LEGACY_UPLOAD_CAPABILITIES(
+                "Legacy upload capabilities are allowed only on the first want"),
+        EMPTY_LEGACY_UPLOAD_CAPABILITY(
+                "Legacy upload capability must not be empty"),
+        INVALID_LEGACY_UPLOAD_REQUEST(
+                "Failed to read legacy upload-pack request");
 
         private String message;
 

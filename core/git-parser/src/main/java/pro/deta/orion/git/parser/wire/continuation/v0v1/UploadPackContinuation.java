@@ -32,11 +32,10 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
             GitNativeClientOutput.SendResult result =
                     context.clientOutput.sendAdvertisement(
                             advertisement);
-            if (result instanceof
-                    GitNativeClientOutput.SendResult.Streaming streaming) {
+            if (result instanceof GitNativeClientOutput.SendResult.Streaming(Runnable task)) {
                 return ContinuationFlow.transitionAndYield(
                         new UploadRequestContinuation(context, data),
-                        streaming.task());
+                        task);
             }
             return ContinuationFlow.transition(
                     new UploadRequestContinuation(context, data));

@@ -14,12 +14,18 @@ descriptive continuation error instead of throwing from `process`.
 
 ## Continuation graph
 
-`UploadRequestContinuation` coordinates pkt-line framing for the want phase. It
-incrementally reads the four-byte hexadecimal header and the declared payload,
-so fragmented headers and payloads do not require concatenating input buffers.
-After each complete data packet it parses the upload-pack command and continues
-with the same instance. On flush it validates the accumulated request and
-transitions to `UploadNegotiationContinuation`.
+`ControlHeaderContinuation` remains the only continuation that reads pkt-line
+headers. It accepts a stage-specific control handler in addition to its
+existing initial-request constructor. The handler maps a parsed `ControlState`
+to the next continuation without calling that continuation's `process` method.
+
+`UploadRequestContinuation` owns the accumulated want-phase state and acts as
+the upload-specific control handler. It first transitions to
+`ControlHeaderContinuation`. A DATA header transitions to
+`UploadWantPayloadContinuation`, which incrementally reads the declared
+payload, updates the request state, and transitions back to a new
+`ControlHeaderContinuation` using the same owner. A flush validates the
+accumulated request and transitions to `UploadNegotiationContinuation`.
 
 The graph remains flat under the existing `ContinuationRuntime`; no continuation
 calls another continuation's `process` method and no nested runtime is added.
@@ -39,7 +45,8 @@ space-separated capability tokens. Later packets in this slice must be
 additional `want <40-hex-object-id>` commands without capabilities. Lines may
 end in LF, which is removed before parsing. Empty requests, malformed object
 IDs, unsupported commands, capabilities on later wants, delimiter packets, and
-response-end packets become typed continuation failures.
+response-end packets become typed `GitWireError.Kind` failures backed by
+`GitGeneralException`.
 
 Shallow and deepen commands are intentionally deferred until their semantics
 are implemented. Accepting and then ignoring them would make a clone appear to
@@ -60,9 +67,10 @@ repository or output behavior prematurely.
 ## Error and resource handling
 
 All parsing and validation failures are caught inside `process` and returned as
-`ContinuationFlow.completedError`. The continuation keeps only primitive header
-state and a byte array for one bounded pkt-line payload; it does not retain
-input `ByteBuf` instances and therefore does not own or release caller buffers.
+`ContinuationFlow.completedError`. `ControlHeaderContinuation` keeps only
+primitive header state; `UploadWantPayloadContinuation` keeps a byte array for
+one bounded pkt-line payload. Neither retains input `ByteBuf` instances, so
+they do not own or release caller buffers.
 
 Payload lengths use the existing pkt-line limits. A flush is accepted only
 after at least one valid want. Closing a partial continuation relies on runtime
