@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
@@ -64,6 +65,35 @@ class UploadPackContinuationTest {
             assertThat(flow.next())
                     .isInstanceOf(UploadRequestContinuation.class);
             assertThat(input.readerIndex()).isZero();
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void completesWithErrorWhenAdvertisementOutputRejectsOperation() {
+        ByteBuf outbound = outputBuffer();
+        outbound.writerIndex(outbound.capacity());
+        ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                outbound,
+                ByteBuf::release);
+        assertThat(output.sendNak())
+                .isInstanceOf(
+                        GitNativeClientOutput.SendResult.Streaming.class);
+
+        try {
+            ContinuationFlow<ByteBuf> flow =
+                    continuation(output).process(input);
+
+            assertThat(flow)
+                    .isInstanceOf(ContinuationFlow.Transition.class);
+            assertThat(((ContinuationFlow.Transition<?>) flow).next())
+                    .isInstanceOfSatisfying(
+                            Continuation.CompletedError.class,
+                            error -> assertThat(error.message())
+                                    .contains("already in progress"));
         } finally {
             input.release();
             outbound.release();

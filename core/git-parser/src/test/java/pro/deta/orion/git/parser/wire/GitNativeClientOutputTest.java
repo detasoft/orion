@@ -95,9 +95,11 @@ class GitNativeClientOutputTest {
                                 GitNativeClientOutput.AckStatus.READY);
 
         try {
-            assertThatThrownBy(output::sendNak)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("already in progress");
+            assertThat(output.sendNak())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .contains("already in progress"));
 
             streaming.task().run();
 
@@ -118,6 +120,30 @@ class GitNativeClientOutputTest {
             assertThat(output.sendNak())
                     .isInstanceOf(
                             GitNativeClientOutput.SendResult.Completed.class);
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void returnsFailedWhenAckCannotBeSerialized() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendAck(
+                    GitObjectId.of("x".repeat(65 * 1024)),
+                    GitNativeClientOutput.AckStatus.FINAL))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> {
+                                assertThat(failed.message())
+                                        .contains("serialize");
+                                assertThat(failed.cause())
+                                        .isInstanceOf(
+                                                IllegalArgumentException.class);
+                            });
+            assertThat(outbound.writerIndex()).isZero();
         } finally {
             outbound.release();
         }
@@ -268,10 +294,11 @@ class GitNativeClientOutputTest {
                 (GitNativeClientOutput.SendResult.Streaming)
                         output.sendAdvertisement(advertisement);
         try {
-            assertThatThrownBy(
-                    () -> output.sendAdvertisement(advertisement))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("already in progress");
+            assertThat(output.sendAdvertisement(advertisement))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .contains("already in progress"));
 
             streaming.task().run();
 

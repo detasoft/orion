@@ -47,35 +47,75 @@ public final class GitNativeClientOutput {
 
     public SendResult sendAdvertisement(
             GitV1Advertisement advertisement) {
-        Objects.requireNonNull(advertisement, "advertisement");
-        return sendSerialization(
-                new PacketListSerialization(
-                        advertisement,
-                        encodePackets(advertisement)));
+        try {
+            Objects.requireNonNull(advertisement, "advertisement");
+            return sendSerialization(
+                    new PacketListSerialization(
+                            advertisement,
+                            encodePackets(advertisement)));
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to serialize Git advertisement",
+                    error);
+        }
     }
 
     public SendResult sendNak() {
-        return sendSerialization(
-                new PktLineSerialization(List.of("NAK\n")));
+        return sendPktLine(
+                List.of("NAK\n"),
+                "Failed to serialize legacy upload-pack NAK");
     }
 
     public SendResult sendAck(
             GitObjectId objectId,
             AckStatus status) {
-        Objects.requireNonNull(objectId, "objectId");
-        Objects.requireNonNull(status, "status");
-        return sendSerialization(new PktLineSerialization(List.of(
-                "ACK ",
-                objectId.value(),
-                status.wireSuffix,
-                "\n")));
+        try {
+            Objects.requireNonNull(objectId, "objectId");
+            Objects.requireNonNull(status, "status");
+            return sendPktLine(
+                    List.of(
+                            "ACK ",
+                            objectId.value(),
+                            status.wireSuffix,
+                            "\n"),
+                    "Failed to serialize legacy upload-pack ACK");
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to serialize legacy upload-pack ACK",
+                    error);
+        }
+    }
+
+    private SendResult sendPktLine(
+            List<String> payloadParts,
+            String failureMessage) {
+        String payload = String.join("", payloadParts);
+        for (int index = 0; index < payload.length(); index++) {
+            if (payload.charAt(index) > 0x7f) {
+                return new SendResult.Failed(
+                        failureMessage,
+                        new IllegalArgumentException(
+                                "Git pkt-line response must be ASCII"));
+            }
+        }
+        int packetLength = payload.length() + PKT_LINE_HEADER_SIZE;
+        if (packetLength > MAX_PKT_LINE_LENGTH) {
+            return new SendResult.Failed(
+                    failureMessage,
+                    new IllegalArgumentException(
+                            "Git pkt-line exceeds maximum length"));
+        }
+        return sendSerialization(
+                new PktLineSerialization(payload, packetLength));
     }
 
     private SendResult sendSerialization(
             OutputSerialization operation) {
         if (serialization != null) {
-            throw new IllegalStateException(
-                    "Client output operation is already in progress");
+            return new SendResult.Failed(
+                    "Client output operation is already in progress",
+                    new IllegalStateException(
+                            "Client output operation is already in progress"));
         }
 
         if (writeAvailable(operation)) {
@@ -191,7 +231,9 @@ public final class GitNativeClientOutput {
     }
 
     public sealed interface SendResult
-            permits SendResult.Completed, SendResult.Streaming {
+            permits SendResult.Completed,
+                    SendResult.Streaming,
+                    SendResult.Failed {
 
         record Completed() implements SendResult {
         }
@@ -199,6 +241,15 @@ public final class GitNativeClientOutput {
         record Streaming(Runnable task) implements SendResult {
             public Streaming {
                 Objects.requireNonNull(task, "task");
+            }
+        }
+
+        record Failed(
+                String message,
+                Throwable cause) implements SendResult {
+            public Failed {
+                Objects.requireNonNull(message, "message");
+                Objects.requireNonNull(cause, "cause");
             }
         }
     }
@@ -259,27 +310,15 @@ public final class GitNativeClientOutput {
 
     private static final class PktLineSerialization
             implements OutputSerialization {
-        private final List<String> payloadParts;
+        private final String payload;
         private final int packetLength;
         private int packetOffset;
 
-        private PktLineSerialization(List<String> payloadParts) {
-            this.payloadParts = List.copyOf(payloadParts);
-            int payloadLength = 0;
-            for (String part : payloadParts) {
-                for (int index = 0; index < part.length(); index++) {
-                    if (part.charAt(index) > 0x7f) {
-                        throw new IllegalArgumentException(
-                                "Git pkt-line response must be ASCII");
-                    }
-                }
-                payloadLength += part.length();
-            }
-            packetLength = payloadLength + PKT_LINE_HEADER_SIZE;
-            if (packetLength > MAX_PKT_LINE_LENGTH) {
-                throw new IllegalArgumentException(
-                        "Git pkt-line exceeds maximum length");
-            }
+        private PktLineSerialization(
+                String payload,
+                int packetLength) {
+            this.payload = payload;
+            this.packetLength = packetLength;
         }
 
         @Override
@@ -297,15 +336,8 @@ public final class GitNativeClientOutput {
                 int shift = (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
                 return hexDigit((packetLength >>> shift) & 0x0f);
             }
-            int payloadOffset = offset - PKT_LINE_HEADER_SIZE;
-            for (String part : payloadParts) {
-                if (payloadOffset < part.length()) {
-                    return (byte) part.charAt(payloadOffset);
-                }
-                payloadOffset -= part.length();
-            }
-            throw new IllegalStateException(
-                    "Git pkt-line cursor exceeds payload");
+            return (byte) payload.charAt(
+                    offset - PKT_LINE_HEADER_SIZE);
         }
     }
 }
