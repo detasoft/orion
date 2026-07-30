@@ -21,6 +21,12 @@ public final class GitNativeRepositoryService {
             GitCapability.SIDE_BAND_64K,
             GitCapability.OFS_DELTA,
             GitCapability.agent("orion-native"));
+    private static final List<GitCapability> RECEIVE_PACK_CAPABILITIES = List.of(
+            GitCapability.REPORT_STATUS,
+            GitCapability.SIDE_BAND_64K,
+            GitCapability.OFS_DELTA,
+            GitCapability.objectFormat("sha1"),
+            GitCapability.agent("orion-native"));
 
     private final InMemoryNativeGitRepositoryProvider repositoryProvider;
 
@@ -33,6 +39,24 @@ public final class GitNativeRepositoryService {
 
     public GitV1Advertisement legacyUploadPackAdvertisement(
             InitialRequestData data) {
+        return legacyAdvertisement(
+                data,
+                UPLOAD_PACK_CAPABILITIES,
+                true);
+    }
+
+    public GitV1Advertisement legacyReceivePackAdvertisement(
+            InitialRequestData data) {
+        return legacyAdvertisement(
+                data,
+                RECEIVE_PACK_CAPABILITIES,
+                false);
+    }
+
+    private GitV1Advertisement legacyAdvertisement(
+            InitialRequestData data,
+            List<GitCapability> baseCapabilities,
+            boolean advertiseHeadSymref) {
         Objects.requireNonNull(data, "data");
         NativeGitRepository repository =
                 resolveRepository(data.getRepositoryPath());
@@ -41,11 +65,15 @@ public final class GitNativeRepositoryService {
         String headTarget = repository.defaultHead();
         String headObjectId = refs.get(headTarget);
         List<GitCapability> capabilities =
-                new ArrayList<>(UPLOAD_PACK_CAPABILITIES);
+                new ArrayList<>(baseCapabilities);
         if (headObjectId != null) {
             advertisedRefs.add(
                     GitAdvertisedRef.direct(headObjectId, "HEAD"));
-            capabilities.add(GitCapability.symref("HEAD", headTarget));
+            if (advertiseHeadSymref) {
+                capabilities.add(GitCapability.symref(
+                        "HEAD",
+                        headTarget));
+            }
         }
         List<String> refNames = new ArrayList<>(refs.keySet());
         refNames.sort(String::compareTo);

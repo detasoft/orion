@@ -15,6 +15,8 @@ designs and implementation steps in `docs/plans/`.
       continuation into its own class.
 - [x] Add the process-local native Git repository provider with isolated
       in-memory refs and objects, without machine/continuation integration.
+- [x] Implement legacy receive-pack advertisement and fragment-safe command
+      parsing with an explicit raw pack handoff boundary.
 
 ## Next
 

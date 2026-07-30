@@ -67,9 +67,20 @@ public final class InitialRequestDispatchContinuation implements Continuation<By
         InitialRequestData.ProtocolVersion version =
                 data.getProtocolVersion().orElse(null);
         if (version == null || version == InitialRequestData.ProtocolVersion.V1) {
-            return ContinuationFlow.transition(
-                    new pro.deta.orion.git.parser.wire.continuation.v0v1
-                            .ReceivePackContinuation(context, data));
+            try {
+                return ContinuationFlow.transition(
+                        new pro.deta.orion.git.parser.wire.continuation.v0v1
+                                .ReceivePackContinuation(
+                                    context,
+                                    data,
+                                    context.repositoryService
+                                            .legacyReceivePackAdvertisement(
+                                                    data)));
+            } catch (RuntimeException error) {
+                return ContinuationFlow.completedError(
+                        "Failed to prepare legacy receive-pack advertisement",
+                        error);
+            }
         }
         return unsupportedVersion(
                 new IllegalArgumentException(

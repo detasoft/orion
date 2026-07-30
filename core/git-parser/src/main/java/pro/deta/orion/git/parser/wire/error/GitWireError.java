@@ -56,7 +56,23 @@ public record GitWireError(
         INVALID_LEGACY_UPLOAD_HAVE_OBJECT_ID(
                 "Legacy upload have must contain a 40-digit hexadecimal object ID"),
         INVALID_LEGACY_UPLOAD_NEGOTIATION(
-                "Failed to read legacy upload-pack negotiation");
+                "Failed to read legacy upload-pack negotiation"),
+        EMPTY_LEGACY_RECEIVE_COMMAND(
+                "Legacy receive-pack request contains an empty command packet"),
+        UNSUPPORTED_LEGACY_RECEIVE_CONTROL(
+                "Control packet is not supported in a legacy receive-pack request"),
+        MISSING_LEGACY_RECEIVE_COMMAND(
+                "Legacy receive-pack request ended before the first command"),
+        INVALID_LEGACY_RECEIVE_COMMAND(
+                "Legacy receive-pack request contains an invalid command"),
+        INVALID_LEGACY_RECEIVE_OBJECT_ID(
+                "Legacy receive-pack command must contain 40-digit hexadecimal object IDs"),
+        LATE_LEGACY_RECEIVE_CAPABILITIES(
+                "Legacy receive-pack capabilities are allowed only on the first command"),
+        EMPTY_LEGACY_RECEIVE_CAPABILITY(
+                "Legacy receive-pack capability must not be empty"),
+        DUPLICATE_LEGACY_RECEIVE_REF(
+                "Legacy receive-pack request contains duplicate ref commands");
 
         private String message;
 

@@ -4,21 +4,42 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
+
+import java.util.Objects;
 
 public final class ReceivePackContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
+    private final GitV1Advertisement advertisement;
 
     public ReceivePackContinuation(
             GitMinimalWireMachine.Context context,
-            InitialRequestData data) {
-        this.context = context;
-        this.data = data;
+            InitialRequestData data,
+            GitV1Advertisement advertisement) {
+        this.context = Objects.requireNonNull(context, "context");
+        this.data = Objects.requireNonNull(data, "data");
+        this.advertisement = Objects.requireNonNull(
+                advertisement,
+                "advertisement");
     }
 
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
-        throw new IllegalStateException("Not implemented");
+        try {
+            GitNativeClientOutput.SendResult result =
+                    context.clientOutput.sendAdvertisement(
+                            advertisement);
+            return result.transitionTo(
+                    new ReceiveCommandContinuation(
+                            data,
+                            advertisement));
+        } catch (RuntimeException error) {
+            return ContinuationFlow.completedError(
+                    "Failed to advertise native Git repository for receive-pack",
+                    error);
+        }
     }
 }

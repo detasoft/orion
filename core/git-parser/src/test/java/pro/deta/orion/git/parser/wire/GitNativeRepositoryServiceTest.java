@@ -70,9 +70,67 @@ class GitNativeRepositoryServiceTest {
                 .contains("symref=HEAD:refs/heads/main");
     }
 
+    @Test
+    void advertisesReceivePackRefsAndCapabilities() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.findOrCreate("demo.git")
+                        .valueOrFailure("repository");
+        repository.updateRef(
+                "refs/heads/main",
+                NULL_ID,
+                MAIN_ID);
+        GitNativeRepositoryService service =
+                new GitNativeRepositoryService(provider);
+
+        GitV1Advertisement advertisement =
+                service.legacyReceivePackAdvertisement(
+                        receiveRequest("/demo.git"));
+
+        assertThat(advertisement.refs()).containsExactly(
+                GitAdvertisedRef.direct(MAIN_ID, "HEAD"),
+                GitAdvertisedRef.direct(
+                        MAIN_ID,
+                        "refs/heads/main"));
+        assertThat(advertisement.capabilities())
+                .extracting(capability -> capability.wireToken())
+                .containsExactly(
+                        "report-status",
+                        "side-band-64k",
+                        "ofs-delta",
+                        "object-format=sha1",
+                        "agent=orion-native");
+    }
+
+    @Test
+    void advertisesEmptyReceivePackRepositoryWithPseudoRef() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        GitNativeRepositoryService service =
+                new GitNativeRepositoryService(provider);
+
+        GitV1Advertisement advertisement =
+                service.legacyReceivePackAdvertisement(
+                        receiveRequest("/demo.git"));
+
+        assertThat(advertisement.refs()).containsExactly(
+                GitAdvertisedRef.direct(
+                        NULL_ID,
+                        "capabilities^{}"));
+    }
+
     private static InitialRequestData request(String path) {
         return new InitialRequestData(
                 InitialRequestService.UPLOAD_PACK,
+                path,
+                "localhost",
+                Map.of());
+    }
+
+    private static InitialRequestData receiveRequest(String path) {
+        return new InitialRequestData(
+                InitialRequestService.RECEIVE_PACK,
                 path,
                 "localhost",
                 Map.of());
