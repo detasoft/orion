@@ -3,7 +3,9 @@ package pro.deta.orion.git.parser.wire.continuation.v0v1;
 import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommandSection;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
@@ -28,13 +30,18 @@ final class ReceivePackBoundaryContinuation
         if (commandSection.requiresPack()) {
             return ContinuationFlow.transition(
                     new ReceivePackIngestionContinuation(
+                            context,
                             commandSection,
                             context.repositoryService
                                     .beginLegacyReceivePack(
                                             commandSection.initialRequest())));
         }
         return ContinuationFlow.transition(
-                Continuation.completedSuccess(this));
+                ReceivePackIngestionContinuation.completeReceivePack(
+                        context,
+                        new LegacyReceivePack(
+                                commandSection,
+                                new LooseObjectStore())));
     }
 
     @TestOnly

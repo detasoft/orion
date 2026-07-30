@@ -28,16 +28,17 @@ public final class GitNativeClientOutput {
 
     private final ByteBuf output;
     private final Consumer<ByteBuf> sendToClient;
+    private final boolean submitOnCompletion;
     private OutputSerialization serialization;
     private LegacySideBandResponse sideBandResponse;
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
     public GitNativeClientOutput(ByteBuf output) {
-        this(
-                output,
-                ignored -> {
-                    throw new IllegalStateException("not implemented");
-                });
+        this.output = Objects.requireNonNull(output, "output");
+        this.sendToClient = ignored -> {
+        };
+        this.submitOnCompletion = false;
+        requireFixedCapacity(output);
     }
 
     public GitNativeClientOutput(
@@ -47,6 +48,11 @@ public final class GitNativeClientOutput {
         this.sendToClient = Objects.requireNonNull(
                 sendToClient,
                 "sendToClient");
+        this.submitOnCompletion = true;
+        requireFixedCapacity(output);
+    }
+
+    private static void requireFixedCapacity(ByteBuf output) {
         if (output.capacity() != BUFFER_CAPACITY
                 || output.maxCapacity() != BUFFER_CAPACITY) {
             throw new IllegalArgumentException(
@@ -166,6 +172,40 @@ public final class GitNativeClientOutput {
         }
     }
 
+    public SendResult sendLegacyReceivePackStatus(
+            List<ReceiveCommandStatus> statuses,
+            boolean sideBand64k) {
+        if (statuses == null) {
+            return failedLegacyReceivePackStatus(
+                    "statuses must not be null");
+        }
+        try {
+            for (ReceiveCommandStatus status : statuses) {
+                Optional<String> validationFailure =
+                        receiveCommandStatusValidationFailure(status);
+                if (validationFailure.isPresent()) {
+                    return failedLegacyReceivePackStatus(
+                            validationFailure.get());
+                }
+            }
+            return sendSerialization(
+                    new ReceivePackStatusSerialization(
+                            List.copyOf(statuses),
+                            sideBand64k));
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to serialize legacy receive-pack status",
+                    error);
+        }
+    }
+
+    private static SendResult.Failed failedLegacyReceivePackStatus(
+            String message) {
+        return new SendResult.Failed(
+                "Failed to serialize legacy receive-pack status",
+                new IllegalArgumentException(message));
+    }
+
     public LegacySideBandResponse beginLegacySideBand64k(
             NativePackProducer producer,
             SideBandChannel channel) {
@@ -273,6 +313,70 @@ public final class GitNativeClientOutput {
         }
     }
 
+    private static Optional<String> receiveCommandStatusValidationFailure(
+            ReceiveCommandStatus status) {
+        if (status == null) {
+            return Optional.of("status must not be null");
+        }
+        Optional<String> refNameFailure = tokenValidationFailure(
+                status.refName(),
+                "status.refName");
+        if (refNameFailure.isPresent()) {
+            return refNameFailure;
+        }
+        Optional<String> messageFailure = status.ok()
+                ? Optional.empty()
+                : statusMessageValidationFailure(status.message());
+        if (messageFailure.isPresent()) {
+            return messageFailure;
+        }
+        int payloadLength = receiveCommandStatusPayload(status).length();
+        if (payloadLength + PKT_LINE_HEADER_SIZE
+                > MAX_PKT_LINE_LENGTH) {
+            return Optional.of(
+                    "Legacy receive-pack status exceeds maximum length");
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<String> tokenValidationFailure(
+            String token,
+            String fieldName) {
+        if (token == null) {
+            return Optional.of(fieldName + " must not be null");
+        }
+        if (token.isEmpty()) {
+            return Optional.of(fieldName + " must not be empty");
+        }
+        for (int index = 0; index < token.length(); index++) {
+            char value = token.charAt(index);
+            if (value <= 0x20 || value >= 0x7f) {
+                return Optional.of(
+                        fieldName
+                                + " must be a protocol-safe ASCII token");
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<String> statusMessageValidationFailure(
+            String message) {
+        if (message == null) {
+            return Optional.of("status.message must not be null");
+        }
+        if (message.isBlank()) {
+            return Optional.of("status.message must not be blank");
+        }
+        for (int index = 0; index < message.length(); index++) {
+            char value = message.charAt(index);
+            if (value <= 0x20 || value >= 0x7f) {
+                return Optional.of(
+                        "status.message must contain printable non-space ASCII");
+            }
+        }
+        return Optional.empty();
+    }
+
     private SendResult sendSerialization(
             OutputSerialization operation) {
         if (serialization != null
@@ -285,11 +389,24 @@ public final class GitNativeClientOutput {
         }
 
         if (writeAvailable(operation)) {
-            return new SendResult.Completed();
+            return completeOutput();
         }
         serialization = operation;
         SerializationTask task = new SerializationTask();
         return new SendResult.Streaming(task, task::failure);
+    }
+
+    private SendResult completeOutput() {
+        try {
+            if (submitOnCompletion) {
+                submitOutput();
+            }
+            return new SendResult.Completed();
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to deliver serialized client output",
+                    error);
+        }
     }
 
     private void finishStreaming() {
@@ -540,6 +657,16 @@ public final class GitNativeClientOutput {
 
         public byte wireValue() {
             return wireValue;
+        }
+    }
+
+    public record ReceiveCommandStatus(
+            String refName,
+            boolean ok,
+            String message) {
+        public ReceiveCommandStatus {
+            Objects.requireNonNull(refName, "refName");
+            Objects.requireNonNull(message, "message");
         }
     }
 
@@ -1175,5 +1302,141 @@ public final class GitNativeClientOutput {
                     offset - PKT_LINE_HEADER_SIZE);
         }
 
+    }
+
+    private static final class ReceivePackStatusSerialization
+            implements OutputSerialization {
+        private static final String UNPACK_OK = "unpack ok\n";
+
+        private final List<ReceiveCommandStatus> statuses;
+        private final boolean sideBand64k;
+        private int packetIndex;
+        private int packetOffset;
+
+        private ReceivePackStatusSerialization(
+                List<ReceiveCommandStatus> statuses,
+                boolean sideBand64k) {
+            this.statuses = statuses;
+            this.sideBand64k = sideBand64k;
+        }
+
+        @Override
+        public boolean writeAvailable(ByteBuf output) {
+            while (packetIndex < packetCount()
+                    && output.isWritable()) {
+                int packetSize = packetSize();
+                while (packetOffset < packetSize
+                        && output.isWritable()) {
+                    output.writeByte(byteAt(packetOffset));
+                    packetOffset++;
+                }
+                if (packetOffset == packetSize) {
+                    packetIndex++;
+                    packetOffset = 0;
+                }
+            }
+            return packetIndex == packetCount();
+        }
+
+        private int packetCount() {
+            int innerPacketCount = statuses.size() + 2;
+            return sideBand64k
+                    ? innerPacketCount + 1
+                    : innerPacketCount;
+        }
+
+        private int packetSize() {
+            return packetLength() == 0
+                    ? PKT_LINE_HEADER_SIZE
+                    : packetLength();
+        }
+
+        private int packetLength() {
+            if (outerFlush()) {
+                return 0;
+            }
+            if (!sideBand64k) {
+                return innerPacketLength();
+            }
+            return PKT_LINE_HEADER_SIZE
+                    + 1
+                    + innerPacketSize();
+        }
+
+        private boolean outerFlush() {
+            return sideBand64k
+                    && packetIndex == statuses.size() + 2;
+        }
+
+        private int innerPacketSize() {
+            return innerPacketLength() == 0
+                    ? PKT_LINE_HEADER_SIZE
+                    : innerPacketLength();
+        }
+
+        private int innerPacketLength() {
+            String payload = innerPayload();
+            return payload == null
+                    ? 0
+                    : payload.length() + PKT_LINE_HEADER_SIZE;
+        }
+
+        private String innerPayload() {
+            if (packetIndex == 0) {
+                return UNPACK_OK;
+            }
+            int statusIndex = packetIndex - 1;
+            if (statusIndex < statuses.size()) {
+                return receiveCommandStatusPayload(
+                        statuses.get(statusIndex));
+            }
+            return null;
+        }
+
+        private byte byteAt(int offset) {
+            if (packetLength() == 0) {
+                return '0';
+            }
+            if (!sideBand64k) {
+                return innerByteAt(offset);
+            }
+            if (offset < PKT_LINE_HEADER_SIZE) {
+                return headerByte(packetLength(), offset);
+            }
+            if (offset == PKT_LINE_HEADER_SIZE) {
+                return SideBandChannel.DATA.wireValue();
+            }
+            return innerByteAt(offset - PKT_LINE_HEADER_SIZE - 1);
+        }
+
+        private byte innerByteAt(int offset) {
+            int innerPacketLength = innerPacketLength();
+            if (innerPacketLength == 0) {
+                return '0';
+            }
+            if (offset < PKT_LINE_HEADER_SIZE) {
+                return headerByte(innerPacketLength, offset);
+            }
+            return (byte) innerPayload().charAt(
+                    offset - PKT_LINE_HEADER_SIZE);
+        }
+
+        private static byte headerByte(
+                int packetLength,
+                int offset) {
+            int shift = (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
+            return hexDigit((packetLength >>> shift) & 0x0f);
+        }
+    }
+
+    private static String receiveCommandStatusPayload(
+            ReceiveCommandStatus status) {
+        return status.ok()
+                ? "ok " + status.refName() + "\n"
+                : "ng "
+                        + status.refName()
+                        + " "
+                        + status.message()
+                        + "\n";
     }
 }

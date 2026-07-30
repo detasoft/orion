@@ -16,6 +16,7 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -68,6 +69,10 @@ public class NativeGitRepository {
         return looseObjectStore.write(type, data);
     }
 
+    public Optional<LooseObject> readObject(GitObjectId id) {
+        return looseObjectStore.read(id);
+    }
+
     public Optional<LooseObjectPrefix> readObjectPrefix(
             GitObjectId id,
             int maxDataBytes) {
@@ -79,6 +84,16 @@ public class NativeGitRepository {
         return new PackIngestor(
                 Objects.requireNonNull(limits, "limits"),
                 looseObjectStore);
+    }
+
+    public List<RefUpdateResult> publishObjectsAndRefs(
+            LooseObjectStore quarantinedObjects,
+            List<LooseRefStore.Update> updates) {
+        Objects.requireNonNull(quarantinedObjects, "quarantinedObjects");
+        Objects.requireNonNull(updates, "updates");
+        return looseRefStore.updateAll(
+                updates,
+                () -> looseObjectStore.putAll(quarantinedObjects));
     }
 
     public NativePackProducer fetch(NativeFetchRequest request) {

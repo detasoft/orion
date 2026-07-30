@@ -9,11 +9,15 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommand;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
 import pro.deta.orion.util.Result;
 
@@ -99,6 +103,39 @@ public final class GitNativeRepositoryService {
         Objects.requireNonNull(data, "data");
         return resolveRepository(data.getRepositoryPath())
                 .beginPackIngestion(RECEIVE_PACK_LIMITS);
+    }
+
+    public List<ReceivePackStatus> completeLegacyReceivePack(
+            LegacyReceivePack receivePack) {
+        Objects.requireNonNull(receivePack, "receivePack");
+        List<LooseRefStore.Update> updates = new ArrayList<>();
+        for (LegacyReceiveCommand command
+                : receivePack.commandSection().commands()) {
+            updates.add(new LooseRefStore.Update(
+                    command.refName(),
+                    command.oldObjectId().value(),
+                    command.newObjectId().value()));
+        }
+        List<RefUpdateResult> results = resolveRepository(
+                receivePack.commandSection()
+                        .initialRequest()
+                        .getRepositoryPath())
+                .publishObjectsAndRefs(
+                        receivePack.quarantine(),
+                        updates);
+        List<ReceivePackStatus> statuses = new ArrayList<>();
+        for (int index = 0; index < results.size(); index++) {
+            LegacyReceiveCommand command =
+                    receivePack.commandSection().commands().get(index);
+            RefUpdateResult result = results.get(index);
+            statuses.add(new ReceivePackStatus(
+                    command.refName(),
+                    result != RefUpdateResult.STALE,
+                    result == RefUpdateResult.STALE
+                            ? "stale"
+                            : ""));
+        }
+        return List.copyOf(statuses);
     }
 
     public GitLsRefsResponse lsRefs(
@@ -362,5 +399,15 @@ public final class GitNativeRepositoryService {
                             failure.getMessage(),
                             failure.throwable());
         };
+    }
+
+    public record ReceivePackStatus(
+            String refName,
+            boolean ok,
+            String message) {
+        public ReceivePackStatus {
+            Objects.requireNonNull(refName, "refName");
+            Objects.requireNonNull(message, "message");
+        }
     }
 }

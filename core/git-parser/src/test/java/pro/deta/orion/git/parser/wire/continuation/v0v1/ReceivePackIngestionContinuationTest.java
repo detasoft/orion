@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.wire.continuation.v0v1;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
@@ -31,7 +32,11 @@ class ReceivePackIngestionContinuationTest {
         RecordingSession session = new RecordingSession();
         LegacyReceiveCommandSection section = section();
         ReceivePackIngestionContinuation continuation =
-                new ReceivePackIngestionContinuation(section, session);
+                new ReceivePackIngestionContinuation(
+                        pro.deta.orion.git.parser.wire.GitMinimalWireMachine
+                                .testContext(UnpooledByteBufAllocator.DEFAULT),
+                        section,
+                        session);
         ByteBuf first = Unpooled.wrappedBuffer(new byte[]{1});
         ByteBuf second = Unpooled.wrappedBuffer(new byte[]{2});
         try {
@@ -43,6 +48,11 @@ class ReceivePackIngestionContinuationTest {
             assertThat(firstFlow)
                     .isInstanceOf(ContinuationFlow.Await.class);
             assertThat(secondFlow)
+                    .isInstanceOf(ContinuationFlow.Transition.class);
+            Continuation<ByteBuf> completion =
+                    ((ContinuationFlow.Transition<ByteBuf>) secondFlow)
+                            .next();
+            assertThat(completion.process(Unpooled.EMPTY_BUFFER))
                     .isInstanceOfSatisfying(
                             ContinuationFlow.Transition.class,
                             transition -> assertThat(transition.next())
@@ -63,7 +73,11 @@ class ReceivePackIngestionContinuationTest {
     void closesRepositorySessionOnContinuationClose() {
         RecordingSession session = new RecordingSession();
         ReceivePackIngestionContinuation continuation =
-                new ReceivePackIngestionContinuation(section(), session);
+                new ReceivePackIngestionContinuation(
+                        pro.deta.orion.git.parser.wire.GitMinimalWireMachine
+                                .testContext(UnpooledByteBufAllocator.DEFAULT),
+                        section(),
+                        session);
 
         continuation.close();
 

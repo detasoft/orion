@@ -9,9 +9,11 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +49,32 @@ class NativeGitRepositoryTest {
         assertThat(repository.refs())
                 .containsExactlyEntriesOf(
                         java.util.Map.of("refs/heads/main", MAIN_ID));
+    }
+
+    @Test
+    void publishesQuarantinedObjectsWhenRefUpdatesApply() {
+        LooseObjectStore publishedObjects = new LooseObjectStore();
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId blob = quarantine.write(
+                ObjectType.BLOB,
+                "published".getBytes(StandardCharsets.UTF_8));
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                publishedObjects,
+                "refs/heads/main");
+
+        List<RefUpdateResult> results = repository.publishObjectsAndRefs(
+                quarantine,
+                List.of(new LooseRefStore.Update(
+                        "refs/heads/main",
+                        NULL_ID,
+                        blob.value())));
+
+        assertThat(results).containsExactly(RefUpdateResult.CREATED);
+        assertThat(repository.refs())
+                .containsEntry("refs/heads/main", blob.value());
+        assertThat(repository.readObject(blob)).isPresent();
     }
 
     @Test

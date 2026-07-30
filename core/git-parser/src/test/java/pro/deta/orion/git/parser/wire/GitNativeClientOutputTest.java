@@ -395,6 +395,92 @@ class GitNativeClientOutputTest {
     }
 
     @Test
+    void sendsLegacyReceivePackStatusInsideSideBandData() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendLegacyReceivePackStatus(
+                    List.of(new GitNativeClientOutput.ReceiveCommandStatus(
+                            "refs/heads/master",
+                            true,
+                            "")),
+                    true))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "0013\001000eunpack ok\n"
+                                    + "001e\0010019ok refs/heads/master\n"
+                                    + "0009\0010000"
+                                    + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void streamsLegacyReceivePackStatusWithoutMaterializingResponse() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        List<GitNativeClientOutput.ReceiveCommandStatus> statuses =
+                new ArrayList<>();
+        for (int index = 0; index < 4_000; index++) {
+            statuses.add(new GitNativeClientOutput.ReceiveCommandStatus(
+                    "refs/heads/branch-" + index,
+                    true,
+                    ""));
+        }
+
+        try {
+            GitNativeClientOutput.SendResult result =
+                    output.sendLegacyReceivePackStatus(statuses, true);
+
+            assertThat(result)
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Streaming.class);
+            ((GitNativeClientOutput.SendResult.Streaming) result)
+                    .task()
+                    .run();
+            assertThat(sent).isNotEmpty();
+            ByteArrayOutputStream response = new ByteArrayOutputStream();
+            for (byte[] chunk : sent) {
+                response.writeBytes(chunk);
+            }
+            assertThat(response.toString(StandardCharsets.US_ASCII))
+                    .startsWith("0013\001000eunpack ok\n")
+                    .contains("0020\001001bok refs/heads/branch-0\n")
+                    .endsWith("0009\00100000000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void reportsInvalidLegacyReceivePackStatusThroughSendResult() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendLegacyReceivePackStatus(
+                    List.of(new GitNativeClientOutput.ReceiveCommandStatus(
+                            "refs/heads/main",
+                            false,
+                            "has space")),
+                    true))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .isEqualTo(
+                                            "Failed to serialize legacy receive-pack status"));
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
     void sendsLegacyPackOnEveryTypedSideBandChannel() {
         ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
 
@@ -1246,8 +1332,10 @@ class GitNativeClientOutputTest {
                                                         .isSameAs(failure);
                                             }));
             assertThat(output.sendAdvertisement(advertisement))
-                    .isInstanceOf(
-                            GitNativeClientOutput.SendResult.Completed.class);
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.cause())
+                                    .isSameAs(failure));
         } finally {
             outbound.release();
         }
