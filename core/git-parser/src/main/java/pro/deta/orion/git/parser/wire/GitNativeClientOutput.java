@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
+import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -47,14 +48,32 @@ public final class GitNativeClientOutput {
     public SendResult sendAdvertisement(
             GitV1Advertisement advertisement) {
         Objects.requireNonNull(advertisement, "advertisement");
+        return sendPackets(encodePackets(advertisement));
+    }
+
+    public SendResult sendNak() {
+        return sendPackets(List.of(encodePacket("NAK\n")));
+    }
+
+    public SendResult sendAck(
+            GitObjectId objectId,
+            AckStatus status) {
+        Objects.requireNonNull(objectId, "objectId");
+        Objects.requireNonNull(status, "status");
+        return sendPackets(List.of(encodePacket(
+                "ACK "
+                        + objectId
+                        + status.wireSuffix
+                        + "\n")));
+    }
+
+    private SendResult sendPackets(List<byte[]> packets) {
         if (serialization != null) {
             throw new IllegalStateException(
                     "Client output operation is already in progress");
         }
 
-        Serialization operation = new Serialization(
-                advertisement,
-                encodePackets(advertisement));
+        Serialization operation = new Serialization(packets);
         if (writeAvailable(operation)) {
             return new SendResult.Completed();
         }
@@ -120,23 +139,31 @@ public final class GitNativeClientOutput {
             GitV1Advertisement advertisement) {
         List<byte[]> packets = new ArrayList<>();
         for (byte[] line : encodeLines(advertisement)) {
-            int packetLength = line.length + PKT_LINE_HEADER_SIZE;
-            if (packetLength > MAX_PKT_LINE_LENGTH) {
-                throw new IllegalArgumentException(
-                        "Advertisement line exceeds Git pkt-line limit");
-            }
-            byte[] packet = new byte[packetLength];
-            writeHeader(packet, packetLength);
-            System.arraycopy(
-                    line,
-                    0,
-                    packet,
-                    PKT_LINE_HEADER_SIZE,
-                    line.length);
-            packets.add(packet);
+            packets.add(encodePacket(line));
         }
         packets.add(new byte[] {'0', '0', '0', '0'});
         return List.copyOf(packets);
+    }
+
+    private static byte[] encodePacket(String payload) {
+        return encodePacket(payload.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static byte[] encodePacket(byte[] payload) {
+        int packetLength = payload.length + PKT_LINE_HEADER_SIZE;
+        if (packetLength > MAX_PKT_LINE_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Git pkt-line exceeds maximum length");
+        }
+        byte[] packet = new byte[packetLength];
+        writeHeader(packet, packetLength);
+        System.arraycopy(
+                payload,
+                0,
+                packet,
+                PKT_LINE_HEADER_SIZE,
+                payload.length);
+        return packet;
     }
 
     private static List<byte[]> encodeLines(
@@ -194,16 +221,25 @@ public final class GitNativeClientOutput {
         }
     }
 
+    public enum AckStatus {
+        FINAL(""),
+        CONTINUE(" continue"),
+        COMMON(" common"),
+        READY(" ready");
+
+        private final String wireSuffix;
+
+        AckStatus(String wireSuffix) {
+            this.wireSuffix = wireSuffix;
+        }
+    }
+
     private static final class Serialization {
-        private final GitV1Advertisement advertisement;
         private final List<byte[]> packets;
         private int packetIndex;
         private int packetOffset;
 
-        private Serialization(
-                GitV1Advertisement advertisement,
-                List<byte[]> packets) {
-            this.advertisement = advertisement;
+        private Serialization(List<byte[]> packets) {
             this.packets = packets;
         }
     }

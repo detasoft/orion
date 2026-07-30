@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -11,7 +12,9 @@ import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import java.nio.charset.StandardCharsets;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,6 +26,58 @@ class GitNativeClientOutputTest {
             "2222222222222222222222222222222222222222";
     private static final String PEELED_TAG_ID =
             "3333333333333333333333333333333333333333";
+
+    @Test
+    void sendsNakAsPktLine() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendNak())
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("0008NAK\n");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsEveryAckStatusAsPktLine() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        Map<GitNativeClientOutput.AckStatus, String> expected =
+                new LinkedHashMap<>();
+        expected.put(
+                GitNativeClientOutput.AckStatus.FINAL,
+                "0031ACK " + MAIN_ID + "\n");
+        expected.put(
+                GitNativeClientOutput.AckStatus.CONTINUE,
+                "003aACK " + MAIN_ID + " continue\n");
+        expected.put(
+                GitNativeClientOutput.AckStatus.COMMON,
+                "0038ACK " + MAIN_ID + " common\n");
+        expected.put(
+                GitNativeClientOutput.AckStatus.READY,
+                "0037ACK " + MAIN_ID + " ready\n");
+
+        try {
+            for (Map.Entry<GitNativeClientOutput.AckStatus, String> entry
+                    : expected.entrySet()) {
+                assertThat(output.sendAck(
+                        GitObjectId.of(MAIN_ID),
+                        entry.getKey()))
+                        .isInstanceOf(
+                                GitNativeClientOutput.SendResult.Completed.class);
+                assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                        .isEqualTo(entry.getValue());
+                outbound.clear();
+            }
+        } finally {
+            outbound.release();
+        }
+    }
 
     @Test
     void sendsTypedLegacyAdvertisementAsPktLines() {
