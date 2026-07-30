@@ -102,6 +102,22 @@ public final class GitNativeRepositoryService {
                 .fetch(request);
     }
 
+    public List<GitObjectId> protocolV2FetchAcknowledgments(
+            InitialRequestData data,
+            NativeFetchRequest request) {
+        Objects.requireNonNull(data, "data");
+        Objects.requireNonNull(request, "request");
+        NativeGitRepository repository =
+                resolveRepository(data.getRepositoryPath());
+        List<GitObjectId> acknowledgments = new ArrayList<>();
+        for (GitObjectId have : request.haves()) {
+            if (repository.readObject(have).isPresent()) {
+                acknowledgments.add(have);
+            }
+        }
+        return List.copyOf(acknowledgments);
+    }
+
     public PackIngestionSession beginLegacyReceivePack(
             InitialRequestData data) {
         Objects.requireNonNull(data, "data");

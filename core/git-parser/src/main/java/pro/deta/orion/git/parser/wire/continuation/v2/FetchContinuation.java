@@ -26,6 +26,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     private boolean thinPack;
     private boolean ofsDelta;
     private boolean includeTag;
+    private boolean waitForDone;
 
     FetchContinuation(
             GitMinimalWireMachine.Context context,
@@ -67,6 +68,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                     case THIN_PACK -> thinPack = true;
                     case OFS_DELTA -> ofsDelta = true;
                     case INCLUDE_TAG -> includeTag = true;
+                    case WAIT_FOR_DONE -> waitForDone = true;
                     case NO_PROGRESS -> {
                     }
                 }
@@ -75,7 +77,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     }
 
     private Continuation<ByteBuf> completeRequest() {
-        if (wants.isEmpty() || !done) {
+        if (wants.isEmpty()) {
             return failed();
         }
         NativeFetchRequest request = new NativeFetchRequest(
@@ -84,7 +86,14 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                 done,
                 thinPack,
                 ofsDelta,
-                includeTag);
+                includeTag,
+                waitForDone);
+        if (!done) {
+            return new FetchNegotiationResponseContinuation(
+                    context,
+                    data,
+                    request);
+        }
         return new FetchResponseContinuation(
                 context,
                 data,
@@ -111,7 +120,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
         THIN_PACK,
         OFS_DELTA,
         NO_PROGRESS,
-        INCLUDE_TAG
+        INCLUDE_TAG,
+        WAIT_FOR_DONE
     }
 
     static Continuation<ByteBuf> failed() {

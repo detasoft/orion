@@ -13,7 +13,8 @@ public record NativeFetchRequest(
         boolean done,
         boolean thinPack,
         boolean ofsDelta,
-        boolean includeTag) {
+        boolean includeTag,
+        boolean waitForDone) {
 
     public NativeFetchRequest(
             Set<GitObjectId> wants,
@@ -27,6 +28,24 @@ public record NativeFetchRequest(
                 done,
                 thinPack,
                 ofsDelta,
+                false,
+                false);
+    }
+
+    public NativeFetchRequest(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves,
+            boolean done,
+            boolean thinPack,
+            boolean ofsDelta,
+            boolean includeTag) {
+        this(
+                wants,
+                haves,
+                done,
+                thinPack,
+                ofsDelta,
+                includeTag,
                 false);
     }
 

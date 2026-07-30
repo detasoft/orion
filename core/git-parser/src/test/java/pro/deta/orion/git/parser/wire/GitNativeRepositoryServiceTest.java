@@ -20,6 +20,7 @@ import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -293,6 +294,43 @@ class GitNativeRepositoryServiceTest {
         } finally {
             pack.release();
         }
+    }
+
+    @Test
+    void acknowledgesProtocolV2FetchHavesPresentInRepositoryOrder() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.findOrCreate("demo.git")
+                        .valueOrFailure("repository");
+        GitObjectId firstPresent = repository.writeObject(
+                ObjectType.BLOB,
+                "first".getBytes(StandardCharsets.US_ASCII));
+        GitObjectId secondPresent = repository.writeObject(
+                ObjectType.BLOB,
+                "second".getBytes(StandardCharsets.US_ASCII));
+        GitObjectId missing = GitObjectId.of("f".repeat(40));
+        LinkedHashSet<GitObjectId> haves = new LinkedHashSet<>();
+        haves.add(secondPresent);
+        haves.add(missing);
+        haves.add(firstPresent);
+        GitNativeRepositoryService service =
+                new GitNativeRepositoryService(provider);
+
+        List<GitObjectId> acknowledgments =
+                service.protocolV2FetchAcknowledgments(
+                        request("/demo.git"),
+                        new NativeFetchRequest(
+                                Set.of(firstPresent),
+                                haves,
+                                false,
+                                false,
+                                false,
+                                false,
+                                true));
+
+        assertThat(acknowledgments)
+                .containsExactly(secondPresent, firstPresent);
     }
 
     @Test

@@ -47,12 +47,8 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
     private static final class FetchPayloadParser {
         private static final int OBJECT_ID_LENGTH = 40;
 
-        private final StringBuilder objectId =
-                new StringBuilder(OBJECT_ID_LENGTH);
+        private final StringBuilder payload = new StringBuilder();
         private int remainingBytes;
-        private int tokenIndex;
-        private Phase phase = Phase.TOKEN;
-        private Token token;
 
         private FetchPayloadParser(int payloadLength) {
             this.remainingBytes = payloadLength;
@@ -63,48 +59,12 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             remainingBytes--;
             boolean last = remainingBytes == 0;
             if (last && value == '\n') {
-                return phase == Phase.COMPLETE;
+                return !payload.isEmpty();
             }
             if (value > 0x7f || value == 0) {
                 return false;
             }
-            boolean accepted = switch (phase) {
-                case TOKEN -> acceptTokenByte(value);
-                case OBJECT_ID -> acceptObjectIdByte(value);
-                case COMPLETE -> false;
-            };
-            return accepted && (!last || phase == Phase.COMPLETE);
-        }
-
-        private boolean acceptTokenByte(int value) {
-            if (token == null) {
-                token = Token.startingWith(value);
-                if (token == null) {
-                    return false;
-                }
-            }
-            if (tokenIndex >= token.prefix.length()
-                    || token.prefix.charAt(tokenIndex) != value) {
-                return false;
-            }
-            tokenIndex++;
-            if (tokenIndex == token.prefix.length()) {
-                phase = token.objectKind == null
-                        ? Phase.COMPLETE
-                        : Phase.OBJECT_ID;
-            }
-            return true;
-        }
-
-        private boolean acceptObjectIdByte(int value) {
-            if (!isHexadecimal(value)
-                    || objectId.length() == OBJECT_ID_LENGTH) {
-                return false;
-            }
-            objectId.append((char) value);
-            if (objectId.length() == OBJECT_ID_LENGTH) {
-                phase = Phase.COMPLETE;
-            }
+            payload.append((char) value);
             return true;
         }
 
@@ -113,84 +73,60 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
         }
 
         private FetchContinuation.FetchArgument completeArgument() {
-            if (remainingBytes != 0
-                    || phase != Phase.COMPLETE
-                    || token == null) {
+            if (remainingBytes != 0 || payload.isEmpty()) {
                 return null;
             }
-            if (token.objectKind != null) {
-                return new FetchContinuation.ObjectArgument(
-                        token.objectKind,
-                        GitObjectId.of(objectId.toString()));
+            String value = payload.toString();
+            if (value.startsWith("want ")) {
+                return objectArgument(
+                        value,
+                        "want ",
+                        FetchContinuation.ObjectArgumentKind.WANT);
             }
-            return token.simple;
+            if (value.startsWith("have ")) {
+                return objectArgument(
+                        value,
+                        "have ",
+                        FetchContinuation.ObjectArgumentKind.HAVE);
+            }
+            return switch (value) {
+                case "done" -> FetchContinuation.SimpleArgument.DONE;
+                case "thin-pack" ->
+                        FetchContinuation.SimpleArgument.THIN_PACK;
+                case "ofs-delta" ->
+                        FetchContinuation.SimpleArgument.OFS_DELTA;
+                case "no-progress" ->
+                        FetchContinuation.SimpleArgument.NO_PROGRESS;
+                case "include-tag" ->
+                        FetchContinuation.SimpleArgument.INCLUDE_TAG;
+                case "wait-for-done" ->
+                        FetchContinuation.SimpleArgument.WAIT_FOR_DONE;
+                default -> null;
+            };
+        }
+
+        private static FetchContinuation.FetchArgument objectArgument(
+                String value,
+                String prefix,
+                FetchContinuation.ObjectArgumentKind objectKind) {
+            String objectId = value.substring(prefix.length());
+            if (objectId.length() != OBJECT_ID_LENGTH) {
+                return null;
+            }
+            for (int index = 0; index < objectId.length(); index++) {
+                if (!isHexadecimal(objectId.charAt(index))) {
+                    return null;
+                }
+            }
+                return new FetchContinuation.ObjectArgument(
+                        objectKind,
+                        GitObjectId.of(objectId));
         }
 
         private static boolean isHexadecimal(int value) {
             return value >= '0' && value <= '9'
                     || value >= 'a' && value <= 'f'
                     || value >= 'A' && value <= 'F';
-        }
-
-        private enum Phase {
-            TOKEN,
-            OBJECT_ID,
-            COMPLETE
-        }
-
-        private enum Token {
-            WANT(
-                    "want ",
-                    FetchContinuation.ObjectArgumentKind.WANT),
-            HAVE(
-                    "have ",
-                    FetchContinuation.ObjectArgumentKind.HAVE),
-            DONE("done", FetchContinuation.SimpleArgument.DONE),
-            THIN_PACK(
-                    "thin-pack",
-                    FetchContinuation.SimpleArgument.THIN_PACK),
-            OFS_DELTA(
-                    "ofs-delta",
-                    FetchContinuation.SimpleArgument.OFS_DELTA),
-            NO_PROGRESS(
-                    "no-progress",
-                    FetchContinuation.SimpleArgument.NO_PROGRESS),
-            INCLUDE_TAG(
-                    "include-tag",
-                    FetchContinuation.SimpleArgument.INCLUDE_TAG);
-
-            private final String prefix;
-            private final FetchContinuation.ObjectArgumentKind objectKind;
-            private final FetchContinuation.SimpleArgument simple;
-
-            Token(
-                    String prefix,
-                    FetchContinuation.ObjectArgumentKind objectKind) {
-                this.prefix = prefix;
-                this.objectKind = objectKind;
-                this.simple = null;
-            }
-
-            Token(
-                    String prefix,
-                    FetchContinuation.SimpleArgument simple) {
-                this.prefix = prefix;
-                this.objectKind = null;
-                this.simple = simple;
-            }
-
-            private static Token startingWith(int value) {
-                return switch (value) {
-                    case 'w' -> WANT;
-                    case 'h' -> HAVE;
-                    case 'd' -> DONE;
-                    case 't' -> THIN_PACK;
-                    case 'o' -> OFS_DELTA;
-                    case 'n' -> NO_PROGRESS;
-                    case 'i' -> INCLUDE_TAG;
-                    default -> null;
-                };
-            }
         }
     }
 }

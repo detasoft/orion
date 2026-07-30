@@ -93,7 +93,9 @@ public final class GitNativeClientOutput {
                         : "ls-refs\n");
             }
             if (configuration.fetch()) {
-                capabilities.add("fetch\n");
+                capabilities.add(configuration.waitForDone()
+                        ? "fetch=wait-for-done\n"
+                        : "fetch\n");
             }
             if (configuration.serverOption()) {
                 capabilities.add("server-option\n");
@@ -166,6 +168,32 @@ public final class GitNativeClientOutput {
         } catch (RuntimeException error) {
             return new SendResult.Failed(
                     "Failed to serialize protocol v2 ls-refs response",
+                    error);
+        }
+    }
+
+    public SendResult sendProtocolV2FetchAcknowledgments(
+            List<GitObjectId> acknowledgments) {
+        try {
+            Objects.requireNonNull(acknowledgments, "acknowledgments");
+            List<String> payloads = new ArrayList<>();
+            payloads.add("acknowledgments\n");
+            if (acknowledgments.isEmpty()) {
+                payloads.add("NAK\n");
+            } else {
+                for (GitObjectId acknowledgment : acknowledgments) {
+                    Objects.requireNonNull(
+                            acknowledgment,
+                            "acknowledgment");
+                    validateObjectId(acknowledgment.value());
+                    payloads.add("ACK " + acknowledgment.value() + "\n");
+                }
+            }
+            return sendSerialization(
+                    new AsciiPacketSequenceSerialization(payloads));
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to serialize protocol v2 fetch acknowledgments",
                     error);
         }
     }

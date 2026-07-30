@@ -27,6 +27,7 @@ class GitWireConfigurationTest {
         assertThat(configuration.protocolV2().lsRefs()).isTrue();
         assertThat(configuration.protocolV2().lsRefsUnborn()).isTrue();
         assertThat(configuration.protocolV2().fetch()).isTrue();
+        assertThat(configuration.protocolV2().waitForDone()).isTrue();
         assertThat(configuration.protocolV2().serverOption()).isTrue();
     }
 
@@ -42,6 +43,18 @@ class GitWireConfigurationTest {
     }
 
     @Test
+    void rejectsWaitForDoneWithoutFetch() {
+        assertThatThrownBy(() -> new GitWireConfiguration.ProtocolV2(
+                true,
+                true,
+                false,
+                true,
+                true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("waitForDone requires fetch");
+    }
+
+    @Test
     void rejectsNullTopLevelSections() {
         GitWireConfiguration.LegacyUploadPack uploadPack =
                 new GitWireConfiguration.LegacyUploadPack(
@@ -51,7 +64,7 @@ class GitWireConfigurationTest {
                         true, true, true, true, true);
         GitWireConfiguration.ProtocolV2 protocolV2 =
                 new GitWireConfiguration.ProtocolV2(
-                        true, true, true, true);
+                        true, true, true, true, true);
 
         assertThatNullPointerException()
                 .isThrownBy(() -> new GitWireConfiguration(

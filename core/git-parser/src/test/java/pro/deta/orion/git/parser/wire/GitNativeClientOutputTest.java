@@ -88,7 +88,7 @@ class GitNativeClientOutputTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "0013ls-refs=unborn\n"
-                                    + "000afetch\n"
+                                    + "0018fetch=wait-for-done\n"
                                     + "0012server-option\n"
                                     + "0000");
         } finally {
@@ -110,10 +110,16 @@ class GitNativeClientOutputTest {
     void omitsDisabledProtocolV2Capabilities() {
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
-                        false, false, true, true),
+                        false, false, true, false, true),
                 "000eversion 2\n"
                         + "000afetch\n"
                         + "0012server-option\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        false, false, true, true, false),
+                "000eversion 2\n"
+                        + "0018fetch=wait-for-done\n"
                         + "0000");
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
@@ -135,10 +141,10 @@ class GitNativeClientOutputTest {
     void keepsProtocolV2CapabilitiesInStableOrder() {
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
-                        true, false, true, true),
+                        true, false, true, true, true),
                 "000eversion 2\n"
                         + "000cls-refs\n"
-                        + "000afetch\n"
+                        + "0018fetch=wait-for-done\n"
                         + "0012server-option\n"
                         + "0000");
     }
@@ -365,6 +371,67 @@ class GitNativeClientOutputTest {
             }
             assertThat(outbound.writerIndex()).isZero();
         } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsProtocolV2FetchAcknowledgmentsForPresentHaves() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendProtocolV2FetchAcknowledgments(List.of(
+                    GitObjectId.of(MAIN_ID),
+                    GitObjectId.of(TAG_ID))))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "0014acknowledgments\n"
+                                    + "0031ACK " + MAIN_ID + "\n"
+                                    + "0031ACK " + TAG_ID + "\n"
+                                    + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsProtocolV2FetchNakWhenNoHavesAreAcknowledged() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendProtocolV2FetchAcknowledgments(List.of()))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "0014acknowledgments\n"
+                                    + "0008NAK\n"
+                                    + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsProtocolV2FetchAcknowledgmentsWhileOutputIsBusy() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+                output.beginProtocolV2Packfile(
+                        producer("PACK".getBytes(StandardCharsets.US_ASCII)));
+
+        try {
+            assertThat(output.sendProtocolV2FetchAcknowledgments(List.of()))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .contains("already in progress"));
+        } finally {
+            response.close();
             outbound.release();
         }
     }

@@ -55,7 +55,7 @@ class UploadPackContinuationTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "0013ls-refs=unborn\n"
-                                    + "000afetch\n"
+                                    + "0018fetch=wait-for-done\n"
                                     + "0012server-option\n"
                                     + "0000");
             assertThat(input.readerIndex()).isZero();
@@ -161,6 +161,44 @@ class UploadPackContinuationTest {
     }
 
     @Test
+    void rejectsDisabledLsRefsCommand() {
+        ByteBuf outbound = outputBuffer();
+        ByteBuf input = request("command=ls-refs\n");
+        try {
+            Driver driver = new Driver(context(
+                    new GitNativeClientOutput(outbound),
+                    new GitWireConfiguration.ProtocolV2(
+                            false, false, true, false)));
+
+            driver.drive(input);
+
+            assertInvalid(driver.current);
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsDisabledFetchCommand() {
+        ByteBuf outbound = outputBuffer();
+        ByteBuf input = request("command=fetch\n");
+        try {
+            Driver driver = new Driver(context(
+                    new GitNativeClientOutput(outbound),
+                    new GitWireConfiguration.ProtocolV2(
+                            true, true, false, false)));
+
+            driver.drive(input);
+
+            assertInvalid(driver.current);
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
     void rejectsUnknownCommand() {
         assertInvalid(data("command=unknown\n"));
     }
@@ -187,6 +225,11 @@ class UploadPackContinuationTest {
 
     private static void assertInvalid(ByteBuf input) {
         Continuation<ByteBuf> completed = drive(input);
+        assertInvalid(completed);
+    }
+
+    private static void assertInvalid(
+            Continuation<ByteBuf> completed) {
         assertThat(completed)
                 .isInstanceOfSatisfying(
                         Continuation.CompletedError.class,
@@ -301,11 +344,18 @@ class UploadPackContinuationTest {
     }
 
     private static final class Driver {
-        private Continuation<ByteBuf> current =
-                new UploadCommandContinuation(
-                        GitMinimalWireMachine.testContext(
-                                UnpooledByteBufAllocator.DEFAULT),
-                        initialRequest());
+        private Continuation<ByteBuf> current;
+
+        private Driver() {
+            this(GitMinimalWireMachine.testContext(
+                    UnpooledByteBufAllocator.DEFAULT));
+        }
+
+        private Driver(GitMinimalWireMachine.Context context) {
+            current = new UploadCommandContinuation(
+                    context,
+                    initialRequest());
+        }
 
         private void drive(ByteBuf input) {
             while (true) {
