@@ -35,11 +35,9 @@ final class UploadCommandContinuation implements Continuation<ByteBuf> {
         return switch (control.type()) {
             case DATA -> control.payloadLength() == 0
                     ? failed()
-                    : command == null
-                            ? new UploadCommandPayloadContinuation(
-                                    this,
-                                    control.payloadLength())
-                            : failed();
+                    : new UploadCommandPayloadContinuation(
+                            this,
+                            control.payloadLength());
             case DELIMITER -> completeCommand();
             case FLUSH -> failed();
             case RESPONSE_END -> failed();
@@ -52,6 +50,16 @@ final class UploadCommandContinuation implements Continuation<ByteBuf> {
         }
         this.command = Objects.requireNonNull(command, "command");
         return true;
+    }
+
+    boolean acceptServerOption() {
+        if (command == null
+                || !context.configuration
+                        .protocolV2()
+                        .serverOption()) {
+            return false;
+        }
+        throw new IllegalStateException("not implemented");
     }
 
     private Continuation<ByteBuf> completeCommand() {

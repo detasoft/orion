@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST;
 
 class UploadPackContinuationTest {
@@ -212,6 +213,89 @@ class UploadPackContinuationTest {
             input.release();
             outbound.release();
         }
+    }
+
+    @Test
+    void rejectsServerOptionWhenItIsDisabled() {
+        ByteBuf outbound = outputBuffer();
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "command=fetch\n");
+        writeData(input, "server-option=trace2\n");
+        writeDelimiter(input);
+        try {
+            Driver driver = new Driver(context(
+                    new GitNativeClientOutput(outbound),
+                    new GitWireConfiguration.ProtocolV2(
+                            false, false, true, false)));
+
+            driver.drive(input);
+
+            assertInvalid(driver.current);
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void enabledServerOptionFailsAtProcessingTime() {
+        ByteBuf outbound = outputBuffer();
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "command=fetch\n");
+        writeData(input, "server-option=trace2\n");
+        writeDelimiter(input);
+        try {
+            Driver driver = new Driver(context(
+                    new GitNativeClientOutput(outbound),
+                    new GitWireConfiguration.ProtocolV2(
+                            false, false, true, true)));
+
+            assertThatThrownBy(() -> driver.drive(input))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("not implemented");
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsServerOptionBeforeCommand() {
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "server-option=trace2\n");
+        writeData(input, "command=fetch\n");
+        writeDelimiter(input);
+
+        assertInvalid(input);
+    }
+
+    @Test
+    void rejectsMalformedServerOptionHeaders() {
+        assertInvalid(data("server-option=\n"));
+        assertInvalid(data("server-option trace2\n"));
+        assertInvalid(data("server-option=trace2"));
+        assertInvalid(data("server-option=trace\u0000\n"));
+
+        ByteBuf nonAscii = Unpooled.buffer();
+        byte[] prefix = "server-option=".getBytes(
+                StandardCharsets.US_ASCII);
+        nonAscii.writeCharSequence(
+                "%04x".formatted(prefix.length + 6),
+                StandardCharsets.US_ASCII);
+        nonAscii.writeBytes(prefix);
+        nonAscii.writeByte(0x80);
+        nonAscii.writeByte('\n');
+        assertInvalid(nonAscii);
+    }
+
+    @Test
+    void rejectsDuplicateCommandHeader() {
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "command=fetch\n");
+        writeData(input, "command=fetch\n");
+        writeDelimiter(input);
+
+        assertInvalid(input);
     }
 
     @Test

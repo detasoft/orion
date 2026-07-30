@@ -28,9 +28,8 @@ final class UploadCommandPayloadContinuation
                         UploadCommandContinuation.failed());
             }
         }
-        UploadCommandContinuation.Command command =
-                parser.completeCommand();
-        if (command == null || !request.acceptCommand(command)) {
+        UploadCommandParser.Header header = parser.completeHeader();
+        if (header == null || !accept(header)) {
             return ContinuationFlow.transition(
                     UploadCommandContinuation.failed());
         }
@@ -38,9 +37,18 @@ final class UploadCommandPayloadContinuation
                 new ControlHeaderContinuation(request::next));
     }
 
+    private boolean accept(UploadCommandParser.Header header) {
+        if (header instanceof UploadCommandParser.CommandHeader command) {
+            return request.acceptCommand(command.command());
+        }
+        return request.acceptServerOption();
+    }
+
     private static final class UploadCommandParser {
-        private static final byte[] PREFIX =
+        private static final byte[] COMMAND_PREFIX =
                 ascii("command=");
+        private static final byte[] SERVER_OPTION_PREFIX =
+                ascii("server-option=");
         private static final byte[] LS_REFS =
                 ascii("ls-refs");
         private static final byte[] FETCH =
@@ -49,8 +57,10 @@ final class UploadCommandPayloadContinuation
         private int remainingBytes;
         private int tokenIndex;
         private Phase phase = Phase.PREFIX;
+        private HeaderKind headerKind;
         private byte[] expectedCommand;
         private UploadCommandContinuation.Command command;
+        private int serverOptionLength;
 
         private UploadCommandParser(int payloadLength) {
             this.remainingBytes = payloadLength;
@@ -62,46 +72,62 @@ final class UploadCommandPayloadContinuation
             boolean last = remainingBytes == 0;
             if (last && value == '\n') {
                 phase = Phase.COMPLETE;
-                return commandComplete();
+                return headerComplete();
             }
             if (phase == Phase.COMPLETE
-                    || value > 0x7f
-                    || value == 0) {
+                    || value < 0x20
+                    || value > 0x7e) {
                 return false;
             }
             boolean accepted = switch (phase) {
                 case PREFIX -> acceptPrefix(value);
                 case COMMAND_NAME -> acceptCommandByte(value);
+                case SERVER_OPTION -> acceptServerOptionByte();
                 case COMPLETE -> false;
             };
-            if (!accepted) {
-                return false;
-            }
-            if (last) {
-                phase = Phase.COMPLETE;
-                return commandComplete();
-            }
-            return true;
+            return accepted && !last;
         }
 
         private boolean notDone() {
             return remainingBytes > 0;
         }
 
-        private UploadCommandContinuation.Command completeCommand() {
-            return phase == Phase.COMPLETE && commandComplete()
-                    ? command
-                    : null;
+        private Header completeHeader() {
+            if (phase != Phase.COMPLETE || !headerComplete()) {
+                return null;
+            }
+            return switch (headerKind) {
+                case COMMAND -> new CommandHeader(command);
+                case SERVER_OPTION -> ServerOptionHeader.VALUE;
+            };
         }
 
         private boolean acceptPrefix(int value) {
-            if (!matches(PREFIX, value)) {
+            byte[] prefix;
+            if (headerKind == null) {
+                if (value == COMMAND_PREFIX[0]) {
+                    headerKind = HeaderKind.COMMAND;
+                    prefix = COMMAND_PREFIX;
+                } else if (value == SERVER_OPTION_PREFIX[0]) {
+                    headerKind = HeaderKind.SERVER_OPTION;
+                    prefix = SERVER_OPTION_PREFIX;
+                } else {
+                    return false;
+                }
+            } else {
+                prefix = headerKind == HeaderKind.COMMAND
+                        ? COMMAND_PREFIX
+                        : SERVER_OPTION_PREFIX;
+            }
+            if (!matches(prefix, value)) {
                 return false;
             }
             tokenIndex++;
-            if (tokenIndex == PREFIX.length) {
+            if (tokenIndex == prefix.length) {
                 tokenIndex = 0;
-                phase = Phase.COMMAND_NAME;
+                phase = headerKind == HeaderKind.COMMAND
+                        ? Phase.COMMAND_NAME
+                        : Phase.SERVER_OPTION;
             }
             return true;
         }
@@ -127,14 +153,25 @@ final class UploadCommandPayloadContinuation
             return true;
         }
 
+        private boolean acceptServerOptionByte() {
+            serverOptionLength++;
+            return true;
+        }
+
         private boolean matches(byte[] expected, int value) {
             return tokenIndex < expected.length
                     && expected[tokenIndex] == (byte) value;
         }
 
-        private boolean commandComplete() {
-            return expectedCommand != null
-                    && tokenIndex == expectedCommand.length;
+        private boolean headerComplete() {
+            if (headerKind == null) {
+                return false;
+            }
+            return switch (headerKind) {
+                case COMMAND -> expectedCommand != null
+                        && tokenIndex == expectedCommand.length;
+                case SERVER_OPTION -> serverOptionLength > 0;
+            };
         }
 
         private static byte[] ascii(String value) {
@@ -145,7 +182,26 @@ final class UploadCommandPayloadContinuation
         private enum Phase {
             PREFIX,
             COMMAND_NAME,
+            SERVER_OPTION,
             COMPLETE
+        }
+
+        private enum HeaderKind {
+            COMMAND,
+            SERVER_OPTION
+        }
+
+        private sealed interface Header
+                permits CommandHeader, ServerOptionHeader {
+        }
+
+        private record CommandHeader(
+                UploadCommandContinuation.Command command)
+                implements Header {
+        }
+
+        private enum ServerOptionHeader implements Header {
+            VALUE
         }
     }
 }
