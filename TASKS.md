@@ -31,7 +31,7 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Add authenticated native repository resolution around the server
       WireMachine, including READ, WRITE, and CREATE checks before automatic
       repository creation.
-- [ ] Connect receive-pack wire handling directly to the continuation-based
+- [x] Connect receive-pack wire handling directly to the continuation-based
       `PackIngestor`, streaming `ByteBuf` fragments into the in-memory
       quarantine store and handing off the quarantine at the pack checksum
       checkpoint.

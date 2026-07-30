@@ -34,6 +34,7 @@ public final class ReceivePackContinuation implements Continuation<ByteBuf> {
                             advertisement);
             return result.transitionTo(
                     new ReceiveCommandContinuation(
+                            context,
                             data,
                             advertisement));
         } catch (RuntimeException error) {

@@ -4,6 +4,8 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -17,6 +19,11 @@ import java.util.Objects;
 
 public final class GitNativeRepositoryService {
     private static final String NULL_ID = "0".repeat(40);
+    private static final PackIngestionLimits RECEIVE_PACK_LIMITS =
+            new PackIngestionLimits(
+                    100L * 1024 * 1024,
+                    1_000_000,
+                    64 * 1024 * 1024);
     private static final List<GitCapability> UPLOAD_PACK_CAPABILITIES = List.of(
             GitCapability.MULTI_ACK_DETAILED,
             GitCapability.THIN_PACK,
@@ -62,6 +69,13 @@ public final class GitNativeRepositoryService {
         Objects.requireNonNull(request, "request");
         return resolveRepository(data.getRepositoryPath())
                 .fetch(request);
+    }
+
+    public PackIngestionSession beginLegacyReceivePack(
+            InitialRequestData data) {
+        Objects.requireNonNull(data, "data");
+        return resolveRepository(data.getRepositoryPath())
+                .beginPackIngestion(RECEIVE_PACK_LIMITS);
     }
 
     private GitV1Advertisement legacyAdvertisement(

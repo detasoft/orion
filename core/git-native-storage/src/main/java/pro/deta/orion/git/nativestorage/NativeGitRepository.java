@@ -5,6 +5,9 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.pack.PackIngestor;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
@@ -58,6 +61,13 @@ public class NativeGitRepository {
 
     public GitObjectId writeObject(ObjectType type, byte[] data) {
         return looseObjectStore.write(type, data);
+    }
+
+    public PackIngestionSession beginPackIngestion(
+            PackIngestionLimits limits) {
+        return new PackIngestor(
+                Objects.requireNonNull(limits, "limits"),
+                looseObjectStore);
     }
 
     public NativePackProducer fetch(NativeFetchRequest request) {

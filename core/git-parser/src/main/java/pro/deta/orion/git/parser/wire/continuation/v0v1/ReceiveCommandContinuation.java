@@ -5,6 +5,7 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
+import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -32,6 +33,7 @@ import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.UNSUPPORTED
 final class ReceiveCommandContinuation implements Continuation<ByteBuf> {
     private static final String NULL_ID = "0".repeat(40);
 
+    private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
     private final GitV1Advertisement serverAdvertisement;
     private final List<LegacyReceiveCommand> commands =
@@ -40,8 +42,10 @@ final class ReceiveCommandContinuation implements Continuation<ByteBuf> {
     private final Set<String> refNames = new LinkedHashSet<>();
 
     ReceiveCommandContinuation(
+            GitMinimalWireMachine.Context context,
             InitialRequestData data,
             GitV1Advertisement serverAdvertisement) {
+        this.context = Objects.requireNonNull(context, "context");
         this.data = Objects.requireNonNull(data, "data");
         this.serverAdvertisement = Objects.requireNonNull(
                 serverAdvertisement,
@@ -164,7 +168,7 @@ final class ReceiveCommandContinuation implements Continuation<ByteBuf> {
                         commands,
                         capabilities,
                         serverAdvertisement);
-        return new ReceivePackBoundaryContinuation(section);
+        return new ReceivePackBoundaryContinuation(context, section);
     }
 
     private static boolean isObjectId(String value) {
