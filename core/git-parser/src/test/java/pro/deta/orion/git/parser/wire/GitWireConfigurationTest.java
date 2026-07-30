@@ -1,0 +1,69 @@
+package pro.deta.orion.git.parser.wire;
+
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class GitWireConfigurationTest {
+
+    @Test
+    void allSupportedEnablesEveryCurrentFeature() {
+        GitWireConfiguration configuration =
+                GitWireConfiguration.allSupported();
+
+        assertThat(configuration.uploadPack().multiAckDetailed()).isTrue();
+        assertThat(configuration.uploadPack().thinPack()).isTrue();
+        assertThat(configuration.uploadPack().sideBand64k()).isTrue();
+        assertThat(configuration.uploadPack().ofsDelta()).isTrue();
+        assertThat(configuration.uploadPack().symref()).isTrue();
+        assertThat(configuration.uploadPack().agent()).isTrue();
+        assertThat(configuration.receivePack().reportStatus()).isTrue();
+        assertThat(configuration.receivePack().sideBand64k()).isTrue();
+        assertThat(configuration.receivePack().ofsDelta()).isTrue();
+        assertThat(configuration.receivePack().objectFormat()).isTrue();
+        assertThat(configuration.receivePack().agent()).isTrue();
+        assertThat(configuration.protocolV2().lsRefs()).isTrue();
+        assertThat(configuration.protocolV2().lsRefsUnborn()).isTrue();
+        assertThat(configuration.protocolV2().fetch()).isTrue();
+        assertThat(configuration.protocolV2().serverOption()).isTrue();
+    }
+
+    @Test
+    void rejectsUnbornWithoutLsRefs() {
+        assertThatThrownBy(() -> new GitWireConfiguration.ProtocolV2(
+                false,
+                true,
+                true,
+                true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("lsRefsUnborn requires lsRefs");
+    }
+
+    @Test
+    void rejectsNullTopLevelSections() {
+        GitWireConfiguration.LegacyUploadPack uploadPack =
+                new GitWireConfiguration.LegacyUploadPack(
+                        true, true, true, true, true, true);
+        GitWireConfiguration.LegacyReceivePack receivePack =
+                new GitWireConfiguration.LegacyReceivePack(
+                        true, true, true, true, true);
+        GitWireConfiguration.ProtocolV2 protocolV2 =
+                new GitWireConfiguration.ProtocolV2(
+                        true, true, true, true);
+
+        assertThatNullPointerException()
+                .isThrownBy(() -> new GitWireConfiguration(
+                        null, receivePack, protocolV2))
+                .withMessage("uploadPack");
+        assertThatNullPointerException()
+                .isThrownBy(() -> new GitWireConfiguration(
+                        uploadPack, null, protocolV2))
+                .withMessage("receivePack");
+        assertThatNullPointerException()
+                .isThrownBy(() -> new GitWireConfiguration(
+                        uploadPack, receivePack, null))
+                .withMessage("protocolV2");
+    }
+}
