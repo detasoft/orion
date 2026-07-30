@@ -83,6 +83,8 @@ class FetchContinuationTest {
     @Test
     void rejectsMalformedOrIncompleteRequests() {
         assertInvalid(request("want invalid\n", "done\n"));
+        assertInvalid(request("want " + WANT + " trailing\n", "done\n"));
+        assertInvalid(request("want " + WANT.substring(1) + "\n", "done\n"));
         assertInvalid(request("have " + HAVE + "\n", "done\n"));
         assertInvalid(request("want " + WANT + "\n"));
         assertInvalid(request(

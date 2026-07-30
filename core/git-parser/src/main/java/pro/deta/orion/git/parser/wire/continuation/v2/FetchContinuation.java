@@ -6,13 +6,11 @@ import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
-import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -54,42 +52,26 @@ final class FetchContinuation implements Continuation<ByteBuf> {
         };
     }
 
-    boolean accept(byte[] rawPayload) {
-        int length = rawPayload.length;
-        if (length > 0 && rawPayload[length - 1] == '\n') {
-            length--;
+    void accept(FetchArgument argument) {
+        switch (argument) {
+            case ObjectArgument object -> {
+                Set<GitObjectId> destination =
+                        object.kind() == ObjectArgumentKind.WANT
+                                ? wants
+                                : haves;
+                destination.add(object.objectId());
+            }
+            case SimpleArgument simple -> {
+                switch (simple) {
+                    case DONE -> done = true;
+                    case THIN_PACK -> thinPack = true;
+                    case OFS_DELTA -> ofsDelta = true;
+                    case INCLUDE_TAG -> includeTag = true;
+                    case NO_PROGRESS -> {
+                    }
+                }
+            }
         }
-        String line = new String(
-                rawPayload,
-                0,
-                length,
-                StandardCharsets.US_ASCII);
-        if (line.equals("done")) {
-            done = true;
-            return true;
-        }
-        if (line.equals(GitCapability.THIN_PACK.name())) {
-            thinPack = true;
-            return true;
-        }
-        if (line.equals(GitCapability.OFS_DELTA.name())) {
-            ofsDelta = true;
-            return true;
-        }
-        if (line.equals(GitCapability.NO_PROGRESS.name())) {
-            return true;
-        }
-        if (line.equals(GitCapability.INCLUDE_TAG.name())) {
-            includeTag = true;
-            return true;
-        }
-        if (line.startsWith("want ")) {
-            return addObjectId(wants, line.substring("want ".length()));
-        }
-        if (line.startsWith("have ")) {
-            return addObjectId(haves, line.substring("have ".length()));
-        }
-        return false;
     }
 
     private Continuation<ByteBuf> completeRequest() {
@@ -109,30 +91,27 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                 request);
     }
 
-    private static boolean addObjectId(
-            Set<GitObjectId> destination,
-            String value) {
-        if (!isObjectId(value)) {
-            return false;
-        }
-        destination.add(GitObjectId.of(value));
-        return true;
+    sealed interface FetchArgument
+            permits ObjectArgument, SimpleArgument {
     }
 
-    private static boolean isObjectId(String value) {
-        if (value.length() != 40) {
-            return false;
-        }
-        for (int index = 0; index < value.length(); index++) {
-            char digit = value.charAt(index);
-            boolean hexadecimal = digit >= '0' && digit <= '9'
-                    || digit >= 'a' && digit <= 'f'
-                    || digit >= 'A' && digit <= 'F';
-            if (!hexadecimal) {
-                return false;
-            }
-        }
-        return true;
+    record ObjectArgument(
+            ObjectArgumentKind kind,
+            GitObjectId objectId)
+            implements FetchArgument {
+    }
+
+    enum ObjectArgumentKind {
+        WANT,
+        HAVE
+    }
+
+    enum SimpleArgument implements FetchArgument {
+        DONE,
+        THIN_PACK,
+        OFS_DELTA,
+        NO_PROGRESS,
+        INCLUDE_TAG
     }
 
     static Continuation<ByteBuf> failed() {
