@@ -7,16 +7,23 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
+import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommand;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommandSection;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceivePack;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -84,7 +91,54 @@ class ReceivePackIngestionContinuationTest {
         assertThat(session.closed).isTrue();
     }
 
+    @Test
+    void disabledReportStatusDoesNotSendRequestedStatusResponse() {
+        GitWireConfiguration configuration =
+                receiveConfiguration(false, true);
+        ByteBuf outbound = outputBuffer();
+        try {
+            ContinuationFlow<ByteBuf> flow = completeReceivePack(
+                    outbound,
+                    configuration,
+                    Set.of("report-status", "side-band-64k"));
+
+            assertThat(flow)
+                    .isInstanceOf(ContinuationFlow.Transition.class);
+            assertThat(outbound.isReadable()).isFalse();
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void disabledSideBandSendsRequestedReportStatusWithoutSideBand() {
+        GitWireConfiguration configuration =
+                receiveConfiguration(true, false);
+        ByteBuf outbound = outputBuffer();
+        try {
+            ContinuationFlow<ByteBuf> flow = completeReceivePack(
+                    outbound,
+                    configuration,
+                    Set.of("report-status", "side-band-64k"));
+
+            assertThat(flow)
+                    .isInstanceOf(ContinuationFlow.Transition.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "000eunpack ok\n"
+                                    + "0017ok refs/heads/main\n"
+                                    + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
     private static LegacyReceiveCommandSection section() {
+        return section(Set.of("report-status"));
+    }
+
+    private static LegacyReceiveCommandSection section(
+            Set<String> capabilities) {
         InitialRequestData request = new InitialRequestData(
                 InitialRequestService.RECEIVE_PACK,
                 "/demo.git",
@@ -101,8 +155,55 @@ class ReceivePackIngestionContinuationTest {
                         GitObjectId.of(NULL_ID),
                         GitObjectId.of(NEW_ID),
                         "refs/heads/main")),
-                Set.of("report-status"),
+                capabilities,
                 advertisement);
+    }
+
+    private static ContinuationFlow<ByteBuf> completeReceivePack(
+            ByteBuf outbound,
+            GitWireConfiguration configuration,
+            Set<String> capabilities) {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        GitNativeClientOutput output =
+                new GitNativeClientOutput(outbound);
+        GitNativeRepositoryService repositoryService =
+                new GitNativeRepositoryService(provider, configuration);
+        GitMinimalWireMachine.Context context =
+                GitMinimalWireMachine.testContext(
+                        UnpooledByteBufAllocator.DEFAULT,
+                        output,
+                        repositoryService,
+                        configuration);
+        Continuation<ByteBuf> continuation =
+                ReceivePackIngestionContinuation.completeReceivePack(
+                        context,
+                        new LegacyReceivePack(
+                                section(capabilities),
+                                new LooseObjectStore()));
+        return continuation.process(Unpooled.EMPTY_BUFFER);
+    }
+
+    private static ByteBuf outputBuffer() {
+        return Unpooled.buffer(
+                GitNativeClientOutput.BUFFER_CAPACITY,
+                GitNativeClientOutput.BUFFER_CAPACITY);
+    }
+
+    private static GitWireConfiguration receiveConfiguration(
+            boolean reportStatus,
+            boolean sideBand64k) {
+        GitWireConfiguration supported =
+                GitWireConfiguration.allSupported();
+        return new GitWireConfiguration(
+                supported.uploadPack(),
+                new GitWireConfiguration.LegacyReceivePack(
+                        reportStatus,
+                        sideBand64k,
+                        true,
+                        true,
+                        true),
+                supported.protocolV2());
     }
 
     private static final class RecordingSession

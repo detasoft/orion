@@ -82,7 +82,81 @@ class GitNativeRepositoryServiceTest {
                         "refs/tags/v1"));
         assertThat(advertisement.capabilities())
                 .extracting(capability -> capability.wireToken())
-                .contains("symref=HEAD:refs/heads/main");
+                .containsExactly(
+                        "multi_ack_detailed",
+                        "thin-pack",
+                        "side-band-64k",
+                        "ofs-delta",
+                        "agent=orion-native",
+                        "symref=HEAD:refs/heads/main");
+    }
+
+    @Test
+    void omitsEachDisabledUploadPackCapabilityWithoutReorderingOthers() {
+        InMemoryNativeGitRepositoryProvider provider =
+                providerWithMainRef();
+        List<UploadCapabilityCase> cases = List.of(
+                new UploadCapabilityCase(
+                        uploadConfiguration(false, true, true, true, true, true),
+                        List.of(
+                                "thin-pack",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, false, true, true, true, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, false, true, true, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "thin-pack",
+                                "ofs-delta",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, true, false, true, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "thin-pack",
+                                "side-band-64k",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, true, true, false, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "thin-pack",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "agent=orion-native")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, true, true, true, false),
+                        List.of(
+                                "multi_ack_detailed",
+                                "thin-pack",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "symref=HEAD:refs/heads/main")));
+
+        for (UploadCapabilityCase capabilityCase : cases) {
+            GitV1Advertisement advertisement =
+                    new GitNativeRepositoryService(
+                            provider,
+                            capabilityCase.configuration())
+                            .legacyUploadPackAdvertisement(
+                                    request("/demo.git"));
+
+            assertThat(capabilityTokens(advertisement))
+                    .containsExactlyElementsOf(
+                            capabilityCase.expectedTokens());
+        }
     }
 
     @Test
@@ -116,6 +190,61 @@ class GitNativeRepositoryServiceTest {
                         "ofs-delta",
                         "object-format=sha1",
                         "agent=orion-native");
+    }
+
+    @Test
+    void omitsEachDisabledReceivePackCapabilityWithoutReorderingOthers() {
+        InMemoryNativeGitRepositoryProvider provider =
+                providerWithMainRef();
+        List<ReceiveCapabilityCase> cases = List.of(
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(false, true, true, true, true),
+                        List.of(
+                                "side-band-64k",
+                                "ofs-delta",
+                                "object-format=sha1",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, false, true, true, true),
+                        List.of(
+                                "report-status",
+                                "ofs-delta",
+                                "object-format=sha1",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, true, false, true, true),
+                        List.of(
+                                "report-status",
+                                "side-band-64k",
+                                "object-format=sha1",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, true, true, false, true),
+                        List.of(
+                                "report-status",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, true, true, true, false),
+                        List.of(
+                                "report-status",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "object-format=sha1")));
+
+        for (ReceiveCapabilityCase capabilityCase : cases) {
+            GitV1Advertisement advertisement =
+                    new GitNativeRepositoryService(
+                            provider,
+                            capabilityCase.configuration())
+                            .legacyReceivePackAdvertisement(
+                                    receiveRequest("/demo.git"));
+
+            assertThat(capabilityTokens(advertisement))
+                    .containsExactlyElementsOf(
+                            capabilityCase.expectedTokens());
+        }
     }
 
     @Test
@@ -645,6 +774,64 @@ class GitNativeRepositoryServiceTest {
                 peeledObjectId);
     }
 
+    private static InMemoryNativeGitRepositoryProvider providerWithMainRef() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        provider.findOrCreate("demo.git")
+                .valueOrFailure("repository")
+                .updateRef("refs/heads/main", NULL_ID, MAIN_ID);
+        return provider;
+    }
+
+    private static GitWireConfiguration uploadConfiguration(
+            boolean multiAckDetailed,
+            boolean thinPack,
+            boolean sideBand64k,
+            boolean ofsDelta,
+            boolean symref,
+            boolean agent) {
+        GitWireConfiguration supported =
+                GitWireConfiguration.allSupported();
+        return new GitWireConfiguration(
+                new GitWireConfiguration.LegacyUploadPack(
+                        multiAckDetailed,
+                        thinPack,
+                        sideBand64k,
+                        ofsDelta,
+                        symref,
+                        agent),
+                supported.receivePack(),
+                supported.protocolV2());
+    }
+
+    private static GitWireConfiguration receiveConfiguration(
+            boolean reportStatus,
+            boolean sideBand64k,
+            boolean ofsDelta,
+            boolean objectFormat,
+            boolean agent) {
+        GitWireConfiguration supported =
+                GitWireConfiguration.allSupported();
+        return new GitWireConfiguration(
+                supported.uploadPack(),
+                new GitWireConfiguration.LegacyReceivePack(
+                        reportStatus,
+                        sideBand64k,
+                        ofsDelta,
+                        objectFormat,
+                        agent),
+                supported.protocolV2());
+    }
+
+    private static List<String> capabilityTokens(
+            GitV1Advertisement advertisement) {
+        List<String> tokens = new ArrayList<>();
+        for (var capability : advertisement.capabilities()) {
+            tokens.add(capability.wireToken());
+        }
+        return tokens;
+    }
+
     private static InitialRequestData request(String path) {
         return new InitialRequestData(
                 InitialRequestService.UPLOAD_PACK,
@@ -659,5 +846,15 @@ class GitNativeRepositoryServiceTest {
                 path,
                 "localhost",
                 Map.of());
+    }
+
+    private record UploadCapabilityCase(
+            GitWireConfiguration configuration,
+            List<String> expectedTokens) {
+    }
+
+    private record ReceiveCapabilityCase(
+            GitWireConfiguration configuration,
+            List<String> expectedTokens) {
     }
 }

@@ -51,7 +51,10 @@ public final class GitMinimalWireMachine {
                 new GitNativeRepositoryService(
                         Objects.requireNonNull(
                                 repositoryProvider,
-                                "repositoryProvider")),
+                                "repositoryProvider"),
+                        Objects.requireNonNull(
+                                configuration,
+                                "configuration")),
                 Objects.requireNonNull(configuration, "configuration"));
         this.runtime = new ContinuationRuntime<ByteBuf>(
                 new ControlHeaderContinuation(context, ProtocolStage.INITIAL_REQUEST));

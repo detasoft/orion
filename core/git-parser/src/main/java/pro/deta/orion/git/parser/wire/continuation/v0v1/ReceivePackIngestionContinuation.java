@@ -15,6 +15,7 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 final class ReceivePackIngestionContinuation
         implements Continuation<ByteBuf> {
@@ -76,12 +77,23 @@ final class ReceivePackIngestionContinuation
                                 status.ok(),
                                 status.message()));
             }
+            Set<String> requestedCapabilities =
+                    receivePack.commandSection().capabilities();
+            if (!context.configuration.receivePack().reportStatus()
+                    || !requestedCapabilities.contains("report-status")) {
+                return input -> ContinuationFlow.transition(
+                        Continuation.completedSuccess(
+                                new CompletedReceivePackContinuation(
+                                        receivePack)));
+            }
+            boolean sideBand64k =
+                    context.configuration.receivePack().sideBand64k()
+                            && requestedCapabilities.contains(
+                                    "side-band-64k");
             GitNativeClientOutput.SendResult result =
                     context.clientOutput.sendLegacyReceivePackStatus(
                             outputStatuses,
-                            receivePack.commandSection()
-                                    .capabilities()
-                                    .contains("side-band-64k"));
+                            sideBand64k);
             return input -> result.transitionTo(
                     Continuation.completedSuccess(
                             new CompletedReceivePackContinuation(

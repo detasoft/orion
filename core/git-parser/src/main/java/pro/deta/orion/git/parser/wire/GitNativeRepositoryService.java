@@ -42,41 +42,39 @@ public final class GitNativeRepositoryService {
                     100L * 1024 * 1024,
                     1_000_000,
                     64 * 1024 * 1024);
-    private static final List<GitCapability> UPLOAD_PACK_CAPABILITIES = List.of(
-            GitCapability.MULTI_ACK_DETAILED,
-            GitCapability.THIN_PACK,
-            GitCapability.SIDE_BAND_64K,
-            GitCapability.OFS_DELTA,
-            GitCapability.agent("orion-native"));
-    private static final List<GitCapability> RECEIVE_PACK_CAPABILITIES = List.of(
-            GitCapability.REPORT_STATUS,
-            GitCapability.SIDE_BAND_64K,
-            GitCapability.OFS_DELTA,
-            GitCapability.objectFormat("sha1"),
-            GitCapability.agent("orion-native"));
 
     private final InMemoryNativeGitRepositoryProvider repositoryProvider;
+    private final GitWireConfiguration configuration;
 
     public GitNativeRepositoryService(
             InMemoryNativeGitRepositoryProvider repositoryProvider) {
+        this(repositoryProvider, GitWireConfiguration.allSupported());
+    }
+
+    public GitNativeRepositoryService(
+            InMemoryNativeGitRepositoryProvider repositoryProvider,
+            GitWireConfiguration configuration) {
         this.repositoryProvider = Objects.requireNonNull(
                 repositoryProvider,
                 "repositoryProvider");
+        this.configuration = Objects.requireNonNull(
+                configuration,
+                "configuration");
     }
 
     public GitV1Advertisement legacyUploadPackAdvertisement(
             InitialRequestData data) {
         return legacyAdvertisement(
                 data,
-                UPLOAD_PACK_CAPABILITIES,
-                true);
+                uploadPackCapabilities(),
+                configuration.uploadPack().symref());
     }
 
     public GitV1Advertisement legacyReceivePackAdvertisement(
             InitialRequestData data) {
         return legacyAdvertisement(
                 data,
-                RECEIVE_PACK_CAPABILITIES,
+                receivePackCapabilities(),
                 false);
     }
 
@@ -345,6 +343,50 @@ public final class GitNativeRepositoryService {
                 prefix.length,
                 idLength,
                 StandardCharsets.US_ASCII));
+    }
+
+    private List<GitCapability> uploadPackCapabilities() {
+        GitWireConfiguration.LegacyUploadPack uploadPack =
+                configuration.uploadPack();
+        List<GitCapability> capabilities = new ArrayList<>();
+        if (uploadPack.multiAckDetailed()) {
+            capabilities.add(GitCapability.MULTI_ACK_DETAILED);
+        }
+        if (uploadPack.thinPack()) {
+            capabilities.add(GitCapability.THIN_PACK);
+        }
+        if (uploadPack.sideBand64k()) {
+            capabilities.add(GitCapability.SIDE_BAND_64K);
+        }
+        if (uploadPack.ofsDelta()) {
+            capabilities.add(GitCapability.OFS_DELTA);
+        }
+        if (uploadPack.agent()) {
+            capabilities.add(GitCapability.agent("orion-native"));
+        }
+        return capabilities;
+    }
+
+    private List<GitCapability> receivePackCapabilities() {
+        GitWireConfiguration.LegacyReceivePack receivePack =
+                configuration.receivePack();
+        List<GitCapability> capabilities = new ArrayList<>();
+        if (receivePack.reportStatus()) {
+            capabilities.add(GitCapability.REPORT_STATUS);
+        }
+        if (receivePack.sideBand64k()) {
+            capabilities.add(GitCapability.SIDE_BAND_64K);
+        }
+        if (receivePack.ofsDelta()) {
+            capabilities.add(GitCapability.OFS_DELTA);
+        }
+        if (receivePack.objectFormat()) {
+            capabilities.add(GitCapability.objectFormat("sha1"));
+        }
+        if (receivePack.agent()) {
+            capabilities.add(GitCapability.agent("orion-native"));
+        }
+        return capabilities;
     }
 
     private GitV1Advertisement legacyAdvertisement(
