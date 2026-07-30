@@ -56,9 +56,9 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Add the first real native Git client transport and end-to-end remote
       fetch/push compatibility tests after upload-pack and receive-pack client
       machines land.
-- [ ] Extend protocol v2 server fetch beyond the base request: add annotated
-      tag inclusion, shallow history, object filters, ref-in-want,
-      sideband-all, wait-for-done negotiation, and packfile URI responses.
+- [ ] Extend protocol v2 server fetch beyond the base request: add shallow
+      history, object filters, ref-in-want, sideband-all, wait-for-done
+      negotiation, and packfile URI responses.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`, then add
       GitHub mirror administration, manual sync, and webhook-driven inbound
       synchronization.

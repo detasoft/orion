@@ -22,6 +22,8 @@ public record GitWireError(
         UNEXPECTED_PACKET,
         INVALID_INITIAL_SERVICE_REQUEST,
         INVALID_PROTOCOL_V2_REQUEST,
+        INVALID_PROTOCOL_V2_FETCH_REQUEST(
+                "Protocol v2 fetch request is invalid"),
         INVALID_PROTOCOL_V2_RESPONSE,
         INVALID_ADVERTISEMENT,
         INVALID_PHASE_TRANSITION,

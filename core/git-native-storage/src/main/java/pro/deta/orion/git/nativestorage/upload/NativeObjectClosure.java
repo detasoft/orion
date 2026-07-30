@@ -26,13 +26,15 @@ public final class NativeObjectClosure {
         Objects.requireNonNull(wants, "wants");
         Objects.requireNonNull(haves, "haves");
 
-        Set<GitObjectId> wantedClosure = traverse(wants);
-        wantedClosure.removeAll(traverse(haves));
+        Set<GitObjectId> wantedClosure = traverse(wants, false);
+        wantedClosure.removeAll(traverse(haves, true));
 
         return Set.copyOf(wantedClosure);
     }
 
-    private Set<GitObjectId> traverse(Set<GitObjectId> roots) {
+    private Set<GitObjectId> traverse(
+            Set<GitObjectId> roots,
+            boolean ignoreMissing) {
         Set<GitObjectId> visited = new HashSet<>();
         ArrayDeque<GitObjectId> pending = new ArrayDeque<>(roots);
         while (!pending.isEmpty()) {
@@ -40,22 +42,28 @@ public final class NativeObjectClosure {
             if (!visited.add(id)) {
                 continue;
             }
-            LooseObject object = requireObject(id);
+            LooseObject object = objects.read(id).orElse(null);
+            if (object == null) {
+                if (ignoreMissing) {
+                    continue;
+                }
+                throw missingObject();
+            }
             switch (object.type()) {
                 case COMMIT -> addCommitReferences(object.data(), pending);
                 case TREE -> addTreeReferences(object.data(), pending);
-                case BLOB, TAG -> {
+                case TAG -> addTagReference(object.data(), pending);
+                case BLOB -> {
                 }
             }
         }
         return visited;
     }
 
-    private LooseObject requireObject(GitObjectId id) {
-        return objects.read(id).orElseThrow(() ->
-                new GitUploadPackException(
-                        GitUploadPackException.Kind.MISSING_OBJECT,
-                        "Requested Git object is unavailable"));
+    private static GitUploadPackException missingObject() {
+        return new GitUploadPackException(
+                GitUploadPackException.Kind.MISSING_OBJECT,
+                "Requested Git object is unavailable");
     }
 
     private static void addCommitReferences(byte[] data, ArrayDeque<GitObjectId> pending) {
@@ -85,6 +93,29 @@ public final class NativeObjectClosure {
             pending.addLast(GitObjectId.of(HexFormat.of().formatHex(rawId)));
             offset = nul + 1 + RAW_OBJECT_ID_BYTES;
         }
+    }
+
+    private static void addTagReference(
+            byte[] data,
+            ArrayDeque<GitObjectId> pending) {
+        byte[] prefix = "object ".getBytes(StandardCharsets.US_ASCII);
+        int idLength = 40;
+        int newline = prefix.length + idLength;
+        if (data.length <= newline || data[newline] != '\n') {
+            throw new IllegalArgumentException("Malformed Git tag object");
+        }
+        for (int index = 0; index < prefix.length; index++) {
+            if (data[index] != prefix[index]) {
+                throw new IllegalArgumentException(
+                        "Malformed Git tag object");
+            }
+        }
+        String objectId = new String(
+                data,
+                prefix.length,
+                idLength,
+                StandardCharsets.US_ASCII);
+        pending.addLast(GitObjectId.of(objectId));
     }
 
     private static int indexOf(byte[] data, byte target, int offset) {

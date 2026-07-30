@@ -71,6 +71,15 @@ public final class GitNativeRepositoryService {
                 .fetch(request);
     }
 
+    public NativePackProducer protocolV2Fetch(
+            InitialRequestData data,
+            NativeFetchRequest request) {
+        Objects.requireNonNull(data, "data");
+        Objects.requireNonNull(request, "request");
+        return resolveRepository(data.getRepositoryPath())
+                .fetch(request);
+    }
+
     public PackIngestionSession beginLegacyReceivePack(
             InitialRequestData data) {
         Objects.requireNonNull(data, "data");

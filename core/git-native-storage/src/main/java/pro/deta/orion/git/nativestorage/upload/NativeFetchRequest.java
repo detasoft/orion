@@ -12,7 +12,23 @@ public record NativeFetchRequest(
         Set<GitObjectId> haves,
         boolean done,
         boolean thinPack,
-        boolean ofsDelta) {
+        boolean ofsDelta,
+        boolean includeTag) {
+
+    public NativeFetchRequest(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves,
+            boolean done,
+            boolean thinPack,
+            boolean ofsDelta) {
+        this(
+                wants,
+                haves,
+                done,
+                thinPack,
+                ofsDelta,
+                false);
+    }
 
     public NativeFetchRequest {
         Objects.requireNonNull(wants, "wants");

@@ -31,8 +31,9 @@
 
 1. Implement continuation parsing first, as required by `AGENTS.md` for
    `Continuation` implementations.
-2. Accept `want <oid>`, `have <oid>`, `done`, `thin-pack`, `ofs-delta`, and
-   `no-progress`; parse payloads without retaining input buffers.
+2. Accept `want <oid>`, `have <oid>`, `done`, `thin-pack`, `ofs-delta`,
+   `no-progress`, and `include-tag`; parse payloads without retaining input
+   buffers.
 3. On flush, validate at least one want and `done`, then transition to response.
 4. Add tests for fragmented input, multiple object ids and flags, invalid ids,
    missing required arguments, unknown arguments, and control packets.
@@ -60,8 +61,8 @@
 **Files:**
 - Modify: `TASKS.md`
 
-1. Add one future high-level task for `include-tag`, shallow, filter,
-   ref-in-want, sideband-all, wait-for-done, and packfile URI support.
+1. Add one future high-level task for shallow, filter, ref-in-want,
+   sideband-all, wait-for-done, and packfile URI support.
 2. Run:
 
    `mvn test -Pdev -T 4 -q -pl core/git-parser -am -Dtest=GitNativeClientOutputTest,UploadPackContinuationTest,FetchContinuationTest -Dsurefire.failIfNoSpecifiedTests=false`

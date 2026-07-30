@@ -66,6 +66,38 @@ class NativeObjectClosureTest {
                 });
     }
 
+    @Test
+    void followsAnnotatedTagTargets() {
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                "tagged\n".getBytes(StandardCharsets.UTF_8));
+        GitObjectId tree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "tagged.txt", blob));
+        GitObjectId commit = writeCommit(tree, null, "tagged");
+        GitObjectId tag = writeTag(commit, "v1");
+
+        Set<GitObjectId> result =
+                closure.objectIdsFor(Set.of(tag), Set.of());
+
+        assertThat(result)
+                .containsExactlyInAnyOrder(tag, commit, tree, blob);
+    }
+
+    @Test
+    void ignoresUnknownHaveRoots() {
+        GitObjectId wanted = objects.write(
+                ObjectType.BLOB,
+                "wanted\n".getBytes(StandardCharsets.UTF_8));
+        GitObjectId unknownHave = GitObjectId.of("f".repeat(40));
+
+        Set<GitObjectId> result = closure.objectIdsFor(
+                Set.of(wanted),
+                Set.of(unknownHave));
+
+        assertThat(result).containsExactly(wanted);
+    }
+
     private GitObjectId writeCommit(GitObjectId tree, GitObjectId parent, String message) {
         StringBuilder data = new StringBuilder("tree ").append(tree).append('\n');
         if (parent != null) {
@@ -77,6 +109,17 @@ class NativeObjectClosureTest {
                 .append(message)
                 .append('\n');
         return objects.write(ObjectType.COMMIT, data.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private GitObjectId writeTag(GitObjectId target, String name) {
+        return objects.write(
+                ObjectType.TAG,
+                ("object " + target + "\n"
+                        + "type commit\n"
+                        + "tag " + name + "\n"
+                        + "tagger Test <test@example.com> 0 +0000\n"
+                        + "\nmessage\n")
+                        .getBytes(StandardCharsets.UTF_8));
     }
 
     private static byte[] treeEntry(String mode, String name, GitObjectId objectId) {

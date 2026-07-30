@@ -70,7 +70,8 @@ class NativeGitRepositoryTest {
                 Set.of(have),
                 true,
                 true,
-                true)));
+                true,
+                false)));
 
         try {
             assertThat(pack.getCharSequence(
@@ -79,6 +80,44 @@ class NativeGitRepositoryTest {
                     StandardCharsets.US_ASCII))
                     .hasToString("PACK");
             assertThat(pack.getInt(8)).isEqualTo(1);
+        } finally {
+            pack.release();
+        }
+    }
+
+    @Test
+    void includesAnnotatedTagWhoseTargetIsSent() {
+        LooseRefStore refs = new LooseRefStore();
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                "tagged".getBytes(StandardCharsets.UTF_8));
+        GitObjectId tag = objects.write(
+                ObjectType.TAG,
+                ("object " + blob + "\n"
+                        + "type blob\n"
+                        + "tag v1\n"
+                        + "tagger Test <test@example.com> 0 +0000\n"
+                        + "\nmessage\n")
+                        .getBytes(StandardCharsets.UTF_8));
+        refs.update("refs/tags/v1", NULL_ID, tag.value());
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                refs,
+                objects,
+                "refs/heads/main");
+
+        CompositeByteBuf pack = produce(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(blob),
+                        Set.of(),
+                        true,
+                        false,
+                        false,
+                        true)));
+
+        try {
+            assertThat(pack.getInt(8)).isEqualTo(2);
         } finally {
             pack.release();
         }

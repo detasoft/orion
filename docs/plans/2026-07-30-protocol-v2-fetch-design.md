@@ -9,17 +9,18 @@ response.
 
 ## Scope
 
-The continuation accepts `want`, `have`, `done`, `thin-pack`, `ofs-delta`, and
-`no-progress`. It rejects malformed object ids, duplicate `done`, requests
-without wants, unknown arguments, and requests that end without `done`.
+The continuation accepts `want`, `have`, `done`, `thin-pack`, `ofs-delta`,
+`no-progress`, and `include-tag`. It rejects malformed object ids, duplicate
+`done`, requests without wants, unknown arguments, and requests that end
+without `done`.
 
 `thin-pack` and `ofs-delta` are preserved in `NativeFetchRequest`. The current
 no-delta pack builder may still return a complete non-thin pack because these
 arguments permit optimizations rather than requiring them. `no-progress` is
 accepted because the native producer currently emits no progress messages.
 
-`include-tag`, shallow history, filters, ref-in-want, sideband-all,
-wait-for-done, and packfile URIs remain future work. The server must advertise
+Shallow history, filters, ref-in-want, sideband-all, wait-for-done, and
+packfile URIs remain future work. The server must advertise
 plain `fetch`, not `fetch=shallow`, until shallow history and `shallow-info`
 responses exist.
 

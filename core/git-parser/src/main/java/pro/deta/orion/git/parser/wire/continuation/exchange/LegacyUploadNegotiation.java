@@ -25,7 +25,8 @@ public record LegacyUploadNegotiation(
                 haves,
                 true,
                 negotiated(GitCapability.THIN_PACK),
-                negotiated(GitCapability.OFS_DELTA));
+                negotiated(GitCapability.OFS_DELTA),
+                negotiated(GitCapability.INCLUDE_TAG));
     }
 
     public boolean negotiated(GitCapability capability) {

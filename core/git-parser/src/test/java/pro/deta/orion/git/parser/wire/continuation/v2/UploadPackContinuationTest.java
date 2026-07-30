@@ -53,7 +53,7 @@ class UploadPackContinuationTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "000cls-refs\n"
-                                    + "0012fetch=shallow\n"
+                                    + "000afetch\n"
                                     + "0012server-option\n"
                                     + "0000");
             assertThat(input.readerIndex()).isZero();

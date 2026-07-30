@@ -1,6 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
@@ -13,8 +14,11 @@ import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 public class NativeGitRepository {
     private final String name;
@@ -72,10 +76,65 @@ public class NativeGitRepository {
 
     public NativePackProducer fetch(NativeFetchRequest request) {
         Objects.requireNonNull(request, "request");
-        return new NoDeltaPackBuilder().producer(
-                looseObjectStore,
+        Set<GitObjectId> objectIds = new LinkedHashSet<>(
                 new NativeObjectClosure(looseObjectStore).objectIdsFor(
                         request.wants(),
                         request.haves()));
+        if (request.includeTag()) {
+            includeReachableAnnotatedTags(objectIds);
+        }
+        return new NoDeltaPackBuilder().producer(
+                looseObjectStore,
+                objectIds);
+    }
+
+    private void includeReachableAnnotatedTags(
+            Set<GitObjectId> objectIds) {
+        for (Map.Entry<String, String> ref
+                : looseRefStore.snapshot().entrySet()) {
+            if (!ref.getKey().startsWith("refs/tags/")) {
+                continue;
+            }
+            GitObjectId tagId = GitObjectId.of(ref.getValue());
+            Optional<LooseObject> candidate =
+                    looseObjectStore.read(tagId);
+            if (candidate.isEmpty()
+                    || candidate.get().type() != ObjectType.TAG) {
+                continue;
+            }
+            Set<GitObjectId> tagChain = new LinkedHashSet<>();
+            GitObjectId target = tagId;
+            while (true) {
+                Optional<LooseObject> object =
+                        looseObjectStore.read(target);
+                if (object.isEmpty()
+                        || object.get().type() != ObjectType.TAG
+                        || !tagChain.add(target)) {
+                    break;
+                }
+                target = tagTarget(object.get().data());
+            }
+            if (objectIds.contains(target)) {
+                objectIds.addAll(tagChain);
+            }
+        }
+    }
+
+    private static GitObjectId tagTarget(byte[] data) {
+        String prefix = "object ";
+        int idLength = 40;
+        int newline = prefix.length() + idLength;
+        if (data.length <= newline || data[newline] != '\n') {
+            throw new IllegalArgumentException("Malformed Git tag object");
+        }
+        String line = new String(
+                data,
+                0,
+                newline,
+                java.nio.charset.StandardCharsets.US_ASCII);
+        if (!line.startsWith(prefix)) {
+            throw new IllegalArgumentException("Malformed Git tag object");
+        }
+        return GitObjectId.of(line.substring(prefix.length()));
     }
 }
