@@ -59,8 +59,12 @@ final class UploadCommandContinuation implements Continuation<ByteBuf> {
             return failed();
         }
         return switch (command) {
-            case LS_REFS -> new LsRefsContinuation(context, data);
-            case FETCH -> new FetchContinuation(context, data);
+            case LS_REFS -> context.configuration.protocolV2().lsRefs()
+                    ? new LsRefsContinuation(context, data)
+                    : failed();
+            case FETCH -> context.configuration.protocolV2().fetch()
+                    ? new FetchContinuation(context, data)
+                    : failed();
         };
     }
 

@@ -132,32 +132,48 @@ class UploadPackContinuationTest {
     }
 
     @Test
-    void parsesFragmentedLsRefsRequest() {
+    void dispatchesEnabledLsRefsCommandFromFragments() {
         ByteBuf input = request(
                 "command=ls-refs\n");
+        ByteBuf outbound = outputBuffer();
+        try {
+            Continuation<ByteBuf> completed = driveOneByteAtATime(
+                    input,
+                    context(
+                            new GitNativeClientOutput(outbound),
+                            new GitWireConfiguration.ProtocolV2(
+                                    true, false, false, false)));
 
-        Continuation<ByteBuf> completed = driveOneByteAtATime(input);
-
-        assertThat(completed)
-                .isInstanceOf(LsRefsContinuation.class);
+            assertThat(completed)
+                    .isInstanceOf(LsRefsContinuation.class);
+        } finally {
+            outbound.release();
+        }
     }
 
     @Test
-    void dispatchesFetchWithoutConsumingItsArguments() {
+    void dispatchesEnabledFetchWithoutConsumingItsArguments() {
         ByteBuf input = Unpooled.buffer();
         writeData(input, "command=fetch\n");
         writeDelimiter(input);
         writeData(input, "want " + "1".repeat(40) + "\n");
         int argumentsLength = input.readableBytes()
                 - ("command=fetch\n".length() + 8);
+        ByteBuf outbound = outputBuffer();
+        try {
+            Driver driver = new Driver(context(
+                    new GitNativeClientOutput(outbound),
+                    new GitWireConfiguration.ProtocolV2(
+                            false, false, true, false)));
+            driver.drive(input);
 
-        Driver driver = new Driver();
-        driver.drive(input);
-
-        assertThat(driver.current)
-                .isInstanceOf(FetchContinuation.class);
-        assertThat(input.readableBytes()).isEqualTo(argumentsLength);
-        input.release();
+            assertThat(driver.current)
+                    .isInstanceOf(FetchContinuation.class);
+            assertThat(input.readableBytes()).isEqualTo(argumentsLength);
+        } finally {
+            input.release();
+            outbound.release();
+        }
     }
 
     @Test
@@ -247,7 +263,16 @@ class UploadPackContinuationTest {
 
     private static Continuation<ByteBuf> driveOneByteAtATime(
             ByteBuf input) {
-        Driver driver = new Driver();
+        return driveOneByteAtATime(
+                input,
+                GitMinimalWireMachine.testContext(
+                        UnpooledByteBufAllocator.DEFAULT));
+    }
+
+    private static Continuation<ByteBuf> driveOneByteAtATime(
+            ByteBuf input,
+            GitMinimalWireMachine.Context context) {
+        Driver driver = new Driver(context);
         try {
             while (input.isReadable()) {
                 ByteBuf fragment = input.readRetainedSlice(1);

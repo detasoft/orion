@@ -60,7 +60,14 @@ final class LsRefsContinuation implements Continuation<ByteBuf> {
                 switch (simple) {
                     case PEEL -> peel = true;
                     case SYMREFS -> symrefs = true;
-                    case UNBORN -> unborn = true;
+                    case UNBORN -> {
+                        if (!context.configuration
+                                .protocolV2()
+                                .lsRefsUnborn()) {
+                            yield false;
+                        }
+                        unborn = true;
+                    }
                 }
                 yield true;
             }

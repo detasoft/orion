@@ -15,6 +15,7 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
+import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -174,6 +175,30 @@ class LsRefsContinuationTest {
                     .isInstanceOf(UploadCommandContinuation.class);
             assertThat(outbound.toString(StandardCharsets.US_ASCII))
                     .isEqualTo("0000");
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsUnbornWhenFeatureIsDisabled() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        ByteBuf outbound = outputBuffer();
+        Driver driver = new Driver(
+                context(
+                        provider,
+                        new GitNativeClientOutput(outbound),
+                        new GitWireConfiguration.ProtocolV2(
+                                true, false, true, false)),
+                initialRequest());
+        ByteBuf input = request(
+                "unborn\n");
+        try {
+            driver.drive(input);
+
+            assertInvalid(driver.current);
         } finally {
             input.release();
             outbound.release();
@@ -463,25 +488,30 @@ class LsRefsContinuationTest {
                 initialRequest());
         try {
             driver.drive(input);
-            assertThat(driver.current)
-                    .isInstanceOfSatisfying(
-                            Continuation.CompletedError.class,
-                            error -> {
-                                assertThat(error.message())
-                                        .isEqualTo(
-                                                INVALID_PROTOCOL_V2_REQUEST
-                                                        .getMessage());
-                                assertThat(error.throwable())
-                                        .isInstanceOf(
-                                                GitGeneralException.class)
-                                        .hasMessageContaining(
-                                                INVALID_PROTOCOL_V2_REQUEST
-                                                        .name());
-                            });
+            assertInvalid(driver.current);
         } finally {
             input.release();
             outbound.release();
         }
+    }
+
+    private static void assertInvalid(
+            Continuation<ByteBuf> continuation) {
+        assertThat(continuation)
+                .isInstanceOfSatisfying(
+                        Continuation.CompletedError.class,
+                        error -> {
+                            assertThat(error.message())
+                                    .isEqualTo(
+                                            INVALID_PROTOCOL_V2_REQUEST
+                                                    .getMessage());
+                            assertThat(error.throwable())
+                                    .isInstanceOf(
+                                            GitGeneralException.class)
+                                    .hasMessageContaining(
+                                            INVALID_PROTOCOL_V2_REQUEST
+                                                    .name());
+                        });
     }
 
     private static void driveOneByteAtATime(
@@ -585,6 +615,22 @@ class LsRefsContinuationTest {
                 UnpooledByteBufAllocator.DEFAULT,
                 output,
                 new GitNativeRepositoryService(provider));
+    }
+
+    private static GitMinimalWireMachine.Context context(
+            InMemoryNativeGitRepositoryProvider provider,
+            GitNativeClientOutput output,
+            GitWireConfiguration.ProtocolV2 protocolV2) {
+        GitWireConfiguration supported =
+                GitWireConfiguration.allSupported();
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                output,
+                provider,
+                new GitWireConfiguration(
+                        supported.uploadPack(),
+                        supported.receivePack(),
+                        protocolV2));
     }
 
     private static InitialRequestData initialRequest() {
