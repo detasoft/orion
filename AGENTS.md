@@ -21,6 +21,10 @@
   logic first and add or update its tests afterward. Do not use test-first TDD
   for `Continuation` classes. This exception does not remove the requirement to
   cover continuation behavior with tests in the same change.
+- In `Output` implementations, report expected serialization, validation, and
+  delivery failures through the standard output result/flow interface, such as
+  `SendResult.Failed` and its continuation transition. Do not use `throw new`
+  exceptions as expected `Output` control flow.
 - When replacing one behavior or concept with another, do not add or keep tests whose only purpose is to assert that the previous behavior is absent. Remove those legacy negative checks in a separate commit after the behavior-change commit.
 - Prefer ordinary loops and straightforward control flow over Java Stream API unless streams make the code noticeably more readable.
 - If a method is created only for use in tests and is not part of the public contract, mark it with `core/lifecycle-state-machine/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
