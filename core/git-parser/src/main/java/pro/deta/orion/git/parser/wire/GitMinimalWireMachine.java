@@ -33,13 +33,26 @@ public final class GitMinimalWireMachine {
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             InMemoryNativeGitRepositoryProvider repositoryProvider) {
+        this(
+                allocator,
+                clientOutput,
+                repositoryProvider,
+                GitWireConfiguration.allSupported());
+    }
+
+    public GitMinimalWireMachine(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput,
+            InMemoryNativeGitRepositoryProvider repositoryProvider,
+            GitWireConfiguration configuration) {
         this.context = new Context(
                 Objects.requireNonNull(allocator, "allocator"),
                 Objects.requireNonNull(clientOutput, "clientOutput"),
                 new GitNativeRepositoryService(
                         Objects.requireNonNull(
                                 repositoryProvider,
-                                "repositoryProvider")));
+                                "repositoryProvider")),
+                Objects.requireNonNull(configuration, "configuration"));
         this.runtime = new ContinuationRuntime<ByteBuf>(
                 new ControlHeaderContinuation(context, ProtocolStage.INITIAL_REQUEST));
     }
@@ -66,7 +79,8 @@ public final class GitMinimalWireMachine {
                                 GitNativeClientOutput.BUFFER_CAPACITY,
                                 GitNativeClientOutput.BUFFER_CAPACITY)),
                 new GitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()));
+                        new InMemoryNativeGitRepositoryProvider()),
+                GitWireConfiguration.allSupported());
     }
 
     @TestOnly
@@ -77,7 +91,8 @@ public final class GitMinimalWireMachine {
                 allocator,
                 clientOutput,
                 new GitNativeRepositoryService(
-                        new InMemoryNativeGitRepositoryProvider()));
+                        new InMemoryNativeGitRepositoryProvider()),
+                GitWireConfiguration.allSupported());
     }
 
     @TestOnly
@@ -88,7 +103,8 @@ public final class GitMinimalWireMachine {
         return testContext(
                 allocator,
                 clientOutput,
-                new GitNativeRepositoryService(repositoryProvider));
+                new GitNativeRepositoryService(repositoryProvider),
+                GitWireConfiguration.allSupported());
     }
 
     @TestOnly
@@ -96,26 +112,43 @@ public final class GitMinimalWireMachine {
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             GitNativeRepositoryService repositoryService) {
+        return testContext(
+                allocator,
+                clientOutput,
+                repositoryService,
+                GitWireConfiguration.allSupported());
+    }
+
+    @TestOnly
+    public static Context testContext(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput,
+            GitNativeRepositoryService repositoryService,
+            GitWireConfiguration configuration) {
         return new Context(
                 Objects.requireNonNull(allocator, "allocator"),
                 Objects.requireNonNull(clientOutput, "clientOutput"),
                 Objects.requireNonNull(
                         repositoryService,
-                        "repositoryService"));
+                        "repositoryService"),
+                Objects.requireNonNull(configuration, "configuration"));
     }
 
     public static final class Context {
         public final ByteBufAllocator allocator;
         public final GitNativeClientOutput clientOutput;
         public final GitNativeRepositoryService repositoryService;
+        public final GitWireConfiguration configuration;
 
         Context(
                 ByteBufAllocator allocator,
                 GitNativeClientOutput clientOutput,
-                GitNativeRepositoryService repositoryService) {
+                GitNativeRepositoryService repositoryService,
+                GitWireConfiguration configuration) {
             this.allocator = allocator;
             this.clientOutput = clientOutput;
             this.repositoryService = repositoryService;
+            this.configuration = configuration;
         }
     }
 }
