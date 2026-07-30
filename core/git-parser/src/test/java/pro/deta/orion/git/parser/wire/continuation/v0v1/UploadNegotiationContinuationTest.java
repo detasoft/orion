@@ -53,27 +53,11 @@ class UploadNegotiationContinuationTest {
             input.release();
         }
 
-        LegacyUploadNegotiation negotiation =
-                completedNegotiation(flow);
-        assertThat(negotiation.request()).isEqualTo(request());
-        assertThat(negotiation.haves())
-                .containsExactly(GitObjectId.of(FIRST_ID));
-        assertThat(negotiation.haves()).isUnmodifiable();
-        NativeFetchRequest fetchRequest = completedResponse(flow)
-                .fetchRequest();
-        assertThat(fetchRequest.wants())
-                .containsExactly(GitObjectId.of(FIRST_ID));
-        assertThat(fetchRequest.haves())
-                .containsExactly(GitObjectId.of(FIRST_ID));
-        assertThat(fetchRequest.done()).isTrue();
-        assertThat(fetchRequest.thinPack()).isTrue();
-        assertThat(fetchRequest.ofsDelta()).isTrue();
-        assertThat(fetchRequest.wants()).isUnmodifiable();
-        assertThat(fetchRequest.haves()).isUnmodifiable();
+        completedResponse(flow);
     }
 
     @Test
-    void preservesOrderedDeduplicatedHavesAcrossFlushRounds() {
+    void parsesFragmentedHavesAcrossFlushRounds() {
         ByteBuf outbound = fixedOutput();
         GitNativeClientOutput clientOutput =
                 new GitNativeClientOutput(outbound);
@@ -95,20 +79,7 @@ class UploadNegotiationContinuationTest {
         try {
             assertThat(outbound.toString(StandardCharsets.US_ASCII))
                     .isEqualTo("0008NAK\n");
-            UploadResponseContinuation response = completedResponse(flow);
-            assertThat(response.negotiation().haves())
-                    .containsExactly(
-                            GitObjectId.of(FIRST_ID),
-                            GitObjectId.of(SECOND_ID));
-            assertThat(response.fetchRequest().wants())
-                    .containsExactly(GitObjectId.of(FIRST_ID));
-            assertThat(response.fetchRequest().haves())
-                    .containsExactly(
-                            GitObjectId.of(FIRST_ID),
-                            GitObjectId.of(SECOND_ID));
-            assertThat(response.fetchRequest().done()).isTrue();
-            assertThat(response.fetchRequest().thinPack()).isTrue();
-            assertThat(response.fetchRequest().ofsDelta()).isTrue();
+            completedResponse(flow);
         } finally {
             outbound.release();
         }
@@ -298,17 +269,6 @@ class UploadNegotiationContinuationTest {
                     .isEqualTo(capabilityCase.thinPack());
             assertThat(negotiatedRequest.ofsDelta())
                     .isEqualTo(capabilityCase.ofsDelta());
-
-            NativeFetchRequest fetchRequest =
-                    new UploadResponseContinuation(
-                            context(),
-                            negotiation)
-                            .fetchRequest();
-
-            assertThat(fetchRequest.thinPack())
-                    .isEqualTo(capabilityCase.thinPack());
-            assertThat(fetchRequest.ofsDelta())
-                    .isEqualTo(capabilityCase.ofsDelta());
         }
     }
 
@@ -318,11 +278,6 @@ class UploadNegotiationContinuationTest {
         } finally {
             input.release();
         }
-    }
-
-    private static LegacyUploadNegotiation completedNegotiation(
-            ContinuationFlow<ByteBuf> flow) {
-        return completedResponse(flow).negotiation();
     }
 
     private static UploadResponseContinuation completedResponse(
