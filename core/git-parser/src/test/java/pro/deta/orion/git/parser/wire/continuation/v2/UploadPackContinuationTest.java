@@ -6,8 +6,10 @@ import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -55,6 +57,42 @@ class UploadPackContinuationTest {
                                     + "0013ls-refs=unborn\n"
                                     + "000afetch\n"
                                     + "0012server-option\n"
+                                    + "0000");
+            assertThat(input.readerIndex()).isZero();
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void advertisesOnlyConfiguredProtocolV2Capabilities() {
+        ByteBuf outbound = outputBuffer();
+        ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
+        try {
+            GitWireConfiguration.ProtocolV2 protocolV2 =
+                    new GitWireConfiguration.ProtocolV2(
+                            false, false, true, false);
+            UploadPackContinuation continuation =
+                    new UploadPackContinuation(
+                            context(
+                                    new GitNativeClientOutput(outbound),
+                                    protocolV2),
+                            initialRequest());
+
+            ContinuationFlow<ByteBuf> flow =
+                    continuation.process(input);
+
+            assertThat(flow)
+                    .isInstanceOfSatisfying(
+                            ContinuationFlow.Transition.class,
+                            transition -> assertThat(transition.next())
+                                    .isInstanceOf(
+                                            UploadCommandContinuation.class));
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "000eversion 2\n"
+                                    + "000afetch\n"
                                     + "0000");
             assertThat(input.readerIndex()).isZero();
         } finally {
@@ -230,6 +268,21 @@ class UploadPackContinuationTest {
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
                 output);
+    }
+
+    private static GitMinimalWireMachine.Context context(
+            GitNativeClientOutput output,
+            GitWireConfiguration.ProtocolV2 protocolV2) {
+        GitWireConfiguration supported =
+                GitWireConfiguration.allSupported();
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                output,
+                new InMemoryNativeGitRepositoryProvider(),
+                new GitWireConfiguration(
+                        supported.uploadPack(),
+                        supported.receivePack(),
+                        protocolV2));
     }
 
     private static ByteBuf outputBuffer() {

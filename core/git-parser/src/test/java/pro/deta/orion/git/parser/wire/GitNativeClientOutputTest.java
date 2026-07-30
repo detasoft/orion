@@ -80,7 +80,8 @@ class GitNativeClientOutputTest {
         GitNativeClientOutput output = new GitNativeClientOutput(outbound);
 
         try {
-            assertThat(output.sendV2UploadPackAdvertisement())
+            assertThat(output.sendV2UploadPackAdvertisement(
+                    GitWireConfiguration.allSupported().protocolV2()))
                     .isInstanceOf(
                             GitNativeClientOutput.SendResult.Completed.class);
             assertThat(outbound.toString(StandardCharsets.US_ASCII))
@@ -90,6 +91,88 @@ class GitNativeClientOutputTest {
                                     + "000afetch\n"
                                     + "0012server-option\n"
                                     + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsPlainLsRefsWhenUnbornIsDisabled() {
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        true, false, false, false),
+                "000eversion 2\n"
+                        + "000cls-refs\n"
+                        + "0000");
+    }
+
+    @Test
+    void omitsDisabledProtocolV2Capabilities() {
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        false, false, false, false),
+                "000eversion 2\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        false, false, true, false),
+                "000eversion 2\n"
+                        + "000afetch\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        false, false, false, true),
+                "000eversion 2\n"
+                        + "0012server-option\n"
+                        + "0000");
+    }
+
+    @Test
+    void keepsProtocolV2CapabilitiesInStableOrder() {
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        true, false, true, true),
+                "000eversion 2\n"
+                        + "000cls-refs\n"
+                        + "000afetch\n"
+                        + "0012server-option\n"
+                        + "0000");
+    }
+
+    @Test
+    void reportsMissingProtocolV2Configuration() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendV2UploadPackAdvertisement(null))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> {
+                                assertThat(failed.message())
+                                        .isEqualTo(
+                                                "Failed to serialize protocol v2 advertisement");
+                                assertThat(failed.cause())
+                                        .isInstanceOf(
+                                                NullPointerException.class);
+                            });
+        } finally {
+            outbound.release();
+        }
+    }
+
+    private static void assertV2Advertisement(
+            GitWireConfiguration.ProtocolV2 configuration,
+            String expected) {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendV2UploadPackAdvertisement(configuration))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(expected);
         } finally {
             outbound.release();
         }

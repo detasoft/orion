@@ -77,12 +77,34 @@ public final class GitNativeClientOutput {
     }
 
     public SendResult sendV2UploadPackAdvertisement() {
-        return sendSerialization(
-                new AsciiPacketSequenceSerialization(List.of(
-                        "version 2\n",
-                        "ls-refs=unborn\n",
-                        "fetch\n",
-                        "server-option\n")));
+        return sendV2UploadPackAdvertisement(
+                GitWireConfiguration.allSupported().protocolV2());
+    }
+
+    public SendResult sendV2UploadPackAdvertisement(
+            GitWireConfiguration.ProtocolV2 configuration) {
+        try {
+            Objects.requireNonNull(configuration, "configuration");
+            List<String> capabilities = new ArrayList<>();
+            capabilities.add("version 2\n");
+            if (configuration.lsRefs()) {
+                capabilities.add(configuration.lsRefsUnborn()
+                        ? "ls-refs=unborn\n"
+                        : "ls-refs\n");
+            }
+            if (configuration.fetch()) {
+                capabilities.add("fetch\n");
+            }
+            if (configuration.serverOption()) {
+                capabilities.add("server-option\n");
+            }
+            return sendSerialization(
+                    new AsciiPacketSequenceSerialization(capabilities));
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to serialize protocol v2 advertisement",
+                    error);
+        }
     }
 
     public SendResult sendLsRefs(GitLsRefsResponse response) {

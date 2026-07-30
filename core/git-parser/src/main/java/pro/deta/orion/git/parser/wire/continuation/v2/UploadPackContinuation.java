@@ -24,7 +24,8 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
         try {
             GitNativeClientOutput.SendResult result =
-                    context.clientOutput.sendV2UploadPackAdvertisement();
+                    context.clientOutput.sendV2UploadPackAdvertisement(
+                            context.configuration.protocolV2());
             UploadCommandContinuation next =
                     new UploadCommandContinuation(context, data);
             return result.transitionTo(next);
