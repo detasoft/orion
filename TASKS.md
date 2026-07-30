@@ -20,17 +20,19 @@ designs and implementation steps in `docs/plans/`.
 
 ## Next
 
-- [ ] Complete Tasks 1–7 from
-      `docs/plans/2026-07-28-native-git-in-memory-server.md`: make one server
-      WireMachine own the complete protocol conversation, back it with
-      automatically created in-memory native repositories, add lifecycle/DI
-      wiring, and cover native `git://` clone and push.
+- [ ] Finish the native `git://` server path around `GitMinimalWireMachine` and
+      the Netty transport: back it with automatically created in-memory native
+      repositories, add lifecycle/DI wiring, and cover native clone and push.
   - Owner: codex, started 2026-07-30 02:30 Europe/Amsterdam; current:
     wire lifecycle/DI and cover native `git://` clone now that legacy
     upload-pack streams repository packs through side-band-64k.
-- [ ] Add authenticated native repository resolution around the server
-      WireMachine, including READ, WRITE, and CREATE checks before automatic
-      repository creation.
+- [ ] Delete obsolete native Git plan/design references, including
+      `docs/plans/2026-07-28-native-git-in-memory-server.md`,
+      `docs/plans/2026-07-28-native-git-in-memory-server-design.md`, and
+      `docs/plans/2026-07-28-netty-transport-wire-machine-phase2.md`.
+- [ ] Add authenticated native repository resolution around the
+      `GitMinimalWireMachine`/Netty server path, including READ, WRITE, and
+      CREATE checks before automatic repository creation.
 - [x] Connect receive-pack wire handling directly to the continuation-based
       `PackIngestor`, streaming `ByteBuf` fragments into the in-memory
       quarantine store and handing off the quarantine at the pack checksum
@@ -56,11 +58,14 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Add the first real native Git client transport and end-to-end remote
       fetch/push compatibility tests after upload-pack and receive-pack client
       machines land.
-- [ ] Extend protocol v2 server fetch beyond the base request: add shallow
-      history, object filters, ref-in-want, sideband-all, wait-for-done
-      negotiation, and packfile URI responses.
+- [ ] Extend protocol v2 server fetch with shallow history support beyond the
+      base request.
   - Owner: codex, paused 2026-07-30 14:21 Europe/Amsterdam; wait-for-done
     negotiation is implemented; next: add shallow history support.
+- [ ] Extend protocol v2 server fetch with object filter support.
+- [ ] Extend protocol v2 server fetch with ref-in-want support.
+- [ ] Extend protocol v2 server fetch with sideband-all support.
+- [ ] Extend protocol v2 server fetch with packfile URI responses.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`, then add
       GitHub mirror administration, manual sync, and webhook-driven inbound
       synchronization.
