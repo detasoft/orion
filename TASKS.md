@@ -59,6 +59,8 @@ designs and implementation steps in `docs/plans/`.
 - [ ] Extend protocol v2 server fetch beyond the base request: add shallow
       history, object filters, ref-in-want, sideband-all, wait-for-done
       negotiation, and packfile URI responses.
+  - Owner: codex, started 2026-07-30 14:13 Europe/Amsterdam; current:
+    implement wait-for-done negotiation with repository-backed ACK/NAK responses.
 - [ ] Implement `docs/plans/2026-06-08-github-commit-replication.md`, then add
       GitHub mirror administration, manual sync, and webhook-driven inbound
       synchronization.
