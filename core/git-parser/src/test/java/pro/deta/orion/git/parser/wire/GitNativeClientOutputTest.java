@@ -9,6 +9,7 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -19,9 +20,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitNativeClientOutputTest {
@@ -45,8 +48,15 @@ class GitNativeClientOutputTest {
                 .isEqualTo(ContinuationFlow.transition(next));
         assertThat(new GitNativeClientOutput.SendResult.Streaming(task)
                 .transitionTo(next))
-                .isEqualTo(
-                        ContinuationFlow.transitionAndYield(next, task));
+                .isInstanceOfSatisfying(
+                        ContinuationFlow.TransitionAndYield.class,
+                        yielded -> {
+                            assertThat(yielded.task()).isSameAs(task);
+                            yielded.task().run();
+                            assertThat(yielded.next().process(null))
+                                    .isEqualTo(
+                                            ContinuationFlow.transition(next));
+                        });
         assertThat(new GitNativeClientOutput.SendResult.Failed(
                 "output failed",
                 failure).transitionTo(next))
@@ -76,10 +86,257 @@ class GitNativeClientOutputTest {
             assertThat(outbound.toString(StandardCharsets.US_ASCII))
                     .isEqualTo(
                             "000eversion 2\n"
-                                    + "000cls-refs\n"
+                                    + "0013ls-refs=unborn\n"
                                     + "000afetch\n"
                                     + "0012server-option\n"
                                     + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsOrderedProtocolV2LsRefsRows() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitLsRefsResponse response = new GitLsRefsResponse(List.of(
+                new GitLsRefsResponse.DirectRef(
+                        MAIN_ID,
+                        "refs/heads/main",
+                        Optional.empty(),
+                        Optional.empty()),
+                new GitLsRefsResponse.DirectRef(
+                        MAIN_ID,
+                        "HEAD",
+                        Optional.of("refs/heads/main"),
+                        Optional.empty()),
+                new GitLsRefsResponse.DirectRef(
+                        TAG_ID,
+                        "refs/tags/v1",
+                        Optional.empty(),
+                        Optional.of(PEELED_TAG_ID)),
+                new GitLsRefsResponse.UnbornRef(
+                        "refs/heads/new",
+                        "refs/heads/main")));
+
+        try {
+            assertThat(output.sendLsRefs(response))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "003d" + MAIN_ID + " refs/heads/main\n"
+                                    + "0050" + MAIN_ID
+                                    + " HEAD symref-target:refs/heads/main\n"
+                                    + "006a" + TAG_ID
+                                    + " refs/tags/v1 peeled:"
+                                    + PEELED_TAG_ID + "\n"
+                                    + "0038unborn refs/heads/new"
+                                    + " symref-target:refs/heads/main\n"
+                                    + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsEmptyProtocolV2LsRefsResponseAsFlush() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendLsRefs(
+                    new GitLsRefsResponse(List.of())))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void streamsProtocolV2LsRefsWhenOutputIsAlreadyFull() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        outbound.writerIndex(outbound.capacity());
+        outbound.setByte(outbound.writerIndex() - 1, 'x');
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitLsRefsResponse response = new GitLsRefsResponse(List.of(
+                new GitLsRefsResponse.DirectRef(
+                        MAIN_ID,
+                        "refs/heads/main",
+                        Optional.empty(),
+                        Optional.empty())));
+
+        GitNativeClientOutput.SendResult.Streaming streaming =
+                (GitNativeClientOutput.SendResult.Streaming)
+                        output.sendLsRefs(response);
+        streaming.task().run();
+
+        try {
+            assertThat(sent).hasSize(2);
+            assertThat(sent.getFirst()).hasSize(outbound.capacity());
+            assertThat(sent.getFirst()[outbound.capacity() - 1])
+                    .isEqualTo((byte) 'x');
+            assertThat(new String(
+                    sent.getLast(),
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "003d" + MAIN_ID
+                                    + " refs/heads/main\n0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsNonAsciiProtocolV2LsRefsRow() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitLsRefsResponse response = new GitLsRefsResponse(List.of(
+                new GitLsRefsResponse.UnbornRef(
+                        "refs/heads/caf\u00e9",
+                        "refs/heads/main")));
+
+        try {
+            assertThat(output.sendLsRefs(response))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> {
+                                assertThat(failed.message()).isEqualTo(
+                                        "Failed to serialize protocol v2"
+                                                + " ls-refs response");
+                                assertThat(failed.cause())
+                                        .isInstanceOf(
+                                                IllegalArgumentException.class);
+                            });
+            assertThat(outbound.writerIndex()).isZero();
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsMalformedProtocolV2LsRefsObjectIds() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        List<GitLsRefsResponse> malformed = List.of(
+                new GitLsRefsResponse(List.of(
+                        new GitLsRefsResponse.DirectRef(
+                                MAIN_ID.substring(1),
+                                "refs/heads/main",
+                                Optional.empty(),
+                                Optional.empty()))),
+                new GitLsRefsResponse(List.of(
+                        new GitLsRefsResponse.DirectRef(
+                                MAIN_ID,
+                                "refs/tags/v1",
+                                Optional.empty(),
+                                Optional.of("g".repeat(40))))));
+
+        try {
+            for (GitLsRefsResponse response : malformed) {
+                assertLsRefsSerializationFailed(output, response);
+            }
+            assertThat(outbound.writerIndex()).isZero();
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsUnsafeProtocolV2LsRefsTokens() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        List<GitLsRefsResponse> malformed = List.of(
+                new GitLsRefsResponse(List.of(
+                        new GitLsRefsResponse.DirectRef(
+                                MAIN_ID,
+                                "refs/heads/main\ninjected",
+                                Optional.empty(),
+                                Optional.empty()))),
+                new GitLsRefsResponse(List.of(
+                        new GitLsRefsResponse.DirectRef(
+                                MAIN_ID,
+                                "HEAD",
+                                Optional.of("refs/heads/main branch"),
+                                Optional.empty()))),
+                new GitLsRefsResponse(List.of(
+                        new GitLsRefsResponse.UnbornRef(
+                                "",
+                                "refs/heads/main"))),
+                new GitLsRefsResponse(List.of(
+                        new GitLsRefsResponse.UnbornRef(
+                                "refs/heads/new",
+                                "refs/heads/\u007fmain"))));
+
+        try {
+            for (GitLsRefsResponse response : malformed) {
+                assertLsRefsSerializationFailed(output, response);
+            }
+            assertThat(outbound.writerIndex()).isZero();
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsProtocolV2LsRefsRowAtExactPktLineLimit() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        String target = "x";
+        int nameLength = 65_520
+                - 4
+                - "unborn ".length()
+                - " symref-target:".length()
+                - target.length()
+                - "\n".length();
+        String name = "r".repeat(nameLength);
+
+        try {
+            assertThat(output.sendLsRefs(new GitLsRefsResponse(List.of(
+                    new GitLsRefsResponse.UnbornRef(name, target)))))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.readableBytes())
+                    .isEqualTo(65_520 + 4);
+            assertThat(outbound.getCharSequence(
+                    0,
+                    4,
+                    StandardCharsets.US_ASCII))
+                    .hasToString("fff0");
+            assertThat(outbound.getCharSequence(
+                    65_520,
+                    4,
+                    StandardCharsets.US_ASCII))
+                    .hasToString("0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsProtocolV2LsRefsRowOneByteOverPktLineLimit() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        String target = "x";
+        int nameLength = 65_520
+                - 4
+                - "unborn ".length()
+                - " symref-target:".length()
+                - target.length()
+                - "\n".length()
+                + 1;
+        GitLsRefsResponse response = new GitLsRefsResponse(List.of(
+                new GitLsRefsResponse.UnbornRef(
+                        "r".repeat(nameLength),
+                        target)));
+
+        try {
+            assertLsRefsSerializationFailed(output, response);
+            assertThat(outbound.writerIndex()).isZero();
         } finally {
             outbound.release();
         }
@@ -946,28 +1203,48 @@ class GitNativeClientOutputTest {
     }
 
     @Test
-    void streamingTaskPropagatesSendFailureAndReleasesOperation() {
+    void streamingTaskReportsSendFailureOnResumptionAndReleasesOperation() {
         ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
-        outbound.writerIndex(outbound.capacity() - 1);
+        outbound.writerIndex(outbound.capacity());
+        IllegalStateException failure =
+                new IllegalStateException("send failed");
         GitNativeClientOutput output = new GitNativeClientOutput(
                 outbound,
                 ignored -> {
-                    throw new IllegalStateException("send failed");
+                    throw failure;
                 });
         GitV1Advertisement advertisement = new GitV1Advertisement(
                 List.of(),
                 List.of(GitAdvertisedRef.direct(
                         MAIN_ID,
                         "refs/heads/main")));
+        Continuation<ByteBuf> next =
+                input -> ContinuationFlow.await();
 
         GitNativeClientOutput.SendResult.Streaming streaming =
                 (GitNativeClientOutput.SendResult.Streaming)
                         output.sendAdvertisement(advertisement);
+        ContinuationFlow.TransitionAndYield<ByteBuf> yielded =
+                (ContinuationFlow.TransitionAndYield<ByteBuf>)
+                        streaming.transitionTo(next);
 
         try {
-            assertThatThrownBy(streaming.task()::run)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("send failed");
+            assertThatCode(yielded.task()::run)
+                    .doesNotThrowAnyException();
+            assertThat(yielded.next().process(Unpooled.EMPTY_BUFFER))
+                    .isInstanceOfSatisfying(
+                            ContinuationFlow.Transition.class,
+                            transition -> assertThat(transition.next())
+                                    .isInstanceOfSatisfying(
+                                            Continuation.CompletedError.class,
+                                            error -> {
+                                                assertThat(error.message())
+                                                        .isEqualTo(
+                                                                "Failed to deliver"
+                                                                        + " serialized client output");
+                                                assertThat(error.throwable())
+                                                        .isSameAs(failure);
+                                            }));
             assertThat(output.sendAdvertisement(advertisement))
                     .isInstanceOf(
                             GitNativeClientOutput.SendResult.Completed.class);
@@ -991,6 +1268,22 @@ class GitNativeClientOutputTest {
         } finally {
             outbound.release();
         }
+    }
+
+    private static void assertLsRefsSerializationFailed(
+            GitNativeClientOutput output,
+            GitLsRefsResponse response) {
+        assertThat(output.sendLsRefs(response))
+                .isInstanceOfSatisfying(
+                        GitNativeClientOutput.SendResult.Failed.class,
+                        failed -> {
+                            assertThat(failed.message()).isEqualTo(
+                                    "Failed to serialize protocol v2"
+                                            + " ls-refs response");
+                            assertThat(failed.cause())
+                                    .isInstanceOf(
+                                            IllegalArgumentException.class);
+                        });
     }
 
     private static byte[] expectedAdvertisement(

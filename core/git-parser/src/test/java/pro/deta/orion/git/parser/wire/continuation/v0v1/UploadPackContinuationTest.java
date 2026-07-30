@@ -62,10 +62,12 @@ class UploadPackContinuationTest {
                             continuation.process(input);
             flow.task().run();
 
-            assertThat(flow.next())
-                    .satisfies(next -> assertAdvertisement(
-                            next,
-                            advertisement()));
+            assertThat(flow.next().process(input))
+                    .isInstanceOfSatisfying(
+                            ContinuationFlow.Transition.class,
+                            resumed -> assertAdvertisement(
+                                    resumed.next(),
+                                    advertisement()));
             assertThat(input.readerIndex()).isZero();
         } finally {
             input.release();

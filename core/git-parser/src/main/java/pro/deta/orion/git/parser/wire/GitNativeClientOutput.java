@@ -6,6 +6,7 @@ import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
+import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 
@@ -14,7 +15,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
@@ -69,9 +72,72 @@ public final class GitNativeClientOutput {
         return sendSerialization(
                 new AsciiPacketSequenceSerialization(List.of(
                         "version 2\n",
-                        "ls-refs\n",
+                        "ls-refs=unborn\n",
                         "fetch\n",
                         "server-option\n")));
+    }
+
+    public SendResult sendLsRefs(GitLsRefsResponse response) {
+        try {
+            Objects.requireNonNull(response, "response");
+            List<String> payloads = new ArrayList<>();
+            for (GitLsRefsResponse.Ref ref : response.refs()) {
+                Objects.requireNonNull(ref, "ref");
+                String payload;
+                if (ref instanceof GitLsRefsResponse.DirectRef direct) {
+                    validateObjectId(direct.objectId());
+                    validateToken(direct.name(), "direct.name");
+                    Objects.requireNonNull(
+                            direct.symrefTarget(),
+                            "direct.symrefTarget");
+                    Objects.requireNonNull(
+                            direct.peeledObjectId(),
+                            "direct.peeledObjectId");
+                    if (direct.symrefTarget().isPresent()) {
+                        validateToken(
+                                direct.symrefTarget().get(),
+                                "direct.symrefTarget");
+                    }
+                    if (direct.peeledObjectId().isPresent()) {
+                        validateObjectId(
+                                direct.peeledObjectId().get());
+                    }
+                    StringBuilder row = new StringBuilder()
+                            .append(direct.objectId())
+                            .append(' ')
+                            .append(direct.name());
+                    if (direct.symrefTarget().isPresent()) {
+                        row.append(" symref-target:")
+                                .append(direct.symrefTarget().get());
+                    }
+                    if (direct.peeledObjectId().isPresent()) {
+                        row.append(" peeled:")
+                                .append(direct.peeledObjectId().get());
+                    }
+                    payload = row.append('\n').toString();
+                } else {
+                    GitLsRefsResponse.UnbornRef unborn =
+                            (GitLsRefsResponse.UnbornRef) ref;
+                    validateToken(unborn.name(), "unborn.name");
+                    validateToken(
+                            unborn.symrefTarget(),
+                            "unborn.symrefTarget");
+                    payload = "unborn "
+                            + unborn.name()
+                            + " symref-target:"
+                            + unborn.symrefTarget()
+                            + "\n";
+                }
+                validateAsciiPacket(payload);
+                payloads.add(payload);
+            }
+            return sendSerialization(
+                    new AsciiPacketSequenceSerialization(payloads));
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to serialize protocol v2 ls-refs response",
+                    error);
+        }
     }
 
     public SendResult sendNak() {
@@ -157,6 +223,56 @@ public final class GitNativeClientOutput {
                 new PktLineSerialization(payload, packetLength));
     }
 
+    private static void validateObjectId(String objectId) {
+        Objects.requireNonNull(objectId, "objectId");
+        if (objectId.length() != 40) {
+            throw new IllegalArgumentException(
+                    "Git object ID must contain 40 hexadecimal digits");
+        }
+        for (int index = 0; index < objectId.length(); index++) {
+            char value = objectId.charAt(index);
+            boolean hexadecimal = value >= '0' && value <= '9'
+                    || value >= 'a' && value <= 'f'
+                    || value >= 'A' && value <= 'F';
+            if (!hexadecimal) {
+                throw new IllegalArgumentException(
+                        "Git object ID must contain 40 hexadecimal digits");
+            }
+        }
+    }
+
+    private static void validateToken(
+            String token,
+            String fieldName) {
+        Objects.requireNonNull(token, fieldName);
+        if (token.isEmpty()) {
+            throw new IllegalArgumentException(
+                    fieldName + " must not be empty");
+        }
+        for (int index = 0; index < token.length(); index++) {
+            char value = token.charAt(index);
+            if (value <= 0x20 || value >= 0x7f) {
+                throw new IllegalArgumentException(
+                        fieldName
+                                + " must be a protocol-safe ASCII token");
+            }
+        }
+    }
+
+    private static void validateAsciiPacket(String payload) {
+        for (int index = 0; index < payload.length(); index++) {
+            if (payload.charAt(index) > 0x7f) {
+                throw new IllegalArgumentException(
+                        "Git pkt-line response must be ASCII");
+            }
+        }
+        if (payload.length() + PKT_LINE_HEADER_SIZE
+                > MAX_PKT_LINE_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Git pkt-line exceeds maximum length");
+        }
+    }
+
     private SendResult sendSerialization(
             OutputSerialization operation) {
         if (serialization != null
@@ -172,7 +288,8 @@ public final class GitNativeClientOutput {
             return new SendResult.Completed();
         }
         serialization = operation;
-        return new SendResult.Streaming(this::finishStreaming);
+        SerializationTask task = new SerializationTask();
+        return new SendResult.Streaming(task, task::failure);
     }
 
     private void finishStreaming() {
@@ -191,6 +308,25 @@ public final class GitNativeClientOutput {
             }
         } finally {
             serialization = null;
+        }
+    }
+
+    private final class SerializationTask implements Runnable {
+        private volatile SendResult.Failed failure;
+
+        @Override
+        public void run() {
+            try {
+                finishStreaming();
+            } catch (Throwable cause) {
+                failure = new SendResult.Failed(
+                        "Failed to deliver serialized client output",
+                        cause);
+            }
+        }
+
+        private Optional<SendResult.Failed> failure() {
+            return Optional.ofNullable(failure);
         }
     }
 
@@ -311,7 +447,9 @@ public final class GitNativeClientOutput {
                         ContinuationFlow.transition(next);
                 case Streaming streaming ->
                         ContinuationFlow.transitionAndYield(
-                                next,
+                                new StreamingResumption<>(
+                                        next,
+                                        streaming.failure()),
                                 streaming.task());
                 case Failed failed ->
                         ContinuationFlow.completedError(
@@ -323,9 +461,18 @@ public final class GitNativeClientOutput {
         record Completed() implements SendResult {
         }
 
-        record Streaming(Runnable task) implements SendResult {
+        record Streaming(
+                Runnable task,
+                Supplier<Optional<Failed>> failure)
+                implements SendResult {
+
+            public Streaming(Runnable task) {
+                this(task, Optional::empty);
+            }
+
             public Streaming {
                 Objects.requireNonNull(task, "task");
+                Objects.requireNonNull(failure, "failure");
             }
         }
 
@@ -336,6 +483,34 @@ public final class GitNativeClientOutput {
                 Objects.requireNonNull(message, "message");
                 Objects.requireNonNull(cause, "cause");
             }
+        }
+    }
+
+    private static final class StreamingResumption<I>
+            implements Continuation<I> {
+        private final Continuation<I> next;
+        private final Supplier<Optional<SendResult.Failed>> failure;
+
+        private StreamingResumption(
+                Continuation<I> next,
+                Supplier<Optional<SendResult.Failed>> failure) {
+            this.next = Objects.requireNonNull(next, "next");
+            this.failure = Objects.requireNonNull(failure, "failure");
+        }
+
+        @Override
+        public ContinuationFlow<I> process(I input) {
+            Optional<SendResult.Failed> result =
+                    Objects.requireNonNull(
+                            failure.get(),
+                            "failure outcome");
+            if (result.isPresent()) {
+                SendResult.Failed failed = result.get();
+                return ContinuationFlow.completedError(
+                        failed.message(),
+                        failed.cause());
+            }
+            return ContinuationFlow.transition(next);
         }
     }
 

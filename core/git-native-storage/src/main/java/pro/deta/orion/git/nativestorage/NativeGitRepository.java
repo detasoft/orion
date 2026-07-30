@@ -2,6 +2,7 @@ package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
+import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
@@ -65,6 +66,12 @@ public class NativeGitRepository {
 
     public GitObjectId writeObject(ObjectType type, byte[] data) {
         return looseObjectStore.write(type, data);
+    }
+
+    public Optional<LooseObjectPrefix> readObjectPrefix(
+            GitObjectId id,
+            int maxDataBytes) {
+        return looseObjectStore.readPrefix(id, maxDataBytes);
     }
 
     public PackIngestionSession beginPackIngestion(

@@ -17,6 +17,8 @@ import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
 public final class LooseObjectStore {
+    private static final int MAX_OBJECT_HEADER_BYTES = 64;
+
     private final ConcurrentHashMap<String, byte[]> store = new ConcurrentHashMap<>();
 
     public GitObjectId write(ObjectType type, byte[] data) {
@@ -37,6 +39,35 @@ public final class LooseObjectStore {
         }
         byte[] raw = inflate(compressed);
         return Optional.of(parseRaw(id, raw));
+    }
+
+    public Optional<LooseObjectPrefix> readPrefix(
+            GitObjectId id,
+            int maxDataBytes) {
+        Objects.requireNonNull(id, "id");
+        if (maxDataBytes < 0) {
+            throw new IllegalArgumentException(
+                    "maxDataBytes must be nonnegative");
+        }
+        byte[] compressed = store.get(id.value());
+        if (compressed == null) {
+            return Optional.empty();
+        }
+        try (InflaterInputStream inflater = new InflaterInputStream(
+                new ByteArrayInputStream(compressed))) {
+            ParsedHeader header = readHeader(inflater);
+            int prefixLength = (int) Math.min(
+                    header.declaredDataLength(),
+                    maxDataBytes);
+            byte[] prefix = readExactly(inflater, prefixLength);
+            return Optional.of(new LooseObjectPrefix(
+                    id,
+                    header.type(),
+                    header.declaredDataLength(),
+                    prefix));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Malformed compressed loose object", e);
+        }
     }
 
     public boolean contains(GitObjectId id) {
@@ -73,6 +104,69 @@ public final class LooseObjectStore {
             }
         }
         throw new ObjectFormatException("Unknown object type: " + name);
+    }
+
+    private static ParsedHeader readHeader(
+            InflaterInputStream inflater) throws IOException {
+        ByteArrayOutputStream header = new ByteArrayOutputStream();
+        while (header.size() < MAX_OBJECT_HEADER_BYTES) {
+            int value = inflater.read();
+            if (value < 0) {
+                throw new ObjectFormatException(
+                        "Loose object header is truncated");
+            }
+            if (value == 0) {
+                return parseHeader(header.toByteArray());
+            }
+            header.write(value);
+        }
+        throw new ObjectFormatException(
+                "Loose object header exceeds maximum length");
+    }
+
+    private static ParsedHeader parseHeader(byte[] headerBytes) {
+        String header = new String(
+                headerBytes,
+                StandardCharsets.US_ASCII);
+        int space = header.indexOf(' ');
+        if (space <= 0 || space == header.length() - 1) {
+            throw new ObjectFormatException(
+                    "Malformed loose object header");
+        }
+        String lengthText = header.substring(space + 1);
+        for (int i = 0; i < lengthText.length(); i++) {
+            char character = lengthText.charAt(i);
+            if (character < '0' || character > '9') {
+                throw new ObjectFormatException(
+                        "Malformed loose object data length");
+            }
+        }
+        long declaredDataLength;
+        try {
+            declaredDataLength = Long.parseLong(lengthText);
+        } catch (NumberFormatException e) {
+            throw new ObjectFormatException(
+                    "Loose object data length is too large");
+        }
+        return new ParsedHeader(
+                parseTypeName(header.substring(0, space)),
+                declaredDataLength);
+    }
+
+    private static byte[] readExactly(
+            InflaterInputStream inflater,
+            int length) throws IOException {
+        byte[] data = new byte[length];
+        int offset = 0;
+        while (offset < length) {
+            int read = inflater.read(data, offset, length - offset);
+            if (read < 0) {
+                throw new ObjectFormatException(
+                        "Loose object data prefix is truncated");
+            }
+            offset += read;
+        }
+        return data;
     }
 
     private static byte[] objectHeader(ObjectType type, int dataLength) {
@@ -131,5 +225,10 @@ public final class LooseObjectStore {
             }
         }
         return -1;
+    }
+
+    private record ParsedHeader(
+            ObjectType type,
+            long declaredDataLength) {
     }
 }

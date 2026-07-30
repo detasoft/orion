@@ -52,7 +52,7 @@ class UploadPackContinuationTest {
             assertThat(outbound.toString(StandardCharsets.US_ASCII))
                     .isEqualTo(
                             "000eversion 2\n"
-                                    + "000cls-refs\n"
+                                    + "0013ls-refs=unborn\n"
                                     + "000afetch\n"
                                     + "0012server-option\n"
                                     + "0000");
@@ -79,9 +79,13 @@ class UploadPackContinuationTest {
                                     initialRequest())
                                     .process(input);
 
-            assertThat(flow.next())
-                    .isInstanceOf(UploadCommandContinuation.class);
             flow.task().run();
+            assertThat(flow.next().process(input))
+                    .isInstanceOfSatisfying(
+                            ContinuationFlow.Transition.class,
+                            resumed -> assertThat(resumed.next())
+                                    .isInstanceOf(
+                                            UploadCommandContinuation.class));
             assertThat(input.readerIndex()).isZero();
         } finally {
             input.release();

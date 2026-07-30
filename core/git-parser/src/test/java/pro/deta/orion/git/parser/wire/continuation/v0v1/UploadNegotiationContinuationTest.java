@@ -111,14 +111,12 @@ class UploadNegotiationContinuationTest {
         }
 
         try {
-            assertThat(flow)
-                    .isInstanceOfSatisfying(
-                            ContinuationFlow.TransitionAndYield.class,
-                            yielded -> {
-                                assertThat(yielded.next())
-                                        .isSameAs(negotiation);
-                                yielded.task().run();
-                            });
+            ContinuationFlow.TransitionAndYield<ByteBuf> yielded =
+                    (ContinuationFlow.TransitionAndYield<ByteBuf>) flow;
+            yielded.task().run();
+            assertThat(yielded.next().process(Unpooled.EMPTY_BUFFER))
+                    .isEqualTo(
+                            ContinuationFlow.transition(negotiation));
             assertThat(sent).hasSize(2);
             assertThat(sent.getLast()
                     .toString(StandardCharsets.US_ASCII))
