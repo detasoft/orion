@@ -1,6 +1,8 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
+import pro.deta.orion.continuation.Continuation;
+import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -51,13 +53,21 @@ public final class GitNativeClientOutput {
             Objects.requireNonNull(advertisement, "advertisement");
             return sendSerialization(
                     new PacketListSerialization(
-                            advertisement,
                             encodePackets(advertisement)));
         } catch (RuntimeException error) {
             return new SendResult.Failed(
                     "Failed to serialize Git advertisement",
                     error);
         }
+    }
+
+    public SendResult sendV2UploadPackAdvertisement() {
+        return sendSerialization(
+                new AsciiPacketSequenceSerialization(List.of(
+                        "version 2\n",
+                        "ls-refs\n",
+                        "fetch=shallow\n",
+                        "server-option\n")));
     }
 
     public SendResult sendNak() {
@@ -235,6 +245,23 @@ public final class GitNativeClientOutput {
                     SendResult.Streaming,
                     SendResult.Failed {
 
+        default <I> ContinuationFlow<I> transitionTo(
+                Continuation<I> next) {
+            Objects.requireNonNull(next, "next");
+            return switch (this) {
+                case Completed ignored ->
+                        ContinuationFlow.transition(next);
+                case Streaming streaming ->
+                        ContinuationFlow.transitionAndYield(
+                                next,
+                                streaming.task());
+                case Failed failed ->
+                        ContinuationFlow.completedError(
+                                failed.message(),
+                                failed.cause());
+            };
+        }
+
         record Completed() implements SendResult {
         }
 
@@ -273,16 +300,11 @@ public final class GitNativeClientOutput {
 
     private static final class PacketListSerialization
             implements OutputSerialization {
-        @SuppressWarnings("unused")
-        private final GitV1Advertisement advertisement;
         private final List<byte[]> packets;
         private int packetIndex;
         private int packetOffset;
 
-        private PacketListSerialization(
-                GitV1Advertisement advertisement,
-                List<byte[]> packets) {
-            this.advertisement = advertisement;
+        private PacketListSerialization(List<byte[]> packets) {
             this.packets = packets;
         }
 
@@ -339,5 +361,67 @@ public final class GitNativeClientOutput {
             return (byte) payload.charAt(
                     offset - PKT_LINE_HEADER_SIZE);
         }
+    }
+
+    private static final class AsciiPacketSequenceSerialization
+            implements OutputSerialization {
+        private final List<String> payloads;
+        private int packetIndex;
+        private int packetOffset;
+
+        private AsciiPacketSequenceSerialization(
+                List<String> payloads) {
+            this.payloads = List.copyOf(payloads);
+        }
+
+        @Override
+        public boolean writeAvailable(ByteBuf output) {
+            while (packetIndex <= payloads.size()
+                    && output.isWritable()) {
+                String payload = packetIndex < payloads.size()
+                        ? payloads.get(packetIndex)
+                        : "";
+                int packetLength = packetIndex < payloads.size()
+                        ? payload.length() + PKT_LINE_HEADER_SIZE
+                        : 0;
+                while (packetOffset
+                        < packetSize(payload, packetLength)
+                        && output.isWritable()) {
+                    output.writeByte(byteAt(
+                            payload,
+                            packetLength,
+                            packetOffset));
+                    packetOffset++;
+                }
+                if (packetOffset
+                        == packetSize(payload, packetLength)) {
+                    packetIndex++;
+                    packetOffset = 0;
+                }
+            }
+            return packetIndex > payloads.size();
+        }
+
+        private static int packetSize(
+                String payload,
+                int packetLength) {
+            return packetLength == 0
+                    ? PKT_LINE_HEADER_SIZE
+                    : payload.length() + PKT_LINE_HEADER_SIZE;
+        }
+
+        private static byte byteAt(
+                String payload,
+                int packetLength,
+                int offset) {
+            if (offset < PKT_LINE_HEADER_SIZE) {
+                int shift =
+                        (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
+                return hexDigit((packetLength >>> shift) & 0x0f);
+            }
+            return (byte) payload.charAt(
+                    offset - PKT_LINE_HEADER_SIZE);
+        }
+
     }
 }

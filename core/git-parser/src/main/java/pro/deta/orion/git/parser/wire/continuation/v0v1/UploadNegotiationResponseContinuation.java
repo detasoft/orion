@@ -27,20 +27,7 @@ final class UploadNegotiationResponseContinuation
         try {
             GitNativeClientOutput.SendResult result =
                     context.clientOutput.sendNak();
-            if (result instanceof GitNativeClientOutput.SendResult.Failed(
-                    String message,
-                    Throwable cause)) {
-                return ContinuationFlow.completedError(
-                        message,
-                        cause);
-            }
-            if (result instanceof GitNativeClientOutput.SendResult.Streaming(
-                    Runnable task)) {
-                return ContinuationFlow.transitionAndYield(
-                        negotiation,
-                        task);
-            }
-            return ContinuationFlow.transition(negotiation);
+            return result.transitionTo(negotiation);
         } catch (RuntimeException error) {
             return ContinuationFlow.completedError(
                     "Failed to write legacy upload-pack negotiation response",

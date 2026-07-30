@@ -4,6 +4,8 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.continuation.Continuation;
+import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
@@ -26,6 +28,59 @@ class GitNativeClientOutputTest {
             "2222222222222222222222222222222222222222";
     private static final String PEELED_TAG_ID =
             "3333333333333333333333333333333333333333";
+
+    @Test
+    void mapsEverySendResultToAContinuationTransition() {
+        Continuation<ByteBuf> next = input -> ContinuationFlow.await();
+        Runnable task = () -> {
+        };
+        IllegalStateException failure =
+                new IllegalStateException("failed");
+
+        assertThat(new GitNativeClientOutput.SendResult.Completed()
+                .transitionTo(next))
+                .isEqualTo(ContinuationFlow.transition(next));
+        assertThat(new GitNativeClientOutput.SendResult.Streaming(task)
+                .transitionTo(next))
+                .isEqualTo(
+                        ContinuationFlow.transitionAndYield(next, task));
+        assertThat(new GitNativeClientOutput.SendResult.Failed(
+                "output failed",
+                failure).transitionTo(next))
+                .isInstanceOfSatisfying(
+                        ContinuationFlow.Transition.class,
+                        transition -> assertThat(transition.next())
+                                .isInstanceOfSatisfying(
+                                        Continuation.CompletedError.class,
+                                        error -> {
+                                            assertThat(error.message())
+                                                    .isEqualTo(
+                                                            "output failed");
+                                            assertThat(error.throwable())
+                                                    .isSameAs(failure);
+                                        }));
+    }
+
+    @Test
+    void sendsProtocolV2UploadPackAdvertisement() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendV2UploadPackAdvertisement())
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "000eversion 2\n"
+                                    + "000cls-refs\n"
+                                    + "0012fetch=shallow\n"
+                                    + "0012server-option\n"
+                                    + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
 
     @Test
     void sendsNakAsPktLine() {
