@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 class GitMinimalWireMachineTest {
 
@@ -58,6 +59,23 @@ class GitMinimalWireMachineTest {
                     disabledConfiguration());
 
             machine.close();
+        } finally {
+            output.outbound().release();
+        }
+    }
+
+    @Test
+    void explicitConfigurationConstructorRejectsNullConfiguration() {
+        OutputFixture output = outputFixture();
+
+        try {
+            assertThatNullPointerException()
+                    .isThrownBy(() -> new GitMinimalWireMachine(
+                            UnpooledByteBufAllocator.DEFAULT,
+                            output.clientOutput(),
+                            new InMemoryNativeGitRepositoryProvider(),
+                            null))
+                    .withMessage("configuration");
         } finally {
             output.outbound().release();
         }
