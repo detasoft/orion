@@ -1,14 +1,19 @@
 package pro.deta.orion.git.parser.wire;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -118,6 +123,37 @@ class GitNativeRepositoryServiceTest {
                 GitAdvertisedRef.direct(
                         NULL_ID,
                         "capabilities^{}"));
+    }
+
+    @Test
+    void fetchesPackFromRepositoryNamedByInitialRequest() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        GitNativeRepositoryService service =
+                new GitNativeRepositoryService(provider);
+
+        NativePackProducer producer = service.legacyUploadPack(
+                request("/demo.git"),
+                new NativeFetchRequest(
+                        Set.of(),
+                        Set.of(),
+                        true,
+                        false,
+                        false));
+
+        ByteBuf pack = Unpooled.buffer();
+        try (producer) {
+            assertThat(producer.produce(pack))
+                    .isEqualTo(
+                            NativePackProducer.Result.COMPLETED);
+            assertThat(provider.exists("demo.git")).isTrue();
+            assertThat(pack.readCharSequence(
+                    4,
+                    java.nio.charset.StandardCharsets.US_ASCII))
+                    .hasToString("PACK");
+        } finally {
+            pack.release();
+        }
     }
 
     private static InitialRequestData request(String path) {

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -132,6 +133,158 @@ class GitNativeClientOutputTest {
         } finally {
             outbound.release();
         }
+    }
+
+    @Test
+    void sendsLegacyPackOnEveryTypedSideBandChannel() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+
+        try {
+            for (GitNativeClientOutput.SideBandChannel channel
+                    : GitNativeClientOutput.SideBandChannel.values()) {
+                outbound.clear();
+                List<byte[]> sent = new ArrayList<>();
+                GitNativeClientOutput output =
+                        collectingOutput(outbound, sent);
+
+                complete(output.beginLegacySideBand64k(
+                        producer(new byte[] {'P', 'A', 'C', 'K'}),
+                        channel));
+                ByteBuf response = Unpooled.wrappedBuffer(
+                        sent.toArray(byte[][]::new));
+                assertThat(response.readCharSequence(
+                        8,
+                        StandardCharsets.US_ASCII))
+                        .hasToString("0008NAK\n");
+                assertThat(response.readCharSequence(
+                        4,
+                        StandardCharsets.US_ASCII))
+                        .hasToString("0009");
+                assertThat(response.readByte())
+                        .isEqualTo(channel.wireValue());
+                byte[] pack = new byte[4];
+                response.readBytes(pack);
+                assertThat(pack)
+                        .containsExactly('P', 'A', 'C', 'K');
+                assertThat(response.readCharSequence(
+                        4,
+                        StandardCharsets.US_ASCII))
+                        .hasToString("0000");
+                response.release();
+            }
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void fragmentsLegacySideBand64kPackAtPktLineLimit() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        byte[] pack = new byte[65_516];
+        pack[0] = 'P';
+        pack[1] = 'A';
+        pack[2] = 'C';
+        pack[3] = 'K';
+
+        GitNativeClientOutput.LegacySideBandResponse sideBandResponse =
+                output.beginLegacySideBand64k(
+                        producer(pack),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+
+        try {
+            int taskCount = 0;
+            while (true) {
+                GitNativeClientOutput.SendResult result =
+                        sideBandResponse.advance();
+                if (result instanceof
+                        GitNativeClientOutput.SendResult.Completed) {
+                    break;
+                }
+                GitNativeClientOutput.SendResult.Streaming streaming =
+                        (GitNativeClientOutput.SendResult.Streaming) result;
+                int submissionsBefore = sent.size();
+                streaming.task().run();
+                taskCount++;
+                assertThat(sent)
+                        .hasSize(submissionsBefore + 1);
+            }
+            assertThat(taskCount).isGreaterThan(1);
+            ByteArrayOutputStream response = new ByteArrayOutputStream();
+            for (byte[] chunk : sent) {
+                response.writeBytes(chunk);
+            }
+            byte[] bytes = response.toByteArray();
+            assertThat(new String(
+                    bytes,
+                    0,
+                    8,
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo("0008NAK\n");
+            assertThat(new String(
+                    bytes,
+                    8,
+                    4,
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo("fff0");
+            assertThat(bytes[12]).isEqualTo((byte) 1);
+            assertThat(new String(
+                    bytes,
+                    65_528,
+                    4,
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo("0006");
+            assertThat(bytes[65_532]).isEqualTo((byte) 1);
+            assertThat(new String(
+                    bytes,
+                    bytes.length - 4,
+                    4,
+                    StandardCharsets.US_ASCII))
+                    .isEqualTo("0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    private static void complete(
+            GitNativeClientOutput.LegacySideBandResponse response) {
+        while (true) {
+            GitNativeClientOutput.SendResult result =
+                    response.advance();
+            if (result
+                    instanceof GitNativeClientOutput.SendResult.Completed) {
+                return;
+            }
+            assertThat(result)
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Streaming.class);
+            ((GitNativeClientOutput.SendResult.Streaming) result)
+                    .task()
+                    .run();
+        }
+    }
+
+    private static NativePackProducer producer(byte[] bytes) {
+        return new NativePackProducer() {
+            private int offset;
+
+            @Override
+            public Result produce(ByteBuf destination) {
+                int length = Math.min(
+                        destination.writableBytes(),
+                        bytes.length - offset);
+                destination.writeBytes(bytes, offset, length);
+                offset += length;
+                return offset == bytes.length
+                        ? Result.COMPLETED
+                        : Result.MORE;
+            }
+
+            @Override
+            public void close() {
+            }
+        };
     }
 
     @Test

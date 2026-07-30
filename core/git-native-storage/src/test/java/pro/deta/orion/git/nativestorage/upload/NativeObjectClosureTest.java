@@ -2,14 +2,12 @@ package pro.deta.orion.git.nativestorage.upload;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.common.GitObjectId;
-import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,10 +28,10 @@ class NativeObjectClosureTest {
                         + "committer Test <test@example.com> 0 +0000\n"
                         + "\ninitial\n").getBytes(StandardCharsets.UTF_8));
 
-        List<LooseObject> result = closure.objectsFor(Set.of(commit), Set.of());
+        Set<GitObjectId> result =
+                closure.objectIdsFor(Set.of(commit), Set.of());
 
         assertThat(result)
-                .extracting(LooseObject::id)
                 .containsExactlyInAnyOrder(commit, tree, blob);
     }
 
@@ -47,10 +45,12 @@ class NativeObjectClosureTest {
         GitObjectId tipTree = objects.write(ObjectType.TREE, treeEntry("100644", "file.txt", tipBlob));
         GitObjectId tipCommit = writeCommit(tipTree, baseCommit, "tip");
 
-        List<LooseObject> result = closure.objectsFor(Set.of(tipCommit), Set.of(baseCommit));
+        Set<GitObjectId> result =
+                closure.objectIdsFor(
+                        Set.of(tipCommit),
+                        Set.of(baseCommit));
 
         assertThat(result)
-                .extracting(LooseObject::id)
                 .containsExactlyInAnyOrder(tipCommit, tipTree, tipBlob);
     }
 
@@ -58,7 +58,8 @@ class NativeObjectClosureTest {
     void rejectsMissingWantedObjectWithTypedFailure() {
         GitObjectId missing = GitObjectId.of("f".repeat(40));
 
-        assertThatThrownBy(() -> closure.objectsFor(Set.of(missing), Set.of()))
+        assertThatThrownBy(() ->
+                closure.objectIdsFor(Set.of(missing), Set.of()))
                 .isInstanceOfSatisfying(GitUploadPackException.class, error -> {
                     assertThat(error.kind()).isEqualTo(GitUploadPackException.Kind.MISSING_OBJECT);
                     assertThat(error.getMessage()).isEqualTo("Requested Git object is unavailable");

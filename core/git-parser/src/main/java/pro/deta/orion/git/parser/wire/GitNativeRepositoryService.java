@@ -2,6 +2,8 @@ package pro.deta.orion.git.parser.wire;
 
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -51,6 +53,15 @@ public final class GitNativeRepositoryService {
                 data,
                 RECEIVE_PACK_CAPABILITIES,
                 false);
+    }
+
+    public NativePackProducer legacyUploadPack(
+            InitialRequestData data,
+            NativeFetchRequest request) {
+        Objects.requireNonNull(data, "data");
+        Objects.requireNonNull(request, "request");
+        return resolveRepository(data.getRepositoryPath())
+                .fetch(request);
     }
 
     private GitV1Advertisement legacyAdvertisement(

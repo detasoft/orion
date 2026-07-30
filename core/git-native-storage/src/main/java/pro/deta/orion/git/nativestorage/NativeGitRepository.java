@@ -1,8 +1,14 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 
 import java.util.Map;
 import java.util.Objects;
@@ -48,5 +54,18 @@ public class NativeGitRepository {
                 refName,
                 expectedOldId,
                 newId);
+    }
+
+    public GitObjectId writeObject(ObjectType type, byte[] data) {
+        return looseObjectStore.write(type, data);
+    }
+
+    public NativePackProducer fetch(NativeFetchRequest request) {
+        Objects.requireNonNull(request, "request");
+        return new NoDeltaPackBuilder().producer(
+                looseObjectStore,
+                new NativeObjectClosure(looseObjectStore).objectIdsFor(
+                        request.wants(),
+                        request.haves()));
     }
 }

@@ -6,11 +6,8 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -23,19 +20,16 @@ public final class NativeObjectClosure {
         this.objects = Objects.requireNonNull(objects, "objects");
     }
 
-    public List<LooseObject> objectsFor(Set<GitObjectId> wants, Set<GitObjectId> haves) {
+    public Set<GitObjectId> objectIdsFor(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves) {
         Objects.requireNonNull(wants, "wants");
         Objects.requireNonNull(haves, "haves");
 
         Set<GitObjectId> wantedClosure = traverse(wants);
         wantedClosure.removeAll(traverse(haves));
 
-        List<LooseObject> result = new ArrayList<>();
-        for (GitObjectId id : wantedClosure) {
-            result.add(requireObject(id));
-        }
-        result.sort(Comparator.comparing(object -> object.id().value()));
-        return List.copyOf(result);
+        return Set.copyOf(wantedClosure);
     }
 
     private Set<GitObjectId> traverse(Set<GitObjectId> roots) {

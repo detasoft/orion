@@ -26,8 +26,8 @@ designs and implementation steps in `docs/plans/`.
       automatically created in-memory native repositories, add lifecycle/DI
       wiring, and cover native `git://` clone and push.
   - Owner: codex, started 2026-07-30 02:30 Europe/Amsterdam; current:
-    invoke repository fetch after legacy negotiation and stream the resulting
-    pack response.
+    wire lifecycle/DI and cover native `git://` clone now that legacy
+    upload-pack streams repository packs through side-band-64k.
 - [ ] Add authenticated native repository resolution around the server
       WireMachine, including READ, WRITE, and CREATE checks before automatic
       repository creation.

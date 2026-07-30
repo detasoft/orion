@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -24,6 +25,7 @@ public final class GitNativeClientOutput {
     private final ByteBuf output;
     private final Consumer<ByteBuf> sendToClient;
     private OutputSerialization serialization;
+    private LegacySideBandResponse sideBandResponse;
 
     public GitNativeClientOutput(ByteBuf output) {
         this(
@@ -94,6 +96,22 @@ public final class GitNativeClientOutput {
                     "Failed to serialize legacy upload-pack ACK",
                     error);
         }
+    }
+
+    public LegacySideBandResponse beginLegacySideBand64k(
+            NativePackProducer producer,
+            SideBandChannel channel) {
+        Objects.requireNonNull(producer, "producer");
+        Objects.requireNonNull(channel, "channel");
+        if (serialization != null || sideBandResponse != null) {
+            producer.close();
+            throw new IllegalStateException(
+                    "Client output operation is already in progress");
+        }
+        LegacySideBandResponse response =
+                new LegacySideBandResponse(producer, channel);
+        sideBandResponse = response;
+        return response;
     }
 
     private SendResult sendPktLine(
@@ -240,6 +258,24 @@ public final class GitNativeClientOutput {
         output[3] = hexDigit(packetLength & 0x0f);
     }
 
+    private static void writeHeader(
+            ByteBuf output,
+            int offset,
+            int packetLength) {
+        output.setByte(
+                offset,
+                hexDigit((packetLength >>> 12) & 0x0f));
+        output.setByte(
+                offset + 1,
+                hexDigit((packetLength >>> 8) & 0x0f));
+        output.setByte(
+                offset + 2,
+                hexDigit((packetLength >>> 4) & 0x0f));
+        output.setByte(
+                offset + 3,
+                hexDigit(packetLength & 0x0f));
+    }
+
     public sealed interface SendResult
             permits SendResult.Completed,
                     SendResult.Streaming,
@@ -291,6 +327,169 @@ public final class GitNativeClientOutput {
 
         AckStatus(String wireSuffix) {
             this.wireSuffix = wireSuffix;
+        }
+    }
+
+    public enum SideBandChannel {
+        DATA(1),
+        PROGRESS(2),
+        ERROR(3);
+
+        private final byte wireValue;
+
+        SideBandChannel(int wireValue) {
+            this.wireValue = (byte) wireValue;
+        }
+
+        public byte wireValue() {
+            return wireValue;
+        }
+    }
+
+    public final class LegacySideBandResponse
+            implements AutoCloseable {
+        private static final byte[] NAK =
+                {'0', '0', '0', '8', 'N', 'A', 'K', '\n'};
+        private static final byte[] FLUSH =
+                {'0', '0', '0', '0'};
+        private static final int MAXIMUM_PAYLOAD =
+                MAX_PKT_LINE_LENGTH
+                        - PKT_LINE_HEADER_SIZE
+                        - 1;
+
+        private final NativePackProducer producer;
+        private final SideBandChannel channel;
+        private Phase phase = Phase.NAK;
+        private int controlOffset;
+        private boolean closed;
+
+        private LegacySideBandResponse(
+                NativePackProducer producer,
+                SideBandChannel channel) {
+            this.producer = producer;
+            this.channel = channel;
+        }
+
+        public SendResult advance() {
+            if (closed) {
+                return new SendResult.Failed(
+                        "Legacy side-band response is closed",
+                        new IllegalStateException(
+                                "Legacy side-band response is closed"));
+            }
+            try {
+                writing:
+                while (output.isWritable()
+                        && phase != Phase.COMPLETED) {
+                    switch (phase) {
+                        case NAK -> writeControl(NAK, Phase.PACK);
+                        case PACK -> {
+                            if (!writePackPacket()) {
+                                break writing;
+                            }
+                        }
+                        case FLUSH -> writeControl(
+                                FLUSH,
+                                Phase.COMPLETED);
+                        case COMPLETED -> {
+                        }
+                    }
+                }
+                if (output.isReadable()) {
+                    return new SendResult.Streaming(
+                            GitNativeClientOutput.this::submitOutput);
+                }
+                complete();
+                return new SendResult.Completed();
+            } catch (RuntimeException error) {
+                close();
+                return new SendResult.Failed(
+                        "Failed to serialize legacy side-band-64k response",
+                        error);
+            }
+        }
+
+        private void writeControl(
+                byte[] control,
+                Phase next) {
+            int length = Math.min(
+                    output.writableBytes(),
+                    control.length - controlOffset);
+            output.writeBytes(
+                    control,
+                    controlOffset,
+                    length);
+            controlOffset += length;
+            if (controlOffset == control.length) {
+                controlOffset = 0;
+                phase = next;
+            }
+        }
+
+        private boolean writePackPacket() {
+            int packetCapacity = Math.min(
+                    MAXIMUM_PAYLOAD,
+                    output.writableBytes()
+                            - PKT_LINE_HEADER_SIZE
+                            - 1);
+            if (packetCapacity <= 0) {
+                return false;
+            }
+            int packetOffset = output.writerIndex();
+            output.writerIndex(
+                    packetOffset
+                            + PKT_LINE_HEADER_SIZE
+                            + 1);
+            output.setByte(
+                    packetOffset + PKT_LINE_HEADER_SIZE,
+                    channel.wireValue);
+            ByteBuf payload = output.slice(
+                    output.writerIndex(),
+                    packetCapacity).clear();
+            NativePackProducer.Result result =
+                    producer.produce(payload);
+            int payloadLength = payload.writerIndex();
+            if (payloadLength == 0
+                    && result == NativePackProducer.Result.MORE) {
+                throw new IllegalStateException(
+                        "Native pack producer made no progress");
+            }
+            output.writerIndex(
+                    output.writerIndex() + payloadLength);
+            writeHeader(
+                    output,
+                    packetOffset,
+                    PKT_LINE_HEADER_SIZE
+                            + 1
+                            + payloadLength);
+            if (result
+                    == NativePackProducer.Result.COMPLETED) {
+                phase = Phase.FLUSH;
+            }
+            return true;
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            producer.close();
+            if (sideBandResponse == this) {
+                sideBandResponse = null;
+            }
+        }
+
+        private void complete() {
+            close();
+        }
+
+        private enum Phase {
+            NAK,
+            PACK,
+            FLUSH,
+            COMPLETED
         }
     }
 

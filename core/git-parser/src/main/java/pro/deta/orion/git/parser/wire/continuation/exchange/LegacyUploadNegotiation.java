@@ -28,7 +28,8 @@ public record LegacyUploadNegotiation(
                 negotiated(GitCapability.OFS_DELTA));
     }
 
-    private boolean negotiated(GitCapability capability) {
+    public boolean negotiated(GitCapability capability) {
+        Objects.requireNonNull(capability, "capability");
         if (!request.capabilities().contains(capability.name())) {
             return false;
         }
