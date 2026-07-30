@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -31,6 +32,7 @@ public final class GitNativeClientOutput {
     private final boolean submitOnCompletion;
     private OutputSerialization serialization;
     private LegacySideBandResponse sideBandResponse;
+    private LegacyPackResponse legacyPackResponse;
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
     public GitNativeClientOutput(ByteBuf output) {
@@ -209,14 +211,13 @@ public final class GitNativeClientOutput {
     public LegacySideBandResponse beginLegacySideBand64k(
             NativePackProducer producer,
             SideBandChannel channel) {
-        Objects.requireNonNull(producer, "producer");
         Objects.requireNonNull(channel, "channel");
-        if (serialization != null
-                || sideBandResponse != null
-                || protocolV2PackfileResponse != null) {
-            producer.close();
-            throw new IllegalStateException(
-                    "Client output operation is already in progress");
+        Result<NativePackProducer> availableProducer =
+                availableProducer(producer);
+        if (availableProducer instanceof
+                Result.Failure<NativePackProducer> failure) {
+            return new LegacySideBandResponse(
+                    sendFailure(failure));
         }
         LegacySideBandResponse response =
                 new LegacySideBandResponse(producer, channel);
@@ -224,20 +225,57 @@ public final class GitNativeClientOutput {
         return response;
     }
 
+    public LegacyPackResponse beginLegacyPack(
+            NativePackProducer producer) {
+        Result<NativePackProducer> availableProducer =
+                availableProducer(producer);
+        if (availableProducer instanceof
+                Result.Failure<NativePackProducer> failure) {
+            return new LegacyPackResponse(sendFailure(failure));
+        }
+        LegacyPackResponse response =
+                new LegacyPackResponse(producer);
+        legacyPackResponse = response;
+        return response;
+    }
+
     public ProtocolV2PackfileResponse beginProtocolV2Packfile(
             NativePackProducer producer) {
-        Objects.requireNonNull(producer, "producer");
-        if (serialization != null
-                || sideBandResponse != null
-                || protocolV2PackfileResponse != null) {
-            producer.close();
-            throw new IllegalStateException(
-                    "Client output operation is already in progress");
+        Result<NativePackProducer> availableProducer =
+                availableProducer(producer);
+        if (availableProducer instanceof
+                Result.Failure<NativePackProducer> failure) {
+            return new ProtocolV2PackfileResponse(
+                    sendFailure(failure));
         }
         ProtocolV2PackfileResponse response =
                 new ProtocolV2PackfileResponse(producer);
         protocolV2PackfileResponse = response;
         return response;
+    }
+
+    private Result<NativePackProducer> availableProducer(
+            NativePackProducer producer) {
+        Objects.requireNonNull(producer, "producer");
+        if (serialization != null
+                || sideBandResponse != null
+                || legacyPackResponse != null
+                || protocolV2PackfileResponse != null) {
+            producer.close();
+            return new Result.Failure<>(
+                    Result.FailureCode.GENERAL,
+                    "Client output operation is already in progress",
+                    new IllegalStateException(
+                            "Client output operation is already in progress"));
+        }
+        return new Result.Success<>(producer);
+    }
+
+    private static SendResult.Failed sendFailure(
+            Result.Failure<?> failure) {
+        return new SendResult.Failed(
+                failure.getMessage(),
+                failure.throwable());
     }
 
     private SendResult sendPktLine(
@@ -381,6 +419,7 @@ public final class GitNativeClientOutput {
             OutputSerialization operation) {
         if (serialization != null
                 || sideBandResponse != null
+                || legacyPackResponse != null
                 || protocolV2PackfileResponse != null) {
             return new SendResult.Failed(
                     "Client output operation is already in progress",
@@ -683,6 +722,7 @@ public final class GitNativeClientOutput {
 
         private final NativePackProducer producer;
         private final SideBandChannel channel;
+        private final SendResult.Failed beginFailure;
         private final ArrayDeque<SideBandMessage> messages =
                 new ArrayDeque<>();
         private Phase phase = Phase.NAK;
@@ -698,22 +738,42 @@ public final class GitNativeClientOutput {
                 SideBandChannel channel) {
             this.producer = producer;
             this.channel = channel;
+            this.beginFailure = null;
+            outputStartIndex = output.writerIndex();
+        }
+
+        private LegacySideBandResponse(
+                SendResult.Failed beginFailure) {
+            this.producer = null;
+            this.channel = null;
+            this.beginFailure = Objects.requireNonNull(
+                    beginFailure,
+                    "beginFailure");
             outputStartIndex = output.writerIndex();
         }
 
         public SendResult progress(ByteBuf message) {
+            if (beginFailure != null) {
+                return beginFailure;
+            }
             return enqueueMessage(
                     SideBandChannel.PROGRESS,
                     message);
         }
 
         public SendResult error(ByteBuf message) {
+            if (beginFailure != null) {
+                return beginFailure;
+            }
             return enqueueMessage(
                     SideBandChannel.ERROR,
                     message);
         }
 
         public SendResult advance() {
+            if (beginFailure != null) {
+                return beginFailure;
+            }
             if (deliveryFailure != null) {
                 return new SendResult.Failed(
                         "Failed to deliver legacy side-band-64k response",
@@ -948,7 +1008,9 @@ public final class GitNativeClientOutput {
             acceptingMessages = false;
             rollbackOutput();
             try {
-                producer.close();
+                if (producer != null) {
+                    producer.close();
+                }
             } finally {
                 releaseMessages();
                 if (sideBandResponse == this) {
@@ -999,6 +1061,163 @@ public final class GitNativeClientOutput {
         }
     }
 
+    public final class LegacyPackResponse
+            implements AutoCloseable {
+        private static final byte[] NAK =
+                {'0', '0', '0', '8', 'N', 'A', 'K', '\n'};
+
+        private final NativePackProducer producer;
+        private final SendResult.Failed beginFailure;
+        private Phase phase = Phase.NAK;
+        private int outputStartIndex;
+        private int controlOffset;
+        private Throwable deliveryFailure;
+        private boolean closed;
+
+        private LegacyPackResponse(NativePackProducer producer) {
+            this.producer = producer;
+            this.beginFailure = null;
+            outputStartIndex = output.writerIndex();
+        }
+
+        private LegacyPackResponse(SendResult.Failed beginFailure) {
+            this.producer = null;
+            this.beginFailure = Objects.requireNonNull(
+                    beginFailure,
+                    "beginFailure");
+            outputStartIndex = output.writerIndex();
+        }
+
+        public SendResult advance() {
+            if (beginFailure != null) {
+                return beginFailure;
+            }
+            if (deliveryFailure != null) {
+                return new SendResult.Failed(
+                        "Failed to deliver legacy pack response",
+                        deliveryFailure);
+            }
+            if (closed) {
+                return new SendResult.Failed(
+                        "Legacy pack response is closed",
+                        new IllegalStateException(
+                                "Legacy pack response is closed"));
+            }
+            try {
+                writing:
+                while (output.isWritable()
+                        && phase != Phase.COMPLETED) {
+                    switch (phase) {
+                        case NAK -> writeControl(NAK, Phase.PACK);
+                        case PACK -> {
+                            if (!writePackBytes()) {
+                                break writing;
+                            }
+                        }
+                        case COMPLETED -> {
+                        }
+                    }
+                }
+                if (output.isReadable()) {
+                    return new SendResult.Streaming(
+                            this::submitPackOutput);
+                }
+                close();
+                return new SendResult.Completed();
+            } catch (RuntimeException error) {
+                closeAfterFailure(error);
+                return new SendResult.Failed(
+                        "Failed to serialize legacy pack response",
+                        error);
+            }
+        }
+
+        private void submitPackOutput() {
+            try {
+                GitNativeClientOutput.this.submitOutput();
+                outputStartIndex = output.writerIndex();
+            } catch (Throwable failure) {
+                deliveryFailure = failure;
+                closeAfterFailure(failure);
+            }
+        }
+
+        private void writeControl(
+                byte[] control,
+                Phase next) {
+            int length = Math.min(
+                    output.writableBytes(),
+                    control.length - controlOffset);
+            output.writeBytes(
+                    control,
+                    controlOffset,
+                    length);
+            controlOffset += length;
+            if (controlOffset == control.length) {
+                controlOffset = 0;
+                phase = next;
+            }
+        }
+
+        private boolean writePackBytes() {
+            int packetCapacity = output.writableBytes();
+            if (packetCapacity <= 0) {
+                return false;
+            }
+            ByteBuf payload = output.slice(
+                    output.writerIndex(),
+                    packetCapacity).clear();
+            NativePackProducer.Result result =
+                    producer.produce(payload);
+            int payloadLength = payload.writerIndex();
+            if (payloadLength == 0
+                    && result == NativePackProducer.Result.MORE) {
+                throw new IllegalStateException(
+                        "Native pack producer made no progress");
+            }
+            output.writerIndex(
+                    output.writerIndex() + payloadLength);
+            if (result == NativePackProducer.Result.COMPLETED) {
+                phase = Phase.COMPLETED;
+            }
+            return true;
+        }
+
+        private void closeAfterFailure(Throwable failure) {
+            try {
+                close();
+            } catch (Throwable closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+        }
+
+        @Override
+        public void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            if (output.writerIndex() >= outputStartIndex) {
+                output.writerIndex(outputStartIndex);
+            }
+            try {
+                if (producer != null) {
+                    producer.close();
+                }
+            } finally {
+                if (legacyPackResponse == this) {
+                    legacyPackResponse = null;
+                }
+            }
+        }
+
+        private enum Phase {
+            NAK,
+            PACK,
+            COMPLETED
+        }
+    }
+
     public final class ProtocolV2PackfileResponse
             implements AutoCloseable {
         private static final byte[] PACKFILE_HEADER =
@@ -1012,6 +1231,7 @@ public final class GitNativeClientOutput {
                         - 1;
 
         private final NativePackProducer producer;
+        private final SendResult.Failed beginFailure;
         private Phase phase = Phase.HEADER;
         private int outputStartIndex;
         private int controlOffset;
@@ -1021,10 +1241,23 @@ public final class GitNativeClientOutput {
         private ProtocolV2PackfileResponse(
                 NativePackProducer producer) {
             this.producer = producer;
+            this.beginFailure = null;
+            outputStartIndex = output.writerIndex();
+        }
+
+        private ProtocolV2PackfileResponse(
+                SendResult.Failed beginFailure) {
+            this.producer = null;
+            this.beginFailure = Objects.requireNonNull(
+                    beginFailure,
+                    "beginFailure");
             outputStartIndex = output.writerIndex();
         }
 
         public SendResult advance() {
+            if (beginFailure != null) {
+                return beginFailure;
+            }
             if (deliveryFailure != null) {
                 return new SendResult.Failed(
                         "Failed to deliver protocol v2 packfile response",
@@ -1157,7 +1390,9 @@ public final class GitNativeClientOutput {
                 output.writerIndex(outputStartIndex);
             }
             try {
-                producer.close();
+                if (producer != null) {
+                    producer.close();
+                }
             } finally {
                 if (protocolV2PackfileResponse == this) {
                     protocolV2PackfileResponse = null;

@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class UploadResponseContinuationTest {
     @Test
@@ -107,18 +106,36 @@ class UploadResponseContinuationTest {
     }
 
     @Test
-    void rejectsEveryResponseFormatExceptNegotiatedSideBand64k() {
+    void writesNakAndRawPackWithoutSideBand64k() {
         ByteBuf outbound = fixedOutput();
+        List<ByteBuf> sent = new ArrayList<>();
         UploadResponseContinuation continuation = continuation(
-                new GitNativeClientOutput(outbound),
+                new GitNativeClientOutput(
+                        outbound,
+                        sent::add),
                 Set.of(),
                 List.of(GitCapability.SIDE_BAND_64K));
 
+        ContinuationFlow<ByteBuf> flow = drive(continuation);
+
         try {
-            assertThatThrownBy(() ->
-                    continuation.process(Unpooled.EMPTY_BUFFER))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("not implemented");
+            assertThat(flow)
+                    .isInstanceOfSatisfying(
+                            ContinuationFlow.Transition.class,
+                            transition -> assertThat(transition.next())
+                                    .isInstanceOf(
+                                            Continuation.CompletedSuccess.class));
+            ByteBuf response = Unpooled.wrappedBuffer(
+                    sent.toArray(ByteBuf[]::new));
+            assertThat(response.readCharSequence(
+                    8,
+                    StandardCharsets.US_ASCII))
+                    .hasToString("0008NAK\n");
+            assertThat(response.readCharSequence(
+                    4,
+                    StandardCharsets.US_ASCII))
+                    .hasToString("PACK");
+            response.release();
         } finally {
             outbound.release();
         }

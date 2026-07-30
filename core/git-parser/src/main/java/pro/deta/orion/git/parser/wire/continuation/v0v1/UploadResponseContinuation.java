@@ -17,6 +17,7 @@ final class UploadResponseContinuation implements Continuation<ByteBuf> {
     private final LegacyUploadNegotiation negotiation;
     private final NativeFetchRequest fetchRequest;
     private GitNativeClientOutput.LegacySideBandResponse response;
+    private GitNativeClientOutput.LegacyPackResponse packResponse;
 
     UploadResponseContinuation(
             GitMinimalWireMachine.Context context,
@@ -30,20 +31,23 @@ final class UploadResponseContinuation implements Continuation<ByteBuf> {
 
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
-        if (!negotiation.negotiated(GitCapability.SIDE_BAND_64K)) {
-            throw new IllegalStateException("not implemented");
-        }
         try {
-            if (response == null) {
-                NativePackProducer producer =
-                        context.repositoryService.legacyUploadPack(
-                                negotiation.request().initialRequest(),
-                                fetchRequest);
-                response = context.clientOutput.beginLegacySideBand64k(
-                        producer,
-                        GitNativeClientOutput.SideBandChannel.DATA);
+            GitNativeClientOutput.SendResult result;
+            if (negotiation.negotiated(GitCapability.SIDE_BAND_64K)) {
+                if (response == null) {
+                    response = context.clientOutput.beginLegacySideBand64k(
+                            producer(),
+                            GitNativeClientOutput.SideBandChannel.DATA);
+                }
+                result = response.advance();
+            } else {
+                if (packResponse == null) {
+                    packResponse = context.clientOutput.beginLegacyPack(
+                            producer());
+                }
+                result = packResponse.advance();
             }
-            return switch (response.advance()) {
+            return switch (result) {
                 case GitNativeClientOutput.SendResult.Completed ignored -> {
                     close();
                     yield ContinuationFlow.transition(
@@ -66,11 +70,21 @@ final class UploadResponseContinuation implements Continuation<ByteBuf> {
         }
     }
 
+    private NativePackProducer producer() {
+        return context.repositoryService.legacyUploadPack(
+                negotiation.request().initialRequest(),
+                fetchRequest);
+    }
+
     @Override
     public void close() {
         if (response != null) {
             response.close();
             response = null;
+        }
+        if (packResponse != null) {
+            packResponse.close();
+            packResponse = null;
         }
     }
 }

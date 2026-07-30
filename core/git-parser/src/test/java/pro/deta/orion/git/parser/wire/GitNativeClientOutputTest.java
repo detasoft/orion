@@ -523,6 +523,32 @@ class GitNativeClientOutputTest {
     }
 
     @Test
+    void sendsLegacyPackWithoutSideBandFraming() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+
+        try {
+            complete(output.beginLegacyPack(
+                    producer(new byte[] {'P', 'A', 'C', 'K'})));
+            ByteBuf response = Unpooled.wrappedBuffer(
+                    sent.toArray(byte[][]::new));
+            assertThat(response.readCharSequence(
+                    8,
+                    StandardCharsets.US_ASCII))
+                    .hasToString("0008NAK\n");
+            byte[] pack = new byte[4];
+            response.readBytes(pack);
+            assertThat(pack)
+                    .containsExactly('P', 'A', 'C', 'K');
+            assertThat(response.isReadable()).isFalse();
+            response.release();
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
     void fragmentsLegacySideBand64kPackAtPktLineLimit() {
         ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
         List<byte[]> sent = new ArrayList<>();
@@ -781,6 +807,54 @@ class GitNativeClientOutputTest {
     }
 
     @Test
+    void reportsBeginResponseFailureWhenAnotherPackResponseIsActive() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput.LegacySideBandResponse active =
+                output.beginLegacySideBand64k(
+                        producer(new byte[] {'P', 'A', 'C', 'K'}),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+        AtomicBoolean sideBandProducerClosed = new AtomicBoolean();
+        AtomicBoolean legacyPackProducerClosed = new AtomicBoolean();
+        AtomicBoolean protocolV2ProducerClosed = new AtomicBoolean();
+
+        try {
+            GitNativeClientOutput.LegacySideBandResponse sideBand =
+                    output.beginLegacySideBand64k(
+                            producer(sideBandProducerClosed),
+                            GitNativeClientOutput.SideBandChannel.DATA);
+            GitNativeClientOutput.LegacyPackResponse legacyPack =
+                    output.beginLegacyPack(
+                            producer(legacyPackProducerClosed));
+            GitNativeClientOutput.ProtocolV2PackfileResponse protocolV2 =
+                    output.beginProtocolV2Packfile(
+                            producer(protocolV2ProducerClosed));
+
+            assertThat(sideBand.advance())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .contains("already in progress"));
+            assertThat(legacyPack.advance())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .contains("already in progress"));
+            assertThat(protocolV2.advance())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message())
+                                    .contains("already in progress"));
+            assertThat(sideBandProducerClosed).isTrue();
+            assertThat(legacyPackProducerClosed).isTrue();
+            assertThat(protocolV2ProducerClosed).isTrue();
+        } finally {
+            active.close();
+            outbound.release();
+        }
+    }
+
+    @Test
     void rollsBackStagedResponseWhenPackProductionFails() {
         ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
         outbound.writeCharSequence(
@@ -954,6 +1028,24 @@ class GitNativeClientOutputTest {
         }
     }
 
+    private static void complete(
+            GitNativeClientOutput.LegacyPackResponse response) {
+        while (true) {
+            GitNativeClientOutput.SendResult result =
+                    response.advance();
+            if (result
+                    instanceof GitNativeClientOutput.SendResult.Completed) {
+                return;
+            }
+            assertThat(result)
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Streaming.class);
+            ((GitNativeClientOutput.SendResult.Streaming) result)
+                    .task()
+                    .run();
+        }
+    }
+
     private static NativePackProducer producer(byte[] bytes) {
         return new NativePackProducer() {
             private int offset;
@@ -972,6 +1064,22 @@ class GitNativeClientOutputTest {
 
             @Override
             public void close() {
+            }
+        };
+    }
+
+    private static NativePackProducer producer(
+            AtomicBoolean closed) {
+        return new NativePackProducer() {
+            @Override
+            public Result produce(ByteBuf destination) {
+                destination.writeByte('x');
+                return Result.COMPLETED;
+            }
+
+            @Override
+            public void close() {
+                closed.set(true);
             }
         };
     }
