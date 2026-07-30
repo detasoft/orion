@@ -35,9 +35,9 @@ class UploadPackContinuationTest {
             assertThat(flow)
                     .isInstanceOfSatisfying(
                             ContinuationFlow.Transition.class,
-                            transition -> assertThat(transition.next())
-                                    .isInstanceOf(
-                                            UploadRequestContinuation.class));
+                            transition -> assertAdvertisement(
+                                    transition.next(),
+                                    advertisement()));
             assertThat(input.readerIndex()).isZero();
         } finally {
             input.release();
@@ -63,7 +63,9 @@ class UploadPackContinuationTest {
             flow.task().run();
 
             assertThat(flow.next())
-                    .isInstanceOf(UploadRequestContinuation.class);
+                    .satisfies(next -> assertAdvertisement(
+                            next,
+                            advertisement()));
             assertThat(input.readerIndex()).isZero();
         } finally {
             input.release();
@@ -111,21 +113,66 @@ class UploadPackContinuationTest {
                 "/demo.git",
                 "localhost",
                 Map.of());
-        GitV1Advertisement advertisement =
-                new GitV1Advertisement(
-                        List.of(),
-                        List.of(GitAdvertisedRef.direct(
-                                MAIN_ID,
-                                "refs/heads/main")));
         return new UploadPackContinuation(
                 context,
                 data,
-                advertisement);
+                advertisement());
+    }
+
+    private static GitV1Advertisement advertisement() {
+        return AdvertisementHolder.VALUE;
+    }
+
+    private static void assertAdvertisement(
+            Continuation<?> continuation,
+            GitV1Advertisement advertisement) {
+        assertThat(continuation)
+                .isInstanceOf(UploadRequestContinuation.class);
+        UploadRequestContinuation request =
+                (UploadRequestContinuation) continuation;
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "want " + MAIN_ID + "\n");
+        input.writeCharSequence(
+                "0000",
+                java.nio.charset.StandardCharsets.US_ASCII);
+        try {
+            Continuation<ByteBuf> current = request;
+            while (!(current instanceof UploadNegotiationContinuation)) {
+                ContinuationFlow<ByteBuf> flow = current.process(input);
+                assertThat(flow)
+                        .isInstanceOf(ContinuationFlow.Transition.class);
+                current = ((ContinuationFlow.Transition<ByteBuf>) flow).next();
+            }
+            assertThat(((UploadNegotiationContinuation) current)
+                    .request()
+                    .serverAdvertisement())
+                    .isSameAs(advertisement);
+        } finally {
+            input.release();
+        }
+    }
+
+    private static void writeData(ByteBuf output, String value) {
+        byte[] payload = value.getBytes(
+                java.nio.charset.StandardCharsets.US_ASCII);
+        output.writeCharSequence(
+                "%04x".formatted(payload.length + 4),
+                java.nio.charset.StandardCharsets.US_ASCII);
+        output.writeBytes(payload);
     }
 
     private static ByteBuf outputBuffer() {
         return Unpooled.buffer(
                 GitNativeClientOutput.BUFFER_CAPACITY,
                 GitNativeClientOutput.BUFFER_CAPACITY);
+    }
+
+    private static final class AdvertisementHolder {
+        private static final GitV1Advertisement VALUE =
+                new GitV1Advertisement(
+                        List.of(),
+                        List.of(GitAdvertisedRef.direct(
+                                MAIN_ID,
+                                "refs/heads/main")));
     }
 }

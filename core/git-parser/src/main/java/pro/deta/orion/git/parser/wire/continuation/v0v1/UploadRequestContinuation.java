@@ -5,6 +5,7 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.git.parser.wire.continuation.ControlPacketHandler;
@@ -15,6 +16,7 @@ import pro.deta.orion.git.parser.wire.error.GitWireError;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
+import java.util.Objects;
 import java.util.Set;
 
 import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.EMPTY_LEGACY_UPLOAD_CAPABILITY;
@@ -29,14 +31,19 @@ final class UploadRequestContinuation
         implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
+    private final GitV1Advertisement serverAdvertisement;
     private final Set<GitObjectId> wants = new LinkedHashSet<>();
     private final Set<String> capabilities = new LinkedHashSet<>();
 
     UploadRequestContinuation(
             GitMinimalWireMachine.Context context,
-            InitialRequestData data) {
-        this.context = context;
-        this.data = data;
+            InitialRequestData data,
+            GitV1Advertisement serverAdvertisement) {
+        this.context = Objects.requireNonNull(context, "context");
+        this.data = Objects.requireNonNull(data, "data");
+        this.serverAdvertisement = Objects.requireNonNull(
+                serverAdvertisement,
+                "serverAdvertisement");
     }
 
     @Override
@@ -118,7 +125,8 @@ final class UploadRequestContinuation
         LegacyUploadRequest request = new LegacyUploadRequest(
                 data,
                 wants,
-                capabilities);
+                capabilities,
+                serverAdvertisement);
         return new UploadNegotiationContinuation(context, request);
     }
 

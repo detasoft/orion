@@ -33,7 +33,10 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
                     context.clientOutput.sendAdvertisement(
                             advertisement);
             return result.transitionTo(
-                    new UploadRequestContinuation(context, data));
+                    new UploadRequestContinuation(
+                            context,
+                            data,
+                            advertisement));
         } catch (RuntimeException error) {
             return ContinuationFlow.completedError(
                     "Failed to advertise native Git repository",

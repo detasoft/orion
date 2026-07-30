@@ -8,6 +8,9 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
+import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadRequest;
@@ -15,6 +18,7 @@ import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.git.parser.wire.error.GitWireError;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +60,8 @@ class UploadRequestContinuationTest {
                 .containsExactly(GitObjectId.of(FIRST_ID));
         assertThat(request.capabilities())
                 .containsExactly("thin-pack", "side-band-64k");
+        assertThat(request.serverAdvertisement())
+                .isSameAs(serverAdvertisement());
         assertThat(request.wants()).isUnmodifiable();
         assertThat(request.capabilities()).isUnmodifiable();
     }
@@ -146,6 +152,10 @@ class UploadRequestContinuationTest {
         return InitialRequestHolder.VALUE;
     }
 
+    private static GitV1Advertisement serverAdvertisement() {
+        return AdvertisementHolder.VALUE;
+    }
+
     private static LegacyUploadRequest completedRequest(
             ContinuationFlow<ByteBuf> flow) {
         assertThat(flow)
@@ -227,12 +237,24 @@ class UploadRequestContinuationTest {
                         Map.of());
     }
 
+    private static final class AdvertisementHolder {
+        private static final GitV1Advertisement VALUE =
+                new GitV1Advertisement(
+                        List.of(
+                                GitCapability.THIN_PACK,
+                                GitCapability.OFS_DELTA),
+                        List.of(GitAdvertisedRef.direct(
+                                FIRST_ID,
+                                "refs/heads/main")));
+    }
+
     private static final class Driver {
         private Continuation<ByteBuf> current =
                 new UploadRequestContinuation(
                         GitMinimalWireMachine.testContext(
                                 UnpooledByteBufAllocator.DEFAULT),
-                        initialRequest());
+                        initialRequest(),
+                        serverAdvertisement());
 
         private ContinuationFlow<ByteBuf> drive(ByteBuf input) {
             while (true) {

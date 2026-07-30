@@ -7,8 +7,12 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
+import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadNegotiation;
@@ -55,6 +59,17 @@ class UploadNegotiationContinuationTest {
         assertThat(negotiation.haves())
                 .containsExactly(GitObjectId.of(FIRST_ID));
         assertThat(negotiation.haves()).isUnmodifiable();
+        NativeFetchRequest fetchRequest = completedResponse(flow)
+                .fetchRequest();
+        assertThat(fetchRequest.wants())
+                .containsExactly(GitObjectId.of(FIRST_ID));
+        assertThat(fetchRequest.haves())
+                .containsExactly(GitObjectId.of(FIRST_ID));
+        assertThat(fetchRequest.done()).isTrue();
+        assertThat(fetchRequest.thinPack()).isTrue();
+        assertThat(fetchRequest.ofsDelta()).isTrue();
+        assertThat(fetchRequest.wants()).isUnmodifiable();
+        assertThat(fetchRequest.haves()).isUnmodifiable();
     }
 
     @Test
@@ -80,10 +95,20 @@ class UploadNegotiationContinuationTest {
         try {
             assertThat(outbound.toString(StandardCharsets.US_ASCII))
                     .isEqualTo("0008NAK\n");
-            assertThat(completedNegotiation(flow).haves())
+            UploadResponseContinuation response = completedResponse(flow);
+            assertThat(response.negotiation().haves())
                     .containsExactly(
                             GitObjectId.of(FIRST_ID),
                             GitObjectId.of(SECOND_ID));
+            assertThat(response.fetchRequest().wants())
+                    .containsExactly(GitObjectId.of(FIRST_ID));
+            assertThat(response.fetchRequest().haves())
+                    .containsExactly(
+                            GitObjectId.of(FIRST_ID),
+                            GitObjectId.of(SECOND_ID));
+            assertThat(response.fetchRequest().done()).isTrue();
+            assertThat(response.fetchRequest().thinPack()).isTrue();
+            assertThat(response.fetchRequest().ofsDelta()).isTrue();
         } finally {
             outbound.release();
         }
@@ -205,6 +230,88 @@ class UploadNegotiationContinuationTest {
                 UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_CONTROL);
     }
 
+    @Test
+    void negotiatesFetchCapabilitiesByClientAndServerNames() {
+        List<CapabilityCase> cases = List.of(
+                new CapabilityCase(Set.of(), List.of(), false, false),
+                new CapabilityCase(
+                        Set.of("thin-pack", "ofs-delta"),
+                        List.of(
+                                GitCapability.THIN_PACK,
+                                GitCapability.OFS_DELTA),
+                        true,
+                        true),
+                new CapabilityCase(
+                        Set.of("thin-pack", "ofs-delta"),
+                        List.of(),
+                        false,
+                        false),
+                new CapabilityCase(
+                        Set.of(),
+                        List.of(
+                                GitCapability.THIN_PACK,
+                                GitCapability.OFS_DELTA),
+                        false,
+                        false),
+                new CapabilityCase(
+                        Set.of("thin-pack"),
+                        List.of(
+                                GitCapability.THIN_PACK,
+                                GitCapability.OFS_DELTA),
+                        true,
+                        false),
+                new CapabilityCase(
+                        Set.of("ofs-delta"),
+                        List.of(
+                                GitCapability.THIN_PACK,
+                                GitCapability.OFS_DELTA),
+                        false,
+                        true),
+                new CapabilityCase(
+                        Set.of("thin-pack", "ofs-delta"),
+                        List.of(GitCapability.THIN_PACK),
+                        true,
+                        false),
+                new CapabilityCase(
+                        Set.of("thin-pack", "ofs-delta"),
+                        List.of(GitCapability.OFS_DELTA),
+                        false,
+                        true));
+
+        for (CapabilityCase capabilityCase : cases) {
+            LegacyUploadRequest request = request(
+                    capabilityCase.requested(),
+                    capabilityCase.advertised());
+            LegacyUploadNegotiation negotiation =
+                    new LegacyUploadNegotiation(
+                            request,
+                            Set.of(GitObjectId.of(SECOND_ID)));
+
+            NativeFetchRequest negotiatedRequest =
+                    negotiation.nativeFetchRequest();
+            assertThat(negotiatedRequest.wants())
+                    .containsExactly(GitObjectId.of(FIRST_ID));
+            assertThat(negotiatedRequest.haves())
+                    .containsExactly(GitObjectId.of(SECOND_ID));
+            assertThat(negotiatedRequest.done()).isTrue();
+            assertThat(negotiatedRequest.thinPack())
+                    .isEqualTo(capabilityCase.thinPack());
+            assertThat(negotiatedRequest.ofsDelta())
+                    .isEqualTo(capabilityCase.ofsDelta());
+
+            NativeFetchRequest fetchRequest =
+                    new UploadResponseContinuation(
+                            context(),
+                            negotiation)
+                            .fetchRequest();
+
+            assertThat(fetchRequest.thinPack())
+                    .isEqualTo(capabilityCase.thinPack());
+            assertThat(fetchRequest.ofsDelta())
+                    .isEqualTo(capabilityCase.ofsDelta());
+        }
+    }
+
     private static ContinuationFlow<ByteBuf> process(ByteBuf input) {
         try {
             return new Driver(context()).drive(input);
@@ -215,13 +322,18 @@ class UploadNegotiationContinuationTest {
 
     private static LegacyUploadNegotiation completedNegotiation(
             ContinuationFlow<ByteBuf> flow) {
+        return completedResponse(flow).negotiation();
+    }
+
+    private static UploadResponseContinuation completedResponse(
+            ContinuationFlow<ByteBuf> flow) {
         assertThat(flow)
                 .isInstanceOf(ContinuationFlow.Transition.class);
         Continuation<?> next =
                 ((ContinuationFlow.Transition<?>) flow).next();
         assertThat(next)
                 .isInstanceOf(UploadResponseContinuation.class);
-        return ((UploadResponseContinuation) next).negotiation();
+        return (UploadResponseContinuation) next;
     }
 
     private static void assertError(
@@ -264,6 +376,20 @@ class UploadNegotiationContinuationTest {
         return RequestHolder.VALUE;
     }
 
+    private static LegacyUploadRequest request(
+            Set<String> capabilities,
+            List<GitCapability> serverCapabilities) {
+        return new LegacyUploadRequest(
+                RequestHolder.INITIAL_REQUEST,
+                Set.of(GitObjectId.of(FIRST_ID)),
+                capabilities,
+                new GitV1Advertisement(
+                        serverCapabilities,
+                        List.of(GitAdvertisedRef.direct(
+                                FIRST_ID,
+                                "refs/heads/main"))));
+    }
+
     private static ByteBuf data(String payload) {
         ByteBuf input = Unpooled.buffer();
         writeData(input, payload);
@@ -289,15 +415,25 @@ class UploadNegotiationContinuationTest {
     }
 
     private static final class RequestHolder {
+        private static final InitialRequestData INITIAL_REQUEST =
+                new InitialRequestData(
+                        InitialRequestService.UPLOAD_PACK,
+                        "/demo.git",
+                        "localhost",
+                        Map.of());
         private static final LegacyUploadRequest VALUE =
-                new LegacyUploadRequest(
-                        new InitialRequestData(
-                                InitialRequestService.UPLOAD_PACK,
-                                "/demo.git",
-                                "localhost",
-                                Map.of()),
-                        Set.of(GitObjectId.of(FIRST_ID)),
-                        Set.of("thin-pack"));
+                request(
+                        Set.of("thin-pack", "ofs-delta"),
+                        List.of(
+                                GitCapability.THIN_PACK,
+                                GitCapability.OFS_DELTA));
+    }
+
+    private record CapabilityCase(
+            Set<String> requested,
+            List<GitCapability> advertised,
+            boolean thinPack,
+            boolean ofsDelta) {
     }
 
     private static final class Driver {
