@@ -85,7 +85,18 @@ final class UploadCommandPayloadContinuation
                 case SERVER_OPTION -> acceptServerOptionByte();
                 case COMPLETE -> false;
             };
-            return accepted && !last;
+            if (!accepted) {
+                return false;
+            }
+            if (!last) {
+                return true;
+            }
+            if (headerKind == HeaderKind.COMMAND
+                    && headerComplete()) {
+                phase = Phase.COMPLETE;
+                return true;
+            }
+            return false;
         }
 
         private boolean notDone() {

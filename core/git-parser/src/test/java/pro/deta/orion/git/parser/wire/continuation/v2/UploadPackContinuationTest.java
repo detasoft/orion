@@ -153,6 +153,25 @@ class UploadPackContinuationTest {
     }
 
     @Test
+    void dispatchesCommandWithoutLineFeed() {
+        ByteBuf input = request("command=ls-refs");
+        ByteBuf outbound = outputBuffer();
+        try {
+            Continuation<ByteBuf> completed = driveOneByteAtATime(
+                    input,
+                    context(
+                            new GitNativeClientOutput(outbound),
+                            new GitWireConfiguration.ProtocolV2(
+                                    true, false, false, false)));
+
+            assertThat(completed)
+                    .isInstanceOf(LsRefsContinuation.class);
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
     void dispatchesEnabledFetchWithoutConsumingItsArguments() {
         ByteBuf input = Unpooled.buffer();
         writeData(input, "command=fetch\n");
