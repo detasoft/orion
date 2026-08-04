@@ -27,6 +27,8 @@
   exceptions as expected `Output` control flow.
 - When replacing one behavior or concept with another, do not add or keep tests whose only purpose is to assert that the previous behavior is absent. Remove those legacy negative checks in a separate commit after the behavior-change commit.
 - Prefer ordinary loops and straightforward control flow over Java Stream API unless streams make the code noticeably more readable.
+- Keep source-code lines at or below 112 characters. In exceptional cases where
+  a line barely does not fit, up to 135 characters is acceptable.
 - If a method is created only for use in tests and is not part of the public contract, mark it with `core/lifecycle-state-machine/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
 - When asked to add comments or explanations to classes, add class-level comments only. Do not add method or constructor comments unless explicitly requested.
 - Treat class-level comments tagged with `@AiRule` as local implementation rules. When changing a class, read these comments and verify the rules still hold before finishing the change.
