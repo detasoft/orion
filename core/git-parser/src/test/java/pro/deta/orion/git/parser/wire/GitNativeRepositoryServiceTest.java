@@ -180,7 +180,8 @@ class GitNativeRepositoryServiceTest {
 
         assertThatThrownBy(() -> service.legacyReceivePackAdvertisement(
                 receiveRequest("/demo.git")))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
                 .hasMessageContaining("denied receive /demo.git");
         assertThat(provider.exists("/demo.git")).isFalse();
     }

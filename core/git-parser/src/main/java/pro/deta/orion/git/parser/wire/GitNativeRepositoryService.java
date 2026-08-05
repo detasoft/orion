@@ -102,12 +102,10 @@ public final class GitNativeRepositoryService {
     }
 
     private NativeGitRepository findOrFail(String repositoryPath) {
-        return findOrFail(
-                repositoryPath,
-                repositoryProvider.find(repositoryPath));
+        return check(repositoryPath, repositoryProvider.find(repositoryPath));
     }
 
-    private NativeGitRepository findOrFail(
+    private NativeGitRepository check(
             String repositoryPath,
             Result<NativeGitRepository> repository) {
         return switch (repository) {
@@ -123,7 +121,7 @@ public final class GitNativeRepositoryService {
     public GitV1Advertisement legacyReceivePackAdvertisement(
             InitialRequestData data) {
         String repositoryPath = data.getRepositoryPath();
-        NativeGitRepository repository = findOrFail(
+        NativeGitRepository repository = check(
                 repositoryPath,
                 receiveRepository(repositoryPath));
         return legacyAdvertisement(
@@ -147,8 +145,7 @@ public final class GitNativeRepositoryService {
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        String repositoryPath = data.getRepositoryPath();
-        return findOrFail(repositoryPath).fetch(request);
+        return findOrFail(data.getRepositoryPath()).fetch(request);
     }
 
     public NativePackProducer protocolV2Fetch(
@@ -156,8 +153,7 @@ public final class GitNativeRepositoryService {
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        String repositoryPath = data.getRepositoryPath();
-        return findOrFail(repositoryPath).fetch(request);
+        return findOrFail(data.getRepositoryPath()).fetch(request);
     }
 
     public List<GitObjectId> protocolV2FetchAcknowledgments(
@@ -180,7 +176,7 @@ public final class GitNativeRepositoryService {
             InitialRequestData data) {
         Objects.requireNonNull(data, "data");
         String repositoryPath = data.getRepositoryPath();
-        return findOrFail(
+        return check(
                 repositoryPath,
                 receiveRepository(repositoryPath))
                 .beginPackIngestion(RECEIVE_PACK_LIMITS);
@@ -200,7 +196,7 @@ public final class GitNativeRepositoryService {
         String repositoryPath = receivePack.commandSection()
                 .initialRequest()
                 .getRepositoryPath();
-        NativeGitRepository repository = findOrFail(
+        NativeGitRepository repository = check(
                 repositoryPath,
                 receiveRepository(repositoryPath));
         List<RefUpdateResult> results = repository.publishObjectsAndRefs(
@@ -516,15 +512,8 @@ public final class GitNativeRepositoryService {
 
     private Result<NativeGitRepository> receiveRepository(
             String repositoryName) {
-        try {
-            accessHook.beforeReceive(repositoryName);
-            return findOrCreate(repositoryName);
-        } catch (GitNativeRepositoryAccessHook.AccessDeniedException e) {
-            return new Result.Failure<>(
-                    Result.FailureCode.AUTHENTICATION_FAILED,
-                    e.getMessage(),
-                    e);
-        }
+        accessHook.beforeReceive(repositoryName);
+        return findOrCreate(repositoryName);
     }
 
     private static String failureMessage(
