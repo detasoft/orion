@@ -1,16 +1,30 @@
 package pro.deta.orion.transport.git;
 
 import jakarta.inject.Inject;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.transport.RefSpec;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.GitRepositoryProvider;
+import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
+import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.git.GitCommand;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.util.Result;
@@ -25,12 +39,16 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -55,8 +73,16 @@ import static org.junit.jupiter.api.Assertions.fail;
 class GitNativeTransportServiceTest {
     private static final byte[] HANDLED = "handled\n".getBytes(StandardCharsets.UTF_8);
 
+    @TempDir
+    private Path tempDir;
+
     private GitNativeTransportService service;
     private OrionExecutor executor;
+
+    @BeforeEach
+    void resetImplementationProperty() {
+        System.clearProperty(GitNativeTransportService.IMPLEMENTATION_PROPERTY);
+    }
 
     @AfterEach
     void stopService() throws Exception {
@@ -67,6 +93,7 @@ class GitNativeTransportServiceTest {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
         }
+        System.clearProperty(GitNativeTransportService.IMPLEMENTATION_PROPERTY);
     }
 
     @Test
@@ -264,8 +291,99 @@ class GitNativeTransportServiceTest {
         assertNull(repositoryProvider.lastCreatedRepository);
     }
 
-    private InetSocketAddress startService(GitInternalService gitService, int socketTimeoutMillis) throws Exception {
+    @Test
+    void nativeImplementationPushesThenFetchesThroughSharedInMemoryRepository() throws Exception {
+        System.setProperty(
+                GitNativeTransportService.IMPLEMENTATION_PROPERTY,
+                "native");
+        InetSocketAddress address = startNativeService(
+                new RecordingGitInternalService(),
+                new InMemoryNativeGitRepositoryProvider(),
+                requestId -> repositorySecurityContext(
+                        requestId,
+                        "project",
+                        true,
+                        true),
+                5_000);
+        String remoteUri = "git://127.0.0.1:"
+                + address.getPort()
+                + "/project";
+        ObjectId initialCommit = createSourceCommit();
+
+        try (Git source = Git.open(tempDir.resolve("source").toFile())) {
+            callWithTimeout(() -> source.push()
+                    .setRemote(remoteUri)
+                    .setTimeout(5)
+                    .setRefSpecs(new RefSpec(
+                            "refs/heads/master:refs/heads/master"))
+                    .call());
+        }
+
+        Path fetchDirectory = tempDir.resolve("fetch-target");
+        try (Git target = Git.init()
+                .setDirectory(fetchDirectory.toFile())
+                .call()) {
+            callWithTimeout(() -> target.fetch()
+                    .setRemote(remoteUri)
+                    .setTimeout(5)
+                    .setRefSpecs(new RefSpec(
+                            "+refs/heads/master:refs/remotes/origin/master"))
+                    .call());
+
+            ObjectId fetchedCommit = target.getRepository()
+                    .resolve("refs/remotes/origin/master");
+            assertEquals(initialCommit, fetchedCommit);
+            assertEquals(
+                    "hello through GitNativeTransportService\n",
+                    readFile(
+                            target.getRepository(),
+                            fetchedCommit,
+                            "README.md"));
+        }
+    }
+
+    @Test
+    void nativeImplementationAllowsAnonymousReceivePackWithExplicitAllowAllHook() throws Exception {
+        System.setProperty(
+                GitNativeTransportService.IMPLEMENTATION_PROPERTY,
+                "native");
+        InMemoryNativeGitRepositoryProvider repositoryProvider =
+                new InMemoryNativeGitRepositoryProvider();
+        InetSocketAddress address = startNativeService(
+                new RecordingGitInternalService(),
+                repositoryProvider,
+                requestId -> SecurityContext.createContext()
+                        .withRequestId(requestId),
+                5_000);
+
+        byte[] response = request(
+                address,
+                pktLine("git-receive-pack /project.git\0host=localhost\0"));
+
+        assertTrue(new String(response, StandardCharsets.UTF_8)
+                .contains("capabilities^{}"));
+        assertTrue(repositoryProvider.exists("/project.git"));
+    }
+
+    private InetSocketAddress startService(
+            GitInternalService gitService,
+            int socketTimeoutMillis) throws Exception {
         service = newService(gitService, true, socketTimeoutMillis);
+        service.onStart();
+        return awaitBoundAddress(service);
+    }
+
+    private InetSocketAddress startNativeService(
+            GitInternalService gitService,
+            NativeGitRepositoryProvider repositoryProvider,
+            Function<String, SecurityContext> securityContextFactory,
+            int socketTimeoutMillis) throws Exception {
+        service = newNativeService(
+                gitService,
+                true,
+                repositoryProvider,
+                securityContextFactory,
+                socketTimeoutMillis);
         service.onStart();
         return awaitBoundAddress(service);
     }
@@ -281,6 +399,116 @@ class GitNativeTransportServiceTest {
         return new GitNativeTransportService(config, gitService, executor, socketTimeoutMillis);
     }
 
+    private GitNativeTransportService newNativeService(
+            GitInternalService gitService,
+            boolean enabled,
+            NativeGitRepositoryProvider repositoryProvider,
+            Function<String, SecurityContext> securityContextFactory,
+            int socketTimeoutMillis) {
+        GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
+        config.setBacklog(10);
+        config.setEnabled(enabled);
+        executor = new OrionExecutor(4, new OrionThreadFactory());
+        return new GitNativeTransportService(
+                config,
+                gitService,
+                executor,
+                repositoryProvider,
+                socketTimeoutMillis,
+                securityContextFactory);
+    }
+
+    private static SecurityContext repositorySecurityContext(
+            String requestId,
+            String repositoryName,
+            boolean write,
+            boolean create) {
+        AccessControlDraft.Grant grant =
+                new AccessControlDraft.Grant(
+                        "repository",
+                        new ArrayList<>())
+                        .addKey(
+                                AccessControl.GrantKey.REPOSITORY,
+                                repositoryName);
+        if (write) {
+            grant.addKey(
+                    AccessControl.GrantKey.WRITE,
+                    AccessControl.TRUE_STRING);
+        }
+        if (create) {
+            grant.addKey(
+                    AccessControl.GrantKey.CREATE,
+                    AccessControl.TRUE_STRING);
+        }
+        return SecurityContext.createContext()
+                .withRequestId(requestId)
+                .withUserIdentity(new InternalUserImpl(
+                        "git-user",
+                        List.of(grant.toAccessControl())));
+    }
+
+    private ObjectId createSourceCommit() throws Exception {
+        Path sourceDirectory = tempDir.resolve("source");
+        Files.createDirectories(sourceDirectory);
+        Files.writeString(
+                sourceDirectory.resolve("README.md"),
+                "hello through GitNativeTransportService\n",
+                StandardCharsets.UTF_8);
+        try (Git source = Git.init()
+                .setDirectory(sourceDirectory.toFile())
+                .call()) {
+            source.add()
+                    .addFilepattern("README.md")
+                    .call();
+            RevCommit commit = source.commit()
+                    .setAuthor("Test User", "test@example.com")
+                    .setCommitter("Test User", "test@example.com")
+                    .setMessage("initial commit")
+                    .call();
+            return commit.getId();
+        }
+    }
+
+    private static <T> T callWithTimeout(Callable<T> operation)
+            throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<T> future = executor.submit(operation);
+        try {
+            return future.get(8, TimeUnit.SECONDS);
+        } catch (ExecutionException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            if (cause instanceof Error fatal) {
+                throw fatal;
+            }
+            throw new AssertionError(cause);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private static String readFile(
+            Repository repository,
+            ObjectId commitId,
+            String fileName) throws Exception {
+        try (RevWalk revWalk = new RevWalk(repository)) {
+            RevCommit commit = revWalk.parseCommit(commitId);
+            try (TreeWalk treeWalk = TreeWalk.forPath(
+                    repository,
+                    fileName,
+                    commit.getTree())) {
+                if (treeWalk == null) {
+                    fail("Missing file " + fileName);
+                }
+                byte[] data = repository.open(treeWalk.getObjectId(0))
+                        .getBytes();
+                return new String(data, StandardCharsets.UTF_8);
+            }
+        }
+    }
+
     private static Constructor<?> injectConstructor() {
         for (Constructor<?> constructor : GitNativeTransportService.class.getDeclaredConstructors()) {
             if (constructor.isAnnotationPresent(Inject.class)) {
@@ -290,7 +518,8 @@ class GitNativeTransportServiceTest {
         throw new AssertionError("Missing @Inject constructor");
     }
 
-    private static InetSocketAddress awaitBoundAddress(GitNativeTransportService service) throws InterruptedException {
+    private static InetSocketAddress awaitBoundAddress(
+            GitNativeTransportService service) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
         while (System.nanoTime() < deadline) {
             InetSocketAddress address = service.boundAddress();
