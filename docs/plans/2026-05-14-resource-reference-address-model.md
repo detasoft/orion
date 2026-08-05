@@ -24,8 +24,7 @@ sections below still describe the earlier direction and should be treated as
 historical context until this plan is rewritten.
 
 The current syntax and implementation contract are now documented in
-`core/resource-addressing/README.md` and
-`docs/plans/2026-05-15-resource-reference-implementation.md`.
+`core/resource-addressing/README.md`.
 
 The current preferred direction is shell-style interpolation:
 

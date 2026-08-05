@@ -6,10 +6,8 @@ designs and implementation steps in `docs/plans/`.
 
 ## Current
 
-- [x] Complete Task 0 from
-      `docs/plans/2026-07-28-native-git-in-memory-server.md`: replace the
-      internals of `GitMinimalWireMachine` with composed Continuations and add
-      the minimal Netty Yield handler.
+- [x] Replace the internals of `GitMinimalWireMachine` with composed
+      Continuations and add the minimal Netty Yield handler.
 - [x] Flatten the Task 0 Git wire continuation graph: remove nested child
       runners, start directly from the header continuation, and move each wire
       continuation into its own class.
@@ -41,10 +39,8 @@ designs and implementation steps in `docs/plans/`.
   - Owner: codex, started 2026-07-30 02:30 Europe/Amsterdam; current:
     wire lifecycle/DI and cover native `git://` clone now that legacy
     upload-pack streams repository packs through side-band-64k.
-- [ ] Delete obsolete native Git plan/design references, including
-      `docs/plans/2026-07-28-native-git-in-memory-server.md`,
-      `docs/plans/2026-07-28-native-git-in-memory-server-design.md`, and
-      `docs/plans/2026-07-28-netty-transport-wire-machine-phase2.md`.
+- [x] Delete obsolete native Git plan/design references for removed native Git
+      planning documents and completed implementation plans.
 - [ ] Add authenticated native repository resolution around the
       `GitMinimalWireMachine`/Netty server path, including READ, WRITE, and
       CREATE checks before automatic repository creation.
