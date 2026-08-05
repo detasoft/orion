@@ -1,8 +1,8 @@
 package pro.deta.orion.git.parser.wire;
 
 import pro.deta.orion.git.common.GitObjectId;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
@@ -44,16 +44,16 @@ public final class GitNativeRepositoryService {
                     1_000_000,
                     64 * 1024 * 1024);
 
-    private final InMemoryNativeGitRepositoryProvider repositoryProvider;
+    private final NativeGitRepositoryProvider repositoryProvider;
     private final GitWireConfiguration configuration;
 
     public GitNativeRepositoryService(
-            InMemoryNativeGitRepositoryProvider repositoryProvider) {
+            NativeGitRepositoryProvider repositoryProvider) {
         this(repositoryProvider, GitWireConfiguration.allSupported());
     }
 
     public GitNativeRepositoryService(
-            InMemoryNativeGitRepositoryProvider repositoryProvider,
+            NativeGitRepositoryProvider repositoryProvider,
             GitWireConfiguration configuration) {
         this.repositoryProvider = Objects.requireNonNull(
                 repositoryProvider,

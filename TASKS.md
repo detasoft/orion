@@ -17,6 +17,11 @@ designs and implementation steps in `docs/plans/`.
       in-memory refs and objects, without machine/continuation integration.
 - [x] Implement legacy receive-pack advertisement and fragment-safe command
       parsing with an explicit raw pack handoff boundary.
+- [ ] Implement production repository backends for native Git repository ports,
+      including refs, objects, pack indexes, delta reconstruction, pack building,
+      and projection parity.
+  - Owner: codex, paused 2026-08-04 19:45 Europe/Amsterdam; next:
+    add pack index publication and pack-backed object reads.
 
 ## Next
 
@@ -48,9 +53,6 @@ designs and implementation steps in `docs/plans/`.
       `docs/plans/2026-07-30-completion-aware-native-client-output.md`: land
       double buffering first, then add the ring-buffer coordinator as a
       separate slice.
-- [ ] Implement production repository backends for native Git repository ports,
-      including refs, objects, pack indexes, delta reconstruction, pack building,
-      and projection parity.
 - [ ] Before remote replication work, add native upload-pack and receive-pack
       client state machines on top of the Continuation-based `git-parser` wire
       machine. This outbound client path is not required by the native Git

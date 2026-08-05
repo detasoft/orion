@@ -1,8 +1,11 @@
 package pro.deta.orion.git.nativestorage.ref;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.common.GitObjectId;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -161,5 +164,53 @@ class LooseRefStoreTest {
         assertThat(objectsPublished).isFalse();
         assertThat(store.read("refs/heads/feature")).isEmpty();
         assertThat(store.read("refs/heads/main")).contains(GitObjectId.of(SHA1_A));
+    }
+
+    @Test
+    void persistsRefsAcrossStoreInstances(@TempDir Path repositoryDirectory) {
+        LooseRefStore writer = new LooseRefStore(repositoryDirectory);
+
+        RefUpdateResult result = writer.update(
+                "refs/heads/main",
+                NULL_ID,
+                SHA1_A);
+
+        LooseRefStore reader = new LooseRefStore(repositoryDirectory);
+        assertThat(result).isEqualTo(RefUpdateResult.CREATED);
+        assertThat(reader.read("refs/heads/main"))
+                .contains(GitObjectId.of(SHA1_A));
+        assertThat(Files.isRegularFile(
+                repositoryDirectory.resolve("refs/heads/main"))).isTrue();
+    }
+
+    @Test
+    void removesPersistedRefOnDelete(@TempDir Path repositoryDirectory) {
+        LooseRefStore writer = new LooseRefStore(repositoryDirectory);
+        writer.update("refs/heads/main", NULL_ID, SHA1_A);
+
+        RefUpdateResult result = writer.update(
+                "refs/heads/main",
+                SHA1_A,
+                NULL_ID);
+
+        LooseRefStore reader = new LooseRefStore(repositoryDirectory);
+        assertThat(result).isEqualTo(RefUpdateResult.DELETED);
+        assertThat(reader.read("refs/heads/main")).isEmpty();
+        assertThat(Files.exists(
+                repositoryDirectory.resolve("refs/heads/main"))).isFalse();
+    }
+
+    @Test
+    void ignoresTemporaryRefFilesWhenLoading(
+            @TempDir Path repositoryDirectory) throws Exception {
+        Path refsDirectory = repositoryDirectory.resolve("refs/heads");
+        Files.createDirectories(refsDirectory);
+        Files.writeString(
+                refsDirectory.resolve("main.tmp-1"),
+                SHA1_A + "\n");
+
+        LooseRefStore reader = new LooseRefStore(repositoryDirectory);
+
+        assertThat(reader.snapshot()).isEmpty();
     }
 }

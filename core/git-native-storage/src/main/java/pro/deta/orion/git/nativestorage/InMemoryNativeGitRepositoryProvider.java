@@ -7,16 +7,19 @@ import pro.deta.orion.util.Result;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-public final class InMemoryNativeGitRepositoryProvider {
+public final class InMemoryNativeGitRepositoryProvider
+        implements NativeGitRepositoryProvider {
     private static final String DEFAULT_HEAD = "refs/heads/main";
 
     private final ConcurrentMap<String, NativeGitRepository> repositories =
             new ConcurrentHashMap<>();
 
+    @Override
     public boolean exists(String repositoryName) {
         return repositories.containsKey(requireName(repositoryName));
     }
 
+    @Override
     public Result<NativeGitRepository> find(String repositoryName) {
         String name = requireName(repositoryName);
         NativeGitRepository repository = repositories.get(name);
@@ -28,6 +31,7 @@ public final class InMemoryNativeGitRepositoryProvider {
         return new Result.Success<>(repository);
     }
 
+    @Override
     public Result<NativeGitRepository> findOrCreate(String repositoryName) {
         String name = requireName(repositoryName);
         NativeGitRepository repository = repositories.computeIfAbsent(

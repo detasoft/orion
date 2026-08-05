@@ -1,8 +1,11 @@
 package pro.deta.orion.git.nativestorage.object;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.common.GitObjectId;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Optional;
@@ -110,5 +113,26 @@ class LooseObjectStoreTest {
 
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> store.readPrefix(id, -1));
+    }
+
+    @Test
+    void persistsObjectsAcrossStoreInstances(@TempDir Path temporaryDirectory) {
+        Path objectsDirectory = temporaryDirectory.resolve("objects");
+        LooseObjectStore writer = new LooseObjectStore(objectsDirectory);
+        byte[] data = "durable".getBytes(StandardCharsets.UTF_8);
+
+        GitObjectId id = writer.write(ObjectType.BLOB, data);
+
+        LooseObjectStore reader = new LooseObjectStore(objectsDirectory);
+        assertThat(reader.read(id))
+                .isPresent()
+                .get()
+                .satisfies(object -> {
+                    assertThat(object.type()).isEqualTo(ObjectType.BLOB);
+                    assertThat(object.data()).isEqualTo(data);
+                });
+        assertThat(Files.isRegularFile(objectsDirectory
+                .resolve(id.value().substring(0, 2))
+                .resolve(id.value().substring(2)))).isTrue();
     }
 }

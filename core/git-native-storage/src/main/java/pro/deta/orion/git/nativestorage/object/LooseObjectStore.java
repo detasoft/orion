@@ -7,12 +7,21 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
@@ -20,6 +29,18 @@ public final class LooseObjectStore {
     private static final int MAX_OBJECT_HEADER_BYTES = 64;
 
     private final ConcurrentHashMap<String, byte[]> store = new ConcurrentHashMap<>();
+    private final Path directory;
+
+    public LooseObjectStore() {
+        this.directory = null;
+    }
+
+    public LooseObjectStore(Path directory) {
+        this.directory = Objects.requireNonNull(
+                directory,
+                "directory").toAbsolutePath().normalize();
+        createDirectories(this.directory);
+    }
 
     public GitObjectId write(ObjectType type, byte[] data) {
         Objects.requireNonNull(type, "type");
@@ -27,13 +48,13 @@ public final class LooseObjectStore {
         byte[] header = objectHeader(type, data.length);
         byte[] raw = concat(header, data);
         String id = sha1Hex(raw);
-        store.put(id, deflate(raw));
+        putCompressed(id, deflate(raw));
         return GitObjectId.of(id);
     }
 
     public Optional<LooseObject> read(GitObjectId id) {
         Objects.requireNonNull(id, "id");
-        byte[] compressed = store.get(id.value());
+        byte[] compressed = readCompressed(id.value());
         if (compressed == null) {
             return Optional.empty();
         }
@@ -49,7 +70,7 @@ public final class LooseObjectStore {
             throw new IllegalArgumentException(
                     "maxDataBytes must be nonnegative");
         }
-        byte[] compressed = store.get(id.value());
+        byte[] compressed = readCompressed(id.value());
         if (compressed == null) {
             return Optional.empty();
         }
@@ -72,12 +93,156 @@ public final class LooseObjectStore {
 
     public boolean contains(GitObjectId id) {
         Objects.requireNonNull(id, "id");
-        return store.containsKey(id.value());
+        if (store.containsKey(id.value())) {
+            return true;
+        }
+        return objectPath(id.value())
+                .filter(Files::isRegularFile)
+                .isPresent();
     }
 
     public void putAll(LooseObjectStore other) {
         Objects.requireNonNull(other, "other");
-        store.putAll(other.store);
+        other.forEachCompressed(this::putCompressed);
+    }
+
+    private byte[] readCompressed(String id) {
+        byte[] cached = store.get(id);
+        if (cached != null) {
+            return cached.clone();
+        }
+        Optional<Path> path = objectPath(id);
+        if (path.isEmpty() || !Files.isRegularFile(path.get())) {
+            return null;
+        }
+        try {
+            byte[] compressed = Files.readAllBytes(path.get());
+            store.putIfAbsent(id, compressed.clone());
+            return compressed;
+        } catch (IOException error) {
+            throw new UncheckedIOException(
+                    "Failed to read loose Git object",
+                    error);
+        }
+    }
+
+    private void putCompressed(String id, byte[] compressed) {
+        byte[] copy = compressed.clone();
+        store.put(id, copy);
+        objectPath(id).ifPresent(path -> writeCompressed(path, copy));
+    }
+
+    private void writeCompressed(Path path, byte[] compressed) {
+        createDirectories(path.getParent());
+        Path temporary = path.resolveSibling(
+                path.getFileName() + ".tmp-"
+                        + Thread.currentThread().getId() + "-"
+                        + System.nanoTime());
+        try {
+            Files.write(temporary, compressed);
+            moveAtomicallyIfSupported(temporary, path);
+        } catch (IOException error) {
+            try {
+                Files.deleteIfExists(temporary);
+            } catch (IOException cleanupError) {
+                error.addSuppressed(cleanupError);
+            }
+            throw new UncheckedIOException(
+                    "Failed to write loose Git object",
+                    error);
+        }
+    }
+
+    private void forEachCompressed(BiConsumer<String, byte[]> consumer) {
+        Set<String> seen = new HashSet<>();
+        for (Map.Entry<String, byte[]> entry : store.entrySet()) {
+            if (seen.add(entry.getKey())) {
+                consumer.accept(entry.getKey(), entry.getValue().clone());
+            }
+        }
+        if (directory == null || !Files.isDirectory(directory)) {
+            return;
+        }
+        try (DirectoryStream<Path> buckets =
+                     Files.newDirectoryStream(directory)) {
+            for (Path bucket : buckets) {
+                if (!Files.isDirectory(bucket)) {
+                    continue;
+                }
+                String prefix = bucket.getFileName().toString();
+                if (prefix.length() != 2) {
+                    continue;
+                }
+                try (DirectoryStream<Path> objects =
+                             Files.newDirectoryStream(bucket)) {
+                    for (Path object : objects) {
+                        if (!Files.isRegularFile(object)) {
+                            continue;
+                        }
+                        String id = prefix + object.getFileName();
+                        if (!isObjectId(id) || !seen.add(id)) {
+                            continue;
+                        }
+                        consumer.accept(id, Files.readAllBytes(object));
+                    }
+                }
+            }
+        } catch (IOException error) {
+            throw new UncheckedIOException(
+                    "Failed to list loose Git objects",
+                    error);
+        }
+    }
+
+    private Optional<Path> objectPath(String id) {
+        if (directory == null || !isObjectId(id)) {
+            return Optional.empty();
+        }
+        return Optional.of(directory.resolve(id.substring(0, 2))
+                .resolve(id.substring(2))
+                .normalize());
+    }
+
+    private static boolean isObjectId(String id) {
+        if (id == null || id.length() != 40) {
+            return false;
+        }
+        for (int index = 0; index < id.length(); index++) {
+            char character = id.charAt(index);
+            boolean hex = character >= '0' && character <= '9'
+                    || character >= 'a' && character <= 'f';
+            if (!hex) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void createDirectories(Path path) {
+        try {
+            Files.createDirectories(path);
+        } catch (IOException error) {
+            throw new UncheckedIOException(
+                    "Failed to create directory: " + path,
+                    error);
+        }
+    }
+
+    private static void moveAtomicallyIfSupported(
+            Path source,
+            Path target) throws IOException {
+        try {
+            Files.move(
+                    source,
+                    target,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException error) {
+            Files.move(
+                    source,
+                    target,
+                    StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private static LooseObject parseRaw(GitObjectId id, byte[] raw) {

@@ -3,7 +3,9 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
@@ -18,6 +20,7 @@ import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestServic
 import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -49,6 +52,34 @@ class GitNativeRepositoryServiceTest {
                 GitAdvertisedRef.direct(
                         NULL_ID,
                         "capabilities^{}"));
+    }
+
+    @Test
+    void advertisesRefsFromFileBackedRepositoryProvider(
+            @TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider firstProvider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository =
+                firstProvider.findOrCreate("demo.git")
+                        .valueOrFailure("repository");
+        repository.updateRef(
+                "refs/heads/main",
+                NULL_ID,
+                MAIN_ID);
+        FileNativeGitRepositoryProvider secondProvider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        GitNativeRepositoryService service =
+                new GitNativeRepositoryService(secondProvider);
+
+        GitV1Advertisement advertisement =
+                service.legacyUploadPackAdvertisement(
+                        request("/demo.git"));
+
+        assertThat(advertisement.refs()).containsExactly(
+                GitAdvertisedRef.direct(MAIN_ID, "HEAD"),
+                GitAdvertisedRef.direct(
+                        MAIN_ID,
+                        "refs/heads/main"));
     }
 
     @Test
