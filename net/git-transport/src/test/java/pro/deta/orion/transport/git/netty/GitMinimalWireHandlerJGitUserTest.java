@@ -24,6 +24,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.acl.schema.AccessControlDraft;
+import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
@@ -32,6 +36,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -54,7 +59,8 @@ class GitMinimalWireHandlerJGitUserTest {
         InMemoryNativeGitRepositoryProvider repositoryProvider =
                 new InMemoryNativeGitRepositoryProvider();
         try (MinimalGitServer server = new MinimalGitServer(
-                repositoryProvider)) {
+                repositoryProvider,
+                repositorySecurityContext("project", true, true))) {
             server.start();
             String remoteUri = "git://127.0.0.1:"
                     + server.port()
@@ -165,8 +171,36 @@ class GitMinimalWireHandlerJGitUserTest {
         }
     }
 
+    private static SecurityContext repositorySecurityContext(
+            String repositoryName,
+            boolean write,
+            boolean create) {
+        AccessControlDraft.Grant grant =
+                new AccessControlDraft.Grant(
+                        "repository",
+                        new ArrayList<>())
+                        .addKey(
+                                AccessControl.GrantKey.REPOSITORY,
+                                repositoryName);
+        if (write) {
+            grant.addKey(
+                    AccessControl.GrantKey.WRITE,
+                    AccessControl.TRUE_STRING);
+        }
+        if (create) {
+            grant.addKey(
+                    AccessControl.GrantKey.CREATE,
+                    AccessControl.TRUE_STRING);
+        }
+        return SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl(
+                        "git-user",
+                        List.of(grant.toAccessControl())));
+    }
+
     private static final class MinimalGitServer implements AutoCloseable {
         private final InMemoryNativeGitRepositoryProvider repositoryProvider;
+        private final SecurityContext securityContext;
         private final EventLoopGroup bossGroup = new NioEventLoopGroup(1);
         private final EventLoopGroup workerGroup = new NioEventLoopGroup(1);
         private final AtomicInteger connections = new AtomicInteger();
@@ -177,8 +211,10 @@ class GitMinimalWireHandlerJGitUserTest {
         private io.netty.channel.Channel serverChannel;
 
         MinimalGitServer(
-                InMemoryNativeGitRepositoryProvider repositoryProvider) {
+                InMemoryNativeGitRepositoryProvider repositoryProvider,
+                SecurityContext securityContext) {
             this.repositoryProvider = repositoryProvider;
+            this.securityContext = securityContext;
         }
 
         void start() throws InterruptedException {
@@ -211,7 +247,9 @@ class GitMinimalWireHandlerJGitUserTest {
                                     new GitMinimalWireMachine(
                                             channel.alloc(),
                                             clientOutput,
-                                            repositoryProvider);
+                                            repositoryProvider,
+                                            new AuthenticatedNativeRepositoryAccessHook(
+                                                    securityContext));
                             channel.pipeline()
                                     .addLast(new TraceHandler(
                                             connection,

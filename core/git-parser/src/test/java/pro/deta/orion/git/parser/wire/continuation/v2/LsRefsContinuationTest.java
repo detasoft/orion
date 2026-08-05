@@ -14,6 +14,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -451,7 +452,7 @@ class LsRefsContinuationTest {
     }
 
     @Test
-    void wrapsUnexpectedRepositoryFailure() {
+    void wrapsMissingRepositoryFailure() {
         ByteBuf outbound = outputBuffer();
         Driver driver = new Driver(
                 context(
@@ -471,7 +472,9 @@ class LsRefsContinuationTest {
                                                 "Failed to serve protocol v2 ls-refs");
                                 assertThat(error.throwable())
                                         .isInstanceOf(
-                                                IllegalArgumentException.class);
+                                                IllegalStateException.class)
+                                        .hasMessageContaining(
+                                                "Native repository does not exist: /");
                             });
         } finally {
             input.release();
@@ -596,8 +599,9 @@ class LsRefsContinuationTest {
 
     private static NativeGitRepository repository(
             InMemoryNativeGitRepositoryProvider provider) {
-        return provider.findOrCreate("demo.git")
-                .valueOrFailure("repository");
+        return provider.exists("/demo.git")
+                ? provider.find("/demo.git").valueOrFailure("repository")
+                : provider.create("/demo.git").valueOrFailure("repository");
     }
 
     private static GitMinimalWireMachine.Context context(
@@ -611,22 +615,27 @@ class LsRefsContinuationTest {
     private static GitMinimalWireMachine.Context context(
             InMemoryNativeGitRepositoryProvider provider,
             GitNativeClientOutput output) {
+        repository(provider);
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
                 output,
-                new GitNativeRepositoryService(provider));
+                new GitNativeRepositoryService(
+                        provider,
+                        GitNativeRepositoryAccessHook.ALLOW_ALL));
     }
 
     private static GitMinimalWireMachine.Context context(
             InMemoryNativeGitRepositoryProvider provider,
             GitNativeClientOutput output,
             GitWireConfiguration.ProtocolV2 protocolV2) {
+        repository(provider);
         GitWireConfiguration supported =
                 GitWireConfiguration.allSupported();
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
                 output,
                 provider,
+                GitNativeRepositoryAccessHook.ALLOW_ALL,
                 new GitWireConfiguration(
                         supported.uploadPack(),
                         supported.receivePack(),

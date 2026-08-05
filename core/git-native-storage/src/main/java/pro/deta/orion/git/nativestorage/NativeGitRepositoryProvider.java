@@ -7,5 +7,5 @@ public interface NativeGitRepositoryProvider {
 
     Result<NativeGitRepository> find(String repositoryName);
 
-    Result<NativeGitRepository> findOrCreate(String repositoryName);
+    Result<NativeGitRepository> create(String repositoryName);
 }

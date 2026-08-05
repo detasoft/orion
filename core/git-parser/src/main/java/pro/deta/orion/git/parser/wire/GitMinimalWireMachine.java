@@ -5,7 +5,6 @@ import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationRuntime;
 import pro.deta.orion.continuation.RuntimeFlow;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.lifecycle.state.TestOnly;
@@ -23,21 +22,14 @@ public final class GitMinimalWireMachine {
 
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
-            GitNativeClientOutput clientOutput) {
-        this(
-                allocator,
-                clientOutput,
-                new InMemoryNativeGitRepositoryProvider());
-    }
-
-    public GitMinimalWireMachine(
-            ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
-            NativeGitRepositoryProvider repositoryProvider) {
+            NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook) {
         this(
                 allocator,
                 clientOutput,
                 repositoryProvider,
+                accessHook,
                 GitWireConfiguration.allSupported());
     }
 
@@ -45,6 +37,7 @@ public final class GitMinimalWireMachine {
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration) {
         this.context = new Context(
                 Objects.requireNonNull(allocator, "allocator"),
@@ -53,6 +46,9 @@ public final class GitMinimalWireMachine {
                         Objects.requireNonNull(
                                 repositoryProvider,
                                 "repositoryProvider"),
+                        Objects.requireNonNull(
+                                accessHook,
+                                "accessHook"),
                         Objects.requireNonNull(
                                 configuration,
                                 "configuration")),
@@ -75,41 +71,16 @@ public final class GitMinimalWireMachine {
     }
 
     @TestOnly
-    public static Context testContext(ByteBufAllocator allocator) {
-        ByteBufAllocator requiredAllocator =
-                Objects.requireNonNull(allocator, "allocator");
-        GitWireConfiguration configuration =
-                GitWireConfiguration.allSupported();
-        return testContext(
-                requiredAllocator,
-                new GitNativeClientOutput(
-                        requiredAllocator.buffer(
-                                GitNativeClientOutput.BUFFER_CAPACITY,
-                                GitNativeClientOutput.BUFFER_CAPACITY)),
-                new InMemoryNativeGitRepositoryProvider(),
-                configuration);
-    }
-
-    @TestOnly
-    public static Context testContext(
-            ByteBufAllocator allocator,
-            GitNativeClientOutput clientOutput) {
-        return testContext(
-                allocator,
-                clientOutput,
-                new InMemoryNativeGitRepositoryProvider(),
-                GitWireConfiguration.allSupported());
-    }
-
-    @TestOnly
     public static Context testContext(
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
-            NativeGitRepositoryProvider repositoryProvider) {
+            NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook) {
         return testContext(
                 allocator,
                 clientOutput,
                 repositoryProvider,
+                accessHook,
                 GitWireConfiguration.allSupported());
     }
 
@@ -132,6 +103,7 @@ public final class GitMinimalWireMachine {
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration) {
         Objects.requireNonNull(configuration, "configuration");
         return new Context(
@@ -141,6 +113,9 @@ public final class GitMinimalWireMachine {
                         Objects.requireNonNull(
                                 repositoryProvider,
                                 "repositoryProvider"),
+                        Objects.requireNonNull(
+                                accessHook,
+                                "accessHook"),
                         configuration),
                 configuration);
     }

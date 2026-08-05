@@ -12,6 +12,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -153,7 +154,7 @@ class UploadResponseContinuationTest {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
-                provider.findOrCreate("demo.git")
+                provider.create("/demo.git")
                         .valueOrFailure("repository");
         GitObjectId objectId = repository.writeObject(
                 ObjectType.BLOB,
@@ -171,7 +172,8 @@ class UploadResponseContinuationTest {
                 GitMinimalWireMachine.testContext(
                         UnpooledByteBufAllocator.DEFAULT,
                         output,
-                        provider);
+                        provider,
+                        GitNativeRepositoryAccessHook.ALLOW_ALL);
         return new UploadResponseContinuation(
                 context,
                 new LegacyUploadNegotiation(request, Set.of()));

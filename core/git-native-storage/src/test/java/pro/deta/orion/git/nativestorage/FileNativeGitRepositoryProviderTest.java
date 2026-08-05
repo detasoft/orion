@@ -19,7 +19,7 @@ class FileNativeGitRepositoryProviderTest {
     void reopensPersistedRefsAndObjects(@TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider first =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = first.findOrCreate(
+        NativeGitRepository repository = first.create(
                 "team/project.git").valueOrFailure("repository");
         GitObjectId blob = repository.writeObject(
                 ObjectType.BLOB,
@@ -51,10 +51,23 @@ class FileNativeGitRepositoryProviderTest {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
 
-        provider.findOrCreate("team/project.git")
+        provider.create("team/project.git")
                 .valueOrFailure("repository");
 
         assertThat(Files.exists(rootDirectory.resolve("team"))).isFalse();
+    }
+
+    @Test
+    void createFailsWhenRepositoryAlreadyExists(@TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        provider.create("project.git").valueOrFailure("repository");
+
+        Result<NativeGitRepository> result = provider.create("project.git");
+
+        assertThat(result).isInstanceOf(Result.Failure.class);
+        assertThat(((Result.Failure<?>) result).code())
+                .isEqualTo(Result.FailureCode.FILE_ALREADY_EXISTS);
     }
 
     @Test

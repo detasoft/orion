@@ -13,6 +13,7 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -39,8 +40,7 @@ class ReceivePackIngestionContinuationTest {
         LegacyReceiveCommandSection section = section();
         ReceivePackIngestionContinuation continuation =
                 new ReceivePackIngestionContinuation(
-                        pro.deta.orion.git.parser.wire.GitMinimalWireMachine
-                                .testContext(UnpooledByteBufAllocator.DEFAULT),
+                        defaultContext(),
                         section,
                         session);
         ByteBuf first = Unpooled.wrappedBuffer(new byte[]{1});
@@ -80,8 +80,7 @@ class ReceivePackIngestionContinuationTest {
         RecordingSession session = new RecordingSession();
         ReceivePackIngestionContinuation continuation =
                 new ReceivePackIngestionContinuation(
-                        pro.deta.orion.git.parser.wire.GitMinimalWireMachine
-                                .testContext(UnpooledByteBufAllocator.DEFAULT),
+                        defaultContext(),
                         section(),
                         session);
 
@@ -171,6 +170,7 @@ class ReceivePackIngestionContinuationTest {
                         UnpooledByteBufAllocator.DEFAULT,
                         output,
                         provider,
+                        GitNativeRepositoryAccessHook.ALLOW_ALL,
                         configuration);
         Continuation<ByteBuf> continuation =
                 ReceivePackIngestionContinuation.completeReceivePack(
@@ -179,6 +179,15 @@ class ReceivePackIngestionContinuationTest {
                                 section(capabilities),
                                 new LooseObjectStore()));
         return continuation.process(Unpooled.EMPTY_BUFFER);
+    }
+
+    private static GitMinimalWireMachine.Context defaultContext() {
+        ByteBuf outbound = outputBuffer();
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                new GitNativeClientOutput(outbound),
+                new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
 
     private static ByteBuf outputBuffer() {

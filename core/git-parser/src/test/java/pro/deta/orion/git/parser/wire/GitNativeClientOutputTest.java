@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -1612,7 +1613,9 @@ class GitNativeClientOutputTest {
             GitMinimalWireMachine.Context context =
                     GitMinimalWireMachine.testContext(
                             UnpooledByteBufAllocator.DEFAULT,
-                            output);
+                            output,
+                            new InMemoryNativeGitRepositoryProvider(),
+                            GitNativeRepositoryAccessHook.ALLOW_ALL);
 
             assertThat(context.clientOutput).isSameAs(output);
         } finally {

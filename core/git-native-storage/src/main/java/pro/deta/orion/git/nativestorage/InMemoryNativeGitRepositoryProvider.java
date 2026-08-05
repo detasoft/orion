@@ -22,15 +22,29 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
         String name = requireName(repositoryName);
         NativeGitRepository repository = repositories.get(name);
         if (repository == null) {
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Native repository does not exist: " + name);
+            return new Result.Failure<>(
+                    Result.FailureCode.NOT_FOUND,
+                    "Native repository does not exist: " + name);
         }
         return new Result.Success<>(repository);
     }
 
     @Override
-    public Result<NativeGitRepository> findOrCreate(String repositoryName) {
+    public Result<NativeGitRepository> create(String repositoryName) {
         String name = requireName(repositoryName);
-        NativeGitRepository repository = repositories.computeIfAbsent(name, ignored -> new NativeGitRepository(name, new LooseRefStore(), new LooseObjectStore(), DEFAULT_HEAD));
+        NativeGitRepository repository = new NativeGitRepository(
+                name,
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                DEFAULT_HEAD);
+        NativeGitRepository previous = repositories.putIfAbsent(
+                name,
+                repository);
+        if (previous != null) {
+            return new Result.Failure<>(
+                    Result.FailureCode.FILE_ALREADY_EXISTS,
+                    "Native repository already exists: " + name);
+        }
         return new Result.Success<>(repository);
     }
 

@@ -29,7 +29,9 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
     private final ConcurrentMap<String, NativeGitRepository> repositories = new ConcurrentHashMap<>();
 
     public FileNativeGitRepositoryProvider(Path rootDirectory) {
-        this.rootDirectory = Objects.requireNonNull(rootDirectory, "rootDirectory").toAbsolutePath().normalize();
+        this.rootDirectory = Objects.requireNonNull(
+                rootDirectory,
+                "rootDirectory").toAbsolutePath().normalize();
         createDirectories(this.rootDirectory);
     }
 
@@ -43,18 +45,23 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
     public synchronized Result<NativeGitRepository> find(String repositoryName) {
         String name = requireName(repositoryName);
         if (!Files.isRegularFile(metadataPath(name))) {
-            return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Native repository does not exist: " + name);
+            return new Result.Failure<>(
+                    Result.FailureCode.NOT_FOUND,
+                    "Native repository does not exist: " + name);
         }
         return new Result.Success<>(open(name));
     }
 
     @Override
-    public synchronized Result<NativeGitRepository> findOrCreate(String repositoryName) {
+    public synchronized Result<NativeGitRepository> create(String repositoryName) {
         String name = requireName(repositoryName);
         Path metadata = metadataPath(name);
-        if (!Files.isRegularFile(metadata)) {
-            createRepository(name);
+        if (Files.isRegularFile(metadata)) {
+            return new Result.Failure<>(
+                    Result.FailureCode.FILE_ALREADY_EXISTS,
+                    "Native repository already exists: " + name);
         }
+        createRepository(name);
         return new Result.Success<>(open(name));
     }
 
@@ -86,7 +93,9 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
 
     private RepositoryMetadata readMetadata(Path repositoryDirectory) {
         Properties properties = new Properties();
-        try (Reader reader = Files.newBufferedReader(repositoryDirectory.resolve(METADATA_FILE), StandardCharsets.UTF_8)) {
+        try (Reader reader = Files.newBufferedReader(
+                repositoryDirectory.resolve(METADATA_FILE),
+                StandardCharsets.UTF_8)) {
             properties.load(reader);
         } catch (IOException error) {
             throw new UncheckedIOException("Failed to read native repository metadata", error);

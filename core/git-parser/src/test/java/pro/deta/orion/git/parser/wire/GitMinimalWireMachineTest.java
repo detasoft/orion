@@ -22,7 +22,9 @@ class GitMinimalWireMachineTest {
             GitMinimalWireMachine.Context context =
                     GitMinimalWireMachine.testContext(
                             UnpooledByteBufAllocator.DEFAULT,
-                            output.clientOutput());
+                            output.clientOutput(),
+                            new InMemoryNativeGitRepositoryProvider(),
+                            GitNativeRepositoryAccessHook.ALLOW_ALL);
 
             assertThat(context.configuration)
                     .isEqualTo(GitWireConfiguration.allSupported());
@@ -42,6 +44,7 @@ class GitMinimalWireMachineTest {
                             UnpooledByteBufAllocator.DEFAULT,
                             output.clientOutput(),
                             new InMemoryNativeGitRepositoryProvider(),
+                            GitNativeRepositoryAccessHook.ALLOW_ALL,
                             configuration);
 
             assertThat(context.configuration).isSameAs(configuration);
@@ -63,6 +66,7 @@ class GitMinimalWireMachineTest {
                     UnpooledByteBufAllocator.DEFAULT,
                     output.clientOutput(),
                     new InMemoryNativeGitRepositoryProvider(),
+                    GitNativeRepositoryAccessHook.ALLOW_ALL,
                     disabledConfiguration());
 
             machine.close();
@@ -81,7 +85,8 @@ class GitMinimalWireMachineTest {
                             UnpooledByteBufAllocator.DEFAULT,
                             output.clientOutput(),
                             new InMemoryNativeGitRepositoryProvider(),
-                            null))
+                            GitNativeRepositoryAccessHook.ALLOW_ALL,
+                            (GitWireConfiguration) null))
                     .withMessage("configuration");
         } finally {
             output.outbound().release();

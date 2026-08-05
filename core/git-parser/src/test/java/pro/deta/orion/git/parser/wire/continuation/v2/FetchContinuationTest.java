@@ -13,6 +13,7 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -108,7 +109,7 @@ class FetchContinuationTest {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
-                provider.findOrCreate("demo.git")
+                provider.create("/demo.git")
                         .valueOrFailure("repository");
         GitObjectId have = repository.writeObject(
                 ObjectType.BLOB,
@@ -118,7 +119,8 @@ class FetchContinuationTest {
                 GitMinimalWireMachine.testContext(
                         UnpooledByteBufAllocator.DEFAULT,
                         new GitNativeClientOutput(outbound),
-                        provider));
+                        provider,
+                        GitNativeRepositoryAccessHook.ALLOW_ALL));
         ByteBuf input = Unpooled.buffer();
         writeData(input, "want " + WANT + "\n");
         writeData(input, "have " + have.value() + "\n");
@@ -252,8 +254,7 @@ class FetchContinuationTest {
         private Continuation<ByteBuf> current;
 
         private Driver() {
-            this(GitMinimalWireMachine.testContext(
-                    UnpooledByteBufAllocator.DEFAULT));
+            this(defaultContext());
         }
 
         private Driver(GitMinimalWireMachine.Context context) {
@@ -286,5 +287,14 @@ class FetchContinuationTest {
                 return;
             }
         }
+    }
+
+    private static GitMinimalWireMachine.Context defaultContext() {
+        ByteBuf outbound = outputBuffer();
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                new GitNativeClientOutput(outbound),
+                new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
 }

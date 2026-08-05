@@ -2,9 +2,14 @@ package pro.deta.orion.git.parser.wire.continuation;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.continuation.v0v1.ReceivePackContinuation;
@@ -101,6 +106,20 @@ class InitialRequestDispatchContinuationTest extends ByteBufContinuationTest {
                 new InitialRequestDispatchContinuation(context(), data(service, parameters)),
                 Unpooled.buffer());
         return transitionedTo(flow);
+    }
+
+    protected static GitMinimalWireMachine.Context context() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        provider.create("/project.git").valueOrFailure("repository");
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                new GitNativeClientOutput(
+                        UnpooledByteBufAllocator.DEFAULT.buffer(
+                                GitNativeClientOutput.BUFFER_CAPACITY,
+                                GitNativeClientOutput.BUFFER_CAPACITY)),
+                provider,
+                GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
 
     private static void assertUnsupportedVersion(

@@ -45,6 +45,7 @@ public final class GitNativeRepositoryService {
                     64 * 1024 * 1024);
 
     private final NativeGitRepositoryProvider repositoryProvider;
+    private final GitNativeRepositoryAccessHook accessHook;
     private final GitWireConfiguration configuration;
 
     public GitNativeRepositoryService(
@@ -55,9 +56,31 @@ public final class GitNativeRepositoryService {
     public GitNativeRepositoryService(
             NativeGitRepositoryProvider repositoryProvider,
             GitWireConfiguration configuration) {
+        this(
+                repositoryProvider,
+                GitNativeRepositoryAccessHook.ALLOW_ALL,
+                configuration);
+    }
+
+    public GitNativeRepositoryService(
+            NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook) {
+        this(
+                repositoryProvider,
+                accessHook,
+                GitWireConfiguration.allSupported());
+    }
+
+    public GitNativeRepositoryService(
+            NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook,
+            GitWireConfiguration configuration) {
         this.repositoryProvider = Objects.requireNonNull(
                 repositoryProvider,
                 "repositoryProvider");
+        this.accessHook = Objects.requireNonNull(
+                accessHook,
+                "accessHook");
         this.configuration = Objects.requireNonNull(
                 configuration,
                 "configuration");
@@ -70,18 +93,53 @@ public final class GitNativeRepositoryService {
 
     public GitV1Advertisement legacyUploadPackAdvertisement(
             InitialRequestData data) {
+        String repositoryPath = data.getRepositoryPath();
+        NativeGitRepository repository = findOrFail(repositoryPath);
         return legacyAdvertisement(
-                data,
+                repository,
                 uploadPackCapabilities(),
                 configuration.uploadPack().symref());
     }
 
+    private NativeGitRepository findOrFail(String repositoryPath) {
+        return findOrFail(
+                repositoryPath,
+                repositoryProvider.find(repositoryPath));
+    }
+
+    private NativeGitRepository findOrFail(
+            String repositoryPath,
+            Result<NativeGitRepository> repository) {
+        return switch (repository) {
+            case Result.Success(NativeGitRepository repo) ->
+                    repo;
+            case Result.Failure<NativeGitRepository> failure ->
+                    throw new IllegalStateException(
+                            failureMessage(repositoryPath, failure),
+                            failure.throwable());
+        };
+    }
+
     public GitV1Advertisement legacyReceivePackAdvertisement(
             InitialRequestData data) {
+        String repositoryPath = data.getRepositoryPath();
+        NativeGitRepository repository = findOrFail(
+                repositoryPath,
+                receiveRepository(repositoryPath));
         return legacyAdvertisement(
-                data,
+                repository,
                 receivePackCapabilities(),
                 false);
+    }
+
+    private Result<NativeGitRepository> findOrCreate(
+            String repositoryName) {
+        if (!repositoryProvider.exists(repositoryName)) {
+            accessHook.beforeCreate(repositoryName);
+            return repositoryProvider.create(repositoryName);
+        }
+        accessHook.beforeWrite(repositoryName);
+        return repositoryProvider.find(repositoryName);
     }
 
     public NativePackProducer legacyUploadPack(
@@ -89,8 +147,8 @@ public final class GitNativeRepositoryService {
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        return resolveRepository(data.getRepositoryPath())
-                .fetch(request);
+        String repositoryPath = data.getRepositoryPath();
+        return findOrFail(repositoryPath).fetch(request);
     }
 
     public NativePackProducer protocolV2Fetch(
@@ -98,8 +156,8 @@ public final class GitNativeRepositoryService {
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        return resolveRepository(data.getRepositoryPath())
-                .fetch(request);
+        String repositoryPath = data.getRepositoryPath();
+        return findOrFail(repositoryPath).fetch(request);
     }
 
     public List<GitObjectId> protocolV2FetchAcknowledgments(
@@ -107,8 +165,8 @@ public final class GitNativeRepositoryService {
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        NativeGitRepository repository =
-                resolveRepository(data.getRepositoryPath());
+        String repositoryPath = data.getRepositoryPath();
+        NativeGitRepository repository = findOrFail(repositoryPath);
         List<GitObjectId> acknowledgments = new ArrayList<>();
         for (GitObjectId have : request.haves()) {
             if (repository.readObject(have).isPresent()) {
@@ -121,7 +179,10 @@ public final class GitNativeRepositoryService {
     public PackIngestionSession beginLegacyReceivePack(
             InitialRequestData data) {
         Objects.requireNonNull(data, "data");
-        return resolveRepository(data.getRepositoryPath())
+        String repositoryPath = data.getRepositoryPath();
+        return findOrFail(
+                repositoryPath,
+                receiveRepository(repositoryPath))
                 .beginPackIngestion(RECEIVE_PACK_LIMITS);
     }
 
@@ -136,13 +197,15 @@ public final class GitNativeRepositoryService {
                     command.oldObjectId().value(),
                     command.newObjectId().value()));
         }
-        List<RefUpdateResult> results = resolveRepository(
-                receivePack.commandSection()
-                        .initialRequest()
-                        .getRepositoryPath())
-                .publishObjectsAndRefs(
-                        receivePack.quarantine(),
-                        updates);
+        String repositoryPath = receivePack.commandSection()
+                .initialRequest()
+                .getRepositoryPath();
+        NativeGitRepository repository = findOrFail(
+                repositoryPath,
+                receiveRepository(repositoryPath));
+        List<RefUpdateResult> results = repository.publishObjectsAndRefs(
+                receivePack.quarantine(),
+                updates);
         List<ReceivePackStatus> statuses = new ArrayList<>();
         for (int index = 0; index < results.size(); index++) {
             LegacyReceiveCommand command =
@@ -163,8 +226,13 @@ public final class GitNativeRepositoryService {
             LsRefsRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        NativeGitRepository repository =
-                resolveRepository(data.getRepositoryPath());
+        String repositoryPath = data.getRepositoryPath();
+        return lsRefs(findOrFail(repositoryPath), request);
+    }
+
+    private GitLsRefsResponse lsRefs(
+            NativeGitRepository repository,
+            LsRefsRequest request) {
         Map<String, String> refs = repository.refs();
         List<String> refNames = new ArrayList<>(refs.keySet());
         refNames.sort(String::compareTo);
@@ -412,12 +480,10 @@ public final class GitNativeRepositoryService {
     }
 
     private GitV1Advertisement legacyAdvertisement(
-            InitialRequestData data,
+            NativeGitRepository repository,
             List<GitCapability> baseCapabilities,
             boolean advertiseHeadSymref) {
-        Objects.requireNonNull(data, "data");
-        NativeGitRepository repository =
-                resolveRepository(data.getRepositoryPath());
+        Objects.requireNonNull(repository, "repository");
         Map<String, String> refs = repository.refs();
         List<GitAdvertisedRef> advertisedRefs = new ArrayList<>();
         String headTarget = repository.defaultHead();
@@ -448,21 +514,27 @@ public final class GitNativeRepositoryService {
         return new GitV1Advertisement(capabilities, advertisedRefs);
     }
 
-    private NativeGitRepository resolveRepository(String repositoryPath) {
-        String repositoryName = repositoryPath;
-        while (repositoryName.startsWith("/")) {
-            repositoryName = repositoryName.substring(1);
+    private Result<NativeGitRepository> receiveRepository(
+            String repositoryName) {
+        try {
+            accessHook.beforeReceive(repositoryName);
+            return findOrCreate(repositoryName);
+        } catch (GitNativeRepositoryAccessHook.AccessDeniedException e) {
+            return new Result.Failure<>(
+                    Result.FailureCode.AUTHENTICATION_FAILED,
+                    e.getMessage(),
+                    e);
         }
-        Result<NativeGitRepository> result =
-                repositoryProvider.findOrCreate(repositoryName);
-        return switch (result) {
-            case Result.Success<NativeGitRepository> success ->
-                    success.value();
-            case Result.Failure<NativeGitRepository> failure ->
-                    throw new IllegalStateException(
-                            failure.getMessage(),
-                            failure.throwable());
-        };
+    }
+
+    private static String failureMessage(
+            String repositoryName,
+            Result.Failure<NativeGitRepository> failure) {
+        String message = failure.message();
+        if (message == null || message.isBlank()) {
+            return "Cannot resolve native repository " + repositoryName;
+        }
+        return message;
     }
 
     public record ReceivePackStatus(

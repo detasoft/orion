@@ -6,8 +6,10 @@ import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -109,7 +111,9 @@ class UploadPackContinuationTest {
         GitMinimalWireMachine.Context context =
                 GitMinimalWireMachine.testContext(
                         UnpooledByteBufAllocator.DEFAULT,
-                        output);
+                        output,
+                        new InMemoryNativeGitRepositoryProvider(),
+                        GitNativeRepositoryAccessHook.ALLOW_ALL);
         InitialRequestData data = new InitialRequestData(
                 InitialRequestService.UPLOAD_PACK,
                 "/demo.git",

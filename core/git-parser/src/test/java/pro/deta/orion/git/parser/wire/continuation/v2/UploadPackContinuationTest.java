@@ -9,6 +9,7 @@ import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
@@ -368,8 +369,7 @@ class UploadPackContinuationTest {
             ByteBuf input) {
         return driveOneByteAtATime(
                 input,
-                GitMinimalWireMachine.testContext(
-                        UnpooledByteBufAllocator.DEFAULT));
+                defaultContext());
     }
 
     private static Continuation<ByteBuf> driveOneByteAtATime(
@@ -438,7 +438,9 @@ class UploadPackContinuationTest {
             GitNativeClientOutput output) {
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
-                output);
+                output,
+                new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
 
     private static GitMinimalWireMachine.Context context(
@@ -450,6 +452,7 @@ class UploadPackContinuationTest {
                 UnpooledByteBufAllocator.DEFAULT,
                 output,
                 new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL,
                 new GitWireConfiguration(
                         supported.uploadPack(),
                         supported.receivePack(),
@@ -475,8 +478,7 @@ class UploadPackContinuationTest {
         private Continuation<ByteBuf> current;
 
         private Driver() {
-            this(GitMinimalWireMachine.testContext(
-                    UnpooledByteBufAllocator.DEFAULT));
+            this(defaultContext());
         }
 
         private Driver(GitMinimalWireMachine.Context context) {
@@ -506,5 +508,14 @@ class UploadPackContinuationTest {
                 return;
             }
         }
+    }
+
+    private static GitMinimalWireMachine.Context defaultContext() {
+        ByteBuf outbound = outputBuffer();
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                new GitNativeClientOutput(outbound),
+                new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
 }

@@ -7,7 +7,10 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
+import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -251,8 +254,7 @@ class UploadRequestContinuationTest {
     private static final class Driver {
         private Continuation<ByteBuf> current =
                 new UploadRequestContinuation(
-                        GitMinimalWireMachine.testContext(
-                                UnpooledByteBufAllocator.DEFAULT),
+                        defaultContext(),
                         initialRequest(),
                         serverAdvertisement());
 
@@ -277,5 +279,16 @@ class UploadRequestContinuationTest {
                 return flow;
             }
         }
+    }
+
+    private static GitMinimalWireMachine.Context defaultContext() {
+        ByteBuf outbound = UnpooledByteBufAllocator.DEFAULT.buffer(
+                GitNativeClientOutput.BUFFER_CAPACITY,
+                GitNativeClientOutput.BUFFER_CAPACITY);
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                new GitNativeClientOutput(outbound),
+                new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
 }

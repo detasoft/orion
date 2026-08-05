@@ -4,14 +4,23 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.UnpooledByteBufAllocator;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 abstract class ByteBufContinuationTest {
     protected static GitMinimalWireMachine.Context context() {
+        ByteBuf outbound = UnpooledByteBufAllocator.DEFAULT.buffer(
+                GitNativeClientOutput.BUFFER_CAPACITY,
+                GitNativeClientOutput.BUFFER_CAPACITY);
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT);
+                UnpooledByteBufAllocator.DEFAULT,
+                new GitNativeClientOutput(outbound),
+                new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
 
     protected static ContinuationFlow<ByteBuf> processOneByteAtATime(
