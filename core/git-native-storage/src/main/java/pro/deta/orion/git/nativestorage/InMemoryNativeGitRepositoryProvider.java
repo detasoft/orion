@@ -7,43 +7,36 @@ import pro.deta.orion.util.Result;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-public final class InMemoryNativeGitRepositoryProvider {
+public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepositoryProvider {
     private static final String DEFAULT_HEAD = "refs/heads/main";
 
-    private final ConcurrentMap<String, NativeGitRepository> repositories =
-            new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, NativeGitRepository> repositories = new ConcurrentHashMap<>();
 
+    @Override
     public boolean exists(String repositoryName) {
         return repositories.containsKey(requireName(repositoryName));
     }
 
+    @Override
     public Result<NativeGitRepository> find(String repositoryName) {
         String name = requireName(repositoryName);
         NativeGitRepository repository = repositories.get(name);
         if (repository == null) {
-            return new Result.Failure<>(
-                    Result.FailureCode.NOT_FOUND,
-                    "Native repository does not exist: " + name);
+            return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Native repository does not exist: " + name);
         }
         return new Result.Success<>(repository);
     }
 
+    @Override
     public Result<NativeGitRepository> findOrCreate(String repositoryName) {
         String name = requireName(repositoryName);
-        NativeGitRepository repository = repositories.computeIfAbsent(
-                name,
-                ignored -> new NativeGitRepository(
-                        name,
-                        new LooseRefStore(),
-                        new LooseObjectStore(),
-                        DEFAULT_HEAD));
+        NativeGitRepository repository = repositories.computeIfAbsent(name, ignored -> new NativeGitRepository(name, new LooseRefStore(), new LooseObjectStore(), DEFAULT_HEAD));
         return new Result.Success<>(repository);
     }
 
     private static String requireName(String repositoryName) {
         if (repositoryName == null || repositoryName.isBlank()) {
-            throw new IllegalArgumentException(
-                    "repositoryName must not be blank");
+            throw new IllegalArgumentException("repositoryName must not be blank");
         }
         return repositoryName;
     }

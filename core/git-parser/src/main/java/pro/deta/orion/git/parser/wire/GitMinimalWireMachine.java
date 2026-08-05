@@ -6,6 +6,7 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationRuntime;
 import pro.deta.orion.continuation.RuntimeFlow;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
@@ -32,7 +33,7 @@ public final class GitMinimalWireMachine {
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
-            InMemoryNativeGitRepositoryProvider repositoryProvider) {
+            NativeGitRepositoryProvider repositoryProvider) {
         this(
                 allocator,
                 clientOutput,
@@ -43,7 +44,7 @@ public final class GitMinimalWireMachine {
     public GitMinimalWireMachine(
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
-            InMemoryNativeGitRepositoryProvider repositoryProvider,
+            NativeGitRepositoryProvider repositoryProvider,
             GitWireConfiguration configuration) {
         this.context = new Context(
                 Objects.requireNonNull(allocator, "allocator"),
@@ -104,7 +105,7 @@ public final class GitMinimalWireMachine {
     public static Context testContext(
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
-            InMemoryNativeGitRepositoryProvider repositoryProvider) {
+            NativeGitRepositoryProvider repositoryProvider) {
         return testContext(
                 allocator,
                 clientOutput,
@@ -130,7 +131,7 @@ public final class GitMinimalWireMachine {
     public static Context testContext(
             ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
-            InMemoryNativeGitRepositoryProvider repositoryProvider,
+            NativeGitRepositoryProvider repositoryProvider,
             GitWireConfiguration configuration) {
         Objects.requireNonNull(configuration, "configuration");
         return new Context(
