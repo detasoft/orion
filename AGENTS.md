@@ -2,7 +2,8 @@
 
 - When the user asks to commit changes, for example by writing `commit` or `сделай коммит`, create the intended logical commit first, then run regular Maven tests for the whole project with `make test`.
 - Do not run tests after documentation-only commits, including commits that
-  change only Markdown files such as `TASKS.md` and files under `docs/`.
+  change only Markdown files such as task `TASK.md` files and files under
+  `docs/`.
 - Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
 - Use `make test` for routine full-project tests and the commit workflow. For focused checks, use the `dev` Maven profile, for example `mvn test -Pdev -T 4 -q -pl ...`.
 - Do not run integration tests automatically after every commit; `make test` is enough for the commit workflow.
@@ -33,4 +34,10 @@
 - When asked to add comments or explanations to classes, add class-level comments only. Do not add method or constructor comments unless explicitly requested.
 - Treat class-level comments tagged with `@AiRule` as local implementation rules. When changing a class, read these comments and verify the rules still hold before finishing the change.
 - Commit messages must be a single line. Do not add a body, bullet points, or multi-line descriptions — the entire meaning goes in the subject line.
-- Use `TASKS.md` to track only current high-level implementation work and a small set of upcoming high-level tasks. The current section may contain multiple active tasks, not just one. Keep it short, update it when starting or finishing substantial work, and leave detailed designs and implementation steps in `docs/plans/`.
+- Use the filesystem task tree rooted at `docs/plans/TASK.md` to track current
+  high-level implementation work and upcoming tasks. Every task directory must
+  contain its own `TASK.md`, and directories may form a hierarchy of tasks.
+  `TASKS.md` is only a compatibility pointer; do not maintain task lists there.
+  Keep task nodes short, update them when starting or finishing substantial
+  work, and leave detailed designs and implementation steps in ordinary
+  `docs/plans/` plan files.

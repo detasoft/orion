@@ -502,7 +502,7 @@ git commit -m "Add native receive-pack client machine"
 ### Task 5: Verify the module and finish task tracking
 
 **Files:**
-- Modify: `TASKS.md`
+- Modify the selected task node's `TASK.md`.
 
 **Step 1: Run all protocol-client tests**
 
@@ -557,7 +557,7 @@ remain unstaged.
 
 **Step 6: Commit task tracking**
 
-Stage only this task's `TASKS.md` lines and commit:
+Stage only this task node's `TASK.md` changes and commit:
 
 ```bash
 git commit -m "Complete native Git client state machines"

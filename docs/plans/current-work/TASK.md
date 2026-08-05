@@ -1,0 +1,15 @@
+# Current Work
+
+Status: active
+Source: converted from former root task list Current section.
+
+This task node tracks active high-level implementation work and recently
+completed current tasks.
+
+## Child Tasks
+
+- [x] [Replace GitMinimalWireMachine internals](git-minimal-wire-machine-continuations/TASK.md)
+- [x] [Flatten Git wire continuations](flat-git-wire-continuations/TASK.md)
+- [x] [Add process-local native repository provider](process-local-native-repository-provider/TASK.md)
+- [x] [Implement legacy receive-pack advertisement](legacy-receive-pack-advertisement/TASK.md)
+- [ ] [Implement production native repository backends](production-native-git-repository-backends/TASK.md)

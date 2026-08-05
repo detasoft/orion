@@ -1,30 +1,46 @@
 ---
 name: orion-task-runner
-description: Coordinate Orion repository work from TASKS.md. Use when the user asks Codex to take, choose, continue, claim, or run a task from TASKS.md in the Orion repo, including prompts like "возьми задачу", "следующая задача", "продолжай по TASKS", "pick a TASKS.md item", or requests that rely on the current high-level task list.
+description: >-
+  Coordinate Orion repository work from the filesystem task tree rooted at
+  docs/plans/TASK.md. Use when the user asks Codex to take, choose, continue,
+  claim, or run a task from the Orion task list, including prompts like "возьми
+  задачу", "следующая задача", "продолжай по задачам", "pick a task", or
+  requests that rely on current high-level tasks.
 ---
 
 # Orion Task Runner
 
 ## Overview
 
-Use this skill to choose one high-level Orion task from `TASKS.md`, mark it as owned before substantial edits, execute it under the repository rules, and keep `TASKS.md` current without turning it into a detailed plan.
+Use this skill to choose Orion work from the filesystem task tree rooted at
+`docs/plans/TASK.md`, mark it as owned before substantial edits, execute it
+under the repository rules, and keep task tracking current without turning it
+into a detailed plan.
 
 ## Startup
 
 1. Confirm the working directory is the Orion repository.
-2. Read `AGENTS.md`, `TASKS.md`, and `git status --short` before choosing work.
-3. Treat existing uncommitted changes as user-owned unless you made them in the current request. Do not revert or stage unrelated changes.
-4. If the user asks only for status, triage, or explanation, do not claim a task.
+2. Read `AGENTS.md`, `docs/plans/TASK.md`, relevant child `TASK.md` files, and
+   `git status --short` before choosing work.
+3. If root `TASKS.md` exists, treat it as a compatibility pointer only, not as
+   task state.
+4. Treat existing uncommitted changes as user-owned unless you made them in the
+   current request. Do not revert or stage unrelated changes.
+5. If the user asks only for status, triage, or explanation, do not claim a task.
 
 ## Task Selection
 
+Tasks are hierarchical. Treat every directory with a `TASK.md` as a task node.
+A parent task can contain multiple ready next tasks; do not collapse the next
+step into a single item when several independent child tasks are available.
+
 First classify tasks as claimed or unclaimed. Treat a task as claimed when its
-block has any of these signals:
+`TASK.md` has any of these signals:
 
 - any `Owner:` line, including `Owner: codex`;
 - an explicit activity marker such as `Active next task`, `Current work`, `in
   progress`, `started`, or `paused`;
-- checked implementation subtasks under an otherwise unchecked parent task,
+- checked child tasks under an otherwise unchecked parent task,
   unless the block explicitly says the work is available.
 
 Claimed means occupied by another session or person. Never select, continue,
@@ -33,19 +49,33 @@ that task and asks to take it over.
 
 For a generic request such as "take a new task", prefer this order:
 
-1. The first unclaimed unchecked task in `## Current`.
-2. The first unclaimed unchecked task in `## Next`, moved or copied into
-   `## Current` only when starting it.
+1. The first unclaimed unchecked task under `docs/plans/current-work/`.
+2. The first unclaimed unchecked child task under an active parent task.
+3. The first unclaimed unchecked task under `docs/plans/upcoming-work/`, moved
+   under current work only when starting it.
 
 When the user explicitly names or describes a task, select it only if it is
 unclaimed. Ask a concise question before proceeding when two or more unclaimed
-tasks match equally well, when the requested work is absent from `TASKS.md`,
-when the named task is claimed, or when no unclaimed task remains.
+tasks match equally well, when the requested work is absent from the task
+tracking files, when the named task is claimed, or when no unclaimed task
+remains.
+
+## Task Storage
+
+Use `docs/plans/TASK.md` as the root task index. Use directories as task nodes
+and store each task's details in that directory's `TASK.md`. A directory can be
+both a task and a container for subtasks. Keep parent `TASK.md` files focused on
+status, scope, ownership, and the list of immediate child tasks; put detailed
+implementation notes in ordinary `docs/plans/*.md` plan files only when they
+are broader than the task node.
+
+Do not recreate a central `TASKS.md` list. If root `TASKS.md` exists, leave it
+as a compatibility pointer to `docs/plans/TASK.md`.
 
 ## Claim Format
 
 Before substantial code, doc, or test edits, update only the selected unclaimed
-task block in `TASKS.md`:
+task node's `TASK.md`:
 
 ```markdown
 - [ ] Task title and short context.
@@ -62,20 +92,25 @@ or implementation notes in `docs/plans/`.
 
 ## Execution Rules
 
-1. Follow `AGENTS.md` for Maven profiles, commit behavior, tests, comments, and `TASKS.md` scope.
+1. Follow `AGENTS.md` for Maven profiles, commit behavior, tests, comments, and
+   task tree scope.
 2. Read any referenced plan under `docs/plans/` before changing related code.
 3. Add or extend tests when changing functionality.
 4. Run focused verification during implementation and the appropriate Maven check before claiming completion.
-5. Keep `TASKS.md` edits scoped to the selected task and a small number of upcoming high-level tasks.
+5. Keep task tree edits scoped to the selected task and a small number of upcoming high-level tasks.
 
 ## Finish
 
-When the selected task is fully implemented and verified, mark it complete and remove the owner line. Add or adjust the next high-level task only if needed.
+When the selected task is fully implemented and verified, mark it complete and
+remove the owner line. Add or adjust the next high-level task only if needed.
 
-When stopping with work incomplete, keep the task unchecked and replace or update the owner line with a short status line:
+When stopping with work incomplete, keep the task unchecked and replace or
+update the owner line with a short status line:
 
 ```markdown
   - Owner: codex, session SESSION_ID, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
 ```
 
-In the final response, name the selected task, summarize code changes, list verification run, and mention any unrelated pre-existing working tree changes.
+In the final response, name the selected task path, summarize code changes,
+list verification run, and mention any unrelated pre-existing working tree
+changes.

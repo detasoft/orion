@@ -1,0 +1,21 @@
+# Upcoming Work
+
+Status: active
+Source: converted from former root task list Next section.
+
+This task node tracks upcoming high-level implementation work. Multiple child
+tasks may be ready at the same time.
+
+## Child Tasks
+
+- [x] [Finish native git server path](native-git-server-path/TASK.md)
+- [x] [Delete obsolete native Git plan references](obsolete-native-git-plan-cleanup/TASK.md)
+- [x] [Add authenticated native repository resolution](authenticated-native-repository-resolution/TASK.md)
+- [x] [Connect receive-pack to PackIngestor](receive-pack-pack-ingestor/TASK.md)
+- [ ] [Move SSH and HTTP Git server paths to ByteBuf adapters](native-ssh-http-bytebuf-adapters/TASK.md)
+- [x] [Multiplex native Git side-band channels](native-git-side-band-channels/TASK.md)
+- [ ] [Replace copied native client output chunks](native-client-output-buffering/TASK.md)
+- [ ] [Add native Git client state machines](native-git-client-state-machines/TASK.md)
+- [ ] [Add real native Git client transport](native-git-client-transport-compatibility/TASK.md)
+- [ ] [Extend protocol v2 server fetch](protocol-v2-server-fetch-extensions/TASK.md)
+- [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)

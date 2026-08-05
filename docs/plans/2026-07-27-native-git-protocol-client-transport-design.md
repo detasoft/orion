@@ -132,7 +132,7 @@ transports will extend transport diagnostics without changing client commands.
 
 ## Deferred Work
 
-Three high-level follow-up tasks remain in `TASKS.md`:
+Three high-level follow-up tasks remain in the `docs/plans` task tree:
 
 1. scripted upload-pack and receive-pack clients composed from this transport
    and existing wire primitives;

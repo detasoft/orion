@@ -348,7 +348,7 @@ Expected: PASS.
 ### Task 6: Verify the reactor and finish task tracking
 
 **Files:**
-- Modify: `TASKS.md`
+- Modify the selected task node's `TASK.md`.
 
 **Step 1: Run routine development verification**
 
