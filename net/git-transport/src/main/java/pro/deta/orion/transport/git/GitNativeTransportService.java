@@ -45,6 +45,8 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 @Slf4j
 @Singleton
 public class GitNativeTransportService implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
+    static final String IMPLEMENTATION_PROPERTY =
+            "orion.git.transport.implementation";
     private static final int DEFAULT_SOCKET_TIMEOUT_MILLIS = 5 * 1000;
 
     private final GitTransportConfig config;
@@ -123,10 +125,10 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     public void onStart() {
         if (isEnabled()) {
             stopRequested = false;
-            if (isJGitImplementation()) {
-                listenJGitService();
-            } else {
+            if (isNativeImplementation()) {
                 listenNativeService();
+            } else {
+                listenJGitService();
             }
         }
     }
@@ -139,9 +141,9 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
         return boundAddress() != null;
     }
 
-    private boolean isJGitImplementation() {
-        return "jgit".equalsIgnoreCase(
-                System.getProperty("orion.git.transport.implementation"));
+    private boolean isNativeImplementation() {
+        return "native".equalsIgnoreCase(
+                System.getProperty(IMPLEMENTATION_PROPERTY));
     }
 
     private void listenJGitService() {
