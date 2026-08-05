@@ -49,12 +49,16 @@ task block in `TASKS.md`:
 
 ```markdown
 - [ ] Task title and short context.
-  - Owner: codex, started YYYY-MM-DD HH:MM Europe/Amsterdam.
+  - Owner: codex, session SESSION_ID, started YYYY-MM-DD HH:MM Europe/Amsterdam.
 ```
 
-Use the current local date and time. An existing owner line means the task is
-claimed; do not update it without an explicit user-requested takeover. Keep the
-file high-level; put detailed design or implementation notes in `docs/plans/`.
+Use the current local date and time, and record a stable identifier for the
+current Codex session instead of relying on the timestamp alone. Use the actual
+session identifier when it is available; otherwise generate a short unique local
+session id once and reuse it for all owner lines written by this session. An
+existing owner line means the task is claimed; do not update it without an
+explicit user-requested takeover. Keep the file high-level; put detailed design
+or implementation notes in `docs/plans/`.
 
 ## Execution Rules
 
@@ -71,7 +75,7 @@ When the selected task is fully implemented and verified, mark it complete and r
 When stopping with work incomplete, keep the task unchecked and replace or update the owner line with a short status line:
 
 ```markdown
-  - Owner: codex, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
+  - Owner: codex, session SESSION_ID, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
 ```
 
 In the final response, name the selected task, summarize code changes, list verification run, and mention any unrelated pre-existing working tree changes.
