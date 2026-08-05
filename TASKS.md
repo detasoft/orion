@@ -22,6 +22,16 @@ designs and implementation steps in `docs/plans/`.
       and projection parity.
   - Owner: codex, paused 2026-08-04 19:45 Europe/Amsterdam; next:
     add pack index publication and pack-backed object reads.
+  - [x] Add file-backed native repository provider with durable loose refs and
+        loose objects.
+  - [ ] Publish received packs with durable pack indexes.
+  - [ ] Read objects from published pack files through pack indexes.
+  - [ ] Reconstruct packed `OFS_DELTA` and `REF_DELTA` objects on demand.
+  - [ ] Build production pack files, then add delta/thin-pack policy.
+  - [ ] Match native repository projections with the existing JGit-backed
+        file, tree, commit, and ref behavior.
+  - [ ] Define atomic publication and consistency boundaries for receive-pack
+        object, index, manifest, and ref updates.
 
 ## Next
 
