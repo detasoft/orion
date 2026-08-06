@@ -1,16 +1,21 @@
 package pro.deta.orion.transport.git.ssh;
 
+import org.apache.sshd.server.Environment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Proxy;
 import java.nio.channels.ClosedByInterruptException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -91,5 +96,43 @@ class SshCommandFactoryTest {
         factory.readKey(new ByteArrayInputStream(new byte[0]));
 
         assertFalse(Thread.currentThread().isInterrupted());
+    }
+
+    @Test
+    void nativeInitialRequestDataParsesQuotedRepositoryAndProtocol() {
+        InitialRequestData data = SshCommandFactory.initialRequestData(
+                "git-upload-pack '/team/project.git'",
+                environment(Map.of("GIT_PROTOCOL", "version=2")));
+
+        assertEquals(InitialRequestService.UPLOAD_PACK, data.getService());
+        assertEquals("team/project", data.getRepositoryPath());
+        assertNull(data.getHost());
+        assertEquals(Map.of("version", "2"), data.getParameters());
+        assertEquals(
+                InitialRequestData.ProtocolVersion.V2,
+                data.getProtocolVersion().orElseThrow());
+    }
+
+    @Test
+    void nativeInitialRequestDataRejectsPathTraversal() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SshCommandFactory.initialRequestData(
+                        "git-upload-pack '/../outside.git'",
+                        environment(Map.of())));
+    }
+
+    private static Environment environment(Map<String, String> values) {
+        return (Environment) Proxy.newProxyInstance(
+                Environment.class.getClassLoader(),
+                new Class<?>[]{Environment.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getEnv" -> values;
+                    case "toString" -> "Environment" + values;
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(
+                            method.toString());
+                });
     }
 }

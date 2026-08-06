@@ -26,6 +26,16 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
                 "advertisement");
     }
 
+    public static Continuation<ByteBuf> afterAdvertisement(
+            GitMinimalWireMachine.Context context,
+            InitialRequestData data,
+            GitV1Advertisement advertisement) {
+        return new UploadRequestContinuation(
+                context,
+                data,
+                advertisement);
+    }
+
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
         try {

@@ -1,6 +1,6 @@
 # Move SSH And HTTP Git Server Paths To ByteBuf Adapters
 
-Status: todo
+Status: done
 Source: converted from former root task list Next section.
 
 Move native SSH and HTTP Git server paths onto `ByteBuf` transport adapters

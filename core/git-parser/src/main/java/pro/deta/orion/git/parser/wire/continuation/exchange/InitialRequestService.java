@@ -18,4 +18,8 @@ public enum InitialRequestService {
         }
         throw new IllegalArgumentException("Unsupported Git service: " + wireName);
     }
+
+    public String wireName() {
+        return wireName;
+    }
 }

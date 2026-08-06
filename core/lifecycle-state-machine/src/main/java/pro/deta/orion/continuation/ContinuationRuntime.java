@@ -1,6 +1,7 @@
 package pro.deta.orion.continuation;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 
@@ -232,6 +233,14 @@ public class ContinuationRuntime<I> {
 
     protected final Continuation<I> current() {
         return current.get();
+    }
+
+    public final Optional<Continuation.CompletedError<I>> terminalError() {
+        Continuation<I> snapshot = current.get();
+        if (snapshot instanceof Continuation.CompletedError<I> error) {
+            return Optional.of(error);
+        }
+        return Optional.empty();
     }
 
     public final boolean terminal() {

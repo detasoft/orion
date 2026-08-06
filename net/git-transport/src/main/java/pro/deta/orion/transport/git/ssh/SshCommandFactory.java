@@ -16,13 +16,25 @@ import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
+import pro.deta.orion.config.schema.GitPackfileUriConfig;
+import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
+import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
+import pro.deta.orion.git.parser.wire.GitByteBufTransportAdapter;
+import pro.deta.orion.git.parser.wire.GitWireConfiguration;
+import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
+import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
+import pro.deta.orion.transport.git.netty.AuthenticatedNativeRepositoryAccessHook;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.stream.*;
 
+import io.netty.buffer.UnpooledByteBufAllocator;
 import jakarta.inject.Named;
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -30,7 +42,9 @@ import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +65,8 @@ public class SshCommandFactory implements CommandFactory {
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
     private final AggregateStateMachine runtimeStateMachine;
+    private final NativeGitRepositoryProvider nativeRepositoryProvider;
+    private final GitTransportConfig gitTransportConfig;
     private final long setKeyReadTimeoutMillis;
 
     @Inject
@@ -59,9 +75,27 @@ public class SshCommandFactory implements CommandFactory {
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
-            @Named("runtime") AggregateStateMachine runtimeStateMachine) {
+            @Named("runtime") AggregateStateMachine runtimeStateMachine,
+            NativeGitRepositoryProvider nativeRepositoryProvider,
+            GitTransportConfig gitTransportConfig) {
         this(gitInternalService, orionExecutor, orionProvider, accessControlService,
-                runtimeStateMachine, 30_000);
+                runtimeStateMachine, 30_000, nativeRepositoryProvider,
+                gitTransportConfig);
+    }
+
+    public SshCommandFactory(
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor,
+            OrionProvider orionProvider,
+            OrionAccessControlService accessControlService,
+            AggregateStateMachine runtimeStateMachine) {
+        this(
+                gitInternalService,
+                orionExecutor,
+                orionProvider,
+                accessControlService,
+                runtimeStateMachine,
+                30_000);
     }
 
     SshCommandFactory(
@@ -71,11 +105,33 @@ public class SshCommandFactory implements CommandFactory {
             OrionAccessControlService accessControlService,
             AggregateStateMachine runtimeStateMachine,
             long setKeyReadTimeoutMillis) {
+        this(
+                gitInternalService,
+                orionExecutor,
+                orionProvider,
+                accessControlService,
+                runtimeStateMachine,
+                setKeyReadTimeoutMillis,
+                null,
+                null);
+    }
+
+    SshCommandFactory(
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor,
+            OrionProvider orionProvider,
+            OrionAccessControlService accessControlService,
+            AggregateStateMachine runtimeStateMachine,
+            long setKeyReadTimeoutMillis,
+            NativeGitRepositoryProvider nativeRepositoryProvider,
+            GitTransportConfig gitTransportConfig) {
         this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;
         this.orionProvider = orionProvider;
         this.accessControlService = accessControlService;
         this.runtimeStateMachine = runtimeStateMachine;
+        this.nativeRepositoryProvider = nativeRepositoryProvider;
+        this.gitTransportConfig = gitTransportConfig;
         this.setKeyReadTimeoutMillis = setKeyReadTimeoutMillis;
     }
 
@@ -210,15 +266,7 @@ public class SshCommandFactory implements CommandFactory {
                     SecurityContext securityContext = securityContextFor(channelSession);
                     try {
                         accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
-                        List<String> envs = gitEnvironmentValues(environment);
-                        try (StandardStreams streams = StreamUtils.newInstance(inputStream, outputStream, errorStream)) {
-                            gitInternalService.service(
-                                    securityContext,
-                                    channelSession.toString(),
-                                    streams,
-                                    securityContext.getRequestId(),
-                                    inputStream -> GitInternalService.parseGitCommand(commandLine, envs));
-                        }
+                        serveGitCommand(channelSession, environment, securityContext);
                     } catch (OrionSecurityException e) {
                         GitUtils.writeProtocolError(outputStream, "ACCESS_DENIED");
                         returnCode = 10;
@@ -234,6 +282,41 @@ public class SshCommandFactory implements CommandFactory {
                 log.warn("Git SSH command rejected, executor saturated: {}", commandLine);
                 GitUtils.writeProtocolError(outputStream, "Service unavailable");
                 exitCallback.onExit(1);
+            }
+        }
+
+        private void serveGitCommand(
+                ChannelSession channelSession,
+                Environment environment,
+                SecurityContext securityContext) throws IOException {
+            try (StandardStreams streams = StreamUtils.newInstance(
+                    inputStream,
+                    outputStream,
+                    errorStream)) {
+                if (nativeRepositoryProvider == null) {
+                    List<String> envs = gitEnvironmentValues(environment);
+                    gitInternalService.service(
+                            securityContext,
+                            channelSession.toString(),
+                            streams,
+                            securityContext.getRequestId(),
+                            ignoredInput -> GitInternalService.parseGitCommand(
+                                    commandLine,
+                                    envs));
+                    return;
+                }
+                GitByteBufTransportAdapter adapter =
+                        new GitByteBufTransportAdapter(
+                                UnpooledByteBufAllocator.DEFAULT,
+                                nativeRepositoryProvider,
+                                new AuthenticatedNativeRepositoryAccessHook(
+                                        securityContext),
+                                GitWireConfiguration.allSupported(),
+                                packfileUriSourceFactory());
+                adapter.serveCommand(
+                        initialRequestData(commandLine, environment),
+                        streams.getInputStream(),
+                        streams.getOutputStream());
             }
         }
     }
@@ -276,5 +359,128 @@ public class SshCommandFactory implements CommandFactory {
             }
         }
         return values;
+    }
+
+    static InitialRequestData initialRequestData(
+            String commandLine,
+            Environment environment) {
+        GitSshRequest request = parseGitSshCommand(commandLine);
+        return new InitialRequestData(
+                request.service(),
+                request.repositoryPath(),
+                null,
+                gitProtocolParameters(environment));
+    }
+
+    private static GitSshRequest parseGitSshCommand(String commandLine) {
+        String value = commandLine == null ? "" : commandLine.trim();
+        int firstSeparator = firstWhitespace(value);
+        if (firstSeparator <= 0) {
+            throw new IllegalArgumentException(
+                    "Malformed Git SSH command: " + commandLine);
+        }
+        String serviceName = value.substring(0, firstSeparator);
+        String repository = parseRepositoryArgument(
+                value.substring(firstSeparator).trim());
+        return new GitSshRequest(
+                InitialRequestService.fromWireName(serviceName),
+                normalizeRepositoryPath(repository));
+    }
+
+    private static String parseRepositoryArgument(String value) {
+        if (value.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Malformed Git SSH command: missing repository");
+        }
+        if (value.charAt(0) != '\'') {
+            String[] parts = value.split("\\s+", -1);
+            if (parts.length != 1) {
+                throw new IllegalArgumentException(
+                        "Malformed Git SSH command: too many arguments");
+            }
+            return parts[0];
+        }
+        int closingQuote = value.indexOf('\'', 1);
+        if (closingQuote < 0
+                || !value.substring(closingQuote + 1).trim().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Malformed Git SSH command: invalid repository quoting");
+        }
+        return value.substring(1, closingQuote);
+    }
+
+    private static int firstWhitespace(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            if (Character.isWhitespace(value.charAt(index))) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static String normalizeRepositoryPath(String repository) {
+        String normalized = repository == null ? "" : repository.trim();
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        normalized = normalized.replaceFirst("\\.git$", "");
+        if (normalized.isBlank()
+                || normalized.contains("\0")
+                || normalized.contains("\\")
+                || normalized.contains("..")) {
+            throw new IllegalArgumentException(
+                    "Malformed Git SSH repository path");
+        }
+        return normalized;
+    }
+
+    private static Map<String, String> gitProtocolParameters(
+            Environment environment) {
+        if (environment == null) {
+            return Map.of();
+        }
+        return gitProtocolParameters(environment.getEnv().get("GIT_PROTOCOL"));
+    }
+
+    private static Map<String, String> gitProtocolParameters(String value) {
+        if (value == null || value.isBlank()) {
+            return Map.of();
+        }
+        Map<String, String> parameters = new LinkedHashMap<>();
+        for (String token : value.split(":")) {
+            int separator = token.indexOf('=');
+            if (separator <= 0) {
+                continue;
+            }
+            String name = token.substring(0, separator).trim();
+            String parameterValue = token.substring(separator + 1).trim();
+            if ("version".equals(name) && !parameterValue.isEmpty()) {
+                parameters.put(name, parameterValue);
+            }
+        }
+        return Map.copyOf(parameters);
+    }
+
+    private NativePackfileUriSourceFactory packfileUriSourceFactory() {
+        GitPackfileUriConfig packfileUri = gitTransportConfig == null
+                ? null
+                : gitTransportConfig.getPackfileUri();
+        if (packfileUri == null
+                || !packfileUri.isConfigured()
+                || packfileUri.isAuto()) {
+            return NativePackfileUriSourceFactory.NONE;
+        }
+        String baseUri = packfileUri.getBaseUri();
+        return (data, repository) -> new PublishedPackfileUriSource(
+                repository,
+                packId -> NativePackfileUriBuilder.packUri(
+                        baseUri,
+                        data.getRepositoryPath(),
+                        packId));
+    }
+
+    private record GitSshRequest(
+            InitialRequestService service,
+            String repositoryPath) {
     }
 }

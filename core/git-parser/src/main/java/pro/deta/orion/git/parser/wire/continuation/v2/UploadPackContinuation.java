@@ -20,6 +20,12 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
         this.data = Objects.requireNonNull(data, "data");
     }
 
+    public static Continuation<ByteBuf> afterAdvertisement(
+            GitMinimalWireMachine.Context context,
+            InitialRequestData data) {
+        return new UploadCommandContinuation(context, data);
+    }
+
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
         try {

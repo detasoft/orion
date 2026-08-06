@@ -10,6 +10,7 @@ import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Streaming Git wire facade backed by one flat graph of
@@ -76,6 +77,14 @@ public final class GitMinimalWireMachine {
                 new ControlHeaderContinuation(context, ProtocolStage.INITIAL_REQUEST));
     }
 
+    GitMinimalWireMachine(
+            Context context,
+            Continuation<ByteBuf> initial) {
+        this.context = Objects.requireNonNull(context, "context");
+        this.runtime = new ContinuationRuntime<>(
+                Objects.requireNonNull(initial, "initial"));
+    }
+
     public RuntimeFlow accept(ByteBuf input) {
         return runtime.accept(input);
     }
@@ -87,6 +96,14 @@ public final class GitMinimalWireMachine {
 
     public void close() {
         runtime.close("Git wire machine closed");
+    }
+
+    public boolean terminal() {
+        return runtime.terminal();
+    }
+
+    public Optional<Continuation.CompletedError<ByteBuf>> terminalError() {
+        return runtime.terminalError();
     }
 
     @TestOnly

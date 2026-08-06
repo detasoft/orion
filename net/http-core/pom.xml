@@ -30,6 +30,10 @@
             <artifactId>git-native-storage</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>git-parser</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>

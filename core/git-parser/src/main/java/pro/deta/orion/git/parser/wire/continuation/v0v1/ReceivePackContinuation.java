@@ -26,6 +26,16 @@ public final class ReceivePackContinuation implements Continuation<ByteBuf> {
                 "advertisement");
     }
 
+    public static Continuation<ByteBuf> afterAdvertisement(
+            GitMinimalWireMachine.Context context,
+            InitialRequestData data,
+            GitV1Advertisement advertisement) {
+        return new ReceiveCommandContinuation(
+                context,
+                data,
+                advertisement);
+    }
+
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
         try {
