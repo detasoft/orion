@@ -6,6 +6,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
@@ -148,12 +149,12 @@ public final class GitNativeRepositoryService {
         return findOrFail(data.getRepositoryPath()).fetch(request);
     }
 
-    public NativePackProducer protocolV2Fetch(
+    public NativeFetchResponse protocolV2Fetch(
             InitialRequestData data,
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        return findOrFail(data.getRepositoryPath()).fetch(request);
+        return findOrFail(data.getRepositoryPath()).fetchResponse(request);
     }
 
     public List<GitObjectId> protocolV2FetchAcknowledgments(

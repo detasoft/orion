@@ -89,6 +89,9 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
                         "have ",
                         FetchContinuation.ObjectArgumentKind.HAVE);
             }
+            if (value.startsWith("deepen ")) {
+                return depthArgument(value);
+            }
             return switch (value) {
                 case "done" -> FetchContinuation.SimpleArgument.DONE;
                 case "thin-pack" ->
@@ -105,6 +108,28 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             };
         }
 
+        private static FetchContinuation.FetchArgument depthArgument(
+                String value) {
+            String depth = value.substring("deepen ".length());
+            if (depth.isEmpty()) {
+                return null;
+            }
+            long parsed = 0;
+            for (int index = 0; index < depth.length(); index++) {
+                char digit = depth.charAt(index);
+                if (digit < '0' || digit > '9') {
+                    return null;
+                }
+                parsed = parsed * 10 + digit - '0';
+                if (parsed > Integer.MAX_VALUE) {
+                    return null;
+                }
+            }
+            return parsed > 0
+                    ? new FetchContinuation.DepthArgument((int) parsed)
+                    : null;
+        }
+
         private static FetchContinuation.FetchArgument objectArgument(
                 String value,
                 String prefix,
@@ -118,9 +143,9 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
                     return null;
                 }
             }
-                return new FetchContinuation.ObjectArgument(
-                        objectKind,
-                        GitObjectId.of(objectId));
+            return new FetchContinuation.ObjectArgument(
+                    objectKind,
+                    GitObjectId.of(objectId));
         }
 
         private static boolean isHexadecimal(int value) {

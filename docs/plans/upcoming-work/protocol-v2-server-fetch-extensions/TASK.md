@@ -7,7 +7,7 @@ Extend protocol v2 server fetch beyond the base request.
 
 ## Child Tasks
 
-- [ ] [Add shallow history support](shallow-history/TASK.md)
+- [x] [Add shallow history support](shallow-history/TASK.md)
 - [ ] [Add object filter support](object-filter/TASK.md)
 - [ ] [Add ref-in-want support](ref-in-want/TASK.md)
 - [ ] [Add sideband-all support](sideband-all/TASK.md)

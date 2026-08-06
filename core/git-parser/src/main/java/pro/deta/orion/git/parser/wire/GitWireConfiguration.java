@@ -20,7 +20,7 @@ public record GitWireConfiguration(
                 new LegacyReceivePack(
                         true, true, true, true, true),
                 new ProtocolV2(
-                        true, true, true, true, true));
+                        true, true, true, true, true, true));
     }
 
     public record LegacyUploadPack(
@@ -44,6 +44,7 @@ public record GitWireConfiguration(
             boolean lsRefs,
             boolean lsRefsUnborn,
             boolean fetch,
+            boolean shallow,
             boolean waitForDone,
             boolean serverOption) {
 
@@ -51,14 +52,33 @@ public record GitWireConfiguration(
                 boolean lsRefs,
                 boolean lsRefsUnborn,
                 boolean fetch,
+                boolean waitForDone,
                 boolean serverOption) {
-            this(lsRefs, lsRefsUnborn, fetch, false, serverOption);
+            this(
+                    lsRefs,
+                    lsRefsUnborn,
+                    fetch,
+                    false,
+                    waitForDone,
+                    serverOption);
+        }
+
+        public ProtocolV2(
+                boolean lsRefs,
+                boolean lsRefsUnborn,
+                boolean fetch,
+                boolean serverOption) {
+            this(lsRefs, lsRefsUnborn, fetch, false, false, serverOption);
         }
 
         public ProtocolV2 {
             if (lsRefsUnborn && !lsRefs) {
                 throw new IllegalArgumentException(
                         "lsRefsUnborn requires lsRefs");
+            }
+            if (shallow && !fetch) {
+                throw new IllegalArgumentException(
+                        "shallow requires fetch");
             }
             if (waitForDone && !fetch) {
                 throw new IllegalArgumentException(

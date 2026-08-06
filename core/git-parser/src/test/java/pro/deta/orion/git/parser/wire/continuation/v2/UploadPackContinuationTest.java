@@ -57,7 +57,7 @@ class UploadPackContinuationTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "0013ls-refs=unborn\n"
-                                    + "0018fetch=wait-for-done\n"
+                                    + "0020fetch=shallow wait-for-done\n"
                                     + "0012server-option\n"
                                     + "0000");
             assertThat(input.readerIndex()).isZero();

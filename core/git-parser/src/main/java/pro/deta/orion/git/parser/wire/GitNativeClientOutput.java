@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -93,9 +94,18 @@ public final class GitNativeClientOutput {
                         : "ls-refs\n");
             }
             if (configuration.fetch()) {
-                capabilities.add(configuration.waitForDone()
-                        ? "fetch=wait-for-done\n"
-                        : "fetch\n");
+                List<String> fetchOptions = new ArrayList<>();
+                if (configuration.shallow()) {
+                    fetchOptions.add("shallow");
+                }
+                if (configuration.waitForDone()) {
+                    fetchOptions.add("wait-for-done");
+                }
+                capabilities.add(fetchOptions.isEmpty()
+                        ? "fetch\n"
+                        : "fetch="
+                                + String.join(" ", fetchOptions)
+                                + "\n");
             }
             if (configuration.serverOption()) {
                 capabilities.add("server-option\n");
@@ -291,6 +301,13 @@ public final class GitNativeClientOutput {
 
     public ProtocolV2PackfileResponse beginProtocolV2Packfile(
             NativePackProducer producer) {
+        return beginProtocolV2Packfile(producer, Set.of());
+    }
+
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries) {
+        Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
         Result<NativePackProducer> availableProducer =
                 availableProducer(producer);
         if (availableProducer instanceof
@@ -299,7 +316,9 @@ public final class GitNativeClientOutput {
                     sendFailure(failure));
         }
         ProtocolV2PackfileResponse response =
-                new ProtocolV2PackfileResponse(producer);
+                new ProtocolV2PackfileResponse(
+                        producer,
+                        shallowBoundaries);
         protocolV2PackfileResponse = response;
         return response;
     }
@@ -578,6 +597,21 @@ public final class GitNativeClientOutput {
         }
         packets.add(new byte[] {'0', '0', '0', '0'});
         return List.copyOf(packets);
+    }
+
+    private static byte[] encodeAsciiPacket(String payload) {
+        validateAsciiPacket(payload);
+        int packetLength = payload.length() + PKT_LINE_HEADER_SIZE;
+        byte[] packet = new byte[packetLength];
+        writeHeader(packet, packetLength);
+        byte[] payloadBytes = payload.getBytes(StandardCharsets.US_ASCII);
+        System.arraycopy(
+                payloadBytes,
+                0,
+                packet,
+                PKT_LINE_HEADER_SIZE,
+                payloadBytes.length);
+        return packet;
     }
 
     private static List<byte[]> encodeLines(
@@ -1273,6 +1307,8 @@ public final class GitNativeClientOutput {
         private static final byte[] PACKFILE_HEADER =
                 {'0', '0', '0', 'd',
                         'p', 'a', 'c', 'k', 'f', 'i', 'l', 'e', '\n'};
+        private static final byte[] DELIMITER =
+                {'0', '0', '0', '1'};
         private static final byte[] FLUSH =
                 {'0', '0', '0', '0'};
         private static final int MAXIMUM_PAYLOAD =
@@ -1281,26 +1317,36 @@ public final class GitNativeClientOutput {
                         - 1;
 
         private final NativePackProducer producer;
+        private final List<byte[]> shallowInfoPackets;
         private final SendResult.Failed beginFailure;
-        private Phase phase = Phase.HEADER;
+        private Phase phase;
         private int outputStartIndex;
         private int controlOffset;
+        private int shallowInfoPacketIndex;
         private Throwable deliveryFailure;
         private boolean closed;
 
         private ProtocolV2PackfileResponse(
-                NativePackProducer producer) {
+                NativePackProducer producer,
+                Set<GitObjectId> shallowBoundaries) {
             this.producer = producer;
+            this.shallowInfoPackets = shallowInfoPackets(
+                    shallowBoundaries);
             this.beginFailure = null;
+            this.phase = shallowInfoPackets.isEmpty()
+                    ? Phase.HEADER
+                    : Phase.SHALLOW_INFO;
             outputStartIndex = output.writerIndex();
         }
 
         private ProtocolV2PackfileResponse(
                 SendResult.Failed beginFailure) {
             this.producer = null;
+            this.shallowInfoPackets = List.of();
             this.beginFailure = Objects.requireNonNull(
                     beginFailure,
                     "beginFailure");
+            this.phase = Phase.HEADER;
             outputStartIndex = output.writerIndex();
         }
 
@@ -1324,6 +1370,11 @@ public final class GitNativeClientOutput {
                 while (output.isWritable()
                         && phase != Phase.COMPLETED) {
                     switch (phase) {
+                        case SHALLOW_INFO -> {
+                            if (!writeShallowInfo()) {
+                                break writing;
+                            }
+                        }
                         case HEADER -> writeControl(
                                 PACKFILE_HEADER,
                                 Phase.PACK);
@@ -1378,6 +1429,25 @@ public final class GitNativeClientOutput {
                 controlOffset = 0;
                 phase = next;
             }
+        }
+
+        private boolean writeShallowInfo() {
+            while (shallowInfoPacketIndex < shallowInfoPackets.size()) {
+                byte[] packet =
+                        shallowInfoPackets.get(shallowInfoPacketIndex);
+                int length = Math.min(
+                        output.writableBytes(),
+                        packet.length - controlOffset);
+                output.writeBytes(packet, controlOffset, length);
+                controlOffset += length;
+                if (controlOffset < packet.length) {
+                    return false;
+                }
+                shallowInfoPacketIndex++;
+                controlOffset = 0;
+            }
+            phase = Phase.HEADER;
+            return true;
         }
 
         private boolean writePackPacket() {
@@ -1451,10 +1521,35 @@ public final class GitNativeClientOutput {
         }
 
         private enum Phase {
+            SHALLOW_INFO,
             HEADER,
             PACK,
             FLUSH,
             COMPLETED
+        }
+
+        private static List<byte[]> shallowInfoPackets(
+                Set<GitObjectId> shallowBoundaries) {
+            Objects.requireNonNull(
+                    shallowBoundaries,
+                    "shallowBoundaries");
+            if (shallowBoundaries.isEmpty()) {
+                return List.of();
+            }
+            List<byte[]> packets = new ArrayList<>();
+            packets.add(encodeAsciiPacket("shallow-info\n"));
+            for (GitObjectId shallowBoundary : shallowBoundaries) {
+                Objects.requireNonNull(
+                        shallowBoundary,
+                        "shallowBoundary");
+                validateObjectId(shallowBoundary.value());
+                packets.add(encodeAsciiPacket(
+                        "shallow "
+                                + shallowBoundary.value()
+                                + "\n"));
+            }
+            packets.add(DELIMITER);
+            return List.copyOf(packets);
         }
     }
 

@@ -8,6 +8,7 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -98,9 +99,88 @@ class NativeObjectClosureTest {
         assertThat(result).containsExactly(wanted);
     }
 
+    @Test
+    void selectsDepthOneTipClosureAndReportsTipAsShallowBoundary() {
+        GitObjectId baseBlob = objects.write(
+                ObjectType.BLOB,
+                "base\n".getBytes(StandardCharsets.UTF_8));
+        GitObjectId baseTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "file.txt", baseBlob));
+        GitObjectId baseCommit = writeCommit(baseTree, null, "base");
+        GitObjectId tipBlob = objects.write(
+                ObjectType.BLOB,
+                "tip\n".getBytes(StandardCharsets.UTF_8));
+        GitObjectId tipTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "file.txt", tipBlob));
+        GitObjectId tipCommit = writeCommit(tipTree, baseCommit, "tip");
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(Set.of(tipCommit), Set.of(), 1);
+
+        assertThat(result.objectIds())
+                .containsExactlyInAnyOrder(tipCommit, tipTree, tipBlob);
+        assertThat(result.shallowBoundaries()).containsExactly(tipCommit);
+    }
+
+    @Test
+    void selectsMergeParentsAtDepthTwoAndReportsOnlyTruncatedParents() {
+        GitObjectId rootBlob = objects.write(
+                ObjectType.BLOB,
+                "root\n".getBytes(StandardCharsets.UTF_8));
+        GitObjectId rootTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "root.txt", rootBlob));
+        GitObjectId rootCommit = writeCommit(rootTree, null, "root");
+        GitObjectId leftTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "left.txt", rootBlob));
+        GitObjectId leftCommit = writeCommit(leftTree, rootCommit, "left");
+        GitObjectId rightTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "right.txt", rootBlob));
+        GitObjectId rightCommit = writeCommit(rightTree, null, "right");
+        GitObjectId mergeTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "merge.txt", rootBlob));
+        GitObjectId mergeCommit = writeCommitWithParents(
+                mergeTree,
+                List.of(leftCommit, rightCommit),
+                "merge");
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(Set.of(mergeCommit), Set.of(), 2);
+
+        assertThat(result.objectIds())
+                .contains(mergeCommit, leftCommit, rightCommit);
+        assertThat(result.objectIds()).doesNotContain(rootCommit);
+        assertThat(result.shallowBoundaries()).containsExactly(leftCommit);
+    }
+
     private GitObjectId writeCommit(GitObjectId tree, GitObjectId parent, String message) {
+        return writeCommitInternal(
+                tree,
+                parent == null ? List.of() : List.of(parent),
+                message);
+    }
+
+    private GitObjectId writeCommitWithParents(
+            GitObjectId tree,
+            List<GitObjectId> parents,
+            String message) {
+        return writeCommitInternal(
+                tree,
+                parents,
+                message);
+    }
+
+    private GitObjectId writeCommitInternal(
+            GitObjectId tree,
+            List<GitObjectId> parents,
+            String message) {
         StringBuilder data = new StringBuilder("tree ").append(tree).append('\n');
-        if (parent != null) {
+        for (GitObjectId parent : parents) {
             data.append("parent ").append(parent).append('\n');
         }
         data.append("author Test <test@example.com> 0 +0000\n")

@@ -11,8 +11,11 @@ import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 
@@ -151,6 +154,50 @@ class NativeGitRepositoryTest {
         }
     }
 
+    @Test
+    void fetchResponseCarriesShallowBoundaryMetadata() {
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId baseBlob = objects.write(
+                ObjectType.BLOB,
+                "base".getBytes(StandardCharsets.UTF_8));
+        GitObjectId baseTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "file.txt", baseBlob));
+        GitObjectId baseCommit = writeCommit(objects, baseTree, null, "base");
+        GitObjectId tipBlob = objects.write(
+                ObjectType.BLOB,
+                "tip".getBytes(StandardCharsets.UTF_8));
+        GitObjectId tipTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "file.txt", tipBlob));
+        GitObjectId tipCommit = writeCommit(objects, tipTree, baseCommit, "tip");
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(tipCommit),
+                        Set.of(),
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        1));
+        CompositeByteBuf pack = produce(response.packProducer());
+
+        try {
+            assertThat(response.shallowBoundaries())
+                    .containsExactly(tipCommit);
+            assertThat(pack.getInt(8)).isEqualTo(3);
+        } finally {
+            pack.release();
+        }
+    }
+
     private static CompositeByteBuf produce(
             NativePackProducer producer) {
         CompositeByteBuf complete = Unpooled.compositeBuffer();
@@ -174,5 +221,38 @@ class NativeGitRepositoryTest {
             complete.release();
             throw error;
         }
+    }
+
+    private static GitObjectId writeCommit(
+            LooseObjectStore objects,
+            GitObjectId tree,
+            GitObjectId parent,
+            String message) {
+        StringBuilder data = new StringBuilder()
+                .append("tree ")
+                .append(tree)
+                .append('\n');
+        if (parent != null) {
+            data.append("parent ").append(parent).append('\n');
+        }
+        data.append("author Test <test@example.com> 0 +0000\n")
+                .append("committer Test <test@example.com> 0 +0000\n")
+                .append('\n')
+                .append(message)
+                .append('\n');
+        return objects.write(
+                ObjectType.COMMIT,
+                data.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static byte[] treeEntry(
+            String mode,
+            String name,
+            GitObjectId objectId) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.writeBytes((mode + " " + name + "\0")
+                .getBytes(StandardCharsets.UTF_8));
+        output.writeBytes(HexFormat.of().parseHex(objectId.value()));
+        return output.toByteArray();
     }
 }

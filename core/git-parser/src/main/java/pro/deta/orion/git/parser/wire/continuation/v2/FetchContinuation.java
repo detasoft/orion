@@ -27,6 +27,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     private boolean ofsDelta;
     private boolean includeTag;
     private boolean waitForDone;
+    private int depth;
+    private boolean invalid;
 
     FetchContinuation(
             GitMinimalWireMachine.Context context,
@@ -62,6 +64,16 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                                 : haves;
                 destination.add(object.objectId());
             }
+            case DepthArgument shallow -> {
+                if (depth > 0
+                        || !context.configuration
+                                .protocolV2()
+                                .shallow()) {
+                    invalid = true;
+                } else {
+                    depth = shallow.depth();
+                }
+            }
             case SimpleArgument simple -> {
                 switch (simple) {
                     case DONE -> done = true;
@@ -77,7 +89,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     }
 
     private Continuation<ByteBuf> completeRequest() {
-        if (wants.isEmpty()) {
+        if (invalid || wants.isEmpty()) {
             return failed();
         }
         NativeFetchRequest request = new NativeFetchRequest(
@@ -87,7 +99,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                 thinPack,
                 ofsDelta,
                 includeTag,
-                waitForDone);
+                waitForDone,
+                depth);
         if (!done) {
             return new FetchNegotiationResponseContinuation(
                     context,
@@ -101,13 +114,23 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     }
 
     sealed interface FetchArgument
-            permits ObjectArgument, SimpleArgument {
+            permits ObjectArgument, DepthArgument, SimpleArgument {
     }
 
     record ObjectArgument(
             ObjectArgumentKind kind,
             GitObjectId objectId)
             implements FetchArgument {
+    }
+
+    record DepthArgument(int depth) implements FetchArgument {
+
+        DepthArgument {
+            if (depth <= 0) {
+                throw new IllegalArgumentException(
+                        "Depth must be positive");
+            }
+        }
     }
 
     enum ObjectArgumentKind {

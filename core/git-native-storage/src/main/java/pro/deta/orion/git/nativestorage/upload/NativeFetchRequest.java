@@ -14,7 +14,8 @@ public record NativeFetchRequest(
         boolean thinPack,
         boolean ofsDelta,
         boolean includeTag,
-        boolean waitForDone) {
+        boolean waitForDone,
+        int depth) {
 
     public NativeFetchRequest(
             Set<GitObjectId> wants,
@@ -29,7 +30,8 @@ public record NativeFetchRequest(
                 thinPack,
                 ofsDelta,
                 false,
-                false);
+                false,
+                0);
     }
 
     public NativeFetchRequest(
@@ -46,13 +48,41 @@ public record NativeFetchRequest(
                 thinPack,
                 ofsDelta,
                 includeTag,
-                false);
+                false,
+                0);
+    }
+
+    public NativeFetchRequest(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves,
+            boolean done,
+            boolean thinPack,
+            boolean ofsDelta,
+            boolean includeTag,
+            boolean waitForDone) {
+        this(
+                wants,
+                haves,
+                done,
+                thinPack,
+                ofsDelta,
+                includeTag,
+                waitForDone,
+                0);
     }
 
     public NativeFetchRequest {
         Objects.requireNonNull(wants, "wants");
         Objects.requireNonNull(haves, "haves");
+        if (depth < 0) {
+            throw new IllegalArgumentException(
+                    "Fetch depth must not be negative");
+        }
         wants = Collections.unmodifiableSet(new LinkedHashSet<>(wants));
         haves = Collections.unmodifiableSet(new LinkedHashSet<>(haves));
+    }
+
+    public boolean shallow() {
+        return depth > 0;
     }
 }

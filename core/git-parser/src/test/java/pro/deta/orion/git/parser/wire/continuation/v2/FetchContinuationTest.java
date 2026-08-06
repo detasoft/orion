@@ -14,6 +14,7 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -37,6 +38,7 @@ class FetchContinuationTest {
         writeData(input, "ofs-delta\n");
         writeData(input, "no-progress\n");
         writeData(input, "include-tag\n");
+        writeData(input, "deepen 1\n");
         writeData(input, "want " + WANT + "\n");
         writeData(input, "have " + HAVE + "\n");
         writeData(input, "done\n");
@@ -57,6 +59,7 @@ class FetchContinuationTest {
                             assertThat(request.thinPack()).isTrue();
                             assertThat(request.ofsDelta()).isTrue();
                             assertThat(request.includeTag()).isTrue();
+                            assertThat(request.depth()).isEqualTo(1);
                         });
     }
 
@@ -149,11 +152,38 @@ class FetchContinuationTest {
         assertInvalid(request("want invalid\n", "done\n"));
         assertInvalid(request("want " + WANT + " trailing\n", "done\n"));
         assertInvalid(request("want " + WANT.substring(1) + "\n", "done\n"));
+        assertInvalid(request("want " + WANT + "\n", "deepen 0\n", "done\n"));
+        assertInvalid(request("want " + WANT + "\n", "deepen -1\n", "done\n"));
+        assertInvalid(request(
+                "want " + WANT + "\n",
+                "deepen 1\n",
+                "deepen 2\n",
+                "done\n"));
         assertInvalid(request("have " + HAVE + "\n", "done\n"));
         assertInvalid(request(
                 "want " + WANT + "\n",
                 "done\n",
                 "have " + HAVE + "\n"));
+    }
+
+    @Test
+    void rejectsDeepenWhenShallowIsDisabled() {
+        ByteBuf input = request(
+                "want " + WANT + "\n",
+                "deepen 1\n",
+                "done\n");
+        Continuation<ByteBuf> completed = drive(
+                input,
+                context(
+                        new GitWireConfiguration.ProtocolV2(
+                                false,
+                                false,
+                                true,
+                                false,
+                                false,
+                                false)));
+
+        assertInvalid(completed);
     }
 
     @Test
@@ -165,6 +195,10 @@ class FetchContinuationTest {
 
     private static void assertInvalid(ByteBuf input) {
         Continuation<ByteBuf> completed = drive(input);
+        assertInvalid(completed);
+    }
+
+    private static void assertInvalid(Continuation<ByteBuf> completed) {
         assertThat(completed)
                 .isInstanceOfSatisfying(
                         Continuation.CompletedError.class,
@@ -200,8 +234,14 @@ class FetchContinuationTest {
     }
 
     private static Continuation<ByteBuf> drive(ByteBuf input) {
+        return drive(input, defaultContext());
+    }
+
+    private static Continuation<ByteBuf> drive(
+            ByteBuf input,
+            GitMinimalWireMachine.Context context) {
         try {
-            Driver driver = new Driver();
+            Driver driver = new Driver(context);
             driver.drive(input);
             return driver.current;
         } finally {
@@ -296,5 +336,20 @@ class FetchContinuationTest {
                 new GitNativeClientOutput(outbound),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
+    }
+
+    private static GitMinimalWireMachine.Context context(
+            GitWireConfiguration.ProtocolV2 protocolV2) {
+        ByteBuf outbound = outputBuffer();
+        GitWireConfiguration supported = GitWireConfiguration.allSupported();
+        return GitMinimalWireMachine.testContext(
+                UnpooledByteBufAllocator.DEFAULT,
+                new GitNativeClientOutput(outbound),
+                new InMemoryNativeGitRepositoryProvider(),
+                GitNativeRepositoryAccessHook.ALLOW_ALL,
+                new GitWireConfiguration(
+                        supported.uploadPack(),
+                        supported.receivePack(),
+                        protocolV2));
     }
 }

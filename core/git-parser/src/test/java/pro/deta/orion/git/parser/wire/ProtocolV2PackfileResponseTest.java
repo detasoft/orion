@@ -3,6 +3,7 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 
 import java.io.ByteArrayOutputStream;
@@ -10,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,6 +51,41 @@ class ProtocolV2PackfileResponseTest {
                     .containsExactly(pack);
             assertThat(bytes)
                     .endsWith((byte) '0', (byte) '0', (byte) '0', (byte) '0');
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void writesShallowInfoBeforePackfileSection() {
+        ByteBuf outbound = outputBuffer();
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitObjectId boundary = GitObjectId.of("1".repeat(40));
+        byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
+        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+                output.beginProtocolV2Packfile(
+                        producer(pack),
+                        Set.of(boundary));
+
+        try {
+            complete(response);
+
+            byte[] bytes = join(sent);
+            String prefix = new String(
+                    bytes,
+                    0,
+                    17 + 53 + 4 + 13,
+                    StandardCharsets.US_ASCII);
+            assertThat(prefix)
+                    .isEqualTo(
+                            "0011shallow-info\n"
+                                    + "0035shallow "
+                                    + boundary.value()
+                                    + "\n"
+                                    + "0001"
+                                    + "000dpackfile\n");
         } finally {
             response.close();
             outbound.release();

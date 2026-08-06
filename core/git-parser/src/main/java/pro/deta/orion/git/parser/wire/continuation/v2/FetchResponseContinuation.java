@@ -3,8 +3,8 @@ package pro.deta.orion.git.parser.wire.continuation.v2;
 import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
-import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -31,12 +31,13 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
         try {
             if (response == null) {
-                NativePackProducer producer =
+                NativeFetchResponse fetch =
                         context.repositoryService.protocolV2Fetch(
                                 data,
                                 request);
                 response = context.clientOutput.beginProtocolV2Packfile(
-                        producer);
+                        fetch.packProducer(),
+                        fetch.shallowBoundaries());
             }
             return switch (response.advance()) {
                 case GitNativeClientOutput.SendResult.Completed ignored -> {

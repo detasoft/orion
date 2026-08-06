@@ -89,7 +89,7 @@ class GitNativeClientOutputTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "0013ls-refs=unborn\n"
-                                    + "0018fetch=wait-for-done\n"
+                                    + "0020fetch=shallow wait-for-done\n"
                                     + "0012server-option\n"
                                     + "0000");
         } finally {
@@ -121,6 +121,18 @@ class GitNativeClientOutputTest {
                         false, false, true, true, false),
                 "000eversion 2\n"
                         + "0018fetch=wait-for-done\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        false, false, true, true, false, false),
+                "000eversion 2\n"
+                        + "0012fetch=shallow\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
+                        false, false, true, true, true, false),
+                "000eversion 2\n"
+                        + "0020fetch=shallow wait-for-done\n"
                         + "0000");
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(

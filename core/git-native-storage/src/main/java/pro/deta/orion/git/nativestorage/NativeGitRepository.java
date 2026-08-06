@@ -13,6 +13,7 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestor;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 
 import java.util.LinkedHashSet;
@@ -97,17 +98,26 @@ public class NativeGitRepository {
     }
 
     public NativePackProducer fetch(NativeFetchRequest request) {
+        return fetchResponse(request).packProducer();
+    }
+
+    public NativeFetchResponse fetchResponse(NativeFetchRequest request) {
         Objects.requireNonNull(request, "request");
-        Set<GitObjectId> objectIds = new LinkedHashSet<>(
-                new NativeObjectClosure(looseObjectStore).objectIdsFor(
+        NativeObjectClosure.FetchSelection selection =
+                new NativeObjectClosure(looseObjectStore).selectionFor(
                         request.wants(),
-                        request.haves()));
+                        request.haves(),
+                        request.depth());
+        Set<GitObjectId> objectIds = new LinkedHashSet<>(
+                selection.objectIds());
         if (request.includeTag()) {
             includeReachableAnnotatedTags(objectIds);
         }
-        return new NoDeltaPackBuilder().producer(
-                looseObjectStore,
-                objectIds);
+        return new NativeFetchResponse(
+                new NoDeltaPackBuilder().producer(
+                        looseObjectStore,
+                        objectIds),
+                selection.shallowBoundaries());
     }
 
     private void includeReachableAnnotatedTags(
