@@ -109,6 +109,9 @@ public final class GitNativeClientOutput {
                 if (configuration.refInWant()) {
                     fetchOptions.add("ref-in-want");
                 }
+                if (configuration.sidebandAll()) {
+                    fetchOptions.add("sideband-all");
+                }
                 capabilities.add(fetchOptions.isEmpty()
                         ? "fetch\n"
                         : "fetch="
@@ -192,6 +195,14 @@ public final class GitNativeClientOutput {
 
     public SendResult sendProtocolV2FetchAcknowledgments(
             List<GitObjectId> acknowledgments) {
+        return sendProtocolV2FetchAcknowledgments(
+                acknowledgments,
+                false);
+    }
+
+    public SendResult sendProtocolV2FetchAcknowledgments(
+            List<GitObjectId> acknowledgments,
+            boolean sidebandAll) {
         try {
             Objects.requireNonNull(acknowledgments, "acknowledgments");
             List<String> payloads = new ArrayList<>();
@@ -206,6 +217,11 @@ public final class GitNativeClientOutput {
                     validateObjectId(acknowledgment.value());
                     payloads.add("ACK " + acknowledgment.value() + "\n");
                 }
+            }
+            if (sidebandAll) {
+                return sendSerialization(
+                        new PacketListSerialization(
+                                encodeAsciiPackets(payloads, true)));
             }
             return sendSerialization(
                     new AsciiPacketSequenceSerialization(payloads));
@@ -322,6 +338,18 @@ public final class GitNativeClientOutput {
             NativePackProducer producer,
             Set<GitObjectId> shallowBoundaries,
             Map<String, GitObjectId> wantedRefs) {
+        return beginProtocolV2Packfile(
+                producer,
+                shallowBoundaries,
+                wantedRefs,
+                false);
+    }
+
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Map<String, GitObjectId> wantedRefs,
+            boolean sidebandAll) {
         Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
         Objects.requireNonNull(wantedRefs, "wantedRefs");
         Result<NativePackProducer> availableProducer =
@@ -335,7 +363,8 @@ public final class GitNativeClientOutput {
                 new ProtocolV2PackfileResponse(
                         producer,
                         shallowBoundaries,
-                        wantedRefs);
+                        wantedRefs,
+                        sidebandAll);
         protocolV2PackfileResponse = response;
         return response;
     }
@@ -424,13 +453,21 @@ public final class GitNativeClientOutput {
     }
 
     private static void validateAsciiPacket(String payload) {
+        validateAsciiPacket(payload, 0);
+    }
+
+    private static void validateAsciiPacket(
+            String payload,
+            int extraPayloadBytes) {
         for (int index = 0; index < payload.length(); index++) {
             if (payload.charAt(index) > 0x7f) {
                 throw new IllegalArgumentException(
                         "Git pkt-line response must be ASCII");
             }
         }
-        if (payload.length() + PKT_LINE_HEADER_SIZE
+        if (payload.length()
+                + extraPayloadBytes
+                + PKT_LINE_HEADER_SIZE
                 > MAX_PKT_LINE_LENGTH) {
             throw new IllegalArgumentException(
                     "Git pkt-line exceeds maximum length");
@@ -616,17 +653,42 @@ public final class GitNativeClientOutput {
         return List.copyOf(packets);
     }
 
+    private static List<byte[]> encodeAsciiPackets(
+            List<String> payloads,
+            boolean sidebandAll) {
+        List<byte[]> packets = new ArrayList<>();
+        for (String payload : payloads) {
+            packets.add(encodeAsciiPacket(payload, sidebandAll));
+        }
+        packets.add(new byte[] {'0', '0', '0', '0'});
+        return List.copyOf(packets);
+    }
+
     private static byte[] encodeAsciiPacket(String payload) {
-        validateAsciiPacket(payload);
-        int packetLength = payload.length() + PKT_LINE_HEADER_SIZE;
+        return encodeAsciiPacket(payload, false);
+    }
+
+    private static byte[] encodeAsciiPacket(
+            String payload,
+            boolean sidebandAll) {
+        int sidebandLength = sidebandAll ? 1 : 0;
+        validateAsciiPacket(payload, sidebandLength);
+        int packetLength = payload.length()
+                + PKT_LINE_HEADER_SIZE
+                + sidebandLength;
         byte[] packet = new byte[packetLength];
         writeHeader(packet, packetLength);
         byte[] payloadBytes = payload.getBytes(StandardCharsets.US_ASCII);
+        int payloadOffset = PKT_LINE_HEADER_SIZE;
+        if (sidebandAll) {
+            packet[payloadOffset] = SideBandChannel.DATA.wireValue;
+            payloadOffset++;
+        }
         System.arraycopy(
                 payloadBytes,
                 0,
                 packet,
-                PKT_LINE_HEADER_SIZE,
+                payloadOffset,
                 payloadBytes.length);
         return packet;
     }
@@ -1336,6 +1398,7 @@ public final class GitNativeClientOutput {
         private final NativePackProducer producer;
         private final List<byte[]> prePackSectionPackets;
         private final SendResult.Failed beginFailure;
+        private final byte[] packfileHeader;
         private Phase phase;
         private int outputStartIndex;
         private int controlOffset;
@@ -1346,12 +1409,17 @@ public final class GitNativeClientOutput {
         private ProtocolV2PackfileResponse(
                 NativePackProducer producer,
                 Set<GitObjectId> shallowBoundaries,
-                Map<String, GitObjectId> wantedRefs) {
+                Map<String, GitObjectId> wantedRefs,
+                boolean sidebandAll) {
             this.producer = producer;
             this.prePackSectionPackets = prePackSectionPackets(
                     shallowBoundaries,
-                    wantedRefs);
+                    wantedRefs,
+                    sidebandAll);
             this.beginFailure = null;
+            this.packfileHeader = sidebandAll
+                    ? encodeAsciiPacket("packfile\n", true)
+                    : PACKFILE_HEADER;
             this.phase = prePackSectionPackets.isEmpty()
                     ? Phase.HEADER
                     : Phase.PRE_PACK_SECTIONS;
@@ -1365,6 +1433,7 @@ public final class GitNativeClientOutput {
             this.beginFailure = Objects.requireNonNull(
                     beginFailure,
                     "beginFailure");
+            this.packfileHeader = PACKFILE_HEADER;
             this.phase = Phase.HEADER;
             outputStartIndex = output.writerIndex();
         }
@@ -1395,7 +1464,7 @@ public final class GitNativeClientOutput {
                             }
                         }
                         case HEADER -> writeControl(
-                                PACKFILE_HEADER,
+                                packfileHeader,
                                 Phase.PACK);
                         case PACK -> {
                             if (!writePackPacket()) {
@@ -1550,7 +1619,8 @@ public final class GitNativeClientOutput {
 
         private static List<byte[]> prePackSectionPackets(
                 Set<GitObjectId> shallowBoundaries,
-                Map<String, GitObjectId> wantedRefs) {
+                Map<String, GitObjectId> wantedRefs,
+                boolean sidebandAll) {
             Objects.requireNonNull(
                     shallowBoundaries,
                     "shallowBoundaries");
@@ -1560,7 +1630,9 @@ public final class GitNativeClientOutput {
             }
             List<byte[]> packets = new ArrayList<>();
             if (!shallowBoundaries.isEmpty()) {
-                packets.add(encodeAsciiPacket("shallow-info\n"));
+                packets.add(encodeAsciiPacket(
+                        "shallow-info\n",
+                        sidebandAll));
                 for (GitObjectId shallowBoundary : shallowBoundaries) {
                     Objects.requireNonNull(
                             shallowBoundary,
@@ -1569,12 +1641,15 @@ public final class GitNativeClientOutput {
                     packets.add(encodeAsciiPacket(
                             "shallow "
                                     + shallowBoundary.value()
-                                    + "\n"));
+                                    + "\n",
+                            sidebandAll));
                 }
                 packets.add(DELIMITER);
             }
             if (!wantedRefs.isEmpty()) {
-                packets.add(encodeAsciiPacket("wanted-refs\n"));
+                packets.add(encodeAsciiPacket(
+                        "wanted-refs\n",
+                        sidebandAll));
                 for (Map.Entry<String, GitObjectId> wantedRef
                         : new LinkedHashMap<>(wantedRefs).entrySet()) {
                     String refName = validateRefName(
@@ -1588,7 +1663,8 @@ public final class GitNativeClientOutput {
                             objectId.value()
                                     + " "
                                     + refName
-                                    + "\n"));
+                                    + "\n",
+                            sidebandAll));
                 }
                 packets.add(DELIMITER);
             }

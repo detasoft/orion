@@ -130,6 +130,45 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
+    void writesWholeResponseInsideSidebandAll() {
+        ByteBuf outbound = outputBuffer();
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitObjectId boundary = GitObjectId.of("1".repeat(40));
+        GitObjectId refId = GitObjectId.of("2".repeat(40));
+        byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
+        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+                output.beginProtocolV2Packfile(
+                        producer(pack),
+                        Set.of(boundary),
+                        Map.of("refs/heads/main", refId),
+                        true);
+
+        try {
+            complete(response);
+
+            assertThat(new String(join(sent), StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "0012\001shallow-info\n"
+                                    + "0036\001shallow "
+                                    + boundary.value()
+                                    + "\n"
+                                    + "0001"
+                                    + "0011\001wanted-refs\n"
+                                    + "003e\001"
+                                    + refId.value()
+                                    + " refs/heads/main\n"
+                                    + "0001"
+                                    + "000e\001packfile\n"
+                                    + "000e\001PACK-data"
+                                    + "0000");
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
     void streamsLargePackAndClosesProducer() {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();

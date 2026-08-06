@@ -89,7 +89,7 @@ class GitNativeClientOutputTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "0013ls-refs=unborn\n"
-                                    + "0033fetch=shallow wait-for-done filter ref-in-want\n"
+                                    + "0040fetch=shallow wait-for-done filter ref-in-want sideband-all\n"
                                     + "0012server-option\n"
                                     + "0000");
         } finally {
@@ -155,6 +155,20 @@ class GitNativeClientOutputTest {
                         + "0000");
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
+                        false,
+                        false,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        true),
+                "000eversion 2\n"
+                        + "0017fetch=sideband-all\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
                         true, true, false, true),
                 "000eversion 2\n"
                         + "0013ls-refs=unborn\n"
@@ -173,10 +187,10 @@ class GitNativeClientOutputTest {
     void keepsProtocolV2CapabilitiesInStableOrder() {
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
-                        true, false, true, true, true, true, true, true),
+                        true, false, true, true, true, true, true, true, true),
                 "000eversion 2\n"
                         + "000cls-refs\n"
-                        + "0033fetch=shallow wait-for-done filter ref-in-want\n"
+                        + "0040fetch=shallow wait-for-done filter ref-in-want sideband-all\n"
                         + "0012server-option\n"
                         + "0000");
     }
@@ -423,6 +437,27 @@ class GitNativeClientOutputTest {
                             "0014acknowledgments\n"
                                     + "0031ACK " + MAIN_ID + "\n"
                                     + "0031ACK " + TAG_ID + "\n"
+                                    + "0000");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sendsProtocolV2FetchAcknowledgmentsInsideSidebandAll() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendProtocolV2FetchAcknowledgments(
+                    List.of(GitObjectId.of(MAIN_ID)),
+                    true))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "0015\001acknowledgments\n"
+                                    + "0032\001ACK " + MAIN_ID + "\n"
                                     + "0000");
         } finally {
             outbound.release();

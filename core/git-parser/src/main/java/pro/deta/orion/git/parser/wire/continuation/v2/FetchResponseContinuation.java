@@ -16,15 +16,18 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
     private final NativeFetchRequest request;
+    private final boolean sidebandAll;
     private GitNativeClientOutput.ProtocolV2PackfileResponse response;
 
     FetchResponseContinuation(
             GitMinimalWireMachine.Context context,
             InitialRequestData data,
-            NativeFetchRequest request) {
+            NativeFetchRequest request,
+            boolean sidebandAll) {
         this.context = Objects.requireNonNull(context, "context");
         this.data = Objects.requireNonNull(data, "data");
         this.request = Objects.requireNonNull(request, "request");
+        this.sidebandAll = sidebandAll;
     }
 
     @Override
@@ -38,7 +41,8 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
                 response = context.clientOutput.beginProtocolV2Packfile(
                         fetch.packProducer(),
                         fetch.shallowBoundaries(),
-                        fetch.wantedRefs());
+                        fetch.wantedRefs(),
+                        sidebandAll);
             }
             return switch (response.advance()) {
                 case GitNativeClientOutput.SendResult.Completed ignored -> {
@@ -74,5 +78,10 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
     @TestOnly
     NativeFetchRequest request() {
         return request;
+    }
+
+    @TestOnly
+    boolean sidebandAll() {
+        return sidebandAll;
     }
 }

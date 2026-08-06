@@ -16,14 +16,17 @@ final class FetchNegotiationResponseContinuation
     private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
     private final NativeFetchRequest request;
+    private final boolean sidebandAll;
 
     FetchNegotiationResponseContinuation(
             GitMinimalWireMachine.Context context,
             InitialRequestData data,
-            NativeFetchRequest request) {
+            NativeFetchRequest request,
+            boolean sidebandAll) {
         this.context = Objects.requireNonNull(context, "context");
         this.data = Objects.requireNonNull(data, "data");
         this.request = Objects.requireNonNull(request, "request");
+        this.sidebandAll = sidebandAll;
     }
 
     @Override
@@ -34,7 +37,8 @@ final class FetchNegotiationResponseContinuation
                             context.repositoryService
                                     .protocolV2FetchAcknowledgments(
                                             data,
-                                            request));
+                                            request),
+                            sidebandAll);
             return result.transitionTo(
                     new UploadCommandContinuation(context, data));
         } catch (RuntimeException error) {
@@ -47,5 +51,10 @@ final class FetchNegotiationResponseContinuation
     @TestOnly
     NativeFetchRequest request() {
         return request;
+    }
+
+    @TestOnly
+    boolean sidebandAll() {
+        return sidebandAll;
     }
 }

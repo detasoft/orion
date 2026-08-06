@@ -20,7 +20,7 @@ public record GitWireConfiguration(
                 new LegacyReceivePack(
                         true, true, true, true, true),
                 new ProtocolV2(
-                        true, true, true, true, true, true, true, true));
+                        true, true, true, true, true, true, true, true, true));
     }
 
     public record LegacyUploadPack(
@@ -48,7 +48,8 @@ public record GitWireConfiguration(
             boolean waitForDone,
             boolean serverOption,
             boolean filter,
-            boolean refInWant) {
+            boolean refInWant,
+            boolean sidebandAll) {
 
         public ProtocolV2(
                 boolean lsRefs,
@@ -64,6 +65,7 @@ public record GitWireConfiguration(
                     waitForDone,
                     serverOption,
                     false,
+                    false,
                     false);
         }
 
@@ -72,7 +74,16 @@ public record GitWireConfiguration(
                 boolean lsRefsUnborn,
                 boolean fetch,
                 boolean serverOption) {
-            this(lsRefs, lsRefsUnborn, fetch, false, false, serverOption, false, false);
+            this(
+                    lsRefs,
+                    lsRefsUnborn,
+                    fetch,
+                    false,
+                    false,
+                    serverOption,
+                    false,
+                    false,
+                    false);
         }
 
         public ProtocolV2(
@@ -89,6 +100,7 @@ public record GitWireConfiguration(
                     shallow,
                     waitForDone,
                     serverOption,
+                    false,
                     false,
                     false);
         }
@@ -109,6 +121,28 @@ public record GitWireConfiguration(
                     waitForDone,
                     serverOption,
                     filter,
+                    false,
+                    false);
+        }
+
+        public ProtocolV2(
+                boolean lsRefs,
+                boolean lsRefsUnborn,
+                boolean fetch,
+                boolean shallow,
+                boolean waitForDone,
+                boolean serverOption,
+                boolean filter,
+                boolean refInWant) {
+            this(
+                    lsRefs,
+                    lsRefsUnborn,
+                    fetch,
+                    shallow,
+                    waitForDone,
+                    serverOption,
+                    filter,
+                    refInWant,
                     false);
         }
 
@@ -132,6 +166,10 @@ public record GitWireConfiguration(
             if (refInWant && !fetch) {
                 throw new IllegalArgumentException(
                         "refInWant requires fetch");
+            }
+            if (sidebandAll && !fetch) {
+                throw new IllegalArgumentException(
+                        "sidebandAll requires fetch");
             }
         }
     }

@@ -129,6 +129,37 @@ class FetchContinuationTest {
     }
 
     @Test
+    void acceptsSidebandAllForFinalFetchResponse() {
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "want " + WANT + "\n");
+        writeData(input, "sideband-all\n");
+        writeData(input, "done\n");
+        writeFlush(input);
+
+        FetchResponseContinuation response =
+                (FetchResponseContinuation) drive(input);
+
+        assertThat(response.request().wants())
+                .containsExactly(GitObjectId.of(WANT));
+        assertThat(response.sidebandAll()).isTrue();
+    }
+
+    @Test
+    void acceptsSidebandAllForNegotiationResponse() {
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "want " + WANT + "\n");
+        writeData(input, "sideband-all\n");
+        writeData(input, "wait-for-done\n");
+        writeFlush(input);
+
+        FetchNegotiationResponseContinuation response =
+                (FetchNegotiationResponseContinuation) drive(input);
+
+        assertThat(response.request().waitForDone()).isTrue();
+        assertThat(response.sidebandAll()).isTrue();
+    }
+
+    @Test
     void writesNegotiationAcknowledgmentsAndAwaitsNextCommand() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
@@ -243,6 +274,28 @@ class FetchContinuationTest {
     void rejectsWantRefWhenRefInWantIsDisabled() {
         ByteBuf input = request(
                 "want-ref refs/heads/main\n",
+                "done\n");
+        Continuation<ByteBuf> completed = drive(
+                input,
+                context(
+                        new GitWireConfiguration.ProtocolV2(
+                                false,
+                                false,
+                                true,
+                                false,
+                                false,
+                                false,
+                                false,
+                                false)));
+
+        assertInvalid(completed);
+    }
+
+    @Test
+    void rejectsSidebandAllWhenDisabled() {
+        ByteBuf input = request(
+                "want " + WANT + "\n",
+                "sideband-all\n",
                 "done\n");
         Continuation<ByteBuf> completed = drive(
                 input,

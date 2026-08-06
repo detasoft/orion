@@ -111,6 +111,8 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
                         FetchContinuation.SimpleArgument.INCLUDE_TAG;
                 case "wait-for-done" ->
                         FetchContinuation.SimpleArgument.WAIT_FOR_DONE;
+                case "sideband-all" ->
+                        FetchContinuation.SimpleArgument.SIDEBAND_ALL;
                 default -> null;
             };
         }

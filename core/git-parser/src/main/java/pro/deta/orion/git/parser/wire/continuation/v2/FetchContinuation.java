@@ -29,6 +29,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     private boolean ofsDelta;
     private boolean includeTag;
     private boolean waitForDone;
+    private boolean sidebandAll;
     private int depth;
     private NativeObjectFilter objectFilter = NativeObjectFilter.NONE;
     private boolean invalid;
@@ -101,6 +102,15 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                     case OFS_DELTA -> ofsDelta = true;
                     case INCLUDE_TAG -> includeTag = true;
                     case WAIT_FOR_DONE -> waitForDone = true;
+                    case SIDEBAND_ALL -> {
+                        if (!context.configuration
+                                .protocolV2()
+                                .sidebandAll()) {
+                            invalid = true;
+                        } else {
+                            sidebandAll = true;
+                        }
+                    }
                     case NO_PROGRESS -> {
                     }
                 }
@@ -127,12 +137,14 @@ final class FetchContinuation implements Continuation<ByteBuf> {
             return new FetchNegotiationResponseContinuation(
                     context,
                     data,
-                    request);
+                    request,
+                    sidebandAll);
         }
         return new FetchResponseContinuation(
                 context,
                 data,
-                request);
+                request,
+                sidebandAll);
     }
 
     sealed interface FetchArgument
@@ -186,7 +198,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
         OFS_DELTA,
         NO_PROGRESS,
         INCLUDE_TAG,
-        WAIT_FOR_DONE
+        WAIT_FOR_DONE,
+        SIDEBAND_ALL
     }
 
     static Continuation<ByteBuf> failed() {
