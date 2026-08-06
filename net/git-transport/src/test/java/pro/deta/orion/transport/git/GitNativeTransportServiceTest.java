@@ -126,6 +126,23 @@ class GitNativeTransportServiceTest {
     }
 
     @Test
+    void nativeImplementationIsDefaultWhenPropertyIsUnset() {
+        GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
+        config.setBacklog(10);
+        config.setEnabled(true);
+        service = new GitNativeTransportService(
+                config,
+                null,
+                null,
+                new InMemoryNativeGitRepositoryProvider(),
+                5_000);
+
+        service.onStart();
+
+        assertNotNull(service.boundAddress());
+    }
+
+    @Test
     void bindFailureIsReportedToCaller() throws Exception {
         try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
             GitTransportConfig config = new GitTransportConfig("127.0.0.1", occupied.getLocalPort());
@@ -392,6 +409,9 @@ class GitNativeTransportServiceTest {
             GitInternalService gitService,
             boolean enabled,
             int socketTimeoutMillis) {
+        System.setProperty(
+                GitNativeTransportService.IMPLEMENTATION_PROPERTY,
+                "jgit");
         GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
         config.setBacklog(10);
         config.setEnabled(enabled);

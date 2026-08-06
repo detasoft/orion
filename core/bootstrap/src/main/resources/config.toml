@@ -17,8 +17,8 @@ createOnPush = true
 defaultAddress = "localhost"
 
 [transport.git]
-port = 9418
-enabled = false
+port = 9419
+enabled = true
 
 [transport.http]
 port = 8000

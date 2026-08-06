@@ -5,6 +5,7 @@ import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.config.schema.OrionConfiguration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ConfigurationRuntimeTest {
     @Test
@@ -16,6 +17,8 @@ public class ConfigurationRuntimeTest {
         assertEquals("local:orion", oc.getBootstrap().getAccessControl().getLocation());
         assertEquals("orion.xml", oc.getBootstrap().getAccessControl().primaryPath());
         assertEquals("repos", oc.getStorage().getLocation());
+        assertTrue(oc.getTransport().getGit().isEnabled());
+        assertEquals(9419, oc.getTransport().getGit().getPort());
         assertEquals(8000, oc.getTransport().getHttp().getPort());
     }
 }

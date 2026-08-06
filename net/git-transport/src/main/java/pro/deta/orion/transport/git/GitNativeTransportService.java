@@ -142,8 +142,10 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     }
 
     private boolean isNativeImplementation() {
-        return "native".equalsIgnoreCase(
-                System.getProperty(IMPLEMENTATION_PROPERTY));
+        String implementation = System.getProperty(IMPLEMENTATION_PROPERTY);
+        return implementation == null
+                || implementation.isBlank()
+                || "native".equalsIgnoreCase(implementation);
     }
 
     private void listenJGitService() {

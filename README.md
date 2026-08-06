@@ -51,8 +51,7 @@ Default local listeners:
 - SSH Git transport: `localhost:8022`
 - HTTP Git transport: `http://localhost:8000/r/<repository>`
 - HTTPS Git transport: `https://localhost:8443/r/<repository>`
-- Native Git transport: disabled unless `transport.git.enabled` is set to
-  `true`
+- Native Git transport: `git://localhost:9419/<repository>`
 
 The HTTPS listener uses a self-signed certificate unless
 `transport.https.ksystore` is configured.
@@ -200,8 +199,8 @@ storage:
 transport:
   defaultAddress: localhost
   git:
-    enabled: false
-    port: 9418
+    enabled: true
+    port: 9419
   http:
     enabled: true
     port: 8000
