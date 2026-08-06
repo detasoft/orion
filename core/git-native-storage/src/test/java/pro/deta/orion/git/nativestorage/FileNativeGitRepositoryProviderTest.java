@@ -140,6 +140,58 @@ class FileNativeGitRepositoryProviderTest {
     }
 
     @Test
+    void readsPublishedPackObjectsThroughPackIndexes(
+            @TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("team/project.git")
+                .valueOrFailure("repository");
+        byte[] first = "pack-backed-one".getBytes(StandardCharsets.UTF_8);
+        byte[] second = "pack-backed-two".getBytes(StandardCharsets.UTF_8);
+        byte[] pack = pack(first, second);
+
+        PackIngestionResult result =
+                accept(repository.beginPackIngestion(LIMITS), pack);
+
+        assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
+        assertPublishedObject(repository, blobId(first), first);
+
+        FileNativeGitRepositoryProvider reopenedProvider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository reopened = reopenedProvider.find("team/project.git")
+                .valueOrFailure("repository");
+        assertPublishedObject(reopened, blobId(second), second);
+        assertThat(reopened.readObjectPrefix(GitObjectId.of(blobId(first)), 9))
+                .isPresent()
+                .get()
+                .satisfies(prefix -> {
+                    assertThat(prefix.type()).isEqualTo(ObjectType.BLOB);
+                    assertThat(prefix.declaredDataLength())
+                            .isEqualTo(first.length);
+                    assertThat(prefix.dataPrefix()).isEqualTo(
+                            "pack-back".getBytes(StandardCharsets.UTF_8));
+                });
+    }
+
+    @Test
+    void missingPublishedPackObjectReturnsEmpty(
+            @TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("team/project.git")
+                .valueOrFailure("repository");
+        byte[] pack = pack("indexed-object".getBytes(StandardCharsets.UTF_8));
+
+        PackIngestionResult result =
+                accept(repository.beginPackIngestion(LIMITS), pack);
+
+        assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
+        GitObjectId missing = GitObjectId.of("f".repeat(40));
+        assertThat(repository.readObject(missing)).isEmpty();
+        assertThat(repository.readObjectPrefix(missing, 16)).isEmpty();
+    }
+
+    @Test
     void malformedReceivedPackDoesNotPublishPackIndexOrManifest(
             @TempDir Path rootDirectory) throws IOException {
         FileNativeGitRepositoryProvider provider =
@@ -156,6 +208,19 @@ class FileNativeGitRepositoryProviderTest {
         assertThat(pathsWithSuffix(rootDirectory, ".pack")).isEmpty();
         assertThat(pathsWithSuffix(rootDirectory, ".idx")).isEmpty();
         assertThat(pathsWithSuffix(rootDirectory, ".json")).isEmpty();
+    }
+
+    private static void assertPublishedObject(
+            NativeGitRepository repository,
+            String objectId,
+            byte[] expectedData) {
+        assertThat(repository.readObject(GitObjectId.of(objectId)))
+                .isPresent()
+                .get()
+                .satisfies(object -> {
+                    assertThat(object.type()).isEqualTo(ObjectType.BLOB);
+                    assertThat(object.data()).isEqualTo(expectedData);
+                });
     }
 
     private static PackIngestionResult accept(

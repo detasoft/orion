@@ -9,6 +9,7 @@ import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.pack.PackIngestor;
+import pro.deta.orion.git.nativestorage.pack.PackObjectDirectory;
 import pro.deta.orion.git.nativestorage.pack.PackPublicationStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
@@ -27,6 +28,7 @@ public class NativeGitRepository {
     private final LooseObjectStore looseObjectStore;
     private final String defaultHead;
     private final PackPublicationStore packPublicationStore;
+    private final PackObjectDirectory packObjectDirectory;
 
     public NativeGitRepository(
             String name,
@@ -38,7 +40,8 @@ public class NativeGitRepository {
                 looseRefStore,
                 looseObjectStore,
                 defaultHead,
-                PackPublicationStore.NONE);
+                PackPublicationStore.NONE,
+                PackObjectDirectory.NONE);
     }
 
     public NativeGitRepository(
@@ -47,6 +50,22 @@ public class NativeGitRepository {
             LooseObjectStore looseObjectStore,
             String defaultHead,
             PackPublicationStore packPublicationStore) {
+        this(
+                name,
+                looseRefStore,
+                looseObjectStore,
+                defaultHead,
+                packPublicationStore,
+                PackObjectDirectory.NONE);
+    }
+
+    public NativeGitRepository(
+            String name,
+            LooseRefStore looseRefStore,
+            LooseObjectStore looseObjectStore,
+            String defaultHead,
+            PackPublicationStore packPublicationStore,
+            PackObjectDirectory packObjectDirectory) {
         this.name = Objects.requireNonNull(name, "name");
         this.looseRefStore = Objects.requireNonNull(
                 looseRefStore,
@@ -58,6 +77,9 @@ public class NativeGitRepository {
         this.packPublicationStore = Objects.requireNonNull(
                 packPublicationStore,
                 "packPublicationStore");
+        this.packObjectDirectory = Objects.requireNonNull(
+                packObjectDirectory,
+                "packObjectDirectory");
     }
 
     public String name() {
@@ -87,13 +109,22 @@ public class NativeGitRepository {
     }
 
     public Optional<LooseObject> readObject(GitObjectId id) {
-        return looseObjectStore.read(id);
+        Optional<LooseObject> loose = looseObjectStore.read(id);
+        if (loose.isPresent()) {
+            return loose;
+        }
+        return packObjectDirectory.read(id);
     }
 
     public Optional<LooseObjectPrefix> readObjectPrefix(
             GitObjectId id,
             int maxDataBytes) {
-        return looseObjectStore.readPrefix(id, maxDataBytes);
+        Optional<LooseObjectPrefix> loose =
+                looseObjectStore.readPrefix(id, maxDataBytes);
+        if (loose.isPresent()) {
+            return loose;
+        }
+        return packObjectDirectory.readPrefix(id, maxDataBytes);
     }
 
     public PackIngestionSession beginPackIngestion(

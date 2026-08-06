@@ -1,6 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.LocalPackObjectDirectory;
 import pro.deta.orion.git.nativestorage.pack.LocalPackPublicationStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.util.Result;
@@ -75,7 +76,8 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
                     new LooseRefStore(repositoryDirectory),
                     new LooseObjectStore(repositoryDirectory.resolve("objects")),
                     metadata.defaultHead(),
-                    new LocalPackPublicationStore(repositoryDirectory));
+                    new LocalPackPublicationStore(repositoryDirectory),
+                    new LocalPackObjectDirectory(repositoryDirectory));
         });
     }
 
