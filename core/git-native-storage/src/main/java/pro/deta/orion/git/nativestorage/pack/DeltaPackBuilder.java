@@ -32,19 +32,38 @@ public final class DeltaPackBuilder {
     public NativePackProducer producer(
             LooseObjectStore objects,
             Collection<GitObjectId> objectIds) {
+        return producer(objects, objectIds, List.of());
+    }
+
+    public NativePackProducer producer(
+            LooseObjectStore objects,
+            Collection<GitObjectId> objectIds,
+            Collection<GitObjectId> externalBaseIds) {
         Objects.requireNonNull(objects, "objects");
         Objects.requireNonNull(objectIds, "objectIds");
+        Objects.requireNonNull(externalBaseIds, "externalBaseIds");
+        List<GitObjectId> sortedObjectIds = sortedObjectIds(objectIds);
+        List<GitObjectId> externalBases = new ArrayList<>(externalBaseIds);
+        externalBases.removeAll(sortedObjectIds);
+        return new Producer(plan(objects, sortedObjectIds, externalBases));
+    }
+
+    private static List<GitObjectId> sortedObjectIds(
+            Collection<GitObjectId> objectIds) {
         List<GitObjectId> sorted = new ArrayList<>(objectIds);
         sorted.sort(Comparator.comparing(GitObjectId::value));
-        return new Producer(plan(objects, sorted));
+        return sorted;
     }
 
     private static List<PackEntry> plan(
             LooseObjectStore objects,
-            List<GitObjectId> objectIds) {
+            List<GitObjectId> objectIds,
+            List<GitObjectId> externalBaseIds) {
         List<PackEntry> entries = new ArrayList<>(objectIds.size());
         Map<ObjectType, List<BaseCandidate>> bases =
                 new EnumMap<>(ObjectType.class);
+        Map<ObjectType, List<BaseCandidate>> externalBases =
+                externalBaseCandidates(objects, externalBaseIds);
         for (GitObjectId objectId : objectIds) {
             LooseObject object = objects.read(objectId)
                     .orElseThrow(() -> new IllegalStateException(
@@ -61,7 +80,9 @@ public final class DeltaPackBuilder {
                     object,
                     objectData,
                     whole,
-                    typeBases)
+                    candidatesFor(
+                            typeBases,
+                            externalBases.get(object.type())))
                     .orElse(whole);
             entries.add(selected);
             if (!selected.delta()) {
@@ -74,6 +95,43 @@ public final class DeltaPackBuilder {
             }
         }
         return List.copyOf(entries);
+    }
+
+    private static Map<ObjectType, List<BaseCandidate>> externalBaseCandidates(
+            LooseObjectStore objects,
+            List<GitObjectId> externalBaseIds) {
+        Map<ObjectType, List<BaseCandidate>> bases =
+                new EnumMap<>(ObjectType.class);
+        for (GitObjectId objectId : externalBaseIds) {
+            Optional<LooseObject> object = objects.read(objectId);
+            if (object.isEmpty()) {
+                continue;
+            }
+            List<BaseCandidate> typeBases =
+                    bases.computeIfAbsent(
+                            object.get().type(),
+                            ignored -> new ArrayList<>());
+            if (typeBases.size() >= MAX_BASE_CANDIDATES) {
+                continue;
+            }
+            typeBases.add(new BaseCandidate(
+                    objectId,
+                    object.get().data()));
+        }
+        return bases;
+    }
+
+    private static List<BaseCandidate> candidatesFor(
+            List<BaseCandidate> internalBases,
+            List<BaseCandidate> externalBases) {
+        if (externalBases == null || externalBases.isEmpty()) {
+            return internalBases;
+        }
+        List<BaseCandidate> candidates = new ArrayList<>(
+                internalBases.size() + externalBases.size());
+        candidates.addAll(internalBases);
+        candidates.addAll(externalBases);
+        return candidates;
     }
 
     private static Optional<PackEntry> selectDelta(

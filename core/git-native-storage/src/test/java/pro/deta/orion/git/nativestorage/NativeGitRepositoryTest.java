@@ -338,6 +338,122 @@ class NativeGitRepositoryTest {
     }
 
     @Test
+    void fetchUsesThinDeltaWhenBaseIsReachableFromHave() {
+        LooseObjectStore objects = new LooseObjectStore();
+        SimilarBlobs blobs = similarBlobs(objects);
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        byte[] thinPack = produceBytes(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(blobs.second()),
+                        Set.of(blobs.first()),
+                        true,
+                        true,
+                        true,
+                        false)));
+
+        assertThat(packEntryTypes(thinPack)).containsExactly(7);
+        assertThat(refDeltaBaseIds(thinPack))
+                .containsExactly(blobs.first());
+        assertThat(ingest(thinPack, objects).contains(blobs.second()))
+                .isTrue();
+    }
+
+    @Test
+    void fetchFallsBackWhenThinPackWasNotNegotiated() {
+        LooseObjectStore objects = new LooseObjectStore();
+        SimilarBlobs blobs = similarBlobs(objects);
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        byte[] pack = produceBytes(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(blobs.second()),
+                        Set.of(blobs.first()),
+                        true,
+                        false,
+                        true,
+                        false)));
+
+        assertThat(packEntryTypes(pack))
+                .containsExactly(ObjectType.BLOB.packTypeId());
+    }
+
+    @Test
+    void fetchFallsBackWhenThinBaseIsMissing() {
+        LooseObjectStore objects = new LooseObjectStore();
+        SimilarBlobs blobs = similarBlobs(objects);
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        byte[] pack = produceBytes(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(blobs.second()),
+                        Set.of(GitObjectId.of("a".repeat(40))),
+                        true,
+                        true,
+                        true,
+                        false)));
+
+        assertThat(packEntryTypes(pack))
+                .containsExactly(ObjectType.BLOB.packTypeId());
+    }
+
+    @Test
+    void shallowFetchDoesNotUseExternalThinBase() {
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId baseBlob = objects.write(
+                ObjectType.BLOB,
+                ("shared prefix\n".repeat(80)
+                        + "base line\n"
+                        + "shared suffix\n".repeat(80))
+                        .getBytes(StandardCharsets.UTF_8));
+        GitObjectId baseTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "file.txt", baseBlob));
+        GitObjectId baseCommit = writeCommit(objects, baseTree, null, "base");
+        GitObjectId tipBlob = objects.write(
+                ObjectType.BLOB,
+                ("shared prefix\n".repeat(80)
+                        + "tip line updated\n"
+                        + "shared suffix\n".repeat(80))
+                        .getBytes(StandardCharsets.UTF_8));
+        GitObjectId tipTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "file.txt", tipBlob));
+        GitObjectId tipCommit = writeCommit(objects, tipTree, baseCommit, "tip");
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        byte[] pack = produceBytes(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(tipCommit),
+                        Set.of(baseCommit),
+                        true,
+                        true,
+                        true,
+                        false,
+                        false,
+                        1)));
+
+        assertThat(intAt(pack, 8)).isEqualTo(3);
+        assertThat(packEntryTypes(pack)).doesNotContain(7);
+    }
+
+    @Test
     void resolvesWantedRefsIntoPackAndResponseMetadata() {
         LooseRefStore refs = new LooseRefStore();
         LooseObjectStore objects = new LooseObjectStore();
@@ -467,6 +583,19 @@ class NativeGitRepositoryTest {
         }
     }
 
+    private static LooseObjectStore ingest(
+            byte[] pack,
+            LooseObjectStore publishedObjects) {
+        ByteBuf input = Unpooled.wrappedBuffer(pack);
+        try {
+            return new PackIngestor(pack.length).ingest(
+                    input,
+                    publishedObjects);
+        } finally {
+            input.release();
+        }
+    }
+
     private static GitObjectId writeCommit(
             LooseObjectStore objects,
             GitObjectId tree,
@@ -532,6 +661,24 @@ class NativeGitRepositoryTest {
             offset = skipDeflated(pack, offset, pack.length - 20);
         }
         return types;
+    }
+
+    private static List<GitObjectId> refDeltaBaseIds(byte[] pack) {
+        int count = intAt(pack, 8);
+        int offset = 12;
+        List<GitObjectId> baseIds = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            EntryHeader header = readEntryHeader(pack, offset);
+            offset = header.nextOffset();
+            if (header.typeId() == 7) {
+                byte[] baseId = new byte[20];
+                System.arraycopy(pack, offset, baseId, 0, baseId.length);
+                baseIds.add(GitObjectId.of(HexFormat.of().formatHex(baseId)));
+                offset += baseId.length;
+            }
+            offset = skipDeflated(pack, offset, pack.length - 20);
+        }
+        return baseIds;
     }
 
     private static EntryHeader readEntryHeader(byte[] pack, int offset) {

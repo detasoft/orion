@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.DataFormatException;
@@ -62,6 +63,33 @@ class DeltaPackBuilderTest {
                     .isEqualTo(pair.targetData());
             assertJGitReads(packBytes, pair);
             assertGitIndexPackAccepts(packBytes, temporaryDirectory);
+        } finally {
+            pack.release();
+        }
+    }
+
+    @Test
+    void buildsThinReferenceDeltaPackWithExternalBase() {
+        BlobPair pair = similarBlobPair();
+        CompositeByteBuf pack = produce(
+                builder.producer(
+                        objects,
+                        List.of(pair.targetId()),
+                        List.of(pair.baseId())),
+                5);
+
+        try {
+            byte[] packBytes = ByteBufUtil.getBytes(pack);
+
+            assertThat(packEntryTypes(packBytes))
+                    .containsExactly(REF_DELTA_TYPE);
+            assertThat(refDeltaBaseIds(packBytes))
+                    .containsExactly(pair.baseId());
+            assertThat(ingest(packBytes, objects)
+                    .read(pair.targetId())
+                    .orElseThrow()
+                    .data())
+                    .isEqualTo(pair.targetData());
         } finally {
             pack.release();
         }
@@ -139,6 +167,19 @@ class DeltaPackBuilderTest {
         }
     }
 
+    private static LooseObjectStore ingest(
+            byte[] pack,
+            LooseObjectStore publishedObjects) {
+        ByteBuf input = Unpooled.wrappedBuffer(pack);
+        try {
+            return new PackIngestor(pack.length).ingest(
+                    input,
+                    publishedObjects);
+        } finally {
+            input.release();
+        }
+    }
+
     private static void assertJGitReads(
             byte[] packBytes,
             BlobPair pair) throws Exception {
@@ -193,6 +234,24 @@ class DeltaPackBuilderTest {
             offset = skipDeflated(pack, offset, pack.length - 20);
         }
         return types;
+    }
+
+    private static List<GitObjectId> refDeltaBaseIds(byte[] pack) {
+        int count = intAt(pack, 8);
+        int offset = 12;
+        List<GitObjectId> baseIds = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            EntryHeader header = readEntryHeader(pack, offset);
+            offset = header.nextOffset();
+            if (header.typeId() == REF_DELTA_TYPE) {
+                byte[] baseId = new byte[20];
+                System.arraycopy(pack, offset, baseId, 0, baseId.length);
+                baseIds.add(GitObjectId.of(HexFormat.of().formatHex(baseId)));
+                offset += baseId.length;
+            }
+            offset = skipDeflated(pack, offset, pack.length - 20);
+        }
+        return baseIds;
     }
 
     private static EntryHeader readEntryHeader(

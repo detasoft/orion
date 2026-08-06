@@ -67,6 +67,12 @@ public final class NativeObjectClosure {
         return new FetchSelection(objectIds, shallowBoundaries);
     }
 
+    public Set<GitObjectId> existingObjectIdsReachableFrom(
+            Set<GitObjectId> roots) {
+        Objects.requireNonNull(roots, "roots");
+        return traverse(roots, true);
+    }
+
     private void applyObjectFilter(
             Set<GitObjectId> objectIds,
             Set<GitObjectId> directWants,

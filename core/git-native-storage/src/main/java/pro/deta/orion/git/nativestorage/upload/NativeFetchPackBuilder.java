@@ -54,8 +54,9 @@ public final class NativeFetchPackBuilder {
                 resolveWantedRefs(request.wantRefs());
         Set<GitObjectId> wants = new LinkedHashSet<>(request.wants());
         wants.addAll(wantedRefs.values());
+        NativeObjectClosure closure = new NativeObjectClosure(objects);
         NativeObjectClosure.FetchSelection selection =
-                new NativeObjectClosure(objects).selectionFor(
+                closure.selectionFor(
                         wants,
                         request.haves(),
                         request.depth(),
@@ -66,7 +67,10 @@ public final class NativeFetchPackBuilder {
             includeReachableAnnotatedTags(objectIds);
         }
         NativePackProducer producer = request.ofsDelta()
-                ? deltaPackBuilder.producer(objects, objectIds)
+                ? deltaPackBuilder.producer(
+                        objects,
+                        objectIds,
+                        externalBaseIds(request, closure, objectIds))
                 : noDeltaPackBuilder.producer(objects, objectIds);
         return new NativeFetchResponse(
                 producer,
@@ -88,6 +92,23 @@ public final class NativeFetchPackBuilder {
             resolved.put(wantRef, GitObjectId.of(objectId));
         }
         return resolved;
+    }
+
+    private Set<GitObjectId> externalBaseIds(
+            NativeFetchRequest request,
+            NativeObjectClosure closure,
+            Set<GitObjectId> objectIds) {
+        if (!request.thinPack()
+                || !request.ofsDelta()
+                || request.shallow()) {
+            return Set.of();
+        }
+        Set<GitObjectId> externalBaseIds =
+                new LinkedHashSet<>(request.haves());
+        externalBaseIds.addAll(
+                closure.existingObjectIdsReachableFrom(request.haves()));
+        externalBaseIds.removeAll(objectIds);
+        return externalBaseIds;
     }
 
     private void includeReachableAnnotatedTags(
