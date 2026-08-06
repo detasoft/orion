@@ -276,12 +276,15 @@ make test-jfr
 
 The run uses allocation-heavy JFR settings and writes a report under
 `target/test-analytics/<run-id>/` with `index.html`, `summary.md`, CSV files,
-raw `.jfr` recordings, and SVG flame graphs. The HTML report embeds the CSV
-tables with sortable columns. For allocation work, start with `index.html`,
-`byte-array-allocations.csv`, `allocations.csv`, and `flamegraph-alloc.svg`;
-they show allocation stack hotspots and make it easier to find paths that
-materialize data into `byte[]` before writing instead of parsing or forwarding
-it incrementally.
+raw `.jfr` recordings, and SVG flame graphs. Maven prints the expected
+`file://.../index.html` report URL at the start of the JFR test run. The HTML
+report embeds the CSV tables with sortable columns and hides classloader
+allocation rows by default with a checkbox. For allocation work, start with
+`index.html`, `byte-array-test-allocations.csv`, `test-allocations.csv`, and
+`flamegraph-test-alloc.svg`; they show allocation stack hotspots and make it
+easier to find paths that materialize data into `byte[]` before writing instead
+of parsing or forwarding it incrementally. Raw unfiltered allocation files are
+also kept in the report directory.
 
 ## Repository Layout
 

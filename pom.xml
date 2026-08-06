@@ -50,6 +50,7 @@
     <orion.test.analytics.dir>${maven.multiModuleProjectDirectory}/target/test-analytics</orion.test.analytics.dir>
     <orion.test.analytics.runId>${maven.build.timestamp}</orion.test.analytics.runId>
     <orion.test.analytics.run.dir>${orion.test.analytics.dir}/${orion.test.analytics.runId}</orion.test.analytics.run.dir>
+    <orion.test.analytics.html>${orion.test.analytics.run.dir}/index.html</orion.test.analytics.html>
     <orion.test.debug>false</orion.test.debug>
     <orion.test.jvm.args></orion.test.jvm.args>
     <orion.test.jfr.directory>${orion.test.analytics.run.dir}/jfr</orion.test.jfr.directory>
@@ -424,6 +425,19 @@
           <plugin>
             <artifactId>maven-antrun-plugin</artifactId>
             <executions>
+              <execution>
+                <id>print-test-jfr-report-link</id>
+                <inherited>false</inherited>
+                <phase>initialize</phase>
+                <goals>
+                  <goal>run</goal>
+                </goals>
+                <configuration>
+                  <target>
+                    <echo message="[orion-test-analytics] Report URL: file://${orion.test.analytics.html}"/>
+                  </target>
+                </configuration>
+              </execution>
               <execution>
                 <id>create-test-jfr-directory</id>
                 <phase>initialize</phase>

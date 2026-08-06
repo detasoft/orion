@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TestAnalyticsReportTest {
@@ -22,14 +23,21 @@ class TestAnalyticsReportTest {
         String html = Files.readString(files.html());
         assertTrue(summary.contains("Tests: 2"));
         assertTrue(summary.contains("Failed: 1"));
-        assertTrue(summary.contains("Byte Array Allocation Hotspots"));
+        assertTrue(summary.contains("Byte Array Test Allocation Hotspots"));
         assertTrue(html.contains("table class=\"sortable\""));
         assertTrue(html.contains("A#fast"));
         assertTrue(html.contains("compareCells"));
+        assertTrue(html.contains("main { box-sizing: border-box; width: 100%; padding: 24px; }"));
+        assertTrue(html.contains("table { border-collapse: collapse; width: 100%; min-width: 100%; }"));
+        assertTrue(html.contains("id=\"hide-classloader-allocations\" type=\"checkbox\" checked"));
+        assertTrue(html.contains("applyClassloaderAllocationFilter"));
         assertTrue(Files.isRegularFile(files.testsCsv()));
         assertTrue(Files.isRegularFile(files.modulesCsv()));
+        assertTrue(Files.isRegularFile(files.testAllocationsCsv()));
+        assertTrue(Files.isRegularFile(files.byteArrayTestAllocationsCsv()));
         assertTrue(Files.isRegularFile(files.allocationsCsv()));
         assertTrue(Files.isRegularFile(files.byteArrayAllocationsCsv()));
+        assertTrue(Files.isRegularFile(files.testAllocationFlameGraph()));
         assertTrue(Files.readString(files.cpuFlameGraph()).contains("No stack samples"));
     }
 
@@ -59,6 +67,27 @@ class TestAnalyticsReportTest {
         assertTrue(output.contains("<span class=\"stack-frame\">root</span>"));
         assertTrue(output.contains("<span class=\"stack-frame\">parser.Frame.method</span>"));
         assertTrue(output.contains("<span class=\"stack-frame\">writer.Frame.write</span>"));
+    }
+
+    @Test
+    void formatsReportUriAsFileLink(@TempDir Path temp) {
+        String uri = TestAnalyticsReport.reportUri(temp.resolve("index.html"));
+
+        assertTrue(uri.startsWith("file:"));
+        assertTrue(uri.endsWith("/index.html"));
+    }
+
+    @Test
+    void recognizesClassloaderAllocationStacks() {
+        assertTrue(TestAnalyticsReport.isClassLoadingAllocationStack(
+                "test;java.lang.ClassLoader.loadClass;jdk.internal.loader.URLClassPath$JarLoader$1.getBytes"));
+        assertFalse(TestAnalyticsReport.isTestAllocationStack(
+                "test;java.lang.ClassLoader.loadClass;jdk.internal.loader.URLClassPath$JarLoader$1.getBytes"));
+        assertFalse(TestAnalyticsReport.isTestAllocationStack(
+                "test;java.util.ServiceLoader$LazyClassPathLookupIterator.hasNextService;"
+                        + "java.lang.ClassLoader.getResources"));
+        assertTrue(TestAnalyticsReport.isTestAllocationStack(
+                "test;pro.deta.orion.git.parser.wire.GitNativeClientOutput.write"));
     }
 
     private static String testDurationLine(String testId, String status, long durationMillis, String reason) {

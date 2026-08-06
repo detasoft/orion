@@ -41,6 +41,20 @@ public final class TestAnalyticsReport {
             "jdk.ObjectAllocationInNewTLAB",
             "jdk.ObjectAllocationOutsideTLAB"
     );
+    private static final List<String> CLASS_LOADING_STACK_MARKERS = List.of(
+            "java.lang.ClassLoader.loadClass",
+            "java.lang.ClassLoader.getResources",
+            "jdk.internal.loader.BuiltinClassLoader.loadClass",
+            "jdk.internal.loader.BuiltinClassLoader.loadClassOrNull",
+            "jdk.internal.loader.BuiltinClassLoader.findClassOnClassPathOrNull",
+            "jdk.internal.loader.BuiltinClassLoader.findResources",
+            "jdk.internal.loader.URLClassPath",
+            "java.util.ServiceLoader$LazyClassPathLookupIterator",
+            "jdk.internal.loader.Resource.getBytes",
+            "jdk.internal.loader.Resource.getByteBuffer",
+            "java.util.jar.JarFile.getInputStream",
+            "java.util.zip.ZipFile.getInputStream"
+    );
 
     private TestAnalyticsReport() {
     }
@@ -51,11 +65,14 @@ public final class TestAnalyticsReport {
                 : Paths.get(args[0]);
         int topLimit = args.length >= 2 ? Integer.parseInt(args[1]) : DEFAULT_TOP_LIMIT;
         ReportFiles report = generate(runDirectory, topLimit);
-        System.out.printf("[orion-test-analytics] HTML report: %s%n",
-                report.html().toAbsolutePath().normalize());
+        Path html = report.html().toAbsolutePath().normalize();
+        System.out.printf("[orion-test-analytics] HTML report: %s%n", html);
+        System.out.printf("[orion-test-analytics] HTML report URL: %s%n", reportUri(html));
         System.out.printf("[orion-test-analytics] report: %s%n", report.summary().toAbsolutePath().normalize());
         System.out.printf("[orion-test-analytics] CPU flame graph: %s%n",
                 report.cpuFlameGraph().toAbsolutePath().normalize());
+        System.out.printf("[orion-test-analytics] test allocation flame graph: %s%n",
+                report.testAllocationFlameGraph().toAbsolutePath().normalize());
         System.out.printf("[orion-test-analytics] allocation flame graph: %s%n",
                 report.allocationFlameGraph().toAbsolutePath().normalize());
     }
@@ -70,26 +87,35 @@ public final class TestAnalyticsReport {
 
         Path testsCsv = normalizedRunDirectory.resolve("tests.csv");
         Path modulesCsv = normalizedRunDirectory.resolve("modules.csv");
+        Path testAllocationsCsv = normalizedRunDirectory.resolve("test-allocations.csv");
+        Path byteArrayTestAllocationsCsv = normalizedRunDirectory.resolve("byte-array-test-allocations.csv");
         Path allocationsCsv = normalizedRunDirectory.resolve("allocations.csv");
         Path byteArrayAllocationsCsv = normalizedRunDirectory.resolve("byte-array-allocations.csv");
         Path jfrEventsCsv = normalizedRunDirectory.resolve("jfr-events.csv");
         Path html = normalizedRunDirectory.resolve("index.html");
         Path summary = normalizedRunDirectory.resolve("summary.md");
         Path cpuFlameGraph = normalizedRunDirectory.resolve("flamegraph-cpu.svg");
+        Path testAllocationFlameGraph = normalizedRunDirectory.resolve("flamegraph-test-alloc.svg");
         Path allocationFlameGraph = normalizedRunDirectory.resolve("flamegraph-alloc.svg");
+        List<AllocationStats> testAllocations = testAllocations(jfr.allocationHotspots());
+        Map<String, Long> testAllocationStacks = testAllocationStacks(jfr.allocationStacks());
 
         writeTestsCsv(testsCsv, tests);
         writeModulesCsv(modulesCsv, modules);
+        writeAllocationsCsv(testAllocationsCsv, testAllocations);
+        writeAllocationsCsv(byteArrayTestAllocationsCsv, byteArrayAllocations(testAllocations));
         writeAllocationsCsv(allocationsCsv, jfr.allocationHotspots());
         writeAllocationsCsv(byteArrayAllocationsCsv, byteArrayAllocations(jfr.allocationHotspots()));
         writeJfrEventsCsv(jfrEventsCsv, jfr.eventCounts());
         writeFlameGraph(cpuFlameGraph, "CPU samples", "samples", jfr.cpuStacks());
+        writeFlameGraph(testAllocationFlameGraph, "Test allocation samples", "bytes", testAllocationStacks);
         writeFlameGraph(allocationFlameGraph, "Allocation samples", "bytes", jfr.allocationStacks());
         writeSummary(summary, normalizedRunDirectory, tests, modules, jfr, topLimit);
         writeHtmlReport(html, normalizedRunDirectory, tests, modules, jfr);
 
-        return new ReportFiles(html, summary, testsCsv, modulesCsv, allocationsCsv, byteArrayAllocationsCsv,
-                jfrEventsCsv, cpuFlameGraph, allocationFlameGraph);
+        return new ReportFiles(html, summary, testsCsv, modulesCsv, testAllocationsCsv,
+                byteArrayTestAllocationsCsv, allocationsCsv, byteArrayAllocationsCsv, jfrEventsCsv,
+                cpuFlameGraph, testAllocationFlameGraph, allocationFlameGraph);
     }
 
     private static Path latestRunDirectory(Path analyticsRoot) throws IOException {
@@ -412,6 +438,35 @@ public final class TestAnalyticsReport {
                 .toList();
     }
 
+    private static List<AllocationStats> testAllocations(List<AllocationStats> allocations) {
+        return allocations.stream()
+                .filter(allocation -> isTestAllocationStack(allocation.stack()))
+                .toList();
+    }
+
+    private static Map<String, Long> testAllocationStacks(Map<String, Long> allocationStacks) {
+        Map<String, Long> filtered = new HashMap<>();
+        for (Map.Entry<String, Long> entry : allocationStacks.entrySet()) {
+            if (isTestAllocationStack(entry.getKey())) {
+                filtered.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return filtered;
+    }
+
+    static boolean isClassLoadingAllocationStack(String stack) {
+        for (String marker : CLASS_LOADING_STACK_MARKERS) {
+            if (stack.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean isTestAllocationStack(String stack) {
+        return !isClassLoadingAllocationStack(stack);
+    }
+
     private static void writeJfrEventsCsv(Path output, Map<String, Long> eventCounts) throws IOException {
         List<String> lines = new ArrayList<>();
         lines.add("event,count");
@@ -565,16 +620,23 @@ public final class TestAnalyticsReport {
         markdown.append("## Artifacts\n\n");
         markdown.append("- `tests.csv`\n");
         markdown.append("- `modules.csv`\n");
+        markdown.append("- `test-allocations.csv`\n");
+        markdown.append("- `byte-array-test-allocations.csv`\n");
         markdown.append("- `allocations.csv`\n");
         markdown.append("- `byte-array-allocations.csv`\n");
         markdown.append("- `jfr-events.csv`\n");
         markdown.append("- `flamegraph-cpu.svg`\n");
+        markdown.append("- `flamegraph-test-alloc.svg`\n");
         markdown.append("- `flamegraph-alloc.svg`\n");
         markdown.append("- raw JFR files under `jfr/`\n\n");
 
         appendModuleTable(markdown, modules);
-        appendAllocationTable(markdown, "Top Allocation Hotspots", jfr.allocationHotspots(), topLimit);
-        appendAllocationTable(markdown, "Byte Array Allocation Hotspots",
+        List<AllocationStats> testAllocations = testAllocations(jfr.allocationHotspots());
+        appendAllocationTable(markdown, "Top Test Allocation Hotspots", testAllocations, topLimit);
+        appendAllocationTable(markdown, "Byte Array Test Allocation Hotspots",
+                byteArrayAllocations(testAllocations), topLimit);
+        appendAllocationTable(markdown, "Top Raw Allocation Hotspots", jfr.allocationHotspots(), topLimit);
+        appendAllocationTable(markdown, "Byte Array Raw Allocation Hotspots",
                 byteArrayAllocations(jfr.allocationHotspots()), topLimit);
         appendSlowestTests(markdown, slowest);
         appendNonSuccessfulTests(markdown, nonSuccessful, topLimit);
@@ -606,7 +668,7 @@ public final class TestAnalyticsReport {
                 <style>
                 :root { color-scheme: light; --border: #d7dde5; --muted: #56616f; --bg: #f7f8fa; }
                 body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-                main { max-width: 1280px; margin: 0 auto; padding: 24px; }
+                main { box-sizing: border-box; width: 100%; padding: 24px; }
                 h1 { margin: 0 0 8px; font-size: 28px; }
                 h2 { margin: 32px 0 12px; font-size: 20px; }
                 code { font-family: Menlo, Consolas, monospace; font-size: 12px; }
@@ -616,15 +678,18 @@ public final class TestAnalyticsReport {
                 .metric strong { display: block; font-size: 20px; }
                 .artifacts { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; }
                 .artifacts a { display: block; border: 1px solid var(--border); padding: 6px 9px; color: #0f4c81; }
+                .filters { display: flex; gap: 16px; margin: 18px 0 8px; }
+                .filters label { display: inline-flex; align-items: center; gap: 6px; }
                 .table-wrap { overflow-x: auto; border: 1px solid var(--border); }
-                table { border-collapse: collapse; min-width: 100%; }
+                table { border-collapse: collapse; width: 100%; min-width: 100%; }
                 th, td { border-bottom: 1px solid var(--border); padding: 7px 9px; text-align: left; vertical-align: top; }
                 th { background: var(--bg); cursor: pointer; position: sticky; top: 0; user-select: none; }
                 th::after { content: " \\2195"; color: #7b8794; font-size: 11px; }
                 td.num, th.num { text-align: right; white-space: nowrap; }
-                .stack-cell { min-width: 760px; max-width: 1200px; width: 60%; }
+                .stack-cell { min-width: 760px; width: 70%; }
                 .stack-cell code { overflow-wrap: anywhere; white-space: normal; }
                 .stack-frame { display: block; }
+                tr[hidden] { display: none; }
                 object { width: 100%; min-height: 520px; border: 1px solid var(--border); background: white; }
                 </style>
                 </head>
@@ -636,8 +701,10 @@ public final class TestAnalyticsReport {
                 .append(" for <code>").append(xml(runDirectory.toString())).append("</code></p>\n");
         appendHtmlMetrics(html, tests, jfr);
         appendHtmlArtifacts(html);
+        appendHtmlAllocationFilters(html);
         appendHtmlAllocationTable(html, "Byte Array Allocations", byteArrayAllocations);
         appendHtmlAllocationTable(html, "All Allocations", jfr.allocationHotspots());
+        appendHtmlObject(html, "Test Allocation Flame Graph", "flamegraph-test-alloc.svg");
         appendHtmlObject(html, "Allocation Flame Graph", "flamegraph-alloc.svg");
         appendHtmlObject(html, "CPU Flame Graph", "flamegraph-cpu.svg");
         appendHtmlModuleTable(html, "Modules", modules);
@@ -673,12 +740,23 @@ public final class TestAnalyticsReport {
 
     private static void appendHtmlArtifacts(StringBuilder html) {
         html.append("<h2>Artifacts</h2>\n<ul class=\"artifacts\">\n");
-        for (String artifact : List.of("summary.md", "tests.csv", "modules.csv", "allocations.csv",
-                "byte-array-allocations.csv", "jfr-events.csv", "flamegraph-alloc.svg", "flamegraph-cpu.svg")) {
+        for (String artifact : List.of("summary.md", "tests.csv", "modules.csv", "test-allocations.csv",
+                "byte-array-test-allocations.csv", "allocations.csv", "byte-array-allocations.csv",
+                "jfr-events.csv", "flamegraph-test-alloc.svg", "flamegraph-alloc.svg",
+                "flamegraph-cpu.svg")) {
             html.append("<li><a href=\"").append(xml(artifact)).append("\">")
                     .append(xml(artifact)).append("</a></li>\n");
         }
         html.append("</ul>\n<p class=\"muted\">Raw JFR files are under <code>jfr/</code>.</p>\n");
+    }
+
+    private static void appendHtmlAllocationFilters(StringBuilder html) {
+        html.append("""
+                <div class="filters">
+                <label><input id="hide-classloader-allocations" type="checkbox" checked>
+                Hide classloader allocations</label>
+                </div>
+                """);
     }
 
     private static void appendHtmlObject(StringBuilder html, String title, String href) {
@@ -716,7 +794,11 @@ public final class TestAnalyticsReport {
         html.append("<thead><tr><th class=\"num\">Bytes</th><th class=\"num\">Samples</th>");
         html.append("<th>Object</th><th>Top Frame</th><th>Stack</th></tr></thead><tbody>\n");
         for (AllocationStats allocation : allocations) {
-            html.append("<tr>");
+            html.append("<tr");
+            if (isClassLoadingAllocationStack(allocation.stack())) {
+                html.append(" data-classloading=\"true\"");
+            }
+            html.append(">");
             appendHtmlNumberCell(html, allocation.bytes(), formatBytes(allocation.bytes()));
             appendHtmlNumberCell(html, allocation.samples(), Long.toString(allocation.samples()));
             html.append("<td><code>").append(xml(allocation.objectClass())).append("</code></td><td><code>")
@@ -736,6 +818,10 @@ public final class TestAnalyticsReport {
             }
         }
         html.append("</code></td>");
+    }
+
+    static String reportUri(Path report) {
+        return report.toAbsolutePath().normalize().toUri().toString();
     }
 
     private static void appendHtmlTestsTable(StringBuilder html, String title, List<TestRecord> tests) {
@@ -788,6 +874,11 @@ public final class TestAnalyticsReport {
     private static void appendHtmlSortingScript(StringBuilder html) {
         html.append("""
                 <script>
+                const hideClassloaderAllocations = document.getElementById("hide-classloader-allocations");
+                if (hideClassloaderAllocations) {
+                  hideClassloaderAllocations.addEventListener("change", applyClassloaderAllocationFilter);
+                  applyClassloaderAllocationFilter();
+                }
                 document.querySelectorAll("table.sortable th").forEach((th, index) => {
                   th.addEventListener("click", () => {
                     const table = th.closest("table");
@@ -809,6 +900,12 @@ public final class TestAnalyticsReport {
                     return leftNumber - rightNumber;
                   }
                   return leftValue.localeCompare(rightValue);
+                }
+                function applyClassloaderAllocationFilter() {
+                  const hide = hideClassloaderAllocations.checked;
+                  document.querySelectorAll("tr[data-classloading='true']").forEach(row => {
+                    row.hidden = hide;
+                  });
                 }
                 </script>
                 """);
@@ -981,8 +1078,9 @@ public final class TestAnalyticsReport {
                 .replace("\"", "&quot;");
     }
 
-    record ReportFiles(Path html, Path summary, Path testsCsv, Path modulesCsv, Path allocationsCsv,
-                       Path byteArrayAllocationsCsv, Path jfrEventsCsv, Path cpuFlameGraph,
+    record ReportFiles(Path html, Path summary, Path testsCsv, Path modulesCsv, Path testAllocationsCsv,
+                       Path byteArrayTestAllocationsCsv, Path allocationsCsv, Path byteArrayAllocationsCsv,
+                       Path jfrEventsCsv, Path cpuFlameGraph, Path testAllocationFlameGraph,
                        Path allocationFlameGraph) {
     }
 
