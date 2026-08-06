@@ -22,9 +22,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 public final class TestDurationRecorder implements TestExecutionListener {
-    private static final String ENABLED_PROPERTY = "orion.testDurations.enabled";
-    private static final String OUTPUT_PROPERTY = "orion.testDurations.output";
-    private static final String RUN_ID_PROPERTY = "orion.testDurations.runId";
+    static final String ENABLED_PROPERTY = "orion.testDurations.enabled";
+    static final String OUTPUT_PROPERTY = "orion.testDurations.output";
+    static final String RUN_ID_PROPERTY = "orion.testDurations.runId";
     private static final String DEFAULT_RUN_ID = Instant.now().toString() + "-" + processId();
 
     private final ConcurrentMap<String, StartedTest> startedTests = new ConcurrentHashMap<>();
@@ -42,7 +42,10 @@ public final class TestDurationRecorder implements TestExecutionListener {
             return;
         }
 
-        startedTests.put(testIdentifier.getUniqueId(), new StartedTest(System.nanoTime(), Instant.now()));
+        TestDurationJfrEvent event = new TestDurationJfrEvent();
+        event.begin();
+        StartedTest started = new StartedTest(System.nanoTime(), Instant.now(), event);
+        startedTests.put(testIdentifier.getUniqueId(), started);
     }
 
     @Override
@@ -54,6 +57,7 @@ public final class TestDurationRecorder implements TestExecutionListener {
         synchronized (records) {
             records.add(toJson(testIdentifier, "SKIPPED", 0, Instant.now(), Instant.now(), reason));
         }
+        recordJfrEvent(new TestDurationJfrEvent(), testIdentifier, "SKIPPED", 0, reason, false);
     }
 
     @Override
@@ -76,6 +80,8 @@ public final class TestDurationRecorder implements TestExecutionListener {
         synchronized (records) {
             records.add(toJson(testIdentifier, status, durationMillis, startedAt, finishedAt, reason));
         }
+        TestDurationJfrEvent event = started == null ? new TestDurationJfrEvent() : started.event();
+        recordJfrEvent(event, testIdentifier, status, durationMillis, reason, started != null);
     }
 
     @Override
@@ -112,6 +118,30 @@ public final class TestDurationRecorder implements TestExecutionListener {
         }
     }
 
+    private static void recordJfrEvent(TestDurationJfrEvent event, TestIdentifier testIdentifier, String status,
+                                       long durationMillis, String reason, boolean alreadyStarted) {
+        if (!event.isEnabled()) {
+            return;
+        }
+
+        if (!alreadyStarted) {
+            event.begin();
+        }
+        event.runId = runId();
+        event.module = moduleName();
+        event.testId = testId(testIdentifier);
+        event.className = className(testIdentifier).orElse("");
+        event.methodName = methodName(testIdentifier).orElse("");
+        event.displayName = testIdentifier.getDisplayName();
+        event.status = status;
+        event.durationMillis = durationMillis;
+        event.reason = reason;
+        event.end();
+        if (event.shouldCommit()) {
+            event.commit();
+        }
+    }
+
     private static boolean isEnabled() {
         return !"false".equalsIgnoreCase(System.getProperty(ENABLED_PROPERTY, "true"));
     }
@@ -128,7 +158,9 @@ public final class TestDurationRecorder implements TestExecutionListener {
             return repositoryRoot.get().resolve(".test-durations").resolve("test-durations.jsonl");
         }
 
-        return workingDirectory.resolve("target").resolve("orion-test-durations").resolve("test-durations.jsonl");
+        return workingDirectory.resolve("target")
+                .resolve("orion-test-durations")
+                .resolve("test-durations.jsonl");
     }
 
     private static Optional<Path> findRepositoryRoot(Path start) {
@@ -258,6 +290,6 @@ public final class TestDurationRecorder implements TestExecutionListener {
         return escaped.toString();
     }
 
-    private record StartedTest(long nanoTime, Instant instant) {
+    private record StartedTest(long nanoTime, Instant instant, TestDurationJfrEvent event) {
     }
 }

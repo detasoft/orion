@@ -1,4 +1,11 @@
 MAVEN ?= mvn
+TEST_ANALYTICS_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
+TEST_ANALYTICS_ROOT ?= $(CURDIR)/target/test-analytics
+TEST_ANALYTICS_DIR ?= $(TEST_ANALYTICS_ROOT)/$(TEST_ANALYTICS_RUN_ID)
+TEST_ANALYTICS_TOP ?= 50
+TEST_ANALYTICS_REPORT_ARGS ?=
+TEST_ANALYTICS_MAIN = pro.deta.orion.test.duration.TestAnalyticsReport
+TEST_JFR_MAVEN_ARGS ?=
 ORION_ROOT ?= $(CURDIR)/orion_root
 ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
@@ -16,10 +23,33 @@ ORION_CLONE_DIR ?= $(CURDIR)/target/orion-clone
 ORION_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_REPOSITORY)
 ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -i $(ORION_SERVER_IDENTITY_KEY) -p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: test run-server issue-token issue-token-raw ssh-state ssh-status clone-repository clone-repo admin-acl admin-acl-with-token
+.PHONY: test test-jfr test-jfr-report run-server issue-token issue-token-raw
+.PHONY: ssh-state ssh-status clone-repository clone-repo admin-acl admin-acl-with-token
 
 test:
 	$(MAVEN) test -Pdev -T 4
+
+test-jfr:
+	@mkdir -p "$(TEST_ANALYTICS_DIR)/jfr"
+	@status=0; \
+	$(MAVEN) test -Pdev,test-jfr -T 4 -fae \
+		-Dorion.test.analytics.runId="$(TEST_ANALYTICS_RUN_ID)" \
+		-Dorion.test.analytics.dir="$(TEST_ANALYTICS_ROOT)" \
+		-Dorion.test.jfr.directory="$(TEST_ANALYTICS_DIR)/jfr" \
+		$(TEST_JFR_MAVEN_ARGS) || status=$$?; \
+	$(MAVEN) -q -pl tests/test-duration-recorder -am -DskipTests compile || exit $$?; \
+	$(MAVEN) -q -pl tests/test-duration-recorder \
+		org.codehaus.mojo:exec-maven-plugin:3.5.0:java \
+		-Dexec.mainClass=$(TEST_ANALYTICS_MAIN) \
+		-Dexec.args="$(TEST_ANALYTICS_DIR) $(TEST_ANALYTICS_TOP)" || exit $$?; \
+	exit $$status
+
+test-jfr-report:
+	$(MAVEN) -q -pl tests/test-duration-recorder -am -DskipTests compile
+	$(MAVEN) -q -pl tests/test-duration-recorder \
+		org.codehaus.mojo:exec-maven-plugin:3.5.0:java \
+		-Dexec.mainClass=$(TEST_ANALYTICS_MAIN) \
+		-Dexec.args="$(TEST_ANALYTICS_REPORT_ARGS)"
 
 run-server:
 	$(MAVEN) -pl core/bootstrap -am -Prun-server process-classes

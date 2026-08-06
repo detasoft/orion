@@ -35,6 +35,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>
+                        ${argLine} ${orion.test.jvm.args}
                         --add-exports java.base/jdk.internal.access=ALL-UNNAMED
                     </argLine>
                 </configuration>

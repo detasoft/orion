@@ -268,6 +268,21 @@ mvn test -Pdev \
   -Dorion.test.log.categories=pro.deta.orion.git,org.eclipse.jgit=WARN
 ```
 
+Run all tests with Java Flight Recorder analytics:
+
+```sh
+make test-jfr
+```
+
+The run uses allocation-heavy JFR settings and writes a report under
+`target/test-analytics/<run-id>/` with `index.html`, `summary.md`, CSV files,
+raw `.jfr` recordings, and SVG flame graphs. The HTML report embeds the CSV
+tables with sortable columns. For allocation work, start with `index.html`,
+`byte-array-allocations.csv`, `allocations.csv`, and `flamegraph-alloc.svg`;
+they show allocation stack hotspots and make it easier to find paths that
+materialize data into `byte[]` before writing instead of parsing or forwarding
+it incrementally.
+
 ## Repository Layout
 
 - `core/` - configuration, ACL, authorization, Git engine, storage, and common

@@ -46,7 +46,19 @@
     <maven-shade-plugin.version>3.5.0</maven-shade-plugin.version>
     <maven-antrun-plugin.version>3.1.0</maven-antrun-plugin.version>
     <build-helper-maven-plugin.version>3.6.0</build-helper-maven-plugin.version>
+    <argLine></argLine>
+    <orion.test.analytics.dir>${maven.multiModuleProjectDirectory}/target/test-analytics</orion.test.analytics.dir>
+    <orion.test.analytics.runId>${maven.build.timestamp}</orion.test.analytics.runId>
+    <orion.test.analytics.run.dir>${orion.test.analytics.dir}/${orion.test.analytics.runId}</orion.test.analytics.run.dir>
     <orion.test.debug>false</orion.test.debug>
+    <orion.test.jvm.args></orion.test.jvm.args>
+    <orion.test.jfr.directory>${orion.test.analytics.run.dir}/jfr</orion.test.jfr.directory>
+    <orion.test.jfr.file.name>${project.artifactId}-test-${surefire.forkNumber}.jfr</orion.test.jfr.file.name>
+    <orion.test.jfr.file>${orion.test.jfr.directory}/${orion.test.jfr.file.name}</orion.test.jfr.file>
+    <jfr.opts>settings=profile,allocation-profiling=maximum,disk=true,dumponexit=true,maxsize=512m</jfr.opts>
+    <orion.testDurations.enabled>true</orion.testDurations.enabled>
+    <orion.testDurations.output></orion.testDurations.output>
+    <orion.testDurations.runId>${orion.test.analytics.runId}</orion.testDurations.runId>
     <orion.test.log.level>DEBUG</orion.test.log.level>
     <orion.test.log.categories>pro.deta.orion</orion.test.log.categories>
   </properties>
@@ -268,8 +280,11 @@
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.3.0</version>
           <configuration>
+            <argLine>${argLine} ${orion.test.jvm.args}</argLine>
             <systemPropertyVariables>
-              <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+              <orion.testDurations.enabled>${orion.testDurations.enabled}</orion.testDurations.enabled>
+              <orion.testDurations.output>${orion.testDurations.output}</orion.testDurations.output>
+              <orion.testDurations.runId>${orion.testDurations.runId}</orion.testDurations.runId>
               <orion.test.debug>${orion.test.debug}</orion.test.debug>
               <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
               <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
@@ -280,8 +295,11 @@
           <artifactId>maven-failsafe-plugin</artifactId>
           <version>3.3.0</version>
           <configuration>
+            <argLine>${argLine} ${orion.test.jvm.args}</argLine>
             <systemPropertyVariables>
-              <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
+              <orion.testDurations.enabled>${orion.testDurations.enabled}</orion.testDurations.enabled>
+              <orion.testDurations.output>${orion.testDurations.output}</orion.testDurations.output>
+              <orion.testDurations.runId>${orion.testDurations.runId}</orion.testDurations.runId>
               <orion.test.debug>${orion.test.debug}</orion.test.debug>
               <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
               <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
@@ -366,6 +384,7 @@
         <maven.compiler.compilerReuseStrategy>reuseCreated</maven.compiler.compilerReuseStrategy>
         <maven.compiler.showCompilationChanges>true</maven.compiler.showCompilationChanges>
         <maven.compiler.skipMultiThreadWarning>true</maven.compiler.skipMultiThreadWarning>
+        <orion.testDurations.enabled>false</orion.testDurations.enabled>
       </properties>
       <build>
         <plugins>
@@ -382,27 +401,42 @@
             <artifactId>maven-surefire-plugin</artifactId>
             <configuration>
               <redirectTestOutputToFile>true</redirectTestOutputToFile>
-              <systemPropertyVariables>
-                <orion.testDurations.enabled>false</orion.testDurations.enabled>
-                <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
-                <orion.test.debug>${orion.test.debug}</orion.test.debug>
-                <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
-                <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
-              </systemPropertyVariables>
             </configuration>
           </plugin>
           <plugin>
             <artifactId>maven-failsafe-plugin</artifactId>
             <configuration>
               <redirectTestOutputToFile>true</redirectTestOutputToFile>
-              <systemPropertyVariables>
-                <orion.testDurations.enabled>false</orion.testDurations.enabled>
-                <orion.testDurations.runId>${maven.build.timestamp}</orion.testDurations.runId>
-                <orion.test.debug>${orion.test.debug}</orion.test.debug>
-                <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
-                <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
-              </systemPropertyVariables>
             </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+    <profile>
+      <id>test-jfr</id>
+      <properties>
+        <orion.testDurations.enabled>true</orion.testDurations.enabled>
+        <orion.testDurations.output>${orion.test.analytics.run.dir}/test-durations.jsonl</orion.testDurations.output>
+        <orion.test.jvm.args>-XX:StartFlightRecording=filename=${orion.test.jfr.file},${jfr.opts}</orion.test.jvm.args>
+      </properties>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-antrun-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>create-test-jfr-directory</id>
+                <phase>initialize</phase>
+                <goals>
+                  <goal>run</goal>
+                </goals>
+                <configuration>
+                  <target>
+                    <mkdir dir="${orion.test.jfr.directory}"/>
+                  </target>
+                </configuration>
+              </execution>
+            </executions>
           </plugin>
         </plugins>
       </build>
