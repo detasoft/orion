@@ -11,6 +11,7 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
@@ -39,6 +40,7 @@ class FetchContinuationTest {
         writeData(input, "no-progress\n");
         writeData(input, "include-tag\n");
         writeData(input, "deepen 1\n");
+        writeData(input, "filter blob:none\n");
         writeData(input, "want " + WANT + "\n");
         writeData(input, "have " + HAVE + "\n");
         writeData(input, "done\n");
@@ -60,6 +62,8 @@ class FetchContinuationTest {
                             assertThat(request.ofsDelta()).isTrue();
                             assertThat(request.includeTag()).isTrue();
                             assertThat(request.depth()).isEqualTo(1);
+                            assertThat(request.objectFilter())
+                                    .isEqualTo(NativeObjectFilter.BLOB_NONE);
                         });
     }
 
@@ -159,6 +163,15 @@ class FetchContinuationTest {
                 "deepen 1\n",
                 "deepen 2\n",
                 "done\n"));
+        assertInvalid(request(
+                "want " + WANT + "\n",
+                "filter blob:limit=1\n",
+                "done\n"));
+        assertInvalid(request(
+                "want " + WANT + "\n",
+                "filter blob:none\n",
+                "filter blob:none\n",
+                "done\n"));
         assertInvalid(request("have " + HAVE + "\n", "done\n"));
         assertInvalid(request(
                 "want " + WANT + "\n",
@@ -171,6 +184,26 @@ class FetchContinuationTest {
         ByteBuf input = request(
                 "want " + WANT + "\n",
                 "deepen 1\n",
+                "done\n");
+        Continuation<ByteBuf> completed = drive(
+                input,
+                context(
+                        new GitWireConfiguration.ProtocolV2(
+                                false,
+                                false,
+                                true,
+                                false,
+                                false,
+                                false)));
+
+        assertInvalid(completed);
+    }
+
+    @Test
+    void rejectsFilterWhenFilterIsDisabled() {
+        ByteBuf input = request(
+                "want " + WANT + "\n",
+                "filter blob:none\n",
                 "done\n");
         Continuation<ByteBuf> completed = drive(
                 input,

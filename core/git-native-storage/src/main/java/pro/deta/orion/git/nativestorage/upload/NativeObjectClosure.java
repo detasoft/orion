@@ -3,6 +3,7 @@ package pro.deta.orion.git.nativestorage.upload;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.object.ObjectType;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -27,15 +28,25 @@ public final class NativeObjectClosure {
     public Set<GitObjectId> objectIdsFor(
             Set<GitObjectId> wants,
             Set<GitObjectId> haves) {
-        return selectionFor(wants, haves, 0).objectIds();
+        return selectionFor(wants, haves, 0, NativeObjectFilter.NONE)
+                .objectIds();
     }
 
     public FetchSelection selectionFor(
             Set<GitObjectId> wants,
             Set<GitObjectId> haves,
             int depth) {
+        return selectionFor(wants, haves, depth, NativeObjectFilter.NONE);
+    }
+
+    public FetchSelection selectionFor(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves,
+            int depth,
+            NativeObjectFilter objectFilter) {
         Objects.requireNonNull(wants, "wants");
         Objects.requireNonNull(haves, "haves");
+        Objects.requireNonNull(objectFilter, "objectFilter");
         if (depth < 0) {
             throw new IllegalArgumentException(
                     "Fetch depth must not be negative");
@@ -47,12 +58,33 @@ public final class NativeObjectClosure {
         Set<GitObjectId> objectIds =
                 new LinkedHashSet<>(wantedClosure.objectIds());
         objectIds.removeAll(traverse(haves, true));
+        applyObjectFilter(objectIds, wants, objectFilter);
 
         Set<GitObjectId> shallowBoundaries =
                 new LinkedHashSet<>(wantedClosure.shallowBoundaries());
         shallowBoundaries.retainAll(objectIds);
 
         return new FetchSelection(objectIds, shallowBoundaries);
+    }
+
+    private void applyObjectFilter(
+            Set<GitObjectId> objectIds,
+            Set<GitObjectId> directWants,
+            NativeObjectFilter objectFilter) {
+        if (objectFilter == NativeObjectFilter.NONE) {
+            return;
+        }
+        for (GitObjectId id : new ArrayList<>(objectIds)) {
+            if (directWants.contains(id)) {
+                continue;
+            }
+            LooseObject object = objects.read(id)
+                    .orElseThrow(NativeObjectClosure::missingObject);
+            if (objectFilter == NativeObjectFilter.BLOB_NONE
+                    && object.type() == ObjectType.BLOB) {
+                objectIds.remove(id);
+            }
+        }
     }
 
     private Set<GitObjectId> traverse(

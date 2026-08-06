@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 
 final class FetchPayloadContinuation implements Continuation<ByteBuf> {
@@ -92,6 +93,9 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             if (value.startsWith("deepen ")) {
                 return depthArgument(value);
             }
+            if (value.startsWith("filter ")) {
+                return filterArgument(value);
+            }
             return switch (value) {
                 case "done" -> FetchContinuation.SimpleArgument.DONE;
                 case "thin-pack" ->
@@ -128,6 +132,16 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             return parsed > 0
                     ? new FetchContinuation.DepthArgument((int) parsed)
                     : null;
+        }
+
+        private static FetchContinuation.FetchArgument filterArgument(
+                String value) {
+            String filter = value.substring("filter ".length());
+            return switch (filter) {
+                case "blob:none" -> new FetchContinuation.FilterArgument(
+                        NativeObjectFilter.BLOB_NONE);
+                default -> null;
+            };
         }
 
         private static FetchContinuation.FetchArgument objectArgument(

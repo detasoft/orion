@@ -101,6 +101,9 @@ public final class GitNativeClientOutput {
                 if (configuration.waitForDone()) {
                     fetchOptions.add("wait-for-done");
                 }
+                if (configuration.filter()) {
+                    fetchOptions.add("filter");
+                }
                 capabilities.add(fetchOptions.isEmpty()
                         ? "fetch\n"
                         : "fetch="

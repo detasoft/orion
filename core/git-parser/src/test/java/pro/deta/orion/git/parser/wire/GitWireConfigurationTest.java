@@ -30,6 +30,7 @@ class GitWireConfigurationTest {
         assertThat(configuration.protocolV2().shallow()).isTrue();
         assertThat(configuration.protocolV2().waitForDone()).isTrue();
         assertThat(configuration.protocolV2().serverOption()).isTrue();
+        assertThat(configuration.protocolV2().filter()).isTrue();
     }
 
     @Test
@@ -66,6 +67,20 @@ class GitWireConfigurationTest {
                 true))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("shallow requires fetch");
+    }
+
+    @Test
+    void rejectsFilterWithoutFetch() {
+        assertThatThrownBy(() -> new GitWireConfiguration.ProtocolV2(
+                true,
+                true,
+                false,
+                false,
+                false,
+                true,
+                true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("filter requires fetch");
     }
 
     @Test

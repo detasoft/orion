@@ -15,7 +15,8 @@ public record NativeFetchRequest(
         boolean ofsDelta,
         boolean includeTag,
         boolean waitForDone,
-        int depth) {
+        int depth,
+        NativeObjectFilter objectFilter) {
 
     public NativeFetchRequest(
             Set<GitObjectId> wants,
@@ -31,7 +32,8 @@ public record NativeFetchRequest(
                 ofsDelta,
                 false,
                 false,
-                0);
+                0,
+                NativeObjectFilter.NONE);
     }
 
     public NativeFetchRequest(
@@ -49,7 +51,8 @@ public record NativeFetchRequest(
                 ofsDelta,
                 includeTag,
                 false,
-                0);
+                0,
+                NativeObjectFilter.NONE);
     }
 
     public NativeFetchRequest(
@@ -68,12 +71,35 @@ public record NativeFetchRequest(
                 ofsDelta,
                 includeTag,
                 waitForDone,
-                0);
+                0,
+                NativeObjectFilter.NONE);
+    }
+
+    public NativeFetchRequest(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves,
+            boolean done,
+            boolean thinPack,
+            boolean ofsDelta,
+            boolean includeTag,
+            boolean waitForDone,
+            int depth) {
+        this(
+                wants,
+                haves,
+                done,
+                thinPack,
+                ofsDelta,
+                includeTag,
+                waitForDone,
+                depth,
+                NativeObjectFilter.NONE);
     }
 
     public NativeFetchRequest {
         Objects.requireNonNull(wants, "wants");
         Objects.requireNonNull(haves, "haves");
+        Objects.requireNonNull(objectFilter, "objectFilter");
         if (depth < 0) {
             throw new IllegalArgumentException(
                     "Fetch depth must not be negative");

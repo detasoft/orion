@@ -12,6 +12,7 @@ import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -193,6 +194,42 @@ class NativeGitRepositoryTest {
             assertThat(response.shallowBoundaries())
                     .containsExactly(tipCommit);
             assertThat(pack.getInt(8)).isEqualTo(3);
+        } finally {
+            pack.release();
+        }
+    }
+
+    @Test
+    void filteredFetchBuildsPackWithoutTreeReachedBlobs() {
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                "filtered".getBytes(StandardCharsets.UTF_8));
+        GitObjectId tree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "file.txt", blob));
+        GitObjectId commit = writeCommit(objects, tree, null, "filtered");
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(commit),
+                        Set.of(),
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        0,
+                        NativeObjectFilter.BLOB_NONE));
+        CompositeByteBuf pack = produce(response.packProducer());
+
+        try {
+            assertThat(pack.getInt(8)).isEqualTo(2);
         } finally {
             pack.release();
         }

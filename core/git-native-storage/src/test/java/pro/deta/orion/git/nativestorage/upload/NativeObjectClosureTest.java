@@ -86,6 +86,52 @@ class NativeObjectClosureTest {
     }
 
     @Test
+    void blobNoneOmitsTreeReachedBlobsButKeepsTrees() {
+        GitObjectId rootBlob = objects.write(
+                ObjectType.BLOB,
+                "root\n".getBytes(StandardCharsets.UTF_8));
+        GitObjectId nestedBlob = objects.write(
+                ObjectType.BLOB,
+                "nested\n".getBytes(StandardCharsets.UTF_8));
+        GitObjectId nestedTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "nested.txt", nestedBlob));
+        GitObjectId rootTree = objects.write(
+                ObjectType.TREE,
+                treeEntries(
+                        treeEntry("40000", "dir", nestedTree),
+                        treeEntry("100644", "root.txt", rootBlob)));
+        GitObjectId commit = writeCommit(rootTree, null, "filtered");
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(
+                        Set.of(commit),
+                        Set.of(),
+                        0,
+                        NativeObjectFilter.BLOB_NONE);
+
+        assertThat(result.objectIds())
+                .containsExactlyInAnyOrder(commit, rootTree, nestedTree);
+        assertThat(result.objectIds()).doesNotContain(rootBlob, nestedBlob);
+    }
+
+    @Test
+    void blobNoneKeepsExplicitBlobWants() {
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                "direct\n".getBytes(StandardCharsets.UTF_8));
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(
+                        Set.of(blob),
+                        Set.of(),
+                        0,
+                        NativeObjectFilter.BLOB_NONE);
+
+        assertThat(result.objectIds()).containsExactly(blob);
+    }
+
+    @Test
     void ignoresUnknownHaveRoots() {
         GitObjectId wanted = objects.write(
                 ObjectType.BLOB,
@@ -206,6 +252,14 @@ class NativeObjectClosureTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         output.writeBytes((mode + " " + name + "\0").getBytes(StandardCharsets.UTF_8));
         output.writeBytes(HexFormat.of().parseHex(objectId.value()));
+        return output.toByteArray();
+    }
+
+    private static byte[] treeEntries(byte[]... entries) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        for (byte[] entry : entries) {
+            output.writeBytes(entry);
+        }
         return output.toByteArray();
     }
 }

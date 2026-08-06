@@ -20,7 +20,7 @@ public record GitWireConfiguration(
                 new LegacyReceivePack(
                         true, true, true, true, true),
                 new ProtocolV2(
-                        true, true, true, true, true, true));
+                        true, true, true, true, true, true, true));
     }
 
     public record LegacyUploadPack(
@@ -46,7 +46,8 @@ public record GitWireConfiguration(
             boolean fetch,
             boolean shallow,
             boolean waitForDone,
-            boolean serverOption) {
+            boolean serverOption,
+            boolean filter) {
 
         public ProtocolV2(
                 boolean lsRefs,
@@ -60,7 +61,8 @@ public record GitWireConfiguration(
                     fetch,
                     false,
                     waitForDone,
-                    serverOption);
+                    serverOption,
+                    false);
         }
 
         public ProtocolV2(
@@ -68,7 +70,24 @@ public record GitWireConfiguration(
                 boolean lsRefsUnborn,
                 boolean fetch,
                 boolean serverOption) {
-            this(lsRefs, lsRefsUnborn, fetch, false, false, serverOption);
+            this(lsRefs, lsRefsUnborn, fetch, false, false, serverOption, false);
+        }
+
+        public ProtocolV2(
+                boolean lsRefs,
+                boolean lsRefsUnborn,
+                boolean fetch,
+                boolean shallow,
+                boolean waitForDone,
+                boolean serverOption) {
+            this(
+                    lsRefs,
+                    lsRefsUnborn,
+                    fetch,
+                    shallow,
+                    waitForDone,
+                    serverOption,
+                    false);
         }
 
         public ProtocolV2 {
@@ -83,6 +102,10 @@ public record GitWireConfiguration(
             if (waitForDone && !fetch) {
                 throw new IllegalArgumentException(
                         "waitForDone requires fetch");
+            }
+            if (filter && !fetch) {
+                throw new IllegalArgumentException(
+                        "filter requires fetch");
             }
         }
     }

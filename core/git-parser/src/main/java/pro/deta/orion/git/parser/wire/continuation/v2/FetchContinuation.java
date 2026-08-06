@@ -5,6 +5,7 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
@@ -28,6 +29,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     private boolean includeTag;
     private boolean waitForDone;
     private int depth;
+    private NativeObjectFilter objectFilter = NativeObjectFilter.NONE;
     private boolean invalid;
 
     FetchContinuation(
@@ -74,6 +76,16 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                     depth = shallow.depth();
                 }
             }
+            case FilterArgument filter -> {
+                if (objectFilter != NativeObjectFilter.NONE
+                        || !context.configuration
+                                .protocolV2()
+                                .filter()) {
+                    invalid = true;
+                } else {
+                    objectFilter = filter.objectFilter();
+                }
+            }
             case SimpleArgument simple -> {
                 switch (simple) {
                     case DONE -> done = true;
@@ -100,7 +112,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                 ofsDelta,
                 includeTag,
                 waitForDone,
-                depth);
+                depth,
+                objectFilter);
         if (!done) {
             return new FetchNegotiationResponseContinuation(
                     context,
@@ -114,7 +127,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     }
 
     sealed interface FetchArgument
-            permits ObjectArgument, DepthArgument, SimpleArgument {
+            permits ObjectArgument, DepthArgument, FilterArgument,
+            SimpleArgument {
     }
 
     record ObjectArgument(
@@ -129,6 +143,18 @@ final class FetchContinuation implements Continuation<ByteBuf> {
             if (depth <= 0) {
                 throw new IllegalArgumentException(
                         "Depth must be positive");
+            }
+        }
+    }
+
+    record FilterArgument(NativeObjectFilter objectFilter)
+            implements FetchArgument {
+
+        FilterArgument {
+            Objects.requireNonNull(objectFilter, "objectFilter");
+            if (objectFilter == NativeObjectFilter.NONE) {
+                throw new IllegalArgumentException(
+                        "Fetch filter must not be none");
             }
         }
     }
