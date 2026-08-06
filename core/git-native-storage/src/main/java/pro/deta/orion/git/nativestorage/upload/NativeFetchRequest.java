@@ -4,6 +4,7 @@ import pro.deta.orion.git.common.GitObjectId;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -17,7 +18,8 @@ public record NativeFetchRequest(
         boolean waitForDone,
         int depth,
         NativeObjectFilter objectFilter,
-        Set<String> wantRefs) {
+        Set<String> wantRefs,
+        Set<String> packfileUriProtocols) {
 
     public NativeFetchRequest(
             Set<GitObjectId> wants,
@@ -35,6 +37,7 @@ public record NativeFetchRequest(
                 false,
                 0,
                 NativeObjectFilter.NONE,
+                Set.of(),
                 Set.of());
     }
 
@@ -55,6 +58,7 @@ public record NativeFetchRequest(
                 false,
                 0,
                 NativeObjectFilter.NONE,
+                Set.of(),
                 Set.of());
     }
 
@@ -76,6 +80,7 @@ public record NativeFetchRequest(
                 waitForDone,
                 0,
                 NativeObjectFilter.NONE,
+                Set.of(),
                 Set.of());
     }
 
@@ -98,6 +103,7 @@ public record NativeFetchRequest(
                 waitForDone,
                 depth,
                 NativeObjectFilter.NONE,
+                Set.of(),
                 Set.of());
     }
 
@@ -121,6 +127,32 @@ public record NativeFetchRequest(
                 waitForDone,
                 depth,
                 objectFilter,
+                Set.of(),
+                Set.of());
+    }
+
+    public NativeFetchRequest(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves,
+            boolean done,
+            boolean thinPack,
+            boolean ofsDelta,
+            boolean includeTag,
+            boolean waitForDone,
+            int depth,
+            NativeObjectFilter objectFilter,
+            Set<String> wantRefs) {
+        this(
+                wants,
+                haves,
+                done,
+                thinPack,
+                ofsDelta,
+                includeTag,
+                waitForDone,
+                depth,
+                objectFilter,
+                wantRefs,
                 Set.of());
     }
 
@@ -129,6 +161,9 @@ public record NativeFetchRequest(
         Objects.requireNonNull(haves, "haves");
         Objects.requireNonNull(objectFilter, "objectFilter");
         Objects.requireNonNull(wantRefs, "wantRefs");
+        Objects.requireNonNull(
+                packfileUriProtocols,
+                "packfileUriProtocols");
         if (depth < 0) {
             throw new IllegalArgumentException(
                     "Fetch depth must not be negative");
@@ -136,10 +171,19 @@ public record NativeFetchRequest(
         for (String wantRef : wantRefs) {
             validateWantRef(wantRef);
         }
+        Set<String> normalizedPackfileUriProtocols =
+                new LinkedHashSet<>();
+        for (String protocol : packfileUriProtocols) {
+            validatePackfileUriProtocol(protocol);
+            normalizedPackfileUriProtocols.add(
+                    protocol.toLowerCase(Locale.ROOT));
+        }
         wants = Collections.unmodifiableSet(new LinkedHashSet<>(wants));
         haves = Collections.unmodifiableSet(new LinkedHashSet<>(haves));
         wantRefs = Collections.unmodifiableSet(
                 new LinkedHashSet<>(wantRefs));
+        packfileUriProtocols = Collections.unmodifiableSet(
+                normalizedPackfileUriProtocols);
     }
 
     public boolean shallow() {
@@ -171,6 +215,14 @@ public record NativeFetchRequest(
                 throw new IllegalArgumentException(
                         "wantRef must be a full Git ref name");
             }
+        }
+    }
+
+    private static void validatePackfileUriProtocol(String protocol) {
+        Objects.requireNonNull(protocol, "packfileUriProtocol");
+        if (!NativePackfileUri.validProtocol(protocol)) {
+            throw new IllegalArgumentException(
+                    "packfileUriProtocol must be a valid URI scheme");
         }
     }
 }

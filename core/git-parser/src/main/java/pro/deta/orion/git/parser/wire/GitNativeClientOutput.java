@@ -5,6 +5,7 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -111,6 +112,9 @@ public final class GitNativeClientOutput {
                 }
                 if (configuration.sidebandAll()) {
                     fetchOptions.add("sideband-all");
+                }
+                if (configuration.packfileUris()) {
+                    fetchOptions.add("packfile-uris");
                 }
                 capabilities.add(fetchOptions.isEmpty()
                         ? "fetch\n"
@@ -342,6 +346,7 @@ public final class GitNativeClientOutput {
                 producer,
                 shallowBoundaries,
                 wantedRefs,
+                List.of(),
                 false);
     }
 
@@ -350,8 +355,36 @@ public final class GitNativeClientOutput {
             Set<GitObjectId> shallowBoundaries,
             Map<String, GitObjectId> wantedRefs,
             boolean sidebandAll) {
+        return beginProtocolV2Packfile(
+                producer,
+                shallowBoundaries,
+                wantedRefs,
+                List.of(),
+                sidebandAll);
+    }
+
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Map<String, GitObjectId> wantedRefs,
+            List<NativePackfileUri> packfileUris) {
+        return beginProtocolV2Packfile(
+                producer,
+                shallowBoundaries,
+                wantedRefs,
+                packfileUris,
+                false);
+    }
+
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Map<String, GitObjectId> wantedRefs,
+            List<NativePackfileUri> packfileUris,
+            boolean sidebandAll) {
         Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
         Objects.requireNonNull(wantedRefs, "wantedRefs");
+        Objects.requireNonNull(packfileUris, "packfileUris");
         Result<NativePackProducer> availableProducer =
                 availableProducer(producer);
         if (availableProducer instanceof
@@ -364,6 +397,7 @@ public final class GitNativeClientOutput {
                         producer,
                         shallowBoundaries,
                         wantedRefs,
+                        packfileUris,
                         sidebandAll);
         protocolV2PackfileResponse = response;
         return response;
@@ -1410,11 +1444,13 @@ public final class GitNativeClientOutput {
                 NativePackProducer producer,
                 Set<GitObjectId> shallowBoundaries,
                 Map<String, GitObjectId> wantedRefs,
+                List<NativePackfileUri> packfileUris,
                 boolean sidebandAll) {
             this.producer = producer;
             this.prePackSectionPackets = prePackSectionPackets(
                     shallowBoundaries,
                     wantedRefs,
+                    packfileUris,
                     sidebandAll);
             this.beginFailure = null;
             this.packfileHeader = sidebandAll
@@ -1620,12 +1656,16 @@ public final class GitNativeClientOutput {
         private static List<byte[]> prePackSectionPackets(
                 Set<GitObjectId> shallowBoundaries,
                 Map<String, GitObjectId> wantedRefs,
+                List<NativePackfileUri> packfileUris,
                 boolean sidebandAll) {
             Objects.requireNonNull(
                     shallowBoundaries,
                     "shallowBoundaries");
             Objects.requireNonNull(wantedRefs, "wantedRefs");
-            if (shallowBoundaries.isEmpty() && wantedRefs.isEmpty()) {
+            Objects.requireNonNull(packfileUris, "packfileUris");
+            if (shallowBoundaries.isEmpty()
+                    && wantedRefs.isEmpty()
+                    && packfileUris.isEmpty()) {
                 return List.of();
             }
             List<byte[]> packets = new ArrayList<>();
@@ -1663,6 +1703,21 @@ public final class GitNativeClientOutput {
                             objectId.value()
                                     + " "
                                     + refName
+                                    + "\n",
+                            sidebandAll));
+                }
+                packets.add(DELIMITER);
+            }
+            if (!packfileUris.isEmpty()) {
+                packets.add(encodeAsciiPacket(
+                        "packfile-uris\n",
+                        sidebandAll));
+                for (NativePackfileUri packfileUri : packfileUris) {
+                    Objects.requireNonNull(packfileUri, "packfileUri");
+                    packets.add(encodeAsciiPacket(
+                            packfileUri.packHash()
+                                    + " "
+                                    + packfileUri.uri()
                                     + "\n",
                             sidebandAll));
                 }

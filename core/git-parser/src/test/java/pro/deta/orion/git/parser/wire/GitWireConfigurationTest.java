@@ -33,6 +33,7 @@ class GitWireConfigurationTest {
         assertThat(configuration.protocolV2().filter()).isTrue();
         assertThat(configuration.protocolV2().refInWant()).isTrue();
         assertThat(configuration.protocolV2().sidebandAll()).isTrue();
+        assertThat(configuration.protocolV2().packfileUris()).isTrue();
     }
 
     @Test
@@ -114,6 +115,23 @@ class GitWireConfigurationTest {
                 true))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("sidebandAll requires fetch");
+    }
+
+    @Test
+    void rejectsPackfileUrisWithoutFetch() {
+        assertThatThrownBy(() -> new GitWireConfiguration.ProtocolV2(
+                true,
+                true,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+                true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("packfileUris requires fetch");
     }
 
     @Test

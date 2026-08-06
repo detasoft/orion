@@ -20,7 +20,16 @@ public record GitWireConfiguration(
                 new LegacyReceivePack(
                         true, true, true, true, true),
                 new ProtocolV2(
-                        true, true, true, true, true, true, true, true, true));
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true));
     }
 
     public record LegacyUploadPack(
@@ -49,7 +58,8 @@ public record GitWireConfiguration(
             boolean serverOption,
             boolean filter,
             boolean refInWant,
-            boolean sidebandAll) {
+            boolean sidebandAll,
+            boolean packfileUris) {
 
         public ProtocolV2(
                 boolean lsRefs,
@@ -64,6 +74,7 @@ public record GitWireConfiguration(
                     false,
                     waitForDone,
                     serverOption,
+                    false,
                     false,
                     false,
                     false);
@@ -81,6 +92,7 @@ public record GitWireConfiguration(
                     false,
                     false,
                     serverOption,
+                    false,
                     false,
                     false,
                     false);
@@ -100,6 +112,7 @@ public record GitWireConfiguration(
                     shallow,
                     waitForDone,
                     serverOption,
+                    false,
                     false,
                     false,
                     false);
@@ -122,6 +135,7 @@ public record GitWireConfiguration(
                     serverOption,
                     filter,
                     false,
+                    false,
                     false);
         }
 
@@ -143,6 +157,30 @@ public record GitWireConfiguration(
                     serverOption,
                     filter,
                     refInWant,
+                    false,
+                    false);
+        }
+
+        public ProtocolV2(
+                boolean lsRefs,
+                boolean lsRefsUnborn,
+                boolean fetch,
+                boolean shallow,
+                boolean waitForDone,
+                boolean serverOption,
+                boolean filter,
+                boolean refInWant,
+                boolean sidebandAll) {
+            this(
+                    lsRefs,
+                    lsRefsUnborn,
+                    fetch,
+                    shallow,
+                    waitForDone,
+                    serverOption,
+                    filter,
+                    refInWant,
+                    sidebandAll,
                     false);
         }
 
@@ -170,6 +208,10 @@ public record GitWireConfiguration(
             if (sidebandAll && !fetch) {
                 throw new IllegalArgumentException(
                         "sidebandAll requires fetch");
+            }
+            if (packfileUris && !fetch) {
+                throw new IllegalArgumentException(
+                        "packfileUris requires fetch");
             }
         }
     }

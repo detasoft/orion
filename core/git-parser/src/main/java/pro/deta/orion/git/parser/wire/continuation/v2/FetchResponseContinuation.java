@@ -5,11 +5,14 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 final class FetchResponseContinuation implements Continuation<ByteBuf> {
@@ -42,6 +45,7 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
                         fetch.packProducer(),
                         fetch.shallowBoundaries(),
                         fetch.wantedRefs(),
+                        packfileUrisForClient(fetch),
                         sidebandAll);
             }
             return switch (response.advance()) {
@@ -83,5 +87,20 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
     @TestOnly
     boolean sidebandAll() {
         return sidebandAll;
+    }
+
+    private List<NativePackfileUri> packfileUrisForClient(
+            NativeFetchResponse fetch) {
+        if (request.packfileUriProtocols().isEmpty()) {
+            return List.of();
+        }
+        List<NativePackfileUri> allowed = new ArrayList<>();
+        for (NativePackfileUri packfileUri : fetch.packfileUris()) {
+            if (request.packfileUriProtocols()
+                    .contains(packfileUri.protocol())) {
+                allowed.add(packfileUri);
+            }
+        }
+        return List.copyOf(allowed);
     }
 }

@@ -5,6 +5,7 @@ import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -130,18 +131,61 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
+    void writesPackfileUrisBeforePackfileSection() {
+        ByteBuf outbound = outputBuffer();
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        NativePackfileUri packfileUri = new NativePackfileUri(
+                "3".repeat(40),
+                "https://e/p.pack");
+        byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
+        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+                output.beginProtocolV2Packfile(
+                        producer(pack),
+                        Set.of(),
+                        Map.of(),
+                        List.of(packfileUri));
+
+        try {
+            complete(response);
+
+            byte[] bytes = join(sent);
+            String prefix = new String(
+                    bytes,
+                    0,
+                    18 + 62 + 4 + 13,
+                    StandardCharsets.US_ASCII);
+            assertThat(prefix)
+                    .isEqualTo(
+                            "0012packfile-uris\n"
+                                    + "003e"
+                                    + packfileUri.packHash()
+                                    + " https://e/p.pack\n"
+                                    + "0001"
+                                    + "000dpackfile\n");
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
     void writesWholeResponseInsideSidebandAll() {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
         GitNativeClientOutput output = collectingOutput(outbound, sent);
         GitObjectId boundary = GitObjectId.of("1".repeat(40));
         GitObjectId refId = GitObjectId.of("2".repeat(40));
+        NativePackfileUri packfileUri = new NativePackfileUri(
+                "3".repeat(40),
+                "https://e/p.pack");
         byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
         GitNativeClientOutput.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(pack),
                         Set.of(boundary),
                         Map.of("refs/heads/main", refId),
+                        List.of(packfileUri),
                         true);
 
         try {
@@ -158,6 +202,11 @@ class ProtocolV2PackfileResponseTest {
                                     + "003e\001"
                                     + refId.value()
                                     + " refs/heads/main\n"
+                                    + "0001"
+                                    + "0013\001packfile-uris\n"
+                                    + "003f\001"
+                                    + packfileUri.packHash()
+                                    + " https://e/p.pack\n"
                                     + "0001"
                                     + "000e\001packfile\n"
                                     + "000e\001PACK-data"

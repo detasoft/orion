@@ -17,5 +17,6 @@ tasks may be ready at the same time.
 - [ ] [Replace copied native client output chunks](native-client-output-buffering/TASK.md)
 - [ ] [Add native Git client state machines](native-git-client-state-machines/TASK.md)
 - [ ] [Add real native Git client transport](native-git-client-transport-compatibility/TASK.md)
-- [ ] [Extend protocol v2 server fetch](protocol-v2-server-fetch-extensions/TASK.md)
+- [x] [Extend protocol v2 server fetch](protocol-v2-server-fetch-extensions/TASK.md)
+- [ ] [Serve packfile URI packs over HTTP](packfile-uri-http-serving/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)

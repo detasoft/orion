@@ -89,7 +89,8 @@ class GitNativeClientOutputTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "0013ls-refs=unborn\n"
-                                    + "0040fetch=shallow wait-for-done filter ref-in-want sideband-all\n"
+                                    + "004efetch=shallow wait-for-done filter "
+                                    + "ref-in-want sideband-all packfile-uris\n"
                                     + "0012server-option\n"
                                     + "0000");
         } finally {
@@ -169,6 +170,21 @@ class GitNativeClientOutputTest {
                         + "0000");
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
+                        false,
+                        false,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                        true),
+                "000eversion 2\n"
+                        + "0018fetch=packfile-uris\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
                         true, true, false, true),
                 "000eversion 2\n"
                         + "0013ls-refs=unborn\n"
@@ -187,10 +203,20 @@ class GitNativeClientOutputTest {
     void keepsProtocolV2CapabilitiesInStableOrder() {
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
-                        true, false, true, true, true, true, true, true, true),
+                        true,
+                        false,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true),
                 "000eversion 2\n"
                         + "000cls-refs\n"
-                        + "0040fetch=shallow wait-for-done filter ref-in-want sideband-all\n"
+                        + "004efetch=shallow wait-for-done filter "
+                        + "ref-in-want sideband-all packfile-uris\n"
                         + "0012server-option\n"
                         + "0000");
     }

@@ -7,6 +7,9 @@ import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 final class FetchPayloadContinuation implements Continuation<ByteBuf> {
     private final FetchContinuation fetch;
     private final FetchPayloadParser parser;
@@ -99,6 +102,9 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             if (value.startsWith("want-ref ")) {
                 return refArgument(value);
             }
+            if (value.startsWith("packfile-uris ")) {
+                return packfileUriProtocolsArgument(value);
+            }
             return switch (value) {
                 case "done" -> FetchContinuation.SimpleArgument.DONE;
                 case "thin-pack" ->
@@ -157,6 +163,23 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
                     : null;
         }
 
+        private static FetchContinuation.FetchArgument
+                packfileUriProtocolsArgument(String value) {
+            String rawProtocols = value.substring("packfile-uris ".length());
+            if (rawProtocols.isEmpty()) {
+                return null;
+            }
+            Set<String> protocols = new LinkedHashSet<>();
+            for (String protocol : rawProtocols.split(",", -1)) {
+                if (!isValidProtocol(protocol)) {
+                    return null;
+                }
+                protocols.add(protocol);
+            }
+            return new FetchContinuation.PackfileUriProtocolsArgument(
+                    protocols);
+        }
+
         private static FetchContinuation.FetchArgument objectArgument(
                 String value,
                 String prefix,
@@ -179,6 +202,29 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             return value >= '0' && value <= '9'
                     || value >= 'a' && value <= 'f'
                     || value >= 'A' && value <= 'F';
+        }
+
+        private static boolean isValidProtocol(String protocol) {
+            if (protocol.isEmpty()
+                    || !isAsciiLetter(protocol.charAt(0))) {
+                return false;
+            }
+            for (int index = 1; index < protocol.length(); index++) {
+                char character = protocol.charAt(index);
+                if (!isAsciiLetter(character)
+                        && (character < '0' || character > '9')
+                        && character != '+'
+                        && character != '.'
+                        && character != '-') {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static boolean isAsciiLetter(char character) {
+            return character >= 'a' && character <= 'z'
+                    || character >= 'A' && character <= 'Z';
         }
 
         private static boolean isValidFullRefName(String refName) {

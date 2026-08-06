@@ -41,6 +41,7 @@ class FetchContinuationTest {
         writeData(input, "include-tag\n");
         writeData(input, "deepen 1\n");
         writeData(input, "filter blob:none\n");
+        writeData(input, "packfile-uris HTTP,https\n");
         writeData(input, "want " + WANT + "\n");
         writeData(input, "have " + HAVE + "\n");
         writeData(input, "done\n");
@@ -64,6 +65,8 @@ class FetchContinuationTest {
                             assertThat(request.depth()).isEqualTo(1);
                             assertThat(request.objectFilter())
                                     .isEqualTo(NativeObjectFilter.BLOB_NONE);
+                            assertThat(request.packfileUriProtocols())
+                                    .containsExactly("http", "https");
                         });
     }
 
@@ -228,6 +231,23 @@ class FetchContinuationTest {
         assertInvalid(request("want-ref HEAD\n", "done\n"));
         assertInvalid(request("want-ref refs/heads/main topic\n", "done\n"));
         assertInvalid(request("want-ref refs/heads/../main\n", "done\n"));
+        assertInvalid(request(
+                "want " + WANT + "\n",
+                "packfile-uris \n",
+                "done\n"));
+        assertInvalid(request(
+                "want " + WANT + "\n",
+                "packfile-uris http,\n",
+                "done\n"));
+        assertInvalid(request(
+                "want " + WANT + "\n",
+                "packfile-uris 1http\n",
+                "done\n"));
+        assertInvalid(request(
+                "want " + WANT + "\n",
+                "packfile-uris http\n",
+                "packfile-uris https\n",
+                "done\n"));
     }
 
     @Test
@@ -296,6 +316,28 @@ class FetchContinuationTest {
         ByteBuf input = request(
                 "want " + WANT + "\n",
                 "sideband-all\n",
+                "done\n");
+        Continuation<ByteBuf> completed = drive(
+                input,
+                context(
+                        new GitWireConfiguration.ProtocolV2(
+                                false,
+                                false,
+                                true,
+                                false,
+                                false,
+                                false,
+                                false,
+                                false)));
+
+        assertInvalid(completed);
+    }
+
+    @Test
+    void rejectsPackfileUrisWhenDisabled() {
+        ByteBuf input = request(
+                "want " + WANT + "\n",
+                "packfile-uris https\n",
                 "done\n");
         Continuation<ByteBuf> completed = drive(
                 input,

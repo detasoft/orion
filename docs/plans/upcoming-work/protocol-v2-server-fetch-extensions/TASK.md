@@ -1,6 +1,6 @@
 # Extend Protocol V2 Server Fetch
 
-Status: todo
+Status: done
 Source: converted from former root task list Next section.
 
 Extend protocol v2 server fetch beyond the base request.
@@ -11,4 +11,4 @@ Extend protocol v2 server fetch beyond the base request.
 - [x] [Add object filter support](object-filter/TASK.md)
 - [x] [Add ref-in-want support](ref-in-want/TASK.md)
 - [x] [Add sideband-all support](sideband-all/TASK.md)
-- [ ] [Add packfile URI responses](packfile-uri/TASK.md)
+- [x] [Add packfile URI responses](packfile-uri/TASK.md)

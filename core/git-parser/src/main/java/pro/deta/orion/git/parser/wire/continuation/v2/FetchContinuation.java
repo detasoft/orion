@@ -12,6 +12,7 @@ import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -23,6 +24,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     private final InitialRequestData data;
     private final Set<GitObjectId> wants = new LinkedHashSet<>();
     private final Set<String> wantRefs = new LinkedHashSet<>();
+    private final Set<String> packfileUriProtocols = new LinkedHashSet<>();
     private final Set<GitObjectId> haves = new LinkedHashSet<>();
     private boolean done;
     private boolean thinPack;
@@ -95,6 +97,14 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                     wantRefs.add(ref.refName());
                 }
             }
+            case PackfileUriProtocolsArgument protocols -> {
+                if (!context.configuration.protocolV2().packfileUris()
+                        || !packfileUriProtocols.isEmpty()) {
+                    invalid = true;
+                } else {
+                    packfileUriProtocols.addAll(protocols.protocols());
+                }
+            }
             case SimpleArgument simple -> {
                 switch (simple) {
                     case DONE -> done = true;
@@ -132,7 +142,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                 waitForDone,
                 depth,
                 objectFilter,
-                wantRefs);
+                wantRefs,
+                packfileUriProtocols);
         if (!done) {
             return new FetchNegotiationResponseContinuation(
                     context,
@@ -149,7 +160,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
 
     sealed interface FetchArgument
             permits ObjectArgument, DepthArgument, FilterArgument, RefArgument,
-            SimpleArgument {
+            PackfileUriProtocolsArgument, SimpleArgument {
     }
 
     record ObjectArgument(
@@ -184,6 +195,20 @@ final class FetchContinuation implements Continuation<ByteBuf> {
 
         RefArgument {
             Objects.requireNonNull(refName, "refName");
+        }
+    }
+
+    record PackfileUriProtocolsArgument(Set<String> protocols)
+            implements FetchArgument {
+
+        PackfileUriProtocolsArgument {
+            Objects.requireNonNull(protocols, "protocols");
+            if (protocols.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Packfile URI protocols must not be empty");
+            }
+            protocols = Collections.unmodifiableSet(
+                    new LinkedHashSet<>(protocols));
         }
     }
 
