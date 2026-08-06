@@ -119,6 +119,7 @@ public final class GitNativeRepositoryService {
     }
 
     private NativeGitRepository findOrFail(String repositoryPath) {
+        accessHook.beforeRead(repositoryPath);
         return check(repositoryPath, repositoryProvider.find(repositoryPath));
     }
 

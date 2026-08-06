@@ -124,7 +124,7 @@ class GitNativeRepositoryServiceTest {
     }
 
     @Test
-    void uploadDoesNotCallAccessHook() {
+    void uploadChecksReadAccessBeforeRepositoryLookup() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         provider.create("/demo.git").valueOrFailure("repository");
@@ -134,7 +134,26 @@ class GitNativeRepositoryServiceTest {
 
         service.legacyUploadPackAdvertisement(request("/demo.git"));
 
-        assertThat(accessHook.calls()).isEmpty();
+        assertThat(accessHook.calls()).containsExactly("read /demo.git");
+    }
+
+    @Test
+    void uploadStopsBeforeRepositoryLookupWhenReadHookRejects() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        provider.create("/demo.git").valueOrFailure("repository");
+        RecordingAccessHook accessHook = new RecordingAccessHook();
+        accessHook.rejectRead();
+        GitNativeRepositoryService service =
+                new GitNativeRepositoryService(provider, accessHook);
+
+        assertThatThrownBy(() -> service.legacyUploadPackAdvertisement(
+                request("/demo.git")))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("denied read /demo.git");
+
+        assertThat(accessHook.calls()).containsExactly("read /demo.git");
     }
 
     @Test
@@ -480,7 +499,18 @@ class GitNativeRepositoryServiceTest {
     private static final class RecordingAccessHook
             implements GitNativeRepositoryAccessHook {
         private final List<String> calls = new ArrayList<>();
+        private boolean rejectRead;
         private boolean rejectReceive;
+
+        @Override
+        public void beforeRead(String repositoryName) {
+            calls.add("read " + repositoryName);
+            if (rejectRead) {
+                throw new AccessDeniedException(
+                        "denied read " + repositoryName,
+                        null);
+            }
+        }
 
         @Override
         public void beforeReceive(String repositoryName) {
@@ -500,6 +530,10 @@ class GitNativeRepositoryServiceTest {
         @Override
         public void beforeWrite(String repositoryName) {
             calls.add("write " + repositoryName);
+        }
+
+        private void rejectRead() {
+            rejectRead = true;
         }
 
         private void rejectReceive() {

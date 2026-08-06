@@ -37,6 +37,26 @@ class AuthenticatedNativeRepositoryAccessHookTest {
     }
 
     @Test
+    void readRequiresRepositoryGrant() {
+        AuthenticatedNativeRepositoryAccessHook denied =
+                new AuthenticatedNativeRepositoryAccessHook(
+                        authenticatedWithoutGrants());
+        AuthenticatedNativeRepositoryAccessHook allowed =
+                new AuthenticatedNativeRepositoryAccessHook(
+                        repositorySecurityContext(
+                                "project",
+                                false,
+                                false));
+
+        assertThatThrownBy(() -> denied.beforeRead("project"))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("repository read");
+        assertThatCode(() -> allowed.beforeRead("project"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void writeRequiresRepositoryWriteGrant() {
         AuthenticatedNativeRepositoryAccessHook denied =
                 new AuthenticatedNativeRepositoryAccessHook(
@@ -91,6 +111,8 @@ class AuthenticatedNativeRepositoryAccessHookTest {
                                 false,
                                 true));
 
+        assertThatCode(() -> hook.beforeRead("/team/project.git"))
+                .doesNotThrowAnyException();
         assertThatCode(() -> hook.beforeCreate("/team/project.git"))
                 .doesNotThrowAnyException();
     }

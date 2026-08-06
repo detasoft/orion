@@ -7,6 +7,9 @@ public interface GitNativeRepositoryAccessHook {
     default void beforeReceive(String repositoryName) {
     }
 
+    default void beforeRead(String repositoryName) {
+    }
+
     default void beforeCreate(String repositoryName) {
     }
 

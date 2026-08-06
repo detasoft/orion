@@ -30,6 +30,19 @@ public final class AuthenticatedNativeRepositoryAccessHook
     }
 
     @Override
+    public void beforeRead(String repositoryName) {
+        RepositoryResource repositoryResource =
+                repositoryResource(repositoryName);
+        require(() -> accessEnforcer().require(
+                securityContext,
+                SubjectAccessRules.authenticated()));
+        require(() -> accessEnforcer().require(
+                securityContext,
+                repositoryResource,
+                RepositoryAccessRules.read()));
+    }
+
+    @Override
     public void beforeCreate(String repositoryName) {
         RepositoryResource repositoryResource =
                 repositoryResource(repositoryName);
