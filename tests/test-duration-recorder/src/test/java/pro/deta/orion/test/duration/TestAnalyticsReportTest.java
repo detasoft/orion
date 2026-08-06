@@ -48,6 +48,19 @@ class TestAnalyticsReportTest {
         assertTrue(svg.contains("writer"));
     }
 
+    @Test
+    void rendersStackFramesOnSeparateHtmlLines() {
+        StringBuilder html = new StringBuilder();
+
+        TestAnalyticsReport.appendHtmlStackCell(html, "root;parser.Frame.method;writer.Frame.write");
+
+        String output = html.toString();
+        assertTrue(output.contains("class=\"stack-cell\""));
+        assertTrue(output.contains("<span class=\"stack-frame\">root</span>"));
+        assertTrue(output.contains("<span class=\"stack-frame\">parser.Frame.method</span>"));
+        assertTrue(output.contains("<span class=\"stack-frame\">writer.Frame.write</span>"));
+    }
+
     private static String testDurationLine(String testId, String status, long durationMillis, String reason) {
         return "{"
                 + "\"runId\":\"run-1\","

@@ -622,6 +622,9 @@ public final class TestAnalyticsReport {
                 th { background: var(--bg); cursor: pointer; position: sticky; top: 0; user-select: none; }
                 th::after { content: " \\2195"; color: #7b8794; font-size: 11px; }
                 td.num, th.num { text-align: right; white-space: nowrap; }
+                .stack-cell { min-width: 760px; max-width: 1200px; width: 60%; }
+                .stack-cell code { overflow-wrap: anywhere; white-space: normal; }
+                .stack-frame { display: block; }
                 object { width: 100%; min-height: 520px; border: 1px solid var(--border); background: white; }
                 </style>
                 </head>
@@ -717,10 +720,22 @@ public final class TestAnalyticsReport {
             appendHtmlNumberCell(html, allocation.bytes(), formatBytes(allocation.bytes()));
             appendHtmlNumberCell(html, allocation.samples(), Long.toString(allocation.samples()));
             html.append("<td><code>").append(xml(allocation.objectClass())).append("</code></td><td><code>")
-                    .append(xml(allocation.topFrame())).append("</code></td><td><code>")
-                    .append(xml(allocation.stack())).append("</code></td></tr>\n");
+                    .append(xml(allocation.topFrame())).append("</code></td>");
+            appendHtmlStackCell(html, allocation.stack());
+            html.append("</tr>\n");
         }
         html.append("</tbody></table></div>\n");
+    }
+
+    static void appendHtmlStackCell(StringBuilder html, String stack) {
+        html.append("<td class=\"stack-cell\"><code>");
+        String[] frames = stack.split(";", -1);
+        for (String frame : frames) {
+            if (!frame.isEmpty()) {
+                html.append("<span class=\"stack-frame\">").append(xml(frame)).append("</span>");
+            }
+        }
+        html.append("</code></td>");
     }
 
     private static void appendHtmlTestsTable(StringBuilder html, String title, List<TestRecord> tests) {
