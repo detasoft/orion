@@ -1,6 +1,12 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.common.GitFetchAccessRequest;
+import pro.deta.orion.git.common.GitOperationException;
+import pro.deta.orion.git.common.GitReceiveRequest;
+import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.git.common.GitRepositoryFileSnapshot;
+import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
@@ -20,12 +26,16 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSource;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
-public class NativeGitRepository {
+public class NativeGitRepository implements GitRepository {
     private final String name;
     private final LooseRefStore looseRefStore;
     private final LooseObjectStore looseObjectStore;
@@ -85,8 +95,39 @@ public class NativeGitRepository {
                 "packObjectDirectory");
     }
 
+    @Override
     public String name() {
         return name;
+    }
+
+    @Override
+    public String description() {
+        return name;
+    }
+
+    @Override
+    public GitRepository withFetchAccessCheck(
+            Consumer<GitFetchAccessRequest> fetchAccessCheck) {
+        Objects.requireNonNull(fetchAccessCheck, "fetchAccessCheck");
+        return this;
+    }
+
+    @Override
+    public void upload(
+            GitUploadRequest request,
+            InputStream input,
+            OutputStream output,
+            OutputStream error) throws GitOperationException {
+        throw new GitOperationException("Native repository upload is not supported yet");
+    }
+
+    @Override
+    public void receive(
+            GitReceiveRequest request,
+            InputStream input,
+            OutputStream output,
+            OutputStream error) throws GitOperationException {
+        throw new GitOperationException("Native repository receive is not supported yet");
     }
 
     public String defaultHead() {
@@ -128,6 +169,25 @@ public class NativeGitRepository {
             return loose;
         }
         return packObjectDirectory.readPrefix(id, maxDataBytes);
+    }
+
+    @Override
+    public GitRepositoryFileSnapshot loadFiles(String branch, List<String> paths)
+            throws IOException, GitOperationException {
+        return new NativeRepositoryFileLoader(this).loadFiles(branch, paths);
+    }
+
+    @Override
+    public <T> Optional<T> unwrap(Class<T> repositoryType) {
+        Objects.requireNonNull(repositoryType, "repositoryType");
+        if (repositoryType.isInstance(this)) {
+            return Optional.of(repositoryType.cast(this));
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public void close() {
     }
 
     public PackIngestionSession beginPackIngestion(
