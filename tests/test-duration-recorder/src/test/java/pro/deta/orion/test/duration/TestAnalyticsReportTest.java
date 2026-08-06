@@ -38,7 +38,9 @@ class TestAnalyticsReportTest {
         assertTrue(Files.isRegularFile(files.allocationsCsv()));
         assertTrue(Files.isRegularFile(files.byteArrayAllocationsCsv()));
         assertTrue(Files.isRegularFile(files.testAllocationFlameGraph()));
-        assertTrue(Files.readString(files.cpuFlameGraph()).contains("No stack samples"));
+        String cpuFlameGraph = Files.readString(files.cpuFlameGraph());
+        assertTrue(cpuFlameGraph.contains("width=\"100%\""));
+        assertTrue(cpuFlameGraph.contains("No stack samples"));
     }
 
     @Test
@@ -52,6 +54,12 @@ class TestAnalyticsReportTest {
 
         String svg = Files.readString(output);
         assertTrue(svg.contains("Allocations"));
+        assertTrue(svg.contains("width=\"100%\""));
+        assertTrue(svg.contains("svg { width: 100%; height: auto; display: block; }"));
+        assertTrue(svg.contains("class=\"frame-group\""));
+        assertTrue(svg.contains("id=\"reset-zoom\""));
+        assertTrue(svg.contains("zoom(frame)"));
+        assertTrue(svg.contains("data-path=\"0/"));
         assertTrue(svg.contains("parser"));
         assertTrue(svg.contains("writer"));
     }

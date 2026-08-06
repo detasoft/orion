@@ -496,31 +496,49 @@ public final class TestAnalyticsReport {
 
         int depth = root.depth();
         int chartHeight = Math.max(FRAME_HEIGHT, depth * FRAME_HEIGHT);
-        int height = chartHeight + 80;
+        int headerHeight = 104;
+        int height = chartHeight + headerHeight + 24;
+        double baseY = headerHeight + chartHeight;
+        double chartWidth = SVG_WIDTH - 24.0;
         StringBuilder svg = new StringBuilder(64_000);
         svg.append("""
-                <svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">
+                <svg xmlns="http://www.w3.org/2000/svg" width="100%%" viewBox="0 0 %d %d"
+                  preserveAspectRatio="xMinYMin meet" data-chart-left="12" data-chart-width="%s"
+                  data-base-y="%s" data-frame-height="%d" data-total="%d" data-units="%s">
                 <style>
+                svg { width: 100%%; height: auto; display: block; }
                 text { font-family: Menlo, Consolas, monospace; font-size: %dpx; fill: #111; }
                 .title { font-size: 18px; font-weight: 700; }
                 .meta { fill: #555; }
+                .link { cursor: pointer; fill: #0f4c81; text-decoration: underline; }
+                .frame-group { cursor: pointer; }
                 .frame { stroke: #fff; stroke-width: .5; }
+                .frame-group:hover .frame { stroke: #111; stroke-width: 1.25; }
+                .frame-group.selected .frame { stroke: #111; stroke-width: 1.5; }
+                .frame-label { pointer-events: none; }
                 </style>
-                """.formatted(SVG_WIDTH, height, SVG_WIDTH, height, FONT_SIZE));
+                """.formatted(SVG_WIDTH, height, formatDouble(chartWidth), formatDouble(baseY),
+                FRAME_HEIGHT, root.value(), xml(units), FONT_SIZE));
         svg.append("<text x=\"12\" y=\"24\" class=\"title\">").append(xml(title)).append("</text>\n");
         svg.append("<text x=\"12\" y=\"44\" class=\"meta\">total: ")
                 .append(formatNumber(root.value())).append(' ').append(xml(units)).append("</text>\n");
+        svg.append("<text id=\"reset-zoom\" x=\"12\" y=\"64\" class=\"link\">Reset zoom</text>\n");
+        svg.append("<text id=\"frame-details\" x=\"12\" y=\"84\" class=\"meta\">")
+                .append("Hover a frame for details. Click a frame to zoom into that stack.")
+                .append("</text>\n");
 
-        double chartWidth = SVG_WIDTH - 24.0;
-        renderFlameChildren(svg, root, 1, 12.0, 56.0 + chartHeight, chartWidth, units);
+        renderFlameChildren(svg, root, 1, 12.0, baseY, chartWidth, units, "0");
+        appendFlameGraphScript(svg);
         svg.append("</svg>\n");
         Files.writeString(output, svg.toString(), StandardCharsets.UTF_8);
     }
 
     private static void writeEmptyFlameGraph(Path output, String title) throws IOException {
         String svg = """
-                <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="160" viewBox="0 0 1200 160">
+                <svg xmlns="http://www.w3.org/2000/svg" width="100%%" viewBox="0 0 %d 160"
+                  preserveAspectRatio="xMinYMin meet">
                 <style>
+                svg { width: 100%%; height: auto; display: block; }
                 text { font-family: Menlo, Consolas, monospace; fill: #111; }
                 .title { font-size: 18px; font-weight: 700; }
                 .meta { font-size: 13px; fill: #555; }
@@ -530,15 +548,17 @@ public final class TestAnalyticsReport {
                 <text x="12" y="82" class="meta">Use profile JFR settings and forked tests.</text>
                 <text x="12" y="106" class="meta">Rerun the report generator to collect sample events.</text>
                 </svg>
-                """.formatted(xml(title));
+                """.formatted(SVG_WIDTH, xml(title));
         Files.writeString(output, svg, StandardCharsets.UTF_8);
     }
 
     private static void renderFlameChildren(StringBuilder svg, FlameNode node, int depth, double x,
-                                            double baseY, double width, String units) {
+                                            double baseY, double width, String units, String path) {
         double childX = x;
+        int index = 0;
         for (FlameNode child : node.childrenByWeight()) {
             double childWidth = width * child.value() / node.value();
+            String childPath = path + "/" + index++;
             if (childWidth < 0.25) {
                 childX += childWidth;
                 continue;
@@ -547,7 +567,15 @@ public final class TestAnalyticsReport {
             double y = baseY - depth * FRAME_HEIGHT;
             String color = color(child.name());
             String label = child.name();
-            svg.append("<g>\n<title>")
+            svg.append("<g class=\"frame-group\" tabindex=\"0\" data-path=\"").append(childPath)
+                    .append("\" data-name=\"").append(xml(label))
+                    .append("\" data-value=\"").append(child.value())
+                    .append("\" data-display-value=\"").append(formatNumber(child.value()))
+                    .append("\" data-x=\"").append(formatDouble(childX))
+                    .append("\" data-y=\"").append(formatDouble(y))
+                    .append("\" data-width=\"").append(formatDouble(childWidth))
+                    .append("\" data-depth=\"").append(depth)
+                    .append("\">\n<title>")
                     .append(xml(label)).append(": ")
                     .append(formatNumber(child.value())).append(' ').append(xml(units))
                     .append("</title>\n");
@@ -556,16 +584,131 @@ public final class TestAnalyticsReport {
                     .append("\" width=\"").append(formatDouble(childWidth))
                     .append("\" height=\"").append(FRAME_HEIGHT - 1)
                     .append("\" fill=\"").append(color).append("\"/>\n");
-            if (childWidth >= 46) {
-                svg.append("<text x=\"").append(formatDouble(childX + 4))
-                        .append("\" y=\"").append(formatDouble(y + 13))
-                        .append("\">").append(xml(truncate(label, childWidth))).append("</text>\n");
+            svg.append("<text class=\"frame-label\"");
+            if (childWidth < 46) {
+                svg.append(" hidden=\"true\"");
             }
+            svg.append(" x=\"").append(formatDouble(childX + 4))
+                    .append("\" y=\"").append(formatDouble(y + 13))
+                    .append("\">").append(xml(truncate(label, childWidth))).append("</text>\n");
             svg.append("</g>\n");
 
-            renderFlameChildren(svg, child, depth + 1, childX, baseY, childWidth, units);
+            renderFlameChildren(svg, child, depth + 1, childX, baseY, childWidth, units, childPath);
             childX += childWidth;
         }
+    }
+
+    private static void appendFlameGraphScript(StringBuilder svg) {
+        svg.append("""
+                <script><![CDATA[
+                (() => {
+                  const svg = document.currentScript.ownerSVGElement;
+                  const frames = Array.from(svg.querySelectorAll(".frame-group"));
+                  const details = svg.getElementById("frame-details");
+                  const reset = svg.getElementById("reset-zoom");
+                  const chartLeft = Number(svg.dataset.chartLeft);
+                  const chartWidth = Number(svg.dataset.chartWidth);
+                  const baseY = Number(svg.dataset.baseY);
+                  const frameHeight = Number(svg.dataset.frameHeight);
+                  const total = Number(svg.dataset.total);
+                  const units = svg.dataset.units;
+                  let selected = null;
+
+                  frames.forEach(frame => {
+                    frame.addEventListener("mouseenter", () => showDetails(frame, "Frame"));
+                    frame.addEventListener("mouseleave", () => showDetails(selected, "Selected"));
+                    frame.addEventListener("click", event => {
+                      event.stopPropagation();
+                      zoom(frame);
+                    });
+                    frame.addEventListener("keydown", event => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        zoom(frame);
+                      }
+                    });
+                  });
+                  reset.addEventListener("click", event => {
+                    event.stopPropagation();
+                    zoom(null);
+                  });
+                  svg.addEventListener("keydown", event => {
+                    if (event.key === "Escape") {
+                      zoom(null);
+                    }
+                  });
+                  showDetails(null, "Frame");
+
+                  function zoom(focus) {
+                    selected = focus;
+                    const focusPath = focus?.dataset.path;
+                    const focusX = Number(focus?.dataset.x ?? chartLeft);
+                    const focusWidth = Number(focus?.dataset.width ?? chartWidth);
+                    const focusDepth = Number(focus?.dataset.depth ?? 0);
+                    const scale = chartWidth / focusWidth;
+                    frames.forEach(frame => {
+                      const visible = !focusPath || frame.dataset.path === focusPath
+                        || frame.dataset.path.startsWith(focusPath + "/");
+                      frame.style.display = visible ? "" : "none";
+                      frame.classList.toggle("selected", frame === focus);
+                      if (!visible) {
+                        return;
+                      }
+                      const originalX = Number(frame.dataset.x);
+                      const originalWidth = Number(frame.dataset.width);
+                      const depth = Number(frame.dataset.depth);
+                      const x = focus ? chartLeft + (originalX - focusX) * scale : originalX;
+                      const width = focus ? originalWidth * scale : originalWidth;
+                      const level = focus ? depth - focusDepth + 1 : depth;
+                      const y = focus ? baseY - level * frameHeight : Number(frame.dataset.y);
+                      updateFrame(frame, x, y, width);
+                    });
+                    showDetails(focus, "Selected");
+                  }
+
+                  function updateFrame(frame, x, y, width) {
+                    const rect = frame.querySelector("rect");
+                    const label = frame.querySelector("text");
+                    rect.setAttribute("x", format(x));
+                    rect.setAttribute("y", format(y));
+                    rect.setAttribute("width", format(width));
+                    if (!label) {
+                      return;
+                    }
+                    label.setAttribute("x", format(x + 4));
+                    label.setAttribute("y", format(y + 13));
+                    label.textContent = truncate(frame.dataset.name, width);
+                    label.hidden = width < 46;
+                  }
+
+                  function showDetails(frame, prefix) {
+                    if (!frame) {
+                      details.textContent = "Hover a frame for details. Click a frame to zoom into that stack.";
+                      return;
+                    }
+                    const value = Number(frame.dataset.value);
+                    const percent = total > 0 ? ` (${(value * 100 / total).toFixed(2)}%)` : "";
+                    details.textContent = `${prefix}: ${frame.dataset.name} - ${frame.dataset.displayValue} `
+                      + `${units}${percent}`;
+                  }
+
+                  function truncate(label, width) {
+                    const maxCharacters = Math.max(1, Math.floor((width - 8) / 7));
+                    if (label.length <= maxCharacters) {
+                      return label;
+                    }
+                    if (maxCharacters <= 1) {
+                      return "";
+                    }
+                    return label.slice(0, maxCharacters - 1) + ".";
+                  }
+
+                  function format(value) {
+                    return Number(value).toFixed(2);
+                  }
+                })();
+                ]]></script>
+                """);
     }
 
     private static String truncate(String label, double width) {
