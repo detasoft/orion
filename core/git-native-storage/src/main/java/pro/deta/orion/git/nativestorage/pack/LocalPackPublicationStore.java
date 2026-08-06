@@ -1,19 +1,30 @@
 package pro.deta.orion.git.nativestorage.pack;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import pro.deta.orion.git.common.GitObjectId;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public final class LocalPackPublicationStore implements PackPublicationStore {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private final Path packsDirectory;
     private final Path transactionsDirectory;
 
@@ -62,6 +73,47 @@ public final class LocalPackPublicationStore implements PackPublicationStore {
         }
     }
 
+    @Override
+    public List<PublishedPackManifest> publishedPacks() {
+        List<PublishedPackManifest> manifests = new ArrayList<>();
+        if (!Files.isDirectory(packsDirectory)) {
+            return List.of();
+        }
+        for (Path manifest : publishedManifestPaths()) {
+            readManifest(manifest).ifPresent(manifests::add);
+        }
+        return List.copyOf(manifests);
+    }
+
+    @Override
+    public Optional<PublishedPackContent> openPublishedPack(
+            String packId) {
+        if (!isLowercaseSha1(packId)) {
+            return Optional.empty();
+        }
+        Path manifestPath = packsDirectory.resolve(packId + ".json");
+        Optional<PublishedPackManifest> manifest = readManifest(manifestPath);
+        if (manifest.isEmpty() || !packId.equals(manifest.get().packId())) {
+            return Optional.empty();
+        }
+        Path packPath = packsDirectory.resolve(packId + ".pack");
+        Path indexPath = packsDirectory.resolve(packId + ".idx");
+        if (!Files.isRegularFile(packPath)
+                || !Files.isRegularFile(indexPath)) {
+            return Optional.empty();
+        }
+        try {
+            InputStream input = Files.newInputStream(packPath);
+            return Optional.of(new PublishedPackContent(
+                    manifest.get(),
+                    input));
+        } catch (IOException error) {
+            throw new UncheckedIOException(
+                    "Failed to open published native Git pack",
+                    error);
+        }
+    }
+
     private static String manifestJson(PackPublicationRequest request) {
         StringBuilder json = new StringBuilder();
         json.append("{\n");
@@ -72,12 +124,29 @@ public final class LocalPackPublicationStore implements PackPublicationStore {
         appendNumber(json, "objectCount", request.objectCount(), true);
         appendString(json, "visibility", "PUBLISHED", true);
         appendString(json, "source", "receive-pack", true);
+        appendBoolean(
+                json,
+                "selfContained",
+                request.externalBaseIds().isEmpty(),
+                true);
         json.append("  \"objectIds\": [");
         for (int index = 0; index < request.objectIds().size(); index++) {
             if (index > 0) {
                 json.append(", ");
             }
             GitObjectId objectId = request.objectIds().get(index);
+            json.append('"').append(objectId.value()).append('"');
+        }
+        json.append("],\n");
+        json.append("  \"externalBaseIds\": [");
+        List<GitObjectId> externalBaseIds =
+                new ArrayList<>(request.externalBaseIds());
+        externalBaseIds.sort(Comparator.comparing(GitObjectId::value));
+        for (int index = 0; index < externalBaseIds.size(); index++) {
+            if (index > 0) {
+                json.append(", ");
+            }
+            GitObjectId objectId = externalBaseIds.get(index);
             json.append('"').append(objectId.value()).append('"');
         }
         json.append("]\n");
@@ -95,6 +164,21 @@ public final class LocalPackPublicationStore implements PackPublicationStore {
                 .append("\": \"")
                 .append(value)
                 .append('"');
+        if (comma) {
+            json.append(',');
+        }
+        json.append('\n');
+    }
+
+    private static void appendBoolean(
+            StringBuilder json,
+            String name,
+            boolean value,
+            boolean comma) {
+        json.append("  \"")
+                .append(name)
+                .append("\": ")
+                .append(value);
         if (comma) {
             json.append(',');
         }
@@ -159,6 +243,92 @@ public final class LocalPackPublicationStore implements PackPublicationStore {
                     StandardCopyOption.REPLACE_EXISTING);
         } catch (AtomicMoveNotSupportedException error) {
             Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private List<Path> publishedManifestPaths() {
+        List<Path> manifests = new ArrayList<>();
+        try (var stream = Files.newDirectoryStream(packsDirectory, "*.json")) {
+            for (Path path : stream) {
+                if (Files.isRegularFile(path)) {
+                    manifests.add(path);
+                }
+            }
+        } catch (IOException error) {
+            throw new UncheckedIOException(
+                    "Failed to list native Git pack manifests",
+                    error);
+        }
+        manifests.sort(Comparator.comparing(path -> path.getFileName().toString()));
+        return manifests;
+    }
+
+    private static Optional<PublishedPackManifest> readManifest(
+            Path manifestPath) {
+        if (!Files.isRegularFile(manifestPath)) {
+            return Optional.empty();
+        }
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(manifestPath.toFile());
+            String packId = text(root, "packId");
+            String packChecksum = text(root, "packChecksum");
+            String indexChecksum = text(root, "indexChecksum");
+            long packBytes = root.path("packBytes").asLong(-1);
+            int objectCount = root.path("objectCount").asInt(-1);
+            Set<GitObjectId> objectIds = objectIds(root.path("objectIds"));
+            Set<GitObjectId> externalBaseIds =
+                    objectIds(root.path("externalBaseIds"));
+            boolean selfContained = root.has("selfContained")
+                    && root.path("selfContained").asBoolean(false);
+            return Optional.of(new PublishedPackManifest(
+                    packId,
+                    packBytes,
+                    objectCount,
+                    packChecksum,
+                    indexChecksum,
+                    selfContained,
+                    objectIds,
+                    externalBaseIds));
+        } catch (IOException error) {
+            throw new UncheckedIOException(
+                    "Failed to read native Git pack manifest",
+                    error);
+        }
+    }
+
+    private static String text(JsonNode root, String name) {
+        JsonNode value = root.path(name);
+        if (!value.isTextual()) {
+            throw new IllegalStateException(
+                    "Native Git pack manifest is missing " + name);
+        }
+        return value.asText();
+    }
+
+    private static Set<GitObjectId> objectIds(JsonNode node) {
+        if (!node.isArray()) {
+            return Set.of();
+        }
+        Set<GitObjectId> objectIds = new LinkedHashSet<>();
+        for (JsonNode objectId : node) {
+            if (!objectId.isTextual()) {
+                throw new IllegalStateException(
+                        "Native Git pack manifest object id is not text");
+            }
+            objectIds.add(GitObjectId.of(objectId.asText()));
+        }
+        return objectIds;
+    }
+
+    private static boolean isLowercaseSha1(String value) {
+        if (value == null || value.length() != 40) {
+            return false;
+        }
+        try {
+            byte[] ignored = HexFormat.of().parseHex(value);
+            return value.equals(value.toLowerCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException ignored) {
+            return false;
         }
     }
 }

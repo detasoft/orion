@@ -21,13 +21,17 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ClientConnectionResource;
 import pro.deta.orion.auth.check.rule.ConnectionAccessRules;
+import pro.deta.orion.config.schema.GitPackfileUriConfig;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
+import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.transport.git.netty.GitMinimalWireHandler;
@@ -54,6 +58,7 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     private final OrionExecutor orionExecutor;
     private final NativeGitRepositoryProvider nativeRepositoryProvider;
     private final Function<String, SecurityContext> nativeSecurityContextFactory;
+    private final NativePackfileUriSourceFactory packfileUriSourceFactory;
     private final int socketTimeoutMillis;
     private final ChannelGroup nativeClientChannels =
             new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
@@ -64,6 +69,22 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     private volatile boolean stopRequested;
 
     @Inject
+    public GitNativeTransportService(
+            GitTransportConfig config,
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor,
+            NativeGitRepositoryProvider nativeRepositoryProvider) {
+        this(
+                config,
+                gitInternalService,
+                orionExecutor,
+                nativeRepositoryProvider,
+                DEFAULT_SOCKET_TIMEOUT_MILLIS,
+                requestId -> SecurityContext.createContext()
+                        .withRequestId(requestId),
+                packfileUriSourceFactory(config));
+    }
+
     public GitNativeTransportService(
             GitTransportConfig config,
             GitInternalService gitInternalService,
@@ -102,7 +123,8 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
                 nativeRepositoryProvider,
                 socketTimeoutMillis,
                 requestId -> SecurityContext.createContext()
-                        .withRequestId(requestId));
+                        .withRequestId(requestId),
+                packfileUriSourceFactory(config));
     }
 
     GitNativeTransportService(
@@ -112,6 +134,24 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
             NativeGitRepositoryProvider nativeRepositoryProvider,
             int socketTimeoutMillis,
             Function<String, SecurityContext> nativeSecurityContextFactory) {
+        this(
+                config,
+                gitInternalService,
+                orionExecutor,
+                nativeRepositoryProvider,
+                socketTimeoutMillis,
+                nativeSecurityContextFactory,
+                packfileUriSourceFactory(config));
+    }
+
+    GitNativeTransportService(
+            GitTransportConfig config,
+            GitInternalService gitInternalService,
+            OrionExecutor orionExecutor,
+            NativeGitRepositoryProvider nativeRepositoryProvider,
+            int socketTimeoutMillis,
+            Function<String, SecurityContext> nativeSecurityContextFactory,
+            NativePackfileUriSourceFactory packfileUriSourceFactory) {
         this.config = config;
         this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;
@@ -119,6 +159,9 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
         this.nativeSecurityContextFactory = Objects.requireNonNull(
                 nativeSecurityContextFactory,
                 "nativeSecurityContextFactory");
+        this.packfileUriSourceFactory = Objects.requireNonNull(
+                packfileUriSourceFactory,
+                "packfileUriSourceFactory");
         this.socketTimeoutMillis = socketTimeoutMillis;
     }
 
@@ -256,7 +299,9 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
                     channel.alloc(),
                     clientOutput,
                     nativeRepositoryProvider,
-                    GitNativeRepositoryAccessHook.ALLOW_ALL);
+                    GitNativeRepositoryAccessHook.ALLOW_ALL,
+                    pro.deta.orion.git.parser.wire.GitWireConfiguration.allSupported(),
+                    packfileUriSourceFactory);
             channel.pipeline().addLast(new GitMinimalWireHandler(machine));
         } catch (OrionSecurityException e) {
             log.warn(e.getMessage());
@@ -352,5 +397,24 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
             return address;
         }
         return null;
+    }
+
+    private static NativePackfileUriSourceFactory packfileUriSourceFactory(
+            GitTransportConfig config) {
+        GitPackfileUriConfig packfileUri = config == null
+                ? null
+                : config.getPackfileUri();
+        if (packfileUri == null
+                || !packfileUri.isConfigured()
+                || packfileUri.isAuto()) {
+            return NativePackfileUriSourceFactory.NONE;
+        }
+        String baseUri = packfileUri.getBaseUri();
+        return (data, repository) -> new PublishedPackfileUriSource(
+                repository,
+                packId -> NativePackfileUriBuilder.packUri(
+                        baseUri,
+                        data.getRepositoryPath(),
+                        packId));
     }
 }

@@ -9,6 +9,7 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.pack.PublishedPackContent;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayOutputStream;
@@ -133,10 +134,26 @@ class FileNativeGitRepositoryProviderTest {
         assertThat(manifest)
                 .contains("\"visibility\": \"PUBLISHED\"")
                 .contains("\"source\": \"receive-pack\"")
+                .contains("\"selfContained\": true")
                 .contains(packId);
         for (String objectId : objectIds) {
             assertThat(manifest).contains(objectId);
         }
+        assertThat(repository.publishedPacks())
+                .singleElement()
+                .satisfies(published -> {
+                    assertThat(published.packId()).isEqualTo(packId);
+                    assertThat(published.selfContained()).isTrue();
+                    assertThat(published.objectIds())
+                            .extracting(GitObjectId::value)
+                            .containsExactlyElementsOf(objectIds);
+                });
+        try (PublishedPackContent content =
+                     repository.openPublishedPack(packId).orElseThrow()) {
+            assertThat(content.manifest().packId()).isEqualTo(packId);
+            assertThat(content.input().readAllBytes()).isEqualTo(pack);
+        }
+        assertThat(repository.openPublishedPack("x".repeat(40))).isEmpty();
     }
 
     @Test
@@ -189,6 +206,10 @@ class FileNativeGitRepositoryProviderTest {
 
         assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
         assertPublishedObject(repository, blobId(target), target);
+        assertThat(repository.publishedPacks())
+                .singleElement()
+                .satisfies(manifest ->
+                        assertThat(manifest.selfContained()).isTrue());
 
         FileNativeGitRepositoryProvider reopenedProvider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
@@ -217,6 +238,12 @@ class FileNativeGitRepositoryProviderTest {
 
         assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
         assertPublishedObject(repository, blobId(target), target);
+        assertThat(repository.publishedPacks())
+                .singleElement()
+                .satisfies(manifest -> {
+                    assertThat(manifest.selfContained()).isFalse();
+                    assertThat(manifest.externalBaseIds()).contains(baseId);
+                });
 
         FileNativeGitRepositoryProvider reopenedProvider =
                 new FileNativeGitRepositoryProvider(rootDirectory);

@@ -25,5 +25,9 @@
             <groupId>pro.deta.orion.net</groupId>
             <artifactId>http-core</artifactId>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>git-native-storage</artifactId>
+        </dependency>
     </dependencies>
 </project>

@@ -9,6 +9,8 @@ import lombok.ToString;
 @Data
 public class GitTransportConfig extends TransportConfig {
     public static final int DEFAULT_PORT = 9419;
+    private GitPackfileUriConfig packfileUri =
+            new GitPackfileUriConfig();
 
     public GitTransportConfig() {
         this(null, DEFAULT_PORT);

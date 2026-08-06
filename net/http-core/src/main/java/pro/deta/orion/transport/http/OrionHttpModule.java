@@ -28,6 +28,12 @@ public class OrionHttpModule {
 
     @Provides
     @IntoSet
+    static OrionHttpRoute gitPackfileRoute(OrionGitPackfileRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute tokenRoute(OrionAdminIssueTokenRoute route) {
         return route;
     }

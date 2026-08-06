@@ -22,6 +22,8 @@ import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSelection;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -250,6 +252,85 @@ class NativeGitRepositoryTest {
 
         try {
             assertThat(pack.getInt(8)).isEqualTo(2);
+        } finally {
+            pack.release();
+        }
+    }
+
+    @Test
+    void fetchResponseAdvertisesAcceptedPackfileUriAndOmitsCoveredObjects() {
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                "covered".getBytes(StandardCharsets.UTF_8));
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+        NativePackfileUri uri = new NativePackfileUri(
+                "a".repeat(40),
+                "https://git.example/r/demo.git/objects/pack/"
+                        + "a".repeat(40)
+                        + ".pack");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(blob),
+                        Set.of(),
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        0,
+                        NativeObjectFilter.NONE,
+                        Set.of(),
+                        Set.of("https")),
+                (objectIds, protocols) ->
+                        new NativePackfileUriSelection(
+                                List.of(uri),
+                                Set.of(blob)));
+        CompositeByteBuf pack = produce(response.packProducer());
+
+        try {
+            assertThat(response.packfileUris()).containsExactly(uri);
+            assertThat(pack.getInt(8)).isZero();
+        } finally {
+            pack.release();
+        }
+    }
+
+    @Test
+    void fetchResponseDoesNotUsePackfileUriSourceWithoutClientProtocols() {
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                "inline".getBytes(StandardCharsets.UTF_8));
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(blob),
+                        Set.of(),
+                        true,
+                        false,
+                        false),
+                (objectIds, protocols) ->
+                        new NativePackfileUriSelection(
+                                List.of(new NativePackfileUri(
+                                        "b".repeat(40),
+                                        "https://git.example/pack")),
+                                Set.of(blob)));
+        CompositeByteBuf pack = produce(response.packProducer());
+
+        try {
+            assertThat(response.packfileUris()).isEmpty();
+            assertThat(pack.getInt(8)).isEqualTo(1);
         } finally {
             pack.release();
         }

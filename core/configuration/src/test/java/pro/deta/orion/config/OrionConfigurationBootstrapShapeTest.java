@@ -41,6 +41,10 @@ class OrionConfigurationBootstrapShapeTest {
                   git:
                     enabled: false
                     port: 9418
+                    packfileUri:
+                      baseUri: https://git.example/r
+                      trustedProxyAddresses:
+                        - 127.0.0.1
                   ssh:
                     enabled: false
                     port: 8022
@@ -82,6 +86,16 @@ class OrionConfigurationBootstrapShapeTest {
         assertFalse(configuration.getStorage().isCreateOnPush());
         assertEquals(8000, configuration.getTransport().getHttp().getPort());
         assertFalse(configuration.getTransport().getHttp().isEnabled());
+        assertEquals(
+                "https://git.example/r",
+                configuration.getTransport().getGit().getPackfileUri().getBaseUri());
+        assertEquals(
+                "127.0.0.1",
+                configuration.getTransport()
+                        .getGit()
+                        .getPackfileUri()
+                        .getTrustedProxyAddresses()
+                        .getFirst());
         assertEquals("acme://letsencrypt.org/staging", configuration.getTransport().getHttps().getAcme().getDirectoryUrl());
         assertEquals("admin@example.test", configuration.getTransport().getHttps().getAcme().getAccountEmail());
         assertEquals("example.test", configuration.getTransport().getHttps().getAcme().getDomains().getFirst());

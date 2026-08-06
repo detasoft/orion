@@ -48,6 +48,7 @@ public final class GitNativeRepositoryService {
     private final NativeGitRepositoryProvider repositoryProvider;
     private final GitNativeRepositoryAccessHook accessHook;
     private final GitWireConfiguration configuration;
+    private final NativePackfileUriSourceFactory packfileUriSourceFactory;
 
     public GitNativeRepositoryService(
             NativeGitRepositoryProvider repositoryProvider) {
@@ -76,6 +77,18 @@ public final class GitNativeRepositoryService {
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration) {
+        this(
+                repositoryProvider,
+                accessHook,
+                configuration,
+                NativePackfileUriSourceFactory.NONE);
+    }
+
+    public GitNativeRepositoryService(
+            NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook,
+            GitWireConfiguration configuration,
+            NativePackfileUriSourceFactory packfileUriSourceFactory) {
         this.repositoryProvider = Objects.requireNonNull(
                 repositoryProvider,
                 "repositoryProvider");
@@ -85,6 +98,9 @@ public final class GitNativeRepositoryService {
         this.configuration = Objects.requireNonNull(
                 configuration,
                 "configuration");
+        this.packfileUriSourceFactory = Objects.requireNonNull(
+                packfileUriSourceFactory,
+                "packfileUriSourceFactory");
     }
 
     @TestOnly
@@ -154,7 +170,10 @@ public final class GitNativeRepositoryService {
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        return findOrFail(data.getRepositoryPath()).fetchResponse(request);
+        NativeGitRepository repository = findOrFail(data.getRepositoryPath());
+        return repository.fetchResponse(
+                request,
+                packfileUriSourceFactory.sourceFor(data, repository));
     }
 
     public List<GitObjectId> protocolV2FetchAcknowledgments(

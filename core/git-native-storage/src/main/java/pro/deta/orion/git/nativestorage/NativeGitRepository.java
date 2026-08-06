@@ -11,11 +11,14 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.pack.PackIngestor;
 import pro.deta.orion.git.nativestorage.pack.PackObjectDirectory;
 import pro.deta.orion.git.nativestorage.pack.PackPublicationStore;
+import pro.deta.orion.git.nativestorage.pack.PublishedPackContent;
+import pro.deta.orion.git.nativestorage.pack.PublishedPackManifest;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchPackBuilder;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
+import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSource;
 
 import java.util.List;
 import java.util.Map;
@@ -135,6 +138,15 @@ public class NativeGitRepository {
                 packPublicationStore);
     }
 
+    public List<PublishedPackManifest> publishedPacks() {
+        return packPublicationStore.publishedPacks();
+    }
+
+    public Optional<PublishedPackContent> openPublishedPack(
+            String packId) {
+        return packPublicationStore.openPublishedPack(packId);
+    }
+
     public List<RefUpdateResult> publishObjectsAndRefs(
             LooseObjectStore quarantinedObjects,
             List<LooseRefStore.Update> updates) {
@@ -150,10 +162,19 @@ public class NativeGitRepository {
     }
 
     public NativeFetchResponse fetchResponse(NativeFetchRequest request) {
+        return fetchResponse(request, NativePackfileUriSource.NONE);
+    }
+
+    public NativeFetchResponse fetchResponse(
+            NativeFetchRequest request,
+            NativePackfileUriSource packfileUriSource) {
         Objects.requireNonNull(request, "request");
         return new NativeFetchPackBuilder(
                 looseRefStore,
-                looseObjectStore)
+                looseObjectStore,
+                Objects.requireNonNull(
+                        packfileUriSource,
+                        "packfileUriSource"))
                 .build(request);
     }
 }

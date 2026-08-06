@@ -13,14 +13,22 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.zip.CRC32;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
+/**
+ * Ingests receive-pack input and records whether published pack bytes are
+ * self-contained. A pack is thin when a delta base is found in the repository
+ * object store instead of inside the pack being ingested; those external base
+ * ids are preserved in the publication request.
+ */
 public final class PackIngestor implements PackIngestionSession {
     private static final byte[] PACK_MAGIC = {'P', 'A', 'C', 'K'};
     private static final int PACK_VERSION = 2;
@@ -57,6 +65,7 @@ public final class PackIngestor implements PackIngestionSession {
     private final byte[] inflaterInput = new byte[INPUT_CHUNK_BYTES];
     private final Map<Long, GitObjectId> objectsByOffset = new HashMap<>();
     private final List<PackIndexObject> packIndexObjects = new ArrayList<>();
+    private final Set<GitObjectId> externalBaseIds = new LinkedHashSet<>();
 
     private Phase phase = Phase.PACK_HEADER;
     private PackParseException failure;
@@ -511,7 +520,8 @@ public final class PackIngestor implements PackIngestionSession {
                 HexFormat.of().formatHex(trailer),
                 index.checksum(),
                 entries.size(),
-                objectIds(entries));
+                objectIds(entries),
+                externalBaseIds);
         try {
             Optional<PublishedPack> result = publicationStore.publish(request);
             publishedPack = result.orElse(null);
@@ -632,10 +642,17 @@ public final class PackIngestor implements PackIngestionSession {
     }
 
     private LooseObject findBase(GitObjectId id) {
-        return quarantine.read(id)
-                .or(() -> baseStore.read(id))
-                .orElseThrow(() -> new PackParseException(
-                        "Reference delta base object is unavailable"));
+        Optional<LooseObject> quarantined = quarantine.read(id);
+        if (quarantined.isPresent()) {
+            return quarantined.get();
+        }
+        Optional<LooseObject> base = baseStore.read(id);
+        if (base.isPresent()) {
+            externalBaseIds.add(id);
+            return base.get();
+        }
+        throw new PackParseException(
+                "Reference delta base object is unavailable");
     }
 
     private void resetObject() {
@@ -685,6 +702,7 @@ public final class PackIngestor implements PackIngestionSession {
         deltaBase = null;
         objectsByOffset.clear();
         packIndexObjects.clear();
+        externalBaseIds.clear();
         rawPack.reset();
         objectCrc = null;
         publishedPack = null;

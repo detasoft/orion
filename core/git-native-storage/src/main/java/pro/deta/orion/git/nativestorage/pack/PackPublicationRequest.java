@@ -4,6 +4,7 @@ import pro.deta.orion.git.common.GitObjectId;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 public record PackPublicationRequest(
         byte[] packBytes,
@@ -11,7 +12,8 @@ public record PackPublicationRequest(
         String packId,
         String indexId,
         int objectCount,
-        List<GitObjectId> objectIds) {
+        List<GitObjectId> objectIds,
+        Set<GitObjectId> externalBaseIds) {
     public PackPublicationRequest {
         packBytes = Objects.requireNonNull(packBytes, "packBytes").clone();
         indexBytes = Objects.requireNonNull(indexBytes, "indexBytes").clone();
@@ -24,6 +26,9 @@ public record PackPublicationRequest(
         if (objectIds.size() != objectCount) {
             throw new IllegalArgumentException("objectIds size must match objectCount");
         }
+        externalBaseIds = Set.copyOf(Objects.requireNonNull(
+                externalBaseIds,
+                "externalBaseIds"));
     }
 
     @Override

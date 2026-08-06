@@ -6,7 +6,11 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.config.schema.GitTransportConfig;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.config.schema.SshTransportConfig;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.transport.http.OrionHttpModule;
+import pro.deta.orion.util.ConfigurationContext;
 
 @Module(includes = OrionHttpModule.class)
 public class OrionTransportModule {
@@ -34,4 +38,15 @@ public class OrionTransportModule {
         return transport.getSsh();
     }
 
+    @Provides
+    @Singleton
+    static NativeGitRepositoryProvider nativeGitRepositoryProvider(
+            ConfigurationContext configurationContext) {
+        try {
+            return new FileNativeGitRepositoryProvider(
+                    configurationContext.getFileGitStoragePath());
+        } catch (IllegalArgumentException ignored) {
+            return new InMemoryNativeGitRepositoryProvider();
+        }
+    }
 }

@@ -39,6 +39,22 @@ public final class GitMinimalWireMachine {
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration) {
+        this(
+                allocator,
+                clientOutput,
+                repositoryProvider,
+                accessHook,
+                configuration,
+                NativePackfileUriSourceFactory.NONE);
+    }
+
+    public GitMinimalWireMachine(
+            ByteBufAllocator allocator,
+            GitNativeClientOutput clientOutput,
+            NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryAccessHook accessHook,
+            GitWireConfiguration configuration,
+            NativePackfileUriSourceFactory packfileUriSourceFactory) {
         this.context = new Context(
                 Objects.requireNonNull(allocator, "allocator"),
                 Objects.requireNonNull(clientOutput, "clientOutput"),
@@ -51,7 +67,10 @@ public final class GitMinimalWireMachine {
                                 "accessHook"),
                         Objects.requireNonNull(
                                 configuration,
-                                "configuration")),
+                                "configuration"),
+                        Objects.requireNonNull(
+                                packfileUriSourceFactory,
+                                "packfileUriSourceFactory")),
                 Objects.requireNonNull(configuration, "configuration"));
         this.runtime = new ContinuationRuntime<ByteBuf>(
                 new ControlHeaderContinuation(context, ProtocolStage.INITIAL_REQUEST));

@@ -22,6 +22,7 @@ public final class NativeFetchPackBuilder {
     private final LooseObjectStore objects;
     private final NoDeltaPackBuilder noDeltaPackBuilder;
     private final DeltaPackBuilder deltaPackBuilder;
+    private final NativePackfileUriSource packfileUriSource;
 
     public NativeFetchPackBuilder(
             LooseRefStore refs,
@@ -30,7 +31,8 @@ public final class NativeFetchPackBuilder {
                 refs,
                 objects,
                 new NoDeltaPackBuilder(),
-                new DeltaPackBuilder());
+                new DeltaPackBuilder(),
+                NativePackfileUriSource.NONE);
     }
 
     NativeFetchPackBuilder(
@@ -38,6 +40,32 @@ public final class NativeFetchPackBuilder {
             LooseObjectStore objects,
             NoDeltaPackBuilder noDeltaPackBuilder,
             DeltaPackBuilder deltaPackBuilder) {
+        this(
+                refs,
+                objects,
+                noDeltaPackBuilder,
+                deltaPackBuilder,
+                NativePackfileUriSource.NONE);
+    }
+
+    public NativeFetchPackBuilder(
+            LooseRefStore refs,
+            LooseObjectStore objects,
+            NativePackfileUriSource packfileUriSource) {
+        this(
+                refs,
+                objects,
+                new NoDeltaPackBuilder(),
+                new DeltaPackBuilder(),
+                packfileUriSource);
+    }
+
+    NativeFetchPackBuilder(
+            LooseRefStore refs,
+            LooseObjectStore objects,
+            NoDeltaPackBuilder noDeltaPackBuilder,
+            DeltaPackBuilder deltaPackBuilder,
+            NativePackfileUriSource packfileUriSource) {
         this.refs = Objects.requireNonNull(refs, "refs");
         this.objects = Objects.requireNonNull(objects, "objects");
         this.noDeltaPackBuilder = Objects.requireNonNull(
@@ -46,6 +74,9 @@ public final class NativeFetchPackBuilder {
         this.deltaPackBuilder = Objects.requireNonNull(
                 deltaPackBuilder,
                 "deltaPackBuilder");
+        this.packfileUriSource = Objects.requireNonNull(
+                packfileUriSource,
+                "packfileUriSource");
     }
 
     public NativeFetchResponse build(NativeFetchRequest request) {
@@ -66,6 +97,9 @@ public final class NativeFetchPackBuilder {
         if (request.includeTag()) {
             includeReachableAnnotatedTags(objectIds);
         }
+        NativePackfileUriSelection packfileUriSelection =
+                packfileUriSelection(request, objectIds);
+        objectIds.removeAll(packfileUriSelection.objectIds());
         NativePackProducer producer = request.ofsDelta()
                 ? deltaPackBuilder.producer(
                         objects,
@@ -75,7 +109,19 @@ public final class NativeFetchPackBuilder {
         return new NativeFetchResponse(
                 producer,
                 selection.shallowBoundaries(),
-                wantedRefs);
+                wantedRefs,
+                packfileUriSelection.packfileUris());
+    }
+
+    private NativePackfileUriSelection packfileUriSelection(
+            NativeFetchRequest request,
+            Set<GitObjectId> objectIds) {
+        if (request.packfileUriProtocols().isEmpty()) {
+            return NativePackfileUriSelection.empty();
+        }
+        return packfileUriSource.select(
+                objectIds,
+                request.packfileUriProtocols());
     }
 
     private Map<String, GitObjectId> resolveWantedRefs(

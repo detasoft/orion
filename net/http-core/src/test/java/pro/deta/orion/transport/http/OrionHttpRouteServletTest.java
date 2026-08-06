@@ -32,6 +32,7 @@ import pro.deta.orion.git.common.GitOperationException;
 import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitUploadRequest;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.ActionId;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachine;
@@ -393,8 +394,9 @@ class OrionHttpRouteServletTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType).isEqualTo("application/json");
         JsonNode routes = OBJECT_MAPPER.readTree(response.body.toString()).get("routes");
-        assertThat(routes).hasSize(12);
+        assertThat(routes).hasSize(13);
         assertThat(routeWithPattern(routes, AcmeHttpChallengeRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("anonymous");
+        assertThat(routeWithPattern(routes, OrionGitPackfileRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, OrionGitRoute.URL_PATTERN).get("authorization").asText()).isEqualTo("git");
         assertThat(routeWithPattern(routes, "/api/admin/acl").get("methods").toString()).isEqualTo("[\"GET\",\"POST\"]");
         assertThat(routeWithPattern(routes, "/api/admin/lifecycle/state").get("methods").toString()).isEqualTo("[\"GET\"]");
@@ -684,6 +686,8 @@ class OrionHttpRouteServletTest {
             OrionEventManager eventManager) {
         Set<OrionHttpRoute> routes = new LinkedHashSet<>();
         routes.add(new AcmeHttpChallengeRoute(challengeService));
+        routes.add(new OrionGitPackfileRoute(
+                new InMemoryNativeGitRepositoryProvider()));
         routes.add(new OrionGitRoute(gitRepositoryProvider));
         routes.add(new OrionAdminCreateOrUpdateUserRoute(accessControlService, OBJECT_MAPPER));
         routes.add(new OrionAdminCreateRepositoryRoute(gitRepositoryProvider, OBJECT_MAPPER));
