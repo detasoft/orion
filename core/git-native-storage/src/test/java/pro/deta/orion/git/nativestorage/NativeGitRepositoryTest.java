@@ -1,6 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,13 @@ import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.pack.PackIngestor;
+import pro.deta.orion.git.nativestorage.pack.PackPublicationRequest;
+import pro.deta.orion.git.nativestorage.pack.PackPublicationStore;
+import pro.deta.orion.git.nativestorage.pack.PublishedPack;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
@@ -15,16 +23,24 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NativeGitRepositoryTest {
     private static final String NULL_ID = "0".repeat(40);
     private static final String MAIN_ID = "1".repeat(40);
+    private static final PackIngestionLimits LIMITS =
+            new PackIngestionLimits(1024 * 1024, 100, 1024 * 1024);
 
     @Test
     void exposesConfiguredIdentityAndEmptyRefSnapshot() {
@@ -235,6 +251,55 @@ class NativeGitRepositoryTest {
         }
     }
 
+    @Test
+    void fetchBuildsServerPackInsteadOfReturningReceivedPackBytes() {
+        LooseRefStore refs = new LooseRefStore();
+        LooseObjectStore objects = new LooseObjectStore();
+        RecordingPackPublicationStore publicationStore =
+                new RecordingPackPublicationStore();
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                refs,
+                objects,
+                "refs/heads/main",
+                publicationStore);
+        PackBlob first = blob("first from client".getBytes(StandardCharsets.UTF_8));
+        PackBlob second = blob("second from client".getBytes(StandardCharsets.UTF_8));
+        List<PackBlob> incomingOrder = new ArrayList<>(List.of(first, second));
+        incomingOrder.sort((left, right) ->
+                right.objectId().value().compareTo(left.objectId().value()));
+        byte[] receivedPack = pack(incomingOrder);
+        PackIngestionResult.Complete complete =
+                complete(accept(repository.beginPackIngestion(LIMITS), receivedPack));
+        repository.publishObjectsAndRefs(
+                complete.quarantine(),
+                List.of(new LooseRefStore.Update(
+                        "refs/heads/main",
+                        NULL_ID,
+                        first.objectId().value())));
+
+        CompositeByteBuf fetchPack = produce(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(first.objectId(), second.objectId()),
+                        Set.of(),
+                        true,
+                        true,
+                        true,
+                        false)));
+
+        try {
+            byte[] generatedPack = ByteBufUtil.getBytes(fetchPack);
+            LooseObjectStore fetchedObjects = ingest(generatedPack);
+
+            assertThat(publicationStore.packBytes()).isEqualTo(receivedPack);
+            assertThat(generatedPack).isNotEqualTo(receivedPack);
+            assertThat(fetchedObjects.contains(first.objectId())).isTrue();
+            assertThat(fetchedObjects.contains(second.objectId())).isTrue();
+        } finally {
+            fetchPack.release();
+        }
+    }
+
     private static CompositeByteBuf produce(
             NativePackProducer producer) {
         CompositeByteBuf complete = Unpooled.compositeBuffer();
@@ -257,6 +322,36 @@ class NativeGitRepositoryTest {
         } catch (RuntimeException error) {
             complete.release();
             throw error;
+        }
+    }
+
+    private static PackIngestionResult accept(
+            PackIngestionSession session,
+            byte[] bytes) {
+        ByteBuf input = Unpooled.wrappedBuffer(bytes);
+        try {
+            PackIngestionResult result = session.accept(input);
+            if (result instanceof PackIngestionResult.NeedInput) {
+                return session.endOfInput();
+            }
+            return result;
+        } finally {
+            input.release();
+        }
+    }
+
+    private static PackIngestionResult.Complete complete(
+            PackIngestionResult result) {
+        assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
+        return (PackIngestionResult.Complete) result;
+    }
+
+    private static LooseObjectStore ingest(byte[] pack) {
+        ByteBuf input = Unpooled.wrappedBuffer(pack);
+        try {
+            return new PackIngestor(pack.length).ingest(input);
+        } finally {
+            input.release();
         }
     }
 
@@ -291,5 +386,112 @@ class NativeGitRepositoryTest {
                 .getBytes(StandardCharsets.UTF_8));
         output.writeBytes(HexFormat.of().parseHex(objectId.value()));
         return output.toByteArray();
+    }
+
+    private static PackBlob blob(byte[] data) {
+        return new PackBlob(blobId(data), data);
+    }
+
+    private static GitObjectId blobId(byte[] data) {
+        byte[] header = ("blob " + data.length + "\0")
+                .getBytes(StandardCharsets.US_ASCII);
+        MessageDigest digest = sha1();
+        digest.update(header);
+        digest.update(data);
+        return GitObjectId.of(HexFormat.of().formatHex(digest.digest()));
+    }
+
+    private static byte[] pack(List<PackBlob> objects) {
+        try {
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            writeInt(body, 0x5041434b);
+            writeInt(body, 2);
+            writeInt(body, objects.size());
+            for (PackBlob object : objects) {
+                writeBlobObject(body, object.data());
+            }
+            byte[] bodyBytes = body.toByteArray();
+            ByteArrayOutputStream pack = new ByteArrayOutputStream();
+            pack.writeBytes(bodyBytes);
+            pack.writeBytes(sha1(bodyBytes));
+            return pack.toByteArray();
+        } catch (IOException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    private static void writeBlobObject(
+            ByteArrayOutputStream output,
+            byte[] data) throws IOException {
+        int size = data.length;
+        int first = (ObjectType.BLOB.packTypeId() << 4) | (size & 0x0f);
+        size >>>= 4;
+        if (size != 0) {
+            first |= 0x80;
+        }
+        output.write(first);
+        while (size != 0) {
+            int next = size & 0x7f;
+            size >>>= 7;
+            if (size != 0) {
+                next |= 0x80;
+            }
+            output.write(next);
+        }
+        try (DeflaterOutputStream deflater =
+                     new DeflaterOutputStream(output)) {
+            deflater.write(data);
+        }
+    }
+
+    private static void writeInt(ByteArrayOutputStream output, int value) {
+        output.write(value >>> 24);
+        output.write(value >>> 16);
+        output.write(value >>> 8);
+        output.write(value);
+    }
+
+    private static byte[] sha1(byte[] bytes) {
+        return sha1().digest(bytes);
+    }
+
+    private static MessageDigest sha1() {
+        try {
+            return MessageDigest.getInstance("SHA-1");
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-1 not available", error);
+        }
+    }
+
+    private record PackBlob(GitObjectId objectId, byte[] data) {
+        private PackBlob {
+            data = data.clone();
+        }
+
+        @Override
+        public byte[] data() {
+            return data.clone();
+        }
+    }
+
+    private static final class RecordingPackPublicationStore
+            implements PackPublicationStore {
+        private byte[] packBytes;
+
+        @Override
+        public Optional<PublishedPack> publish(
+                PackPublicationRequest request) {
+            packBytes = request.packBytes();
+            return Optional.of(new PublishedPack(
+                    request.packId(),
+                    request.packBytes().length,
+                    request.objectCount(),
+                    request.packId(),
+                    request.indexId()));
+        }
+
+        private byte[] packBytes() {
+            return packBytes.clone();
+        }
     }
 }
