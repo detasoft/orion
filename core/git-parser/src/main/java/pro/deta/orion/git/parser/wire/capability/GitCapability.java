@@ -33,6 +33,7 @@ public final class GitCapability {
     public static final GitCapability ALLOW_REACHABLE_SHA1_IN_WANT =
             bare("allow-reachable-sha1-in-want");
     public static final GitCapability FILTER = bare("filter");
+    public static final GitCapability REF_IN_WANT = bare("ref-in-want");
 
     private static final Set<String> STANDARD_NAMES = Set.of(
             "multi_ack",
@@ -62,6 +63,7 @@ public final class GitCapability {
             "allow-reachable-sha1-in-want",
             "push-cert",
             "filter",
+            "ref-in-want",
             "session-id");
 
     private final String name;

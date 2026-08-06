@@ -31,6 +31,7 @@ class GitWireConfigurationTest {
         assertThat(configuration.protocolV2().waitForDone()).isTrue();
         assertThat(configuration.protocolV2().serverOption()).isTrue();
         assertThat(configuration.protocolV2().filter()).isTrue();
+        assertThat(configuration.protocolV2().refInWant()).isTrue();
     }
 
     @Test
@@ -81,6 +82,21 @@ class GitWireConfigurationTest {
                 true))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("filter requires fetch");
+    }
+
+    @Test
+    void rejectsRefInWantWithoutFetch() {
+        assertThatThrownBy(() -> new GitWireConfiguration.ProtocolV2(
+                true,
+                true,
+                false,
+                false,
+                false,
+                true,
+                false,
+                true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("refInWant requires fetch");
     }
 
     @Test

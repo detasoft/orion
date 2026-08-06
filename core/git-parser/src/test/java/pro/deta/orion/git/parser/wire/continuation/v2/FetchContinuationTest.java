@@ -93,6 +93,23 @@ class FetchContinuationTest {
     }
 
     @Test
+    void acceptsWantRefsWhenRefInWantIsEnabled() {
+        ByteBuf input = Unpooled.buffer();
+        writeData(input, "want-ref refs/heads/main\n");
+        writeData(input, "want-ref refs/tags/v1\n");
+        writeData(input, "done\n");
+        writeFlush(input);
+
+        FetchResponseContinuation response =
+                (FetchResponseContinuation) drive(input);
+
+        assertThat(response.request().wants()).isEmpty();
+        assertThat(response.request().wantRefs())
+                .containsExactly("refs/heads/main", "refs/tags/v1");
+        assertThat(response.request().done()).isTrue();
+    }
+
+    @Test
     void acceptsWaitForDoneNegotiationRequestWithoutDone() {
         ByteBuf input = Unpooled.buffer();
         writeData(input, "want " + WANT + "\n");
@@ -177,6 +194,9 @@ class FetchContinuationTest {
                 "want " + WANT + "\n",
                 "done\n",
                 "have " + HAVE + "\n"));
+        assertInvalid(request("want-ref HEAD\n", "done\n"));
+        assertInvalid(request("want-ref refs/heads/main topic\n", "done\n"));
+        assertInvalid(request("want-ref refs/heads/../main\n", "done\n"));
     }
 
     @Test
@@ -212,6 +232,27 @@ class FetchContinuationTest {
                                 false,
                                 false,
                                 true,
+                                false,
+                                false,
+                                false)));
+
+        assertInvalid(completed);
+    }
+
+    @Test
+    void rejectsWantRefWhenRefInWantIsDisabled() {
+        ByteBuf input = request(
+                "want-ref refs/heads/main\n",
+                "done\n");
+        Continuation<ByteBuf> completed = drive(
+                input,
+                context(
+                        new GitWireConfiguration.ProtocolV2(
+                                false,
+                                false,
+                                true,
+                                false,
+                                false,
                                 false,
                                 false,
                                 false)));

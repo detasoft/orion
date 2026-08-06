@@ -8,6 +8,7 @@ import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -41,9 +42,13 @@ public final class NativeFetchPackBuilder {
 
     public NativeFetchResponse build(NativeFetchRequest request) {
         Objects.requireNonNull(request, "request");
+        Map<String, GitObjectId> wantedRefs =
+                resolveWantedRefs(request.wantRefs());
+        Set<GitObjectId> wants = new LinkedHashSet<>(request.wants());
+        wants.addAll(wantedRefs.values());
         NativeObjectClosure.FetchSelection selection =
                 new NativeObjectClosure(objects).selectionFor(
-                        request.wants(),
+                        wants,
                         request.haves(),
                         request.depth(),
                         request.objectFilter());
@@ -56,7 +61,24 @@ public final class NativeFetchPackBuilder {
         // client requests thin-pack or ofs-delta capabilities.
         return new NativeFetchResponse(
                 packBuilder.producer(objects, objectIds),
-                selection.shallowBoundaries());
+                selection.shallowBoundaries(),
+                wantedRefs);
+    }
+
+    private Map<String, GitObjectId> resolveWantedRefs(
+            Set<String> wantRefs) {
+        Map<String, String> snapshot = refs.snapshot();
+        Map<String, GitObjectId> resolved = new LinkedHashMap<>();
+        for (String wantRef : wantRefs) {
+            String objectId = snapshot.get(wantRef);
+            if (objectId == null) {
+                throw new GitUploadPackException(
+                        GitUploadPackException.Kind.MISSING_REF,
+                        "Requested Git ref is unavailable: " + wantRef);
+            }
+            resolved.put(wantRef, GitObjectId.of(objectId));
+        }
+        return resolved;
     }
 
     private void includeReachableAnnotatedTags(

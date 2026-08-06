@@ -18,6 +18,7 @@ import pro.deta.orion.git.nativestorage.pack.PackPublicationStore;
 import pro.deta.orion.git.nativestorage.pack.PublishedPack;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
@@ -35,6 +36,7 @@ import java.util.Set;
 import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitRepositoryTest {
     private static final String NULL_ID = "0".repeat(40);
@@ -298,6 +300,72 @@ class NativeGitRepositoryTest {
         } finally {
             fetchPack.release();
         }
+    }
+
+    @Test
+    void resolvesWantedRefsIntoPackAndResponseMetadata() {
+        LooseRefStore refs = new LooseRefStore();
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                "wanted".getBytes(StandardCharsets.UTF_8));
+        refs.update("refs/heads/main", NULL_ID, blob.value());
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                refs,
+                objects,
+                "refs/heads/main");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(),
+                        Set.of(),
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        0,
+                        NativeObjectFilter.NONE,
+                        Set.of("refs/heads/main")));
+        CompositeByteBuf pack = produce(response.packProducer());
+
+        try {
+            assertThat(response.wantedRefs())
+                    .containsExactlyEntriesOf(
+                            java.util.Map.of("refs/heads/main", blob));
+            assertThat(pack.getInt(8)).isEqualTo(1);
+        } finally {
+            pack.release();
+        }
+    }
+
+    @Test
+    void rejectsMissingWantedRefBeforePackBuild() {
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+
+        assertThatThrownBy(() -> repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(),
+                        Set.of(),
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        0,
+                        NativeObjectFilter.NONE,
+                        Set.of("refs/heads/missing"))))
+                .isInstanceOfSatisfying(
+                        GitUploadPackException.class,
+                        error -> assertThat(error.kind())
+                                .isEqualTo(
+                                        GitUploadPackException.Kind
+                                                .MISSING_REF));
     }
 
     private static CompositeByteBuf produce(

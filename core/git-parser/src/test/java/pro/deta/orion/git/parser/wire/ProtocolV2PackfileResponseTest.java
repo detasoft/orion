@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -84,6 +85,42 @@ class ProtocolV2PackfileResponseTest {
                                     + "0035shallow "
                                     + boundary.value()
                                     + "\n"
+                                    + "0001"
+                                    + "000dpackfile\n");
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
+    void writesWantedRefsBeforePackfileSection() {
+        ByteBuf outbound = outputBuffer();
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitObjectId refId = GitObjectId.of("2".repeat(40));
+        byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
+        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+                output.beginProtocolV2Packfile(
+                        producer(pack),
+                        Set.of(),
+                        Map.of("refs/heads/main", refId));
+
+        try {
+            complete(response);
+
+            byte[] bytes = join(sent);
+            String prefix = new String(
+                    bytes,
+                    0,
+                    16 + 61 + 4 + 13,
+                    StandardCharsets.US_ASCII);
+            assertThat(prefix)
+                    .isEqualTo(
+                            "0010wanted-refs\n"
+                                    + "003d"
+                                    + refId.value()
+                                    + " refs/heads/main\n"
                                     + "0001"
                                     + "000dpackfile\n");
         } finally {

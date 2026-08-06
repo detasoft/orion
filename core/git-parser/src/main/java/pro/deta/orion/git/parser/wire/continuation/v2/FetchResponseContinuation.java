@@ -37,7 +37,8 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
                                 request);
                 response = context.clientOutput.beginProtocolV2Packfile(
                         fetch.packProducer(),
-                        fetch.shallowBoundaries());
+                        fetch.shallowBoundaries(),
+                        fetch.wantedRefs());
             }
             return switch (response.advance()) {
                 case GitNativeClientOutput.SendResult.Completed ignored -> {

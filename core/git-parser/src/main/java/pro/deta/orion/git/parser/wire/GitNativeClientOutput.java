@@ -14,7 +14,9 @@ import pro.deta.orion.util.Result;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -103,6 +105,9 @@ public final class GitNativeClientOutput {
                 }
                 if (configuration.filter()) {
                     fetchOptions.add("filter");
+                }
+                if (configuration.refInWant()) {
+                    fetchOptions.add("ref-in-want");
                 }
                 capabilities.add(fetchOptions.isEmpty()
                         ? "fetch\n"
@@ -310,7 +315,15 @@ public final class GitNativeClientOutput {
     public ProtocolV2PackfileResponse beginProtocolV2Packfile(
             NativePackProducer producer,
             Set<GitObjectId> shallowBoundaries) {
+        return beginProtocolV2Packfile(producer, shallowBoundaries, Map.of());
+    }
+
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Map<String, GitObjectId> wantedRefs) {
         Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
+        Objects.requireNonNull(wantedRefs, "wantedRefs");
         Result<NativePackProducer> availableProducer =
                 availableProducer(producer);
         if (availableProducer instanceof
@@ -321,7 +334,8 @@ public final class GitNativeClientOutput {
         ProtocolV2PackfileResponse response =
                 new ProtocolV2PackfileResponse(
                         producer,
-                        shallowBoundaries);
+                        shallowBoundaries,
+                        wantedRefs);
         protocolV2PackfileResponse = response;
         return response;
     }
@@ -1320,32 +1334,34 @@ public final class GitNativeClientOutput {
                         - 1;
 
         private final NativePackProducer producer;
-        private final List<byte[]> shallowInfoPackets;
+        private final List<byte[]> prePackSectionPackets;
         private final SendResult.Failed beginFailure;
         private Phase phase;
         private int outputStartIndex;
         private int controlOffset;
-        private int shallowInfoPacketIndex;
+        private int prePackSectionPacketIndex;
         private Throwable deliveryFailure;
         private boolean closed;
 
         private ProtocolV2PackfileResponse(
                 NativePackProducer producer,
-                Set<GitObjectId> shallowBoundaries) {
+                Set<GitObjectId> shallowBoundaries,
+                Map<String, GitObjectId> wantedRefs) {
             this.producer = producer;
-            this.shallowInfoPackets = shallowInfoPackets(
-                    shallowBoundaries);
+            this.prePackSectionPackets = prePackSectionPackets(
+                    shallowBoundaries,
+                    wantedRefs);
             this.beginFailure = null;
-            this.phase = shallowInfoPackets.isEmpty()
+            this.phase = prePackSectionPackets.isEmpty()
                     ? Phase.HEADER
-                    : Phase.SHALLOW_INFO;
+                    : Phase.PRE_PACK_SECTIONS;
             outputStartIndex = output.writerIndex();
         }
 
         private ProtocolV2PackfileResponse(
                 SendResult.Failed beginFailure) {
             this.producer = null;
-            this.shallowInfoPackets = List.of();
+            this.prePackSectionPackets = List.of();
             this.beginFailure = Objects.requireNonNull(
                     beginFailure,
                     "beginFailure");
@@ -1373,8 +1389,8 @@ public final class GitNativeClientOutput {
                 while (output.isWritable()
                         && phase != Phase.COMPLETED) {
                     switch (phase) {
-                        case SHALLOW_INFO -> {
-                            if (!writeShallowInfo()) {
+                        case PRE_PACK_SECTIONS -> {
+                            if (!writePrePackSections()) {
                                 break writing;
                             }
                         }
@@ -1434,10 +1450,11 @@ public final class GitNativeClientOutput {
             }
         }
 
-        private boolean writeShallowInfo() {
-            while (shallowInfoPacketIndex < shallowInfoPackets.size()) {
+        private boolean writePrePackSections() {
+            while (prePackSectionPacketIndex < prePackSectionPackets.size()) {
                 byte[] packet =
-                        shallowInfoPackets.get(shallowInfoPacketIndex);
+                        prePackSectionPackets.get(
+                                prePackSectionPacketIndex);
                 int length = Math.min(
                         output.writableBytes(),
                         packet.length - controlOffset);
@@ -1446,7 +1463,7 @@ public final class GitNativeClientOutput {
                 if (controlOffset < packet.length) {
                     return false;
                 }
-                shallowInfoPacketIndex++;
+                prePackSectionPacketIndex++;
                 controlOffset = 0;
             }
             phase = Phase.HEADER;
@@ -1524,35 +1541,95 @@ public final class GitNativeClientOutput {
         }
 
         private enum Phase {
-            SHALLOW_INFO,
+            PRE_PACK_SECTIONS,
             HEADER,
             PACK,
             FLUSH,
             COMPLETED
         }
 
-        private static List<byte[]> shallowInfoPackets(
-                Set<GitObjectId> shallowBoundaries) {
+        private static List<byte[]> prePackSectionPackets(
+                Set<GitObjectId> shallowBoundaries,
+                Map<String, GitObjectId> wantedRefs) {
             Objects.requireNonNull(
                     shallowBoundaries,
                     "shallowBoundaries");
-            if (shallowBoundaries.isEmpty()) {
+            Objects.requireNonNull(wantedRefs, "wantedRefs");
+            if (shallowBoundaries.isEmpty() && wantedRefs.isEmpty()) {
                 return List.of();
             }
             List<byte[]> packets = new ArrayList<>();
-            packets.add(encodeAsciiPacket("shallow-info\n"));
-            for (GitObjectId shallowBoundary : shallowBoundaries) {
-                Objects.requireNonNull(
-                        shallowBoundary,
-                        "shallowBoundary");
-                validateObjectId(shallowBoundary.value());
-                packets.add(encodeAsciiPacket(
-                        "shallow "
-                                + shallowBoundary.value()
-                                + "\n"));
+            if (!shallowBoundaries.isEmpty()) {
+                packets.add(encodeAsciiPacket("shallow-info\n"));
+                for (GitObjectId shallowBoundary : shallowBoundaries) {
+                    Objects.requireNonNull(
+                            shallowBoundary,
+                            "shallowBoundary");
+                    validateObjectId(shallowBoundary.value());
+                    packets.add(encodeAsciiPacket(
+                            "shallow "
+                                    + shallowBoundary.value()
+                                    + "\n"));
+                }
+                packets.add(DELIMITER);
             }
-            packets.add(DELIMITER);
+            if (!wantedRefs.isEmpty()) {
+                packets.add(encodeAsciiPacket("wanted-refs\n"));
+                for (Map.Entry<String, GitObjectId> wantedRef
+                        : new LinkedHashMap<>(wantedRefs).entrySet()) {
+                    String refName = validateRefName(
+                            wantedRef.getKey(),
+                            "wantedRef.name");
+                    GitObjectId objectId = Objects.requireNonNull(
+                            wantedRef.getValue(),
+                            "wantedRef.objectId");
+                    validateObjectId(objectId.value());
+                    packets.add(encodeAsciiPacket(
+                            objectId.value()
+                                    + " "
+                                    + refName
+                                    + "\n"));
+                }
+                packets.add(DELIMITER);
+            }
             return List.copyOf(packets);
+        }
+
+        private static String validateRefName(
+                String refName,
+                String fieldName) {
+            Objects.requireNonNull(refName, fieldName);
+            if (!isValidFullRefName(refName)) {
+                throw new IllegalArgumentException(
+                        fieldName + " must be a full Git ref name");
+            }
+            return refName;
+        }
+
+        private static boolean isValidFullRefName(String refName) {
+            if (!refName.startsWith("refs/")
+                    || refName.length() == "refs/".length()
+                    || refName.endsWith("/")
+                    || refName.contains("//")
+                    || refName.contains("..")
+                    || refName.contains("@{")) {
+                return false;
+            }
+            for (int index = 0; index < refName.length(); index++) {
+                char value = refName.charAt(index);
+                if (value <= 0x20
+                        || value >= 0x7f
+                        || value == '~'
+                        || value == '^'
+                        || value == ':'
+                        || value == '?'
+                        || value == '*'
+                        || value == '['
+                        || value == '\\') {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

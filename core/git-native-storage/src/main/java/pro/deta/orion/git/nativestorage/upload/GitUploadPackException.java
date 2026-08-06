@@ -18,6 +18,7 @@ public final class GitUploadPackException extends RuntimeException {
         INVALID_REQUEST,
         UNSUPPORTED_FEATURE,
         ACCESS_DENIED,
+        MISSING_REF,
         MISSING_OBJECT
     }
 }

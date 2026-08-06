@@ -39,6 +39,7 @@ class GitCapabilityTest {
                 GitCapability.ALLOW_REACHABLE_SHA1_IN_WANT,
                 GitCapability.pushCert("nonce"),
                 GitCapability.FILTER,
+                GitCapability.REF_IN_WANT,
                 GitCapability.sessionId("session")))
                 .extracting(GitCapability::wireToken)
                 .containsExactly(
@@ -69,6 +70,7 @@ class GitCapabilityTest {
                         "allow-reachable-sha1-in-want",
                         "push-cert=nonce",
                         "filter",
+                        "ref-in-want",
                         "session-id=session");
     }
 

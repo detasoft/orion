@@ -96,6 +96,9 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             if (value.startsWith("filter ")) {
                 return filterArgument(value);
             }
+            if (value.startsWith("want-ref ")) {
+                return refArgument(value);
+            }
             return switch (value) {
                 case "done" -> FetchContinuation.SimpleArgument.DONE;
                 case "thin-pack" ->
@@ -144,6 +147,14 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             };
         }
 
+        private static FetchContinuation.FetchArgument refArgument(
+                String value) {
+            String refName = value.substring("want-ref ".length());
+            return isValidFullRefName(refName)
+                    ? new FetchContinuation.RefArgument(refName)
+                    : null;
+        }
+
         private static FetchContinuation.FetchArgument objectArgument(
                 String value,
                 String prefix,
@@ -166,6 +177,32 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
             return value >= '0' && value <= '9'
                     || value >= 'a' && value <= 'f'
                     || value >= 'A' && value <= 'F';
+        }
+
+        private static boolean isValidFullRefName(String refName) {
+            if (!refName.startsWith("refs/")
+                    || refName.length() == "refs/".length()
+                    || refName.endsWith("/")
+                    || refName.contains("//")
+                    || refName.contains("..")
+                    || refName.contains("@{")) {
+                return false;
+            }
+            for (int index = 0; index < refName.length(); index++) {
+                char value = refName.charAt(index);
+                if (value <= 0x20
+                        || value >= 0x7f
+                        || value == '~'
+                        || value == '^'
+                        || value == ':'
+                        || value == '?'
+                        || value == '*'
+                        || value == '['
+                        || value == '\\') {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 }

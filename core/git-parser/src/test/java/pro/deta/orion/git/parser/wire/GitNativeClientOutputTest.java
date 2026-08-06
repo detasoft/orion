@@ -89,7 +89,7 @@ class GitNativeClientOutputTest {
                     .isEqualTo(
                             "000eversion 2\n"
                                     + "0013ls-refs=unborn\n"
-                                    + "0027fetch=shallow wait-for-done filter\n"
+                                    + "0033fetch=shallow wait-for-done filter ref-in-want\n"
                                     + "0012server-option\n"
                                     + "0000");
         } finally {
@@ -142,6 +142,19 @@ class GitNativeClientOutputTest {
                         + "0000");
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
+                        false,
+                        false,
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        true),
+                "000eversion 2\n"
+                        + "0016fetch=ref-in-want\n"
+                        + "0000");
+        assertV2Advertisement(
+                new GitWireConfiguration.ProtocolV2(
                         true, true, false, true),
                 "000eversion 2\n"
                         + "0013ls-refs=unborn\n"
@@ -160,10 +173,10 @@ class GitNativeClientOutputTest {
     void keepsProtocolV2CapabilitiesInStableOrder() {
         assertV2Advertisement(
                 new GitWireConfiguration.ProtocolV2(
-                        true, false, true, true, true, true, true),
+                        true, false, true, true, true, true, true, true),
                 "000eversion 2\n"
                         + "000cls-refs\n"
-                        + "0027fetch=shallow wait-for-done filter\n"
+                        + "0033fetch=shallow wait-for-done filter ref-in-want\n"
                         + "0012server-option\n"
                         + "0000");
     }

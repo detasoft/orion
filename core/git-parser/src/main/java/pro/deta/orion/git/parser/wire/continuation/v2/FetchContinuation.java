@@ -22,6 +22,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
     private final InitialRequestData data;
     private final Set<GitObjectId> wants = new LinkedHashSet<>();
+    private final Set<String> wantRefs = new LinkedHashSet<>();
     private final Set<GitObjectId> haves = new LinkedHashSet<>();
     private boolean done;
     private boolean thinPack;
@@ -86,6 +87,13 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                     objectFilter = filter.objectFilter();
                 }
             }
+            case RefArgument ref -> {
+                if (!context.configuration.protocolV2().refInWant()) {
+                    invalid = true;
+                } else {
+                    wantRefs.add(ref.refName());
+                }
+            }
             case SimpleArgument simple -> {
                 switch (simple) {
                     case DONE -> done = true;
@@ -101,7 +109,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     }
 
     private Continuation<ByteBuf> completeRequest() {
-        if (invalid || wants.isEmpty()) {
+        if (invalid || (wants.isEmpty() && wantRefs.isEmpty())) {
             return failed();
         }
         NativeFetchRequest request = new NativeFetchRequest(
@@ -113,7 +121,8 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                 includeTag,
                 waitForDone,
                 depth,
-                objectFilter);
+                objectFilter,
+                wantRefs);
         if (!done) {
             return new FetchNegotiationResponseContinuation(
                     context,
@@ -127,7 +136,7 @@ final class FetchContinuation implements Continuation<ByteBuf> {
     }
 
     sealed interface FetchArgument
-            permits ObjectArgument, DepthArgument, FilterArgument,
+            permits ObjectArgument, DepthArgument, FilterArgument, RefArgument,
             SimpleArgument {
     }
 
@@ -156,6 +165,13 @@ final class FetchContinuation implements Continuation<ByteBuf> {
                 throw new IllegalArgumentException(
                         "Fetch filter must not be none");
             }
+        }
+    }
+
+    record RefArgument(String refName) implements FetchArgument {
+
+        RefArgument {
+            Objects.requireNonNull(refName, "refName");
         }
     }
 
