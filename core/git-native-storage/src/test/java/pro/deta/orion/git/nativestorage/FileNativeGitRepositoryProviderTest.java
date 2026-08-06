@@ -174,6 +174,67 @@ class FileNativeGitRepositoryProviderTest {
     }
 
     @Test
+    void readsPublishedOffsetDeltaObjectsOnDemand(
+            @TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("team/project.git")
+                .valueOrFailure("repository");
+        byte[] source = "hello world".getBytes(StandardCharsets.UTF_8);
+        byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
+        byte[] pack = packWithOffsetDelta(source, target);
+
+        PackIngestionResult result =
+                accept(repository.beginPackIngestion(LIMITS), pack);
+
+        assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
+        assertPublishedObject(repository, blobId(target), target);
+
+        FileNativeGitRepositoryProvider reopenedProvider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository reopened = reopenedProvider.find("team/project.git")
+                .valueOrFailure("repository");
+        assertPublishedObject(reopened, blobId(target), target);
+    }
+
+    @Test
+    void readsPublishedThinReferenceDeltaObjectsOnDemand(
+            @TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("team/project.git")
+                .valueOrFailure("repository");
+        byte[] source = "hello world".getBytes(StandardCharsets.UTF_8);
+        byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
+        GitObjectId baseId = repository.writeObject(ObjectType.BLOB, source);
+        byte[] pack = packWithReferenceDelta(
+                baseId.value(),
+                source,
+                target);
+
+        PackIngestionResult result =
+                accept(repository.beginPackIngestion(LIMITS), pack);
+
+        assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
+        assertPublishedObject(repository, blobId(target), target);
+
+        FileNativeGitRepositoryProvider reopenedProvider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository reopened = reopenedProvider.find("team/project.git")
+                .valueOrFailure("repository");
+        assertThat(reopened.readObjectPrefix(GitObjectId.of(blobId(target)), 7))
+                .isPresent()
+                .get()
+                .satisfies(prefix -> {
+                    assertThat(prefix.type()).isEqualTo(ObjectType.BLOB);
+                    assertThat(prefix.declaredDataLength())
+                            .isEqualTo(target.length);
+                    assertThat(prefix.dataPrefix()).isEqualTo(
+                            "hello n".getBytes(StandardCharsets.UTF_8));
+                });
+    }
+
+    @Test
     void missingPublishedPackObjectReturnsEmpty(
             @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
@@ -247,11 +308,51 @@ class FileNativeGitRepositoryProviderTest {
             for (byte[] object : objects) {
                 writeObject(body, object);
             }
-            byte[] bodyBytes = body.toByteArray();
-            ByteArrayOutputStream result = new ByteArrayOutputStream();
-            result.writeBytes(bodyBytes);
-            result.writeBytes(sha1(bodyBytes));
-            return result.toByteArray();
+            return withChecksum(body.toByteArray());
+        } catch (IOException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    private static byte[] packWithOffsetDelta(
+            byte[] source,
+            byte[] target) {
+        try {
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            writeInt(body, 0x5041434b);
+            writeInt(body, 2);
+            writeInt(body, 2);
+
+            int baseOffset = body.size();
+            writeObject(body, source);
+            int deltaOffset = body.size();
+            byte[] delta = replaceFromSixBytePrefixDelta(source, target);
+            writeDeltaHeader(body, 6, delta.length);
+            writeOffsetDeltaBaseDistance(body, deltaOffset - baseOffset);
+            writeDeflated(body, delta);
+
+            return withChecksum(body.toByteArray());
+        } catch (IOException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    private static byte[] packWithReferenceDelta(
+            String baseId,
+            byte[] source,
+            byte[] target) {
+        try {
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            writeInt(body, 0x5041434b);
+            writeInt(body, 2);
+            writeInt(body, 1);
+
+            byte[] delta = replaceFromSixBytePrefixDelta(source, target);
+            writeDeltaHeader(body, 7, delta.length);
+            body.writeBytes(HexFormat.of().parseHex(baseId));
+            writeDeflated(body, delta);
+
+            return withChecksum(body.toByteArray());
         } catch (IOException error) {
             throw new IllegalStateException(error);
         }
@@ -280,6 +381,83 @@ class FileNativeGitRepositoryProviderTest {
                      new DeflaterOutputStream(output)) {
             deflater.write(data);
         }
+    }
+
+    private static void writeDeltaHeader(
+            ByteArrayOutputStream output,
+            int typeId,
+            int size) {
+        int first = (typeId << 4) | (size & 0x0f);
+        size >>>= 4;
+        if (size != 0) {
+            first |= 0x80;
+        }
+        output.write(first);
+        while (size != 0) {
+            int next = size & 0x7f;
+            size >>>= 7;
+            if (size != 0) {
+                next |= 0x80;
+            }
+            output.write(next);
+        }
+    }
+
+    private static void writeOffsetDeltaBaseDistance(
+            ByteArrayOutputStream output,
+            int distance) {
+        if (distance < 1 || distance > 127) {
+            throw new IllegalArgumentException(
+                    "test helper supports one-byte offset delta distances");
+        }
+        output.write(distance);
+    }
+
+    private static byte[] replaceFromSixBytePrefixDelta(
+            byte[] source,
+            byte[] target) {
+        if (source.length < 6 || target.length < 6) {
+            throw new IllegalArgumentException(
+                    "test delta expects a six-byte shared prefix");
+        }
+        ByteArrayOutputStream delta = new ByteArrayOutputStream();
+        writeDeltaVarInt(delta, source.length);
+        writeDeltaVarInt(delta, target.length);
+        delta.write(0x90);
+        delta.write(6);
+        int insertLength = target.length - 6;
+        delta.write(insertLength);
+        delta.write(target, 6, insertLength);
+        return delta.toByteArray();
+    }
+
+    private static void writeDeltaVarInt(
+            ByteArrayOutputStream output,
+            int value) {
+        do {
+            int next = value & 0x7f;
+            value >>>= 7;
+            if (value != 0) {
+                next |= 0x80;
+            }
+            output.write(next);
+        } while (value != 0);
+    }
+
+    private static void writeDeflated(
+            ByteArrayOutputStream output,
+            byte[] data) throws IOException {
+        try (DeflaterOutputStream deflater =
+                     new DeflaterOutputStream(output)) {
+            deflater.write(data);
+        }
+    }
+
+    private static byte[] withChecksum(byte[] bodyBytes) throws IOException {
+        ByteArrayOutputStream result = new ByteArrayOutputStream();
+        result.writeBytes(bodyBytes);
+        result.writeBytes(sha1(bodyBytes));
+        return result.toByteArray();
     }
 
     private static void assertPackIndex(

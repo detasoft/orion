@@ -71,13 +71,17 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
         return repositories.computeIfAbsent(name, ignored -> {
             Path repositoryDirectory = repositoryDirectory(name);
             RepositoryMetadata metadata = readMetadata(repositoryDirectory);
+            LooseObjectStore objectStore =
+                    new LooseObjectStore(repositoryDirectory.resolve("objects"));
             return new NativeGitRepository(
                     metadata.name(),
                     new LooseRefStore(repositoryDirectory),
-                    new LooseObjectStore(repositoryDirectory.resolve("objects")),
+                    objectStore,
                     metadata.defaultHead(),
                     new LocalPackPublicationStore(repositoryDirectory),
-                    new LocalPackObjectDirectory(repositoryDirectory));
+                    new LocalPackObjectDirectory(
+                            repositoryDirectory,
+                            objectStore));
         });
     }
 

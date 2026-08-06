@@ -2,6 +2,7 @@ package pro.deta.orion.git.nativestorage.pack;
 
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
+import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectFormatException;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 
@@ -17,11 +18,13 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
@@ -37,22 +40,48 @@ public final class LocalPackObjectDirectory implements PackObjectDirectory {
     private static final int INFLATE_CHUNK_BYTES = 8192;
 
     private final Path packsDirectory;
+    private final LooseObjectStore looseObjectStore;
 
     public LocalPackObjectDirectory(Path repositoryDirectory) {
-        Path root = Objects.requireNonNull(
+        this(
                 repositoryDirectory,
-                "repositoryDirectory").toAbsolutePath().normalize();
+                new LooseObjectStore(repositoryRoot(repositoryDirectory)
+                        .resolve("objects")));
+    }
+
+    public LocalPackObjectDirectory(
+            Path repositoryDirectory,
+            LooseObjectStore looseObjectStore) {
+        Path root = repositoryRoot(repositoryDirectory);
         packsDirectory = root.resolve("packs");
+        this.looseObjectStore = Objects.requireNonNull(
+                looseObjectStore,
+                "looseObjectStore");
     }
 
     @Override
     public Optional<LooseObject> read(GitObjectId id) {
         Objects.requireNonNull(id, "id");
+        return resolveObjectById(id, new ResolutionState())
+                .map(object -> new LooseObject(id, object.type(), object.data()));
+    }
+
+    private Optional<ResolvedPackObject> resolveObjectById(
+            GitObjectId id,
+            ResolutionState state) {
+        Optional<LooseObject> loose = looseObjectStore.read(id);
+        if (loose.isPresent()) {
+            LooseObject object = loose.get();
+            return Optional.of(new ResolvedPackObject(
+                    object.type(),
+                    object.data()));
+        }
         if (!Files.isDirectory(packsDirectory)) {
             return Optional.empty();
         }
         for (Path manifest : publishedManifests()) {
-            Optional<LooseObject> object = readFromPublishedPack(id, manifest);
+            Optional<ResolvedPackObject> object =
+                    resolveFromPublishedPack(id, manifest, state);
             if (object.isPresent()) {
                 return object;
             }
@@ -60,9 +89,10 @@ public final class LocalPackObjectDirectory implements PackObjectDirectory {
         return Optional.empty();
     }
 
-    private Optional<LooseObject> readFromPublishedPack(
+    private Optional<ResolvedPackObject> resolveFromPublishedPack(
             GitObjectId id,
-            Path manifest) {
+            Path manifest,
+            ResolutionState state) {
         String packId = packId(manifest);
         Path packPath = packsDirectory.resolve(packId + ".pack");
         Path indexPath = packsDirectory.resolve(packId + ".idx");
@@ -78,7 +108,13 @@ public final class LocalPackObjectDirectory implements PackObjectDirectory {
             }
             byte[] packBytes = Files.readAllBytes(packPath);
             verifyPackChecksum(packPath, packBytes, index.packChecksum());
-            return readPackObject(id, packBytes, objectOffset.getAsLong());
+            ResolvedPackObject object = resolvePackObject(
+                    packId,
+                    packBytes,
+                    objectOffset.getAsLong(),
+                    state);
+            verifyResolvedObjectId(id, object);
+            return Optional.of(object);
         } catch (IOException error) {
             throw new UncheckedIOException(
                     "Failed to read native Git pack object",
@@ -104,34 +140,150 @@ public final class LocalPackObjectDirectory implements PackObjectDirectory {
         return manifests;
     }
 
+    private static Path repositoryRoot(Path repositoryDirectory) {
+        return Objects.requireNonNull(
+                repositoryDirectory,
+                "repositoryDirectory").toAbsolutePath().normalize();
+    }
+
     private static String packId(Path manifest) {
         String fileName = manifest.getFileName().toString();
         return fileName.substring(0, fileName.length() - ".json".length());
     }
 
-    private static Optional<LooseObject> readPackObject(
-            GitObjectId expectedId,
+    private ResolvedPackObject resolvePackObject(
+            String packId,
             byte[] pack,
-            long offset) {
+            long offset,
+            ResolutionState state) {
         if (offset < PACK_HEADER_BYTES || offset >= pack.length - SHA1_BYTES) {
             throw new ObjectFormatException("Pack object offset is outside pack data");
         }
         if (offset > Integer.MAX_VALUE) {
             throw new ObjectFormatException("Pack object offset exceeds local reader limit");
         }
+        PackLocation location = new PackLocation(packId, offset);
+        state.enter(location);
+        try {
+            return resolvePackObjectAtOffset(packId, pack, offset, state);
+        } finally {
+            state.leave(location);
+        }
+    }
+
+    private ResolvedPackObject resolvePackObjectAtOffset(
+            String packId,
+            byte[] pack,
+            long offset,
+            ResolutionState state) {
         int position = (int) offset;
         PackObjectHeader header = readObjectHeader(pack, position);
         if (header.typeId() == PACK_OFS_DELTA_TYPE
                 || header.typeId() == PACK_REF_DELTA_TYPE) {
-            return Optional.empty();
+            DeltaBaseReference reference = readDeltaBaseReference(
+                    header,
+                    pack,
+                    offset);
+            ResolvedPackObject base = resolveDeltaBase(
+                    packId,
+                    pack,
+                    reference,
+                    state);
+            byte[] delta = inflateObject(
+                    pack,
+                    reference.dataOffset(),
+                    header.declaredSize());
+            return new ResolvedPackObject(
+                    base.type(),
+                    applyDelta(base.data(), delta));
         }
         ObjectType type = ObjectType.fromPackTypeId(header.typeId());
         byte[] data = inflateObject(pack, header.dataOffset(), header.declaredSize());
-        String actualId = objectId(type, data);
+        return new ResolvedPackObject(type, data);
+    }
+
+    private ResolvedPackObject resolveDeltaBase(
+            String packId,
+            byte[] pack,
+            DeltaBaseReference reference,
+            ResolutionState state) {
+        if (reference instanceof OffsetDeltaBase offsetBase) {
+            return resolvePackObject(
+                    packId,
+                    pack,
+                    offsetBase.baseOffset(),
+                    state);
+        }
+        if (reference instanceof ReferenceDeltaBase referenceBase) {
+            return resolveObjectById(referenceBase.baseId(), state)
+                    .orElseThrow(() -> new ObjectFormatException(
+                            "Reference delta base object is unavailable"));
+        }
+        throw new IllegalStateException(
+                "Unexpected delta base reference: " + reference);
+    }
+
+    private static DeltaBaseReference readDeltaBaseReference(
+            PackObjectHeader header,
+            byte[] pack,
+            long objectOffset) {
+        if (header.typeId() == PACK_REF_DELTA_TYPE) {
+            int dataOffset = header.dataOffset() + SHA1_BYTES;
+            if (dataOffset > pack.length - SHA1_BYTES) {
+                throw new ObjectFormatException(
+                        "Reference delta base object id is truncated");
+            }
+            byte[] baseId = Arrays.copyOfRange(
+                    pack,
+                    header.dataOffset(),
+                    dataOffset);
+            return new ReferenceDeltaBase(
+                    GitObjectId.of(HexFormat.of().formatHex(baseId)),
+                    dataOffset);
+        }
+        int position = header.dataOffset();
+        long distance = 0;
+        boolean started = false;
+        while (true) {
+            int next = readPackDataByte(pack, position++);
+            if (!started) {
+                distance = next & 0x7fL;
+                started = true;
+            } else {
+                if (distance > (Long.MAX_VALUE >>> 7)) {
+                    throw new ObjectFormatException(
+                            "Offset delta distance is too large");
+                }
+                distance = ((distance + 1) << 7) | (next & 0x7fL);
+            }
+            if ((next & 0x80) == 0) {
+                long baseOffset = objectOffset - distance;
+                if (distance <= 0 || baseOffset < PACK_HEADER_BYTES) {
+                    throw new ObjectFormatException(
+                            "Offset delta base object is unavailable");
+                }
+                return new OffsetDeltaBase(baseOffset, position);
+            }
+        }
+    }
+
+    private static byte[] applyDelta(
+            byte[] base,
+            byte[] delta) {
+        try {
+            return PackDeltaApplier.apply(base, delta, Integer.MAX_VALUE);
+        } catch (PackParseException error) {
+            throw new ObjectFormatException(error.getMessage());
+        }
+    }
+
+    private static void verifyResolvedObjectId(
+            GitObjectId expectedId,
+            ResolvedPackObject object) {
+        String actualId = objectId(object.type(), object.data());
         if (!actualId.equals(expectedId.value())) {
             throw new ObjectFormatException("Pack object id does not match index entry");
         }
-        return Optional.of(new LooseObject(expectedId, type, data));
     }
 
     private static PackObjectHeader readObjectHeader(
@@ -246,6 +398,45 @@ public final class LocalPackObjectDirectory implements PackObjectDirectory {
             int typeId,
             long declaredSize,
             int dataOffset) {
+    }
+
+    private record ResolvedPackObject(
+            ObjectType type,
+            byte[] data) {
+    }
+
+    private sealed interface DeltaBaseReference
+            permits OffsetDeltaBase, ReferenceDeltaBase {
+        int dataOffset();
+    }
+
+    private record OffsetDeltaBase(
+            long baseOffset,
+            int dataOffset) implements DeltaBaseReference {
+    }
+
+    private record ReferenceDeltaBase(
+            GitObjectId baseId,
+            int dataOffset) implements DeltaBaseReference {
+    }
+
+    private record PackLocation(
+            String packId,
+            long offset) {
+    }
+
+    private static final class ResolutionState {
+        private final Set<PackLocation> activeLocations = new HashSet<>();
+
+        private void enter(PackLocation location) {
+            if (!activeLocations.add(location)) {
+                throw new ObjectFormatException("Pack delta base cycle detected");
+            }
+        }
+
+        private void leave(PackLocation location) {
+            activeLocations.remove(location);
+        }
     }
 
     private record PackIndex(
