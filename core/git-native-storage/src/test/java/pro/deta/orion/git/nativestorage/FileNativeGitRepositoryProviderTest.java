@@ -1,19 +1,36 @@
 package pro.deta.orion.git.nativestorage;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.util.Result;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.zip.CRC32;
+import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class FileNativeGitRepositoryProviderTest {
     private static final String NULL_ID = "0".repeat(40);
+    private static final PackIngestionLimits LIMITS =
+            new PackIngestionLimits(1024 * 1024, 100, 1024 * 1024);
 
     @Test
     void reopensPersistedRefsAndObjects(@TempDir Path rootDirectory) {
@@ -79,5 +96,291 @@ class FileNativeGitRepositoryProviderTest {
 
         assertThat(result).isInstanceOf(Result.Failure.class);
         assertThat(provider.exists("missing.git")).isFalse();
+    }
+
+    @Test
+    void publishesReceivedPackWithDurableIndexAndManifest(
+            @TempDir Path rootDirectory) throws IOException {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("team/project.git")
+                .valueOrFailure("repository");
+        byte[] first = "published-one".getBytes(StandardCharsets.UTF_8);
+        byte[] second = "published-two".getBytes(StandardCharsets.UTF_8);
+        byte[] pack = pack(first, second);
+        List<String> objectIds = sortedIds(blobId(first), blobId(second));
+        String packId = packChecksum(pack);
+
+        PackIngestionResult result =
+                accept(repository.beginPackIngestion(LIMITS), pack);
+
+        assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
+        PackIngestionResult.Complete complete =
+                (PackIngestionResult.Complete) result;
+        assertThat(complete.publishedPack()).isPresent();
+        assertThat(complete.publishedPack().get().packId()).isEqualTo(packId);
+        assertThat(complete.publishedPack().get().packBytes())
+                .isEqualTo(pack.length);
+        assertThat(complete.publishedPack().get().objectCount())
+                .isEqualTo(objectIds.size());
+        Path packFile = singlePathWithSuffix(rootDirectory, packId + ".pack");
+        Path indexFile = singlePathWithSuffix(rootDirectory, packId + ".idx");
+        Path manifestFile = singlePathWithSuffix(rootDirectory, packId + ".json");
+
+        assertThat(Files.readAllBytes(packFile)).isEqualTo(pack);
+        assertPackIndex(Files.readAllBytes(indexFile), pack, objectIds);
+        String manifest = Files.readString(manifestFile, StandardCharsets.UTF_8);
+        assertThat(manifest)
+                .contains("\"visibility\": \"PUBLISHED\"")
+                .contains("\"source\": \"receive-pack\"")
+                .contains(packId);
+        for (String objectId : objectIds) {
+            assertThat(manifest).contains(objectId);
+        }
+    }
+
+    @Test
+    void malformedReceivedPackDoesNotPublishPackIndexOrManifest(
+            @TempDir Path rootDirectory) throws IOException {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("team/project.git")
+                .valueOrFailure("repository");
+        byte[] pack = pack("broken".getBytes(StandardCharsets.UTF_8));
+        pack[pack.length - 1] ^= 1;
+
+        PackIngestionResult result =
+                accept(repository.beginPackIngestion(LIMITS), pack);
+
+        assertThat(result).isInstanceOf(PackIngestionResult.Failed.class);
+        assertThat(pathsWithSuffix(rootDirectory, ".pack")).isEmpty();
+        assertThat(pathsWithSuffix(rootDirectory, ".idx")).isEmpty();
+        assertThat(pathsWithSuffix(rootDirectory, ".json")).isEmpty();
+    }
+
+    private static PackIngestionResult accept(
+            PackIngestionSession session,
+            byte[] bytes) {
+        ByteBuf input = Unpooled.wrappedBuffer(bytes);
+        try {
+            PackIngestionResult result = session.accept(input);
+            if (result instanceof PackIngestionResult.NeedInput) {
+                return session.endOfInput();
+            }
+            return result;
+        } finally {
+            input.release();
+        }
+    }
+
+    private static byte[] pack(byte[]... objects) {
+        try {
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            writeInt(body, 0x5041434b);
+            writeInt(body, 2);
+            writeInt(body, objects.length);
+            for (byte[] object : objects) {
+                writeObject(body, object);
+            }
+            byte[] bodyBytes = body.toByteArray();
+            ByteArrayOutputStream result = new ByteArrayOutputStream();
+            result.writeBytes(bodyBytes);
+            result.writeBytes(sha1(bodyBytes));
+            return result.toByteArray();
+        } catch (IOException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    private static void writeObject(
+            ByteArrayOutputStream output,
+            byte[] data) throws IOException {
+        int size = data.length;
+        int first = (ObjectType.BLOB.packTypeId() << 4)
+                | (size & 0x0f);
+        size >>>= 4;
+        if (size != 0) {
+            first |= 0x80;
+        }
+        output.write(first);
+        while (size != 0) {
+            int next = size & 0x7f;
+            size >>>= 7;
+            if (size != 0) {
+                next |= 0x80;
+            }
+            output.write(next);
+        }
+        try (DeflaterOutputStream deflater =
+                     new DeflaterOutputStream(output)) {
+            deflater.write(data);
+        }
+    }
+
+    private static void assertPackIndex(
+            byte[] index,
+            byte[] pack,
+            List<String> expectedObjectIds) {
+        int objectCount = expectedObjectIds.size();
+        int namesOffset = 8 + 256 * Integer.BYTES;
+        int crcOffset = namesOffset + objectCount * 20;
+        int offsetTableOffset = crcOffset + objectCount * Integer.BYTES;
+        int checksumOffset = offsetTableOffset + objectCount * Integer.BYTES;
+        assertThat(index.length).isEqualTo(checksumOffset + 40);
+        assertThat(intAt(index, 0)).isEqualTo(0xff744f63);
+        assertThat(intAt(index, 4)).isEqualTo(2);
+        assertThat(intAt(index, 8 + 255 * Integer.BYTES))
+                .isEqualTo(objectCount);
+        List<String> actualObjectIds = objectIdsAt(
+                index,
+                namesOffset,
+                objectCount);
+        assertThat(actualObjectIds).containsExactlyElementsOf(
+                expectedObjectIds);
+        int[] offsets = objectOffsetsAt(
+                index,
+                offsetTableOffset,
+                objectCount,
+                pack.length);
+        assertCrcs(index, crcOffset, pack, offsets);
+        assertThat(Arrays.copyOfRange(index, checksumOffset, checksumOffset + 20))
+                .isEqualTo(packChecksumBytes(pack));
+        assertThat(Arrays.copyOfRange(index, index.length - 20, index.length))
+                .isEqualTo(sha1(Arrays.copyOf(index, index.length - 20)));
+    }
+
+    private static List<String> objectIdsAt(
+            byte[] index,
+            int offset,
+            int objectCount) {
+        HexFormat hex = HexFormat.of();
+        List<String> objectIds = new ArrayList<>(objectCount);
+        for (int objectIndex = 0; objectIndex < objectCount; objectIndex++) {
+            int objectOffset = offset + objectIndex * 20;
+            objectIds.add(hex.formatHex(
+                    Arrays.copyOfRange(index, objectOffset, objectOffset + 20)));
+        }
+        return objectIds;
+    }
+
+    private static int[] objectOffsetsAt(
+            byte[] index,
+            int offset,
+            int objectCount,
+            int packBytes) {
+        int[] objectOffsets = new int[objectCount];
+        for (int objectIndex = 0; objectIndex < objectCount; objectIndex++) {
+            int tableValue = intAt(
+                    index,
+                    offset + objectIndex * Integer.BYTES);
+            assertThat(tableValue & 0x80000000).isZero();
+            assertThat(tableValue).isGreaterThanOrEqualTo(12);
+            assertThat(tableValue).isLessThan(packBytes - 20);
+            objectOffsets[objectIndex] = tableValue;
+        }
+        return objectOffsets;
+    }
+
+    private static void assertCrcs(
+            byte[] index,
+            int crcOffset,
+            byte[] pack,
+            int[] offsets) {
+        for (int objectIndex = 0; objectIndex < offsets.length; objectIndex++) {
+            int objectOffset = offsets[objectIndex];
+            int objectEnd = objectEnd(pack, offsets, objectOffset);
+            assertThat(intAt(index, crcOffset + objectIndex * Integer.BYTES))
+                    .isEqualTo(crc32(pack, objectOffset, objectEnd - objectOffset));
+        }
+    }
+
+    private static int objectEnd(
+            byte[] pack,
+            int[] offsets,
+            int objectOffset) {
+        int end = pack.length - 20;
+        for (int candidate : offsets) {
+            if (candidate > objectOffset && candidate < end) {
+                end = candidate;
+            }
+        }
+        return end;
+    }
+
+    private static int crc32(
+            byte[] bytes,
+            int offset,
+            int length) {
+        CRC32 crc = new CRC32();
+        crc.update(bytes, offset, length);
+        return (int) crc.getValue();
+    }
+
+    private static Path singlePathWithSuffix(
+            Path rootDirectory,
+            String suffix) throws IOException {
+        List<Path> matches = pathsWithSuffix(rootDirectory, suffix);
+        assertThat(matches).hasSize(1);
+        return matches.get(0);
+    }
+
+    private static List<Path> pathsWithSuffix(
+            Path rootDirectory,
+            String suffix) throws IOException {
+        try (var paths = Files.walk(rootDirectory)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(suffix))
+                    .toList();
+        }
+    }
+
+    private static List<String> sortedIds(String... ids) {
+        List<String> sorted = new ArrayList<>(Arrays.asList(ids));
+        sorted.sort(String::compareTo);
+        return sorted;
+    }
+
+    private static String packChecksum(byte[] pack) {
+        return HexFormat.of().formatHex(packChecksumBytes(pack));
+    }
+
+    private static byte[] packChecksumBytes(byte[] pack) {
+        return Arrays.copyOfRange(pack, pack.length - 20, pack.length);
+    }
+
+    private static String blobId(byte[] data) {
+        byte[] header = ("blob " + data.length + "\0")
+                .getBytes(StandardCharsets.UTF_8);
+        MessageDigest digest = sha1Digest();
+        digest.update(header);
+        return HexFormat.of().formatHex(digest.digest(data));
+    }
+
+    private static byte[] sha1(byte[] bytes) {
+        return sha1Digest().digest(bytes);
+    }
+
+    private static MessageDigest sha1Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-1");
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    private static int intAt(byte[] data, int offset) {
+        return ((data[offset] & 0xff) << 24)
+                | ((data[offset + 1] & 0xff) << 16)
+                | ((data[offset + 2] & 0xff) << 8)
+                | (data[offset + 3] & 0xff);
+    }
+
+    private static void writeInt(
+            ByteArrayOutputStream output,
+            int value) {
+        output.write((value >>> 24) & 0xff);
+        output.write((value >>> 16) & 0xff);
+        output.write((value >>> 8) & 0xff);
+        output.write(value & 0xff);
     }
 }

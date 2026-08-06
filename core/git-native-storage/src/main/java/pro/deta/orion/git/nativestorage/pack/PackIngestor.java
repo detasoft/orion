@@ -9,11 +9,15 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import java.io.ByteArrayOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.zip.CRC32;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
@@ -25,6 +29,10 @@ public final class PackIngestor implements PackIngestionSession {
     private static final int OFS_DELTA_TYPE = 6;
     private static final int REF_DELTA_TYPE = 7;
     private static final int INPUT_CHUNK_BYTES = 8192;
+    private static final int PACK_INDEX_MAGIC = 0xff744f63;
+    private static final int PACK_INDEX_VERSION = 2;
+    private static final int LARGE_OFFSET_FLAG = 0x80000000;
+    private static final long MAX_SMALL_OFFSET = 0x7fffffffL;
 
     private enum Phase {
         PACK_HEADER,
@@ -39,13 +47,16 @@ public final class PackIngestor implements PackIngestionSession {
 
     private final PackIngestionLimits limits;
     private final LooseObjectStore baseStore;
+    private final PackPublicationStore publicationStore;
     private LooseObjectStore quarantine = new LooseObjectStore();
     private final MessageDigest packDigest = sha1Digest();
+    private final ByteArrayOutputStream rawPack = new ByteArrayOutputStream();
     private final byte[] header = new byte[HEADER_BYTES];
     private final byte[] trailer = new byte[SHA1_BYTES];
     private final byte[] refDeltaBase = new byte[SHA1_BYTES];
     private final byte[] inflaterInput = new byte[INPUT_CHUNK_BYTES];
     private final Map<Long, GitObjectId> objectsByOffset = new HashMap<>();
+    private final List<PackIndexObject> packIndexObjects = new ArrayList<>();
 
     private Phase phase = Phase.PACK_HEADER;
     private PackParseException failure;
@@ -56,6 +67,7 @@ public final class PackIngestor implements PackIngestionSession {
     private int declaredObjectCount;
     private int completedObjectCount;
     private long objectOffset;
+    private CRC32 objectCrc;
     private int objectTypeId;
     private long declaredObjectSize;
     private int objectSizeShift;
@@ -68,6 +80,8 @@ public final class PackIngestor implements PackIngestionSession {
     private int inflaterInputConsumed;
     private LooseObject deltaBase;
     private boolean quarantineTransferred;
+    private boolean packPublished;
+    private PublishedPack publishedPack;
 
     public PackIngestor(long maxPackBytes) {
         this(
@@ -81,8 +95,18 @@ public final class PackIngestor implements PackIngestionSession {
     public PackIngestor(
             PackIngestionLimits limits,
             LooseObjectStore baseStore) {
+        this(limits, baseStore, PackPublicationStore.NONE);
+    }
+
+    public PackIngestor(
+            PackIngestionLimits limits,
+            LooseObjectStore baseStore,
+            PackPublicationStore publicationStore) {
         this.limits = Objects.requireNonNull(limits, "limits");
         this.baseStore = Objects.requireNonNull(baseStore, "baseStore");
+        this.publicationStore = Objects.requireNonNull(
+                publicationStore,
+                "publicationStore");
     }
 
     public LooseObjectStore ingest(ByteBuf packBuffer) {
@@ -95,7 +119,8 @@ public final class PackIngestor implements PackIngestionSession {
         Objects.requireNonNull(packBuffer, "packBuffer");
         PackIngestor session = new PackIngestor(
                 limits,
-                Objects.requireNonNull(publishedObjects, "baseStore"));
+                Objects.requireNonNull(publishedObjects, "baseStore"),
+                publicationStore);
         PackIngestionResult result = session.accept(packBuffer);
         if (result instanceof PackIngestionResult.NeedInput) {
             result = session.endOfInput();
@@ -131,11 +156,7 @@ public final class PackIngestor implements PackIngestionSession {
                 if (input.isReadable()) {
                     return fail("Unexpected bytes after pack checksum");
                 }
-                if (quarantineTransferred) {
-                    return fail("Pack quarantine was already transferred");
-                }
-                quarantineTransferred = true;
-                return new PackIngestionResult.Complete(quarantine);
+                return completeResult();
             }
             if (phase == Phase.FAILED) {
                 return new PackIngestionResult.Failed(failure);
@@ -152,8 +173,11 @@ public final class PackIngestor implements PackIngestionSession {
     @Override
     public PackIngestionResult endOfInput() {
         if (phase == Phase.COMPLETE && !quarantineTransferred) {
-            quarantineTransferred = true;
-            return new PackIngestionResult.Complete(quarantine);
+            try {
+                return completeResult();
+            } catch (PackParseException error) {
+                return fail(error);
+            }
         }
         if (phase == Phase.FAILED || phase == Phase.CLOSED) {
             return new PackIngestionResult.Failed(failure);
@@ -209,7 +233,8 @@ public final class PackIngestor implements PackIngestionSession {
     private void readObjectHeader(ByteBuf input) {
         if (objectSizeShift == 0) {
             objectOffset = packBytes;
-            int first = readPackByte(input) & 0xff;
+            objectCrc = new CRC32();
+            int first = readObjectByte(input) & 0xff;
             objectTypeId = (first >>> 4) & 0x07;
             declaredObjectSize = first & 0x0f;
             objectSizeShift = 4;
@@ -219,7 +244,7 @@ public final class PackIngestor implements PackIngestionSession {
             return;
         }
         while (input.isReadable() && phase == Phase.OBJECT_HEADER) {
-            int next = readPackByte(input) & 0xff;
+            int next = readObjectByte(input) & 0xff;
             if (objectSizeShift > 60) {
                 throw new PackParseException(
                         "Pack object size is too large");
@@ -258,7 +283,7 @@ public final class PackIngestor implements PackIngestionSession {
         if (objectTypeId == REF_DELTA_TYPE) {
             while (input.isReadable()
                     && refDeltaBaseBytes < SHA1_BYTES) {
-                refDeltaBase[refDeltaBaseBytes++] = readPackByte(input);
+                refDeltaBase[refDeltaBaseBytes++] = readObjectByte(input);
             }
             if (refDeltaBaseBytes == SHA1_BYTES) {
                 GitObjectId id = GitObjectId.of(
@@ -269,7 +294,7 @@ public final class PackIngestor implements PackIngestionSession {
             return;
         }
         while (input.isReadable() && phase == Phase.DELTA_BASE) {
-            int next = readPackByte(input) & 0xff;
+            int next = readObjectByte(input) & 0xff;
             if (!offsetDeltaStarted) {
                 offsetDeltaDistance = next & 0x7fL;
                 offsetDeltaStarted = true;
@@ -378,6 +403,14 @@ public final class PackIngestor implements PackIngestionSession {
                 inflaterInput,
                 inflaterInputConsumed,
                 consumed);
+        objectCrc.update(
+                inflaterInput,
+                inflaterInputConsumed,
+                consumed);
+        rawPack.write(
+                inflaterInput,
+                inflaterInputConsumed,
+                consumed);
         input.skipBytes(consumed);
         inflaterInputConsumed += consumed;
         addPackBytes(consumed);
@@ -404,6 +437,10 @@ public final class PackIngestor implements PackIngestionSession {
         }
         GitObjectId id = quarantine.write(type, content);
         objectsByOffset.put(objectOffset, id);
+        packIndexObjects.add(new PackIndexObject(
+                id,
+                objectOffset,
+                objectCrc.getValue()));
         completedObjectCount++;
         resetObject();
         phase = completedObjectCount == declaredObjectCount
@@ -414,7 +451,9 @@ public final class PackIngestor implements PackIngestionSession {
     private void readTrailer(ByteBuf input) {
         while (input.isReadable() && trailerBytes < SHA1_BYTES) {
             addPackBytes(1);
-            trailer[trailerBytes++] = input.readByte();
+            byte value = input.readByte();
+            rawPack.write(value & 0xff);
+            trailer[trailerBytes++] = value;
         }
         if (trailerBytes == SHA1_BYTES) {
             if (!Arrays.equals(packDigest.digest(), trailer)) {
@@ -427,7 +466,14 @@ public final class PackIngestor implements PackIngestionSession {
     private byte readPackByte(ByteBuf input) {
         byte value = input.readByte();
         packDigest.update(value);
+        rawPack.write(value & 0xff);
         addPackBytes(1);
+        return value;
+    }
+
+    private byte readObjectByte(ByteBuf input) {
+        byte value = readPackByte(input);
+        objectCrc.update(value & 0xff);
         return value;
     }
 
@@ -440,6 +486,151 @@ public final class PackIngestor implements PackIngestionSession {
         }
     }
 
+    private PackIngestionResult completeResult() {
+        if (quarantineTransferred) {
+            return fail("Pack quarantine was already transferred");
+        }
+        Optional<PublishedPack> pack = publishPack();
+        quarantineTransferred = true;
+        return new PackIngestionResult.Complete(quarantine, pack);
+    }
+
+    private Optional<PublishedPack> publishPack() {
+        if (packPublished) {
+            return Optional.ofNullable(publishedPack);
+        }
+        packPublished = true;
+        if (publicationStore == PackPublicationStore.NONE) {
+            return Optional.empty();
+        }
+        List<PackIndexObject> entries = sortedPackIndexObjects();
+        BuiltPackIndex index = buildPackIndex(entries);
+        PackPublicationRequest request = new PackPublicationRequest(
+                rawPack.toByteArray(),
+                index.bytes(),
+                HexFormat.of().formatHex(trailer),
+                index.checksum(),
+                entries.size(),
+                objectIds(entries));
+        try {
+            Optional<PublishedPack> result = publicationStore.publish(request);
+            publishedPack = result.orElse(null);
+            return result;
+        } catch (RuntimeException error) {
+            String message = error.getMessage();
+            if (message == null || message.isBlank()) {
+                throw new PackParseException(
+                        "Failed to publish native Git pack");
+            }
+            throw new PackParseException(
+                    "Failed to publish native Git pack: " + message);
+        }
+    }
+
+    private List<PackIndexObject> sortedPackIndexObjects() {
+        List<PackIndexObject> entries = new ArrayList<>(packIndexObjects);
+        entries.sort((first, second) ->
+                first.objectId().value().compareTo(second.objectId().value()));
+        return entries;
+    }
+
+    private BuiltPackIndex buildPackIndex(List<PackIndexObject> entries) {
+        ByteArrayOutputStream index = new ByteArrayOutputStream();
+        writeInt(index, PACK_INDEX_MAGIC);
+        writeInt(index, PACK_INDEX_VERSION);
+        writeFanout(index, entries);
+        writeObjectIds(index, entries);
+        writeCrcs(index, entries);
+        List<Long> largeOffsets = writeSmallOffsets(index, entries);
+        writeLargeOffsets(index, largeOffsets);
+        index.writeBytes(trailer);
+        byte[] checksum = sha1Digest().digest(index.toByteArray());
+        index.writeBytes(checksum);
+        return new BuiltPackIndex(
+                index.toByteArray(),
+                HexFormat.of().formatHex(checksum));
+    }
+
+    private static void writeFanout(
+            ByteArrayOutputStream index,
+            List<PackIndexObject> entries) {
+        int[] fanout = new int[256];
+        for (PackIndexObject entry : entries) {
+            fanout[objectIdFirstByte(entry.objectId())]++;
+        }
+        int cumulative = 0;
+        for (int count : fanout) {
+            cumulative += count;
+            writeInt(index, cumulative);
+        }
+    }
+
+    private static void writeObjectIds(
+            ByteArrayOutputStream index,
+            List<PackIndexObject> entries) {
+        String previousId = null;
+        HexFormat hex = HexFormat.of();
+        for (PackIndexObject entry : entries) {
+            String objectId = entry.objectId().value();
+            if (objectId.equals(previousId)) {
+                throw new PackParseException("Duplicate object id in pack");
+            }
+            index.writeBytes(hex.parseHex(objectId));
+            previousId = objectId;
+        }
+    }
+
+    private static void writeCrcs(
+            ByteArrayOutputStream index,
+            List<PackIndexObject> entries) {
+        for (PackIndexObject entry : entries) {
+            writeInt(index, (int) entry.crc32());
+        }
+    }
+
+    private static List<Long> writeSmallOffsets(
+            ByteArrayOutputStream index,
+            List<PackIndexObject> entries) {
+        List<Long> largeOffsets = new ArrayList<>();
+        for (PackIndexObject entry : entries) {
+            if (entry.packOffset() < 0) {
+                throw new PackParseException("Negative pack object offset");
+            }
+            if (entry.packOffset() <= MAX_SMALL_OFFSET) {
+                writeInt(index, (int) entry.packOffset());
+            } else {
+                writeInt(index, LARGE_OFFSET_FLAG | largeOffsets.size());
+                largeOffsets.add(entry.packOffset());
+            }
+        }
+        return largeOffsets;
+    }
+
+    private static void writeLargeOffsets(
+            ByteArrayOutputStream index,
+            List<Long> largeOffsets) {
+        for (long offset : largeOffsets) {
+            writeLong(index, offset);
+        }
+    }
+
+    private static List<GitObjectId> objectIds(
+            List<PackIndexObject> entries) {
+        List<GitObjectId> objectIds = new ArrayList<>(entries.size());
+        for (PackIndexObject entry : entries) {
+            objectIds.add(entry.objectId());
+        }
+        return objectIds;
+    }
+
+    private static int objectIdFirstByte(GitObjectId id) {
+        String value = id.value();
+        if (value.length() < 2) {
+            throw new PackParseException("Invalid object id in pack");
+        }
+        return Integer.parseInt(value.substring(0, 2), 16);
+    }
+
     private LooseObject findBase(GitObjectId id) {
         return quarantine.read(id)
                 .or(() -> baseStore.read(id))
@@ -449,6 +640,7 @@ public final class PackIngestor implements PackIngestionSession {
 
     private void resetObject() {
         objectOffset = 0;
+        objectCrc = null;
         objectTypeId = 0;
         declaredObjectSize = 0;
         objectSizeShift = 0;
@@ -492,6 +684,10 @@ public final class PackIngestor implements PackIngestionSession {
         inflatedObject = null;
         deltaBase = null;
         objectsByOffset.clear();
+        packIndexObjects.clear();
+        rawPack.reset();
+        objectCrc = null;
+        publishedPack = null;
         quarantine = null;
         inflaterInputLength = 0;
         inflaterInputConsumed = 0;
@@ -502,6 +698,28 @@ public final class PackIngestor implements PackIngestionSession {
                 | ((data[offset + 1] & 0xff) << 16)
                 | ((data[offset + 2] & 0xff) << 8)
                 | (data[offset + 3] & 0xff);
+    }
+
+    private static void writeInt(
+            ByteArrayOutputStream output,
+            int value) {
+        output.write((value >>> 24) & 0xff);
+        output.write((value >>> 16) & 0xff);
+        output.write((value >>> 8) & 0xff);
+        output.write(value & 0xff);
+    }
+
+    private static void writeLong(
+            ByteArrayOutputStream output,
+            long value) {
+        output.write((int) ((value >>> 56) & 0xff));
+        output.write((int) ((value >>> 48) & 0xff));
+        output.write((int) ((value >>> 40) & 0xff));
+        output.write((int) ((value >>> 32) & 0xff));
+        output.write((int) ((value >>> 24) & 0xff));
+        output.write((int) ((value >>> 16) & 0xff));
+        output.write((int) ((value >>> 8) & 0xff));
+        output.write((int) (value & 0xff));
     }
 
     private static MessageDigest sha1Digest() {
@@ -607,5 +825,26 @@ public final class PackIngestor implements PackIngestionSession {
     }
 
     private record DeltaVarInt(long value, int nextOffset) {
+    }
+
+    private record PackIndexObject(
+            GitObjectId objectId,
+            long packOffset,
+            long crc32) {
+        private PackIndexObject {
+            Objects.requireNonNull(objectId, "objectId");
+        }
+    }
+
+    private record BuiltPackIndex(byte[] bytes, String checksum) {
+        private BuiltPackIndex {
+            bytes = Objects.requireNonNull(bytes, "bytes").clone();
+            Objects.requireNonNull(checksum, "checksum");
+        }
+
+        @Override
+        public byte[] bytes() {
+            return bytes.clone();
+        }
     }
 }

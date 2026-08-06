@@ -1,6 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.LocalPackPublicationStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.util.Result;
 
@@ -67,12 +68,14 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
 
     private NativeGitRepository open(String name) {
         return repositories.computeIfAbsent(name, ignored -> {
-            RepositoryMetadata metadata = readMetadata(repositoryDirectory(name));
+            Path repositoryDirectory = repositoryDirectory(name);
+            RepositoryMetadata metadata = readMetadata(repositoryDirectory);
             return new NativeGitRepository(
                     metadata.name(),
-                    new LooseRefStore(repositoryDirectory(name)),
-                    new LooseObjectStore(repositoryDirectory(name).resolve("objects")),
-                    metadata.defaultHead());
+                    new LooseRefStore(repositoryDirectory),
+                    new LooseObjectStore(repositoryDirectory.resolve("objects")),
+                    metadata.defaultHead(),
+                    new LocalPackPublicationStore(repositoryDirectory));
         });
     }
 
@@ -80,6 +83,8 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
         Path repositoryDirectory = repositoryDirectory(name);
         createDirectories(repositoryDirectory.resolve("objects"));
         createDirectories(repositoryDirectory.resolve("refs"));
+        createDirectories(repositoryDirectory.resolve("packs"));
+        createDirectories(repositoryDirectory.resolve("tmp").resolve("pack-publication"));
         Properties properties = new Properties();
         properties.setProperty(NAME_PROPERTY, name);
         properties.setProperty(DEFAULT_HEAD_PROPERTY, DEFAULT_HEAD);

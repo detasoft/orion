@@ -10,6 +10,7 @@ import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.pack.PackIngestor;
+import pro.deta.orion.git.nativestorage.pack.PackPublicationStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
@@ -28,12 +29,27 @@ public class NativeGitRepository {
     private final LooseRefStore looseRefStore;
     private final LooseObjectStore looseObjectStore;
     private final String defaultHead;
+    private final PackPublicationStore packPublicationStore;
 
     public NativeGitRepository(
             String name,
             LooseRefStore looseRefStore,
             LooseObjectStore looseObjectStore,
             String defaultHead) {
+        this(
+                name,
+                looseRefStore,
+                looseObjectStore,
+                defaultHead,
+                PackPublicationStore.NONE);
+    }
+
+    public NativeGitRepository(
+            String name,
+            LooseRefStore looseRefStore,
+            LooseObjectStore looseObjectStore,
+            String defaultHead,
+            PackPublicationStore packPublicationStore) {
         this.name = Objects.requireNonNull(name, "name");
         this.looseRefStore = Objects.requireNonNull(
                 looseRefStore,
@@ -42,6 +58,9 @@ public class NativeGitRepository {
                 looseObjectStore,
                 "looseObjectStore");
         this.defaultHead = Objects.requireNonNull(defaultHead, "defaultHead");
+        this.packPublicationStore = Objects.requireNonNull(
+                packPublicationStore,
+                "packPublicationStore");
     }
 
     public String name() {
@@ -84,7 +103,8 @@ public class NativeGitRepository {
             PackIngestionLimits limits) {
         return new PackIngestor(
                 Objects.requireNonNull(limits, "limits"),
-                looseObjectStore);
+                looseObjectStore,
+                packPublicationStore);
     }
 
     public List<RefUpdateResult> publishObjectsAndRefs(
@@ -107,7 +127,8 @@ public class NativeGitRepository {
                 new NativeObjectClosure(looseObjectStore).selectionFor(
                         request.wants(),
                         request.haves(),
-                        request.depth());
+                        request.depth(),
+                        request.objectFilter());
         Set<GitObjectId> objectIds = new LinkedHashSet<>(
                 selection.objectIds());
         if (request.includeTag()) {

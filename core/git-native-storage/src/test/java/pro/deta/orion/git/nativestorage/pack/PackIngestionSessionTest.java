@@ -49,8 +49,11 @@ class PackIngestionSessionTest {
 
         assertThat(result)
                 .isInstanceOf(PackIngestionResult.Complete.class);
+        PackIngestionResult.Complete complete =
+                (PackIngestionResult.Complete) result;
+        assertThat(complete.publishedPack()).isEmpty();
         LooseObjectStore quarantine =
-                ((PackIngestionResult.Complete) result).quarantine();
+                complete.quarantine();
         assertThat(quarantine.contains(GitObjectId.of(blobId(data))))
                 .isTrue();
     }
