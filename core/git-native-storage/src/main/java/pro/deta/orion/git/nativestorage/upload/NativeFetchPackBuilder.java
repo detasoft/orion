@@ -4,6 +4,8 @@ import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.git.nativestorage.pack.DeltaPackBuilder;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 
@@ -18,7 +20,8 @@ import java.util.Set;
 public final class NativeFetchPackBuilder {
     private final LooseRefStore refs;
     private final LooseObjectStore objects;
-    private final NoDeltaPackBuilder packBuilder;
+    private final NoDeltaPackBuilder noDeltaPackBuilder;
+    private final DeltaPackBuilder deltaPackBuilder;
 
     public NativeFetchPackBuilder(
             LooseRefStore refs,
@@ -26,18 +29,23 @@ public final class NativeFetchPackBuilder {
         this(
                 refs,
                 objects,
-                new NoDeltaPackBuilder());
+                new NoDeltaPackBuilder(),
+                new DeltaPackBuilder());
     }
 
     NativeFetchPackBuilder(
             LooseRefStore refs,
             LooseObjectStore objects,
-            NoDeltaPackBuilder packBuilder) {
+            NoDeltaPackBuilder noDeltaPackBuilder,
+            DeltaPackBuilder deltaPackBuilder) {
         this.refs = Objects.requireNonNull(refs, "refs");
         this.objects = Objects.requireNonNull(objects, "objects");
-        this.packBuilder = Objects.requireNonNull(
-                packBuilder,
-                "packBuilder");
+        this.noDeltaPackBuilder = Objects.requireNonNull(
+                noDeltaPackBuilder,
+                "noDeltaPackBuilder");
+        this.deltaPackBuilder = Objects.requireNonNull(
+                deltaPackBuilder,
+                "deltaPackBuilder");
     }
 
     public NativeFetchResponse build(NativeFetchRequest request) {
@@ -57,10 +65,11 @@ public final class NativeFetchPackBuilder {
         if (request.includeTag()) {
             includeReachableAnnotatedTags(objectIds);
         }
-        // Fetch currently uses a self-contained whole-object pack even when a
-        // client requests thin-pack or ofs-delta capabilities.
+        NativePackProducer producer = request.ofsDelta()
+                ? deltaPackBuilder.producer(objects, objectIds)
+                : noDeltaPackBuilder.producer(objects, objectIds);
         return new NativeFetchResponse(
-                packBuilder.producer(objects, objectIds),
+                producer,
                 selection.shallowBoundaries(),
                 wantedRefs);
     }

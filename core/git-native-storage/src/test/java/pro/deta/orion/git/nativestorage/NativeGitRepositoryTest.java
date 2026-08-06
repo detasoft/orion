@@ -33,7 +33,9 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.zip.DataFormatException;
 import java.util.zip.DeflaterOutputStream;
+import java.util.zip.Inflater;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -303,6 +305,39 @@ class NativeGitRepositoryTest {
     }
 
     @Test
+    void fetchUsesNonThinDeltasOnlyWhenOfsDeltaIsNegotiated() {
+        LooseObjectStore objects = new LooseObjectStore();
+        SimilarBlobs blobs = similarBlobs(objects);
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        byte[] thinOnlyPack = produceBytes(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(blobs.first(), blobs.second()),
+                        Set.of(),
+                        true,
+                        true,
+                        false,
+                        false)));
+        byte[] deltaPack = produceBytes(repository.fetch(
+                new NativeFetchRequest(
+                        Set.of(blobs.first(), blobs.second()),
+                        Set.of(),
+                        true,
+                        false,
+                        true,
+                        false)));
+
+        assertThat(packEntryTypes(thinOnlyPack)).doesNotContain(7);
+        assertThat(packEntryTypes(deltaPack)).contains(7);
+        assertThat(ingest(deltaPack).contains(blobs.first())).isTrue();
+        assertThat(ingest(deltaPack).contains(blobs.second())).isTrue();
+    }
+
+    @Test
     void resolvesWantedRefsIntoPackAndResponseMetadata() {
         LooseRefStore refs = new LooseRefStore();
         LooseObjectStore objects = new LooseObjectStore();
@@ -393,6 +428,15 @@ class NativeGitRepositoryTest {
         }
     }
 
+    private static byte[] produceBytes(NativePackProducer producer) {
+        CompositeByteBuf pack = produce(producer);
+        try {
+            return ByteBufUtil.getBytes(pack);
+        } finally {
+            pack.release();
+        }
+    }
+
     private static PackIngestionResult accept(
             PackIngestionSession session,
             byte[] bytes) {
@@ -458,6 +502,79 @@ class NativeGitRepositoryTest {
 
     private static PackBlob blob(byte[] data) {
         return new PackBlob(blobId(data), data);
+    }
+
+    private static SimilarBlobs similarBlobs(LooseObjectStore objects) {
+        byte[] firstData = ("shared prefix\n".repeat(80)
+                + "first line\n"
+                + "shared suffix\n".repeat(80))
+                .getBytes(StandardCharsets.UTF_8);
+        byte[] secondData = ("shared prefix\n".repeat(80)
+                + "second line updated\n"
+                + "shared suffix\n".repeat(80))
+                .getBytes(StandardCharsets.UTF_8);
+        return new SimilarBlobs(
+                objects.write(ObjectType.BLOB, firstData),
+                objects.write(ObjectType.BLOB, secondData));
+    }
+
+    private static List<Integer> packEntryTypes(byte[] pack) {
+        int count = intAt(pack, 8);
+        int offset = 12;
+        List<Integer> types = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            EntryHeader header = readEntryHeader(pack, offset);
+            types.add(header.typeId());
+            offset = header.nextOffset();
+            if (header.typeId() == 7) {
+                offset += 20;
+            }
+            offset = skipDeflated(pack, offset, pack.length - 20);
+        }
+        return types;
+    }
+
+    private static EntryHeader readEntryHeader(byte[] pack, int offset) {
+        int currentOffset = offset;
+        int current = pack[currentOffset++] & 0xff;
+        int typeId = (current >>> 4) & 0x07;
+        while ((current & 0x80) != 0) {
+            current = pack[currentOffset++] & 0xff;
+        }
+        return new EntryHeader(typeId, currentOffset);
+    }
+
+    private static int skipDeflated(
+            byte[] pack,
+            int offset,
+            int end) {
+        Inflater inflater = new Inflater();
+        try {
+            inflater.setInput(pack, offset, end - offset);
+            byte[] scratch = new byte[1024];
+            while (!inflater.finished()) {
+                int produced = inflater.inflate(scratch);
+                if (produced == 0) {
+                    if (inflater.needsInput()) {
+                        throw new IllegalStateException(
+                                "Deflated pack entry is truncated");
+                    }
+                    if (inflater.needsDictionary()) {
+                        throw new IllegalStateException(
+                                "Deflated pack entry needs a dictionary");
+                    }
+                    throw new IllegalStateException(
+                            "Deflated pack entry made no progress");
+                }
+            }
+            return end - inflater.getRemaining();
+        } catch (DataFormatException error) {
+            throw new IllegalStateException(
+                    "Invalid deflated pack entry",
+                    error);
+        } finally {
+            inflater.end();
+        }
     }
 
     private static GitObjectId blobId(byte[] data) {
@@ -529,6 +646,23 @@ class NativeGitRepositoryTest {
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException("SHA-1 not available", error);
         }
+    }
+
+    private static int intAt(byte[] bytes, int offset) {
+        return (bytes[offset] & 0xff) << 24
+                | (bytes[offset + 1] & 0xff) << 16
+                | (bytes[offset + 2] & 0xff) << 8
+                | (bytes[offset + 3] & 0xff);
+    }
+
+    private record SimilarBlobs(
+            GitObjectId first,
+            GitObjectId second) {
+    }
+
+    private record EntryHeader(
+            int typeId,
+            int nextOffset) {
     }
 
     private record PackBlob(GitObjectId objectId, byte[] data) {

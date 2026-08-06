@@ -2,7 +2,7 @@
 
 Status: todo
 Source: converted from former root task list Current section.
-Next: add delta pack optimization.
+Next: add thin-pack optimization.
 
 Implement production repository backends for native Git repository ports,
 including refs, objects, pack indexes, delta reconstruction, pack building, and
@@ -15,7 +15,7 @@ projection parity.
 - [x] [Read objects from published pack files through pack indexes](pack-index-object-reads/TASK.md)
 - [x] [Reconstruct packed delta objects on demand](packed-delta-reconstruction/TASK.md)
 - [x] [Build production pack files](production-pack-building/TASK.md)
-- [ ] [Add delta pack optimization](delta-pack-optimization/TASK.md)
+- [x] [Add delta pack optimization](delta-pack-optimization/TASK.md)
 - [ ] [Add thin-pack optimization](thin-pack-optimization/TASK.md)
 - [ ] [Match native repository projections with JGit behavior](projection-parity/TASK.md)
 - [ ] [Define atomic publication boundaries](atomic-publication-boundaries/TASK.md)
