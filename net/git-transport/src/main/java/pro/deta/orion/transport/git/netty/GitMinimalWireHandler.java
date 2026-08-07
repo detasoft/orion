@@ -5,10 +5,14 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.continuation.ContinuationTask;
 import pro.deta.orion.continuation.RuntimeFlow;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Minimal Netty ownership and scheduling bridge for
@@ -86,24 +90,82 @@ public final class GitMinimalWireHandler extends ChannelInboundHandlerAdapter {
             ChannelHandlerContext context,
             Runnable task,
             ByteBuf retainedInput) {
-        yieldScheduled = false;
         if (closed) {
+            yieldScheduled = false;
             retainedInput.release();
             return;
         }
         try {
             task.run();
+            CompletionStage<Void> completion =
+                    ContinuationTask.completionOf(task);
+            if (completion.toCompletableFuture().isDone()) {
+                completeYield(context, retainedInput, completedFailure(completion));
+            } else {
+                completion.whenComplete((ignored, failure) ->
+                        context.executor().execute(() ->
+                                completeYield(
+                                        context,
+                                        retainedInput,
+                                        failure)));
+            }
+        } catch (Throwable error) {
+            yieldScheduled = false;
+            retainedInput.release();
+            fail(context, error);
+        }
+    }
+
+    private void completeYield(
+            ChannelHandlerContext context,
+            ByteBuf retainedInput,
+            Throwable failure) {
+        if (closed) {
+            yieldScheduled = false;
+            retainedInput.release();
+            return;
+        }
+        if (failure != null) {
+            yieldScheduled = false;
+            retainedInput.release();
+            fail(context, unwrap(failure));
+            return;
+        }
+        try {
             RuntimeFlow flow = machine.resumeTask();
             if (flow instanceof ContinuationFlow.Yield<?> yield) {
+                yieldScheduled = false;
                 scheduleYield(context, yield, retainedInput);
             } else {
+                yieldScheduled = false;
                 retainedInput.release();
                 handleCompletedFlow(context, flow);
             }
         } catch (Throwable error) {
+            yieldScheduled = false;
             retainedInput.release();
             fail(context, error);
         }
+    }
+
+    private static Throwable completedFailure(
+            CompletionStage<Void> completion) {
+        try {
+            completion.toCompletableFuture().getNow(null);
+            return null;
+        } catch (CompletionException error) {
+            return unwrap(error);
+        } catch (CancellationException error) {
+            return error;
+        }
+    }
+
+    private static Throwable unwrap(Throwable error) {
+        if (error instanceof CompletionException completionException
+                && completionException.getCause() != null) {
+            return completionException.getCause();
+        }
+        return error;
     }
 
     private void fail(ChannelHandlerContext context, Throwable error) {

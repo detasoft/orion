@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.continuation.ContinuationTask;
 import pro.deta.orion.continuation.RuntimeFlow;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -19,6 +20,9 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 
@@ -121,7 +125,7 @@ public final class GitByteBufTransportAdapter {
                         new ControlHeaderContinuation(
                                 sessionContext.context(),
                                 ProtocolStage.INITIAL_REQUEST)),
-                sessionContext.outputBuffer());
+                sessionContext.clientOutput());
     }
 
     private StreamSession smartHttpPostSession(
@@ -133,16 +137,13 @@ public final class GitByteBufTransportAdapter {
                 new GitMinimalWireMachine(
                         context,
                         smartHttpPostContinuation(context, data)),
-                sessionContext.outputBuffer());
+                sessionContext.clientOutput());
     }
 
     private SessionContext sessionContext(OutputStream output) {
-        ByteBuf outputBuffer = allocator.buffer(
-                GitNativeClientOutput.BUFFER_CAPACITY,
-                GitNativeClientOutput.BUFFER_CAPACITY);
         GitNativeClientOutput clientOutput = new GitNativeClientOutput(
-                outputBuffer,
-                new OutputStreamByteBufConsumer(output));
+                allocator,
+                new OutputStreamByteBufWrite(output));
         return new SessionContext(
                 new GitMinimalWireMachine.Context(
                         allocator,
@@ -153,22 +154,22 @@ public final class GitByteBufTransportAdapter {
                                 configuration,
                                 packfileUriSourceFactory),
                         configuration),
-                outputBuffer);
+                clientOutput);
     }
 
     private record SessionContext(
             GitMinimalWireMachine.Context context,
-            ByteBuf outputBuffer) {
+            GitNativeClientOutput clientOutput) {
     }
 
     private record StreamSession(
             GitMinimalWireMachine machine,
-            ByteBuf outputBuffer) implements AutoCloseable {
+            GitNativeClientOutput clientOutput) implements AutoCloseable {
 
         @Override
         public void close() {
             machine.close();
-            outputBuffer.release();
+            clientOutput.close();
         }
     }
 
@@ -268,8 +269,13 @@ public final class GitByteBufTransportAdapter {
     private static void runTask(Runnable task) throws IOException {
         try {
             task.run();
+            ContinuationTask.completionOf(task)
+                    .toCompletableFuture()
+                    .join();
         } catch (UncheckedIOException error) {
             throw error.getCause();
+        } catch (CompletionException error) {
+            throw ioFailure("Git wire task failed", error.getCause());
         } catch (RuntimeException error) {
             throw ioFailure("Git wire task failed", error);
         }
@@ -338,26 +344,21 @@ public final class GitByteBufTransportAdapter {
         return builder.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private record OutputStreamByteBufConsumer(OutputStream output)
-            implements java.util.function.Consumer<ByteBuf> {
+    private record OutputStreamByteBufWrite(OutputStream output)
+            implements GitNativeClientWrite {
 
-        private OutputStreamByteBufConsumer {
+        private OutputStreamByteBufWrite {
             Objects.requireNonNull(output, "output");
         }
 
         @Override
-        public void accept(ByteBuf chunk) {
-            boolean written = false;
+        public CompletionStage<Void> write(ByteBuf chunk) {
             try {
                 chunk.readBytes(output, chunk.readableBytes());
                 output.flush();
-                written = true;
+                return CompletableFuture.completedFuture(null);
             } catch (IOException error) {
                 throw new UncheckedIOException(error);
-            } finally {
-                if (written) {
-                    chunk.release();
-                }
             }
         }
     }

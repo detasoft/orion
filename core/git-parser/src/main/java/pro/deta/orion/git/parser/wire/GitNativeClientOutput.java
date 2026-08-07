@@ -1,8 +1,10 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.continuation.ContinuationTask;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
@@ -10,11 +12,17 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.wire.output.DoubleGitOutputBufferCoordinator;
+import pro.deta.orion.git.parser.wire.output.GitOutputBufferCoordinator;
 import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CancellationException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,34 +39,46 @@ import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 public final class GitNativeClientOutput {
     public static final int BUFFER_CAPACITY = 64 * 1024;
 
-    private final ByteBuf output;
-    private final Consumer<ByteBuf> sendToClient;
-    private final boolean submitOnCompletion;
+    private final GitOutputBufferCoordinator outputCoordinator;
+    private ByteBuf output;
     private OutputSerialization serialization;
     private LegacySideBandResponse sideBandResponse;
     private LegacyPackResponse legacyPackResponse;
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
     public GitNativeClientOutput(ByteBuf output) {
-        this.output = Objects.requireNonNull(output, "output");
-        this.sendToClient = ignored -> {
-        };
-        this.submitOnCompletion = false;
-        requireFixedCapacity(output);
+        this(new DirectOutputBufferCoordinator(output));
     }
 
     public GitNativeClientOutput(
             ByteBuf output,
             Consumer<ByteBuf> sendToClient) {
-        this.output = Objects.requireNonNull(output, "output");
-        this.sendToClient = Objects.requireNonNull(
-                sendToClient,
-                "sendToClient");
-        this.submitOnCompletion = true;
-        requireFixedCapacity(output);
+        this(new CopyingOutputBufferCoordinator(output, sendToClient));
+    }
+
+    public GitNativeClientOutput(
+            ByteBufAllocator allocator,
+            GitNativeClientWrite write) {
+        this(new DoubleGitOutputBufferCoordinator(
+                Objects.requireNonNull(allocator, "allocator")
+                        .buffer(BUFFER_CAPACITY, BUFFER_CAPACITY),
+                allocator.buffer(BUFFER_CAPACITY, BUFFER_CAPACITY),
+                write));
+    }
+
+    public GitNativeClientOutput(GitOutputBufferCoordinator outputCoordinator) {
+        this.outputCoordinator = Objects.requireNonNull(
+                outputCoordinator,
+                "outputCoordinator");
+        this.output = outputCoordinator.writableBuffer();
     }
 
     private static void requireFixedCapacity(ByteBuf output) {
+        Objects.requireNonNull(output, "output");
+        validateFixedCapacity(output);
+    }
+
+    private static void validateFixedCapacity(ByteBuf output) {
         if (output.capacity() != BUFFER_CAPACITY
                 || output.maxCapacity() != BUFFER_CAPACITY) {
             throw new IllegalArgumentException(
@@ -594,10 +614,9 @@ public final class GitNativeClientOutput {
 
     private SendResult completeOutput() {
         try {
-            if (submitOnCompletion) {
-                submitOutput();
-            }
-            return new SendResult.Completed();
+            return resultForCompletion(
+                    outputCoordinator.finish(),
+                    "Failed to deliver serialized client output");
         } catch (RuntimeException error) {
             return new SendResult.Failed(
                     "Failed to deliver serialized client output",
@@ -605,37 +624,60 @@ public final class GitNativeClientOutput {
         }
     }
 
-    private void finishStreaming() {
+    private CompletionStage<Void> finishStreaming() {
         OutputSerialization operation = serialization;
         if (operation == null) {
-            throw new IllegalStateException(
-                    "Client output operation is not in progress");
+            return failedStage(new IllegalStateException(
+                    "Client output operation is not in progress"));
         }
+        CompletionStage<Void> completion = continueStreaming(operation);
+        return completion.whenComplete((ignored, failure) ->
+                serialization = null);
+    }
+
+    private CompletionStage<Void> continueStreaming(
+            OutputSerialization operation) {
         try {
-            while (true) {
-                submitOutput();
-                if (writeAvailable(operation)) {
-                    submitOutput();
-                    return;
-                }
-            }
-        } finally {
-            serialization = null;
+            CompletionStage<Void> writable = submitOutput();
+            return writable.thenCompose(
+                    ignored -> continueWhenWritable(operation));
+        } catch (Throwable failure) {
+            return failedStage(failure);
         }
     }
 
-    private final class SerializationTask implements Runnable {
+    private CompletionStage<Void> continueWhenWritable(
+            OutputSerialization operation) {
+        try {
+            if (writeAvailable(operation)) {
+                return outputCoordinator.finish();
+            }
+            return continueStreaming(operation);
+        } catch (Throwable failure) {
+            return failedStage(failure);
+        }
+    }
+
+    private final class SerializationTask implements ContinuationTask {
         private volatile SendResult.Failed failure;
+        private volatile CompletionStage<Void> completion =
+                CompletableFuture.completedFuture(null);
 
         @Override
         public void run() {
-            try {
-                finishStreaming();
-            } catch (Throwable cause) {
-                failure = new SendResult.Failed(
-                        "Failed to deliver serialized client output",
-                        cause);
-            }
+            completion = finishStreaming()
+                    .whenComplete((ignored, cause) -> {
+                        if (cause != null) {
+                            failure = new SendResult.Failed(
+                                    "Failed to deliver serialized client output",
+                                    unwrap(cause));
+                        }
+                    });
+        }
+
+        @Override
+        public CompletionStage<Void> completion() {
+            return completion;
         }
 
         private Optional<SendResult.Failed> failure() {
@@ -643,25 +685,172 @@ public final class GitNativeClientOutput {
         }
     }
 
+    private final class SubmitOutputTask implements ContinuationTask {
+        private final String failureMessage;
+        private final Consumer<Throwable> failureHandler;
+        private final Runnable submittedHandler;
+        private volatile SendResult.Failed failure;
+        private volatile CompletionStage<Void> completion =
+                CompletableFuture.completedFuture(null);
+
+        private SubmitOutputTask(
+                String failureMessage,
+                Consumer<Throwable> failureHandler,
+                Runnable submittedHandler) {
+            this.failureMessage = Objects.requireNonNull(
+                    failureMessage,
+                    "failureMessage");
+            this.failureHandler = Objects.requireNonNull(
+                    failureHandler,
+                    "failureHandler");
+            this.submittedHandler = Objects.requireNonNull(
+                    submittedHandler,
+                    "submittedHandler");
+        }
+
+        @Override
+        public void run() {
+            try {
+                CompletionStage<Void> submitted = submitOutput();
+                completion = submitted
+                        .thenRun(submittedHandler)
+                        .whenComplete((ignored, cause) -> {
+                            if (cause != null) {
+                                recordFailure(unwrap(cause));
+                            }
+                        });
+            } catch (Throwable cause) {
+                recordFailure(cause);
+                completion = failedStage(cause);
+            }
+        }
+
+        @Override
+        public CompletionStage<Void> completion() {
+            return completion;
+        }
+
+        private Optional<SendResult.Failed> failure() {
+            return Optional.ofNullable(failure);
+        }
+
+        private void recordFailure(Throwable cause) {
+            if (failure == null) {
+                failure = new SendResult.Failed(
+                        failureMessage,
+                        cause);
+            }
+            failureHandler.accept(cause);
+        }
+    }
+
+    private SendResult resultForCompletion(
+            CompletionStage<Void> completion,
+            String failureMessage) {
+        Optional<Throwable> completedFailure = completedFailure(completion);
+        if (completedFailure.isPresent()) {
+            return new SendResult.Failed(
+                    failureMessage,
+                    completedFailure.get());
+        }
+        if (completion.toCompletableFuture().isDone()) {
+            return new SendResult.Completed();
+        }
+        AwaitCompletionTask task =
+                new AwaitCompletionTask(completion, failureMessage);
+        return new SendResult.Streaming(task, task::failure);
+    }
+
+    private static final class AwaitCompletionTask
+            implements ContinuationTask {
+        private final CompletionStage<Void> completion;
+        private final String failureMessage;
+        private volatile SendResult.Failed failure;
+
+        private AwaitCompletionTask(
+                CompletionStage<Void> completion,
+                String failureMessage) {
+            this.completion = Objects.requireNonNull(
+                    completion,
+                    "completion");
+            this.failureMessage = Objects.requireNonNull(
+                    failureMessage,
+                    "failureMessage");
+        }
+
+        @Override
+        public void run() {
+            completion.whenComplete((ignored, cause) -> {
+                if (cause != null) {
+                    failure = new SendResult.Failed(
+                            failureMessage,
+                            unwrap(cause));
+                }
+            });
+        }
+
+        @Override
+        public CompletionStage<Void> completion() {
+            return completion;
+        }
+
+        private Optional<SendResult.Failed> failure() {
+            return Optional.ofNullable(failure);
+        }
+    }
+
+    private static Optional<Throwable> completedFailure(
+            CompletionStage<Void> completion) {
+        CompletableFuture<Void> future = completion.toCompletableFuture();
+        if (!future.isDone()) {
+            return Optional.empty();
+        }
+        try {
+            future.getNow(null);
+            return Optional.empty();
+        } catch (CompletionException error) {
+            return Optional.of(unwrap(error));
+        } catch (CancellationException error) {
+            return Optional.of(error);
+        }
+    }
+
+    private static Throwable unwrap(Throwable error) {
+        if (error instanceof CompletionException completionException
+                && completionException.getCause() != null) {
+            return completionException.getCause();
+        }
+        return error;
+    }
+
+    private static CompletionStage<Void> failedStage(Throwable error) {
+        CompletableFuture<Void> failed = new CompletableFuture<>();
+        failed.completeExceptionally(error);
+        return failed;
+    }
+
     private boolean writeAvailable(OutputSerialization operation) {
         return operation.writeAvailable(output);
     }
 
-    private void submitOutput() {
+    private CompletionStage<Void> submitOutput() {
         if (!output.isReadable()) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
-        ByteBuf submitted = output.copy(
-                output.readerIndex(),
-                output.readableBytes());
-        try {
-            sendToClient.accept(submitted);
-        } catch (Throwable failure) {
-            submitted.release();
-            throw failure;
-        } finally {
-            output.clear();
+        outputCoordinator.submitReady();
+        CompletionStage<Void> writable = outputCoordinator.awaitWritable();
+        if (completedFailure(writable).isPresent()) {
+            return writable;
         }
+        if (writable.toCompletableFuture().isDone()) {
+            refreshOutput();
+            return CompletableFuture.completedFuture(null);
+        }
+        return writable.thenRun(this::refreshOutput);
+    }
+
+    private void refreshOutput() {
+        output = outputCoordinator.writableBuffer();
     }
 
     private static List<byte[]> encodePackets(
@@ -785,6 +974,10 @@ public final class GitNativeClientOutput {
         output.setByte(
                 offset + 3,
                 hexDigit(packetLength & 0x0f));
+    }
+
+    public void close() {
+        outputCoordinator.close();
     }
 
     public sealed interface SendResult
@@ -1015,8 +1208,14 @@ public final class GitNativeClientOutput {
                     }
                 }
                 if (output.isReadable()) {
-                    return new SendResult.Streaming(
-                            this::submitSideBandOutput);
+                    SubmitOutputTask task = new SubmitOutputTask(
+                            "Failed to deliver legacy side-band-64k response",
+                            failure -> {
+                                deliveryFailure = failure;
+                                closeAfterFailure(failure);
+                            },
+                            () -> outputStartIndex = output.writerIndex());
+                    return new SendResult.Streaming(task, task::failure);
                 }
                 complete();
                 return new SendResult.Completed();
@@ -1025,16 +1224,6 @@ public final class GitNativeClientOutput {
                 return new SendResult.Failed(
                         "Failed to serialize legacy side-band-64k response",
                         error);
-            }
-        }
-
-        private void submitSideBandOutput() {
-            try {
-                GitNativeClientOutput.this.submitOutput();
-                outputStartIndex = output.writerIndex();
-            } catch (Throwable failure) {
-                deliveryFailure = failure;
-                closeAfterFailure(failure);
             }
         }
 
@@ -1316,8 +1505,14 @@ public final class GitNativeClientOutput {
                     }
                 }
                 if (output.isReadable()) {
-                    return new SendResult.Streaming(
-                            this::submitPackOutput);
+                    SubmitOutputTask task = new SubmitOutputTask(
+                            "Failed to deliver legacy pack response",
+                            failure -> {
+                                deliveryFailure = failure;
+                                closeAfterFailure(failure);
+                            },
+                            () -> outputStartIndex = output.writerIndex());
+                    return new SendResult.Streaming(task, task::failure);
                 }
                 close();
                 return new SendResult.Completed();
@@ -1326,16 +1521,6 @@ public final class GitNativeClientOutput {
                 return new SendResult.Failed(
                         "Failed to serialize legacy pack response",
                         error);
-            }
-        }
-
-        private void submitPackOutput() {
-            try {
-                GitNativeClientOutput.this.submitOutput();
-                outputStartIndex = output.writerIndex();
-            } catch (Throwable failure) {
-                deliveryFailure = failure;
-                closeAfterFailure(failure);
             }
         }
 
@@ -1515,8 +1700,14 @@ public final class GitNativeClientOutput {
                     }
                 }
                 if (output.isReadable()) {
-                    return new SendResult.Streaming(
-                            this::submitPackfileOutput);
+                    SubmitOutputTask task = new SubmitOutputTask(
+                            "Failed to deliver protocol v2 packfile response",
+                            failure -> {
+                                deliveryFailure = failure;
+                                closeAfterFailure(failure);
+                            },
+                            () -> outputStartIndex = output.writerIndex());
+                    return new SendResult.Streaming(task, task::failure);
                 }
                 close();
                 return new SendResult.Completed();
@@ -1525,16 +1716,6 @@ public final class GitNativeClientOutput {
                 return new SendResult.Failed(
                         "Failed to serialize protocol v2 packfile response",
                         error);
-            }
-        }
-
-        private void submitPackfileOutput() {
-            try {
-                GitNativeClientOutput.this.submitOutput();
-                outputStartIndex = output.writerIndex();
-            } catch (Throwable failure) {
-                deliveryFailure = failure;
-                closeAfterFailure(failure);
             }
         }
 
@@ -1761,6 +1942,100 @@ public final class GitNativeClientOutput {
                 }
             }
             return true;
+        }
+    }
+
+    private static final class DirectOutputBufferCoordinator
+            implements GitOutputBufferCoordinator {
+        private final ByteBuf output;
+
+        private DirectOutputBufferCoordinator(ByteBuf output) {
+            this.output = Objects.requireNonNull(output, "output");
+            requireFixedCapacity(output);
+        }
+
+        @Override
+        public ByteBuf writableBuffer() {
+            return output;
+        }
+
+        @Override
+        public CompletionStage<Void> submitReady() {
+            if (output.isReadable()) {
+                throw new IllegalStateException("not implemented");
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> awaitWritable() {
+            return output.isWritable()
+                    ? CompletableFuture.completedFuture(null)
+                    : failedStage(new IllegalStateException(
+                            "not implemented"));
+        }
+
+        @Override
+        public CompletionStage<Void> finish() {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static final class CopyingOutputBufferCoordinator
+            implements GitOutputBufferCoordinator {
+        private final ByteBuf output;
+        private final Consumer<ByteBuf> sendToClient;
+
+        private CopyingOutputBufferCoordinator(
+                ByteBuf output,
+                Consumer<ByteBuf> sendToClient) {
+            this.output = Objects.requireNonNull(output, "output");
+            this.sendToClient = Objects.requireNonNull(
+                    sendToClient,
+                    "sendToClient");
+            requireFixedCapacity(output);
+        }
+
+        @Override
+        public ByteBuf writableBuffer() {
+            return output;
+        }
+
+        @Override
+        public CompletionStage<Void> submitReady() {
+            if (!output.isReadable()) {
+                return CompletableFuture.completedFuture(null);
+            }
+            ByteBuf submitted = output.copy(
+                    output.readerIndex(),
+                    output.readableBytes());
+            try {
+                sendToClient.accept(submitted);
+            } catch (Throwable failure) {
+                submitted.release();
+                throw failure;
+            } finally {
+                output.clear();
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> awaitWritable() {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletionStage<Void> finish() {
+            return submitReady();
+        }
+
+        @Override
+        public void close() {
         }
     }
 

@@ -3,7 +3,6 @@ package pro.deta.orion.transport.git;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
@@ -42,6 +41,8 @@ import java.io.*;
 import java.net.*;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
@@ -287,14 +288,10 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
                     ConnectionAccessRules.localOnly());
             log.debug("Native Git client connected {} via {}", requestId, config);
             nativeClientChannels.add(channel);
-            ByteBuf output = channel.alloc().buffer(
-                    GitNativeClientOutput.BUFFER_CAPACITY,
-                    GitNativeClientOutput.BUFFER_CAPACITY);
-            channel.closeFuture().addListener(ignored -> output.release());
             GitNativeClientOutput clientOutput = new GitNativeClientOutput(
-                    output,
-                    chunk -> channel.writeAndFlush(chunk)
-                            .addListener(ChannelFutureListener.CLOSE_ON_FAILURE));
+                    channel.alloc(),
+                    buffer -> writeToChannel(channel, buffer));
+            channel.closeFuture().addListener(ignored -> clientOutput.close());
             GitMinimalWireMachine machine = new GitMinimalWireMachine(
                     channel.alloc(),
                     clientOutput,
@@ -307,6 +304,24 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
             log.warn(e.getMessage());
             channel.close();
         }
+    }
+
+    private static CompletionStage<Void> writeToChannel(
+            Channel channel,
+            ByteBuf buffer) {
+        CompletableFuture<Void> completion = new CompletableFuture<>();
+        ByteBuf outbound = buffer.retainedSlice(
+                buffer.readerIndex(),
+                buffer.readableBytes());
+        channel.writeAndFlush(outbound).addListener(future -> {
+            if (future.isSuccess()) {
+                completion.complete(null);
+            } else {
+                completion.completeExceptionally(future.cause());
+                channel.close();
+            }
+        });
+        return completion;
     }
 
     private SecurityContext nativeSecurityContext(String requestId) {

@@ -7,6 +7,7 @@ import io.netty.buffer.WrappedByteBuf;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
+import pro.deta.orion.continuation.ContinuationTask;
 import pro.deta.orion.git.common.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
@@ -22,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1715,6 +1717,127 @@ class GitNativeClientOutputTest {
         }
     }
 
+    @Test
+    void reportsSynchronousClientWriteFailure() {
+        IllegalStateException failure =
+                new IllegalStateException("write rejected");
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                UnpooledByteBufAllocator.DEFAULT,
+                ignored -> {
+                    throw failure;
+                });
+
+        try {
+            assertThat(output.sendNak())
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.cause())
+                                    .isSameAs(failure));
+        } finally {
+            output.close();
+        }
+    }
+
+    @Test
+    void reportsExceptionalClientWriteCompletion() {
+        CompletableFuture<Void> writeCompletion = new CompletableFuture<>();
+        IllegalStateException failure =
+                new IllegalStateException("write failed later");
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                UnpooledByteBufAllocator.DEFAULT,
+                ignored -> writeCompletion);
+
+        try {
+            GitNativeClientOutput.SendResult.Streaming streaming =
+                    (GitNativeClientOutput.SendResult.Streaming)
+                            output.sendNak();
+
+            streaming.task().run();
+            writeCompletion.completeExceptionally(failure);
+
+            assertThat(ContinuationTask.completionOf(streaming.task())
+                    .toCompletableFuture())
+                    .isCompletedExceptionally();
+            assertThat(streaming.failure().get())
+                    .hasValueSatisfying(failed ->
+                            assertThat(failed.cause()).isSameAs(failure));
+        } finally {
+            output.close();
+        }
+    }
+
+    @Test
+    void completesSuccessfulClientWriteCompletion() {
+        CompletableFuture<Void> writeCompletion = new CompletableFuture<>();
+        List<byte[]> written = new ArrayList<>();
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                UnpooledByteBufAllocator.DEFAULT,
+                buffer -> {
+                    written.add(snapshot(buffer));
+                    return writeCompletion;
+                });
+
+        try {
+            GitNativeClientOutput.SendResult.Streaming streaming =
+                    (GitNativeClientOutput.SendResult.Streaming)
+                            output.sendNak();
+
+            streaming.task().run();
+            writeCompletion.complete(null);
+
+            assertThat(ContinuationTask.completionOf(streaming.task())
+                    .toCompletableFuture())
+                    .isCompleted();
+            assertThat(written).hasSize(1);
+            assertThat(written.getFirst())
+                    .containsExactly("0008NAK\n"
+                            .getBytes(StandardCharsets.US_ASCII));
+        } finally {
+            output.close();
+        }
+    }
+
+    @Test
+    void keepsSubmittedClientBufferImmutableUntilCompletion() {
+        List<CompletableFuture<Void>> completions = new ArrayList<>();
+        List<ByteBuf> submitted = new ArrayList<>();
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                UnpooledByteBufAllocator.DEFAULT,
+                buffer -> {
+                    submitted.add(buffer);
+                    CompletableFuture<Void> completion =
+                            new CompletableFuture<>();
+                    completions.add(completion);
+                    return completion;
+                });
+        List<GitAdvertisedRef> refs = new ArrayList<>();
+        for (int index = 0; index < 3_000; index++) {
+            refs.add(GitAdvertisedRef.direct(
+                    "%040x".formatted(index + 1),
+                    "refs/heads/branch-%04d".formatted(index)));
+        }
+
+        try {
+            GitNativeClientOutput.SendResult.Streaming streaming =
+                    (GitNativeClientOutput.SendResult.Streaming)
+                            output.sendAdvertisement(
+                                    new GitV1Advertisement(List.of(), refs));
+            streaming.task().run();
+            assertThat(submitted).hasSize(2);
+            byte[] firstBeforeSecondCompletes = snapshot(
+                    submitted.getFirst());
+
+            completions.get(1).complete(null);
+
+            assertThat(snapshot(submitted.getFirst()))
+                    .containsExactly(firstBeforeSecondCompletes);
+            assertThat(submitted).hasSizeGreaterThan(2);
+            assertThat(completions.getFirst().isDone()).isFalse();
+        } finally {
+            output.close();
+        }
+    }
+
     private static void assertLsRefsSerializationFailed(
             GitNativeClientOutput output,
             GitLsRefsResponse response) {
@@ -1749,6 +1872,12 @@ class GitNativeClientOutputTest {
         expected.writeBytes(
                 "0000".getBytes(StandardCharsets.US_ASCII));
         return expected.toByteArray();
+    }
+
+    private static byte[] snapshot(ByteBuf buffer) {
+        byte[] bytes = new byte[buffer.readableBytes()];
+        buffer.getBytes(buffer.readerIndex(), bytes);
+        return bytes;
     }
 
     private static SideBandTranscript transcript(

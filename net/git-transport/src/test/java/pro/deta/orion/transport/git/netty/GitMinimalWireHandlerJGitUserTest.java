@@ -2,7 +2,6 @@ package pro.deta.orion.transport.git.netty;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -39,6 +38,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -227,22 +227,34 @@ class GitMinimalWireHandlerJGitUserTest {
                         protected void initChannel(SocketChannel channel) {
                             int connection = connections.incrementAndGet();
                             events.add(connection + " accepted");
-                            ByteBuf output = channel.alloc().buffer(
-                                    GitNativeClientOutput.BUFFER_CAPACITY,
-                                    GitNativeClientOutput.BUFFER_CAPACITY);
-                            channel.closeFuture()
-                                    .addListener(ignored -> output.release());
                             GitNativeClientOutput clientOutput =
                                     new GitNativeClientOutput(
-                                            output,
-                                            chunk -> {
+                                            channel.alloc(),
+                                            buffer -> {
                                                 events.add(connection
                                                         + " write "
-                                                        + describe(chunk));
+                                                        + describe(buffer));
+                                                CompletableFuture<Void> done =
+                                                        new CompletableFuture<>();
+                                                ByteBuf chunk =
+                                                        buffer.retainedSlice(
+                                                                buffer.readerIndex(),
+                                                                buffer.readableBytes());
                                                 channel.writeAndFlush(chunk)
-                                                        .addListener(
-                                                                ChannelFutureListener.CLOSE_ON_FAILURE);
+                                                        .addListener(future -> {
+                                                            if (future.isSuccess()) {
+                                                                done.complete(null);
+                                                            } else {
+                                                                done.completeExceptionally(
+                                                                        future.cause());
+                                                                channel.close();
+                                                            }
+                                                        });
+                                                return done;
                                             });
+                            channel.closeFuture()
+                                    .addListener(ignored ->
+                                            clientOutput.close());
                             GitMinimalWireMachine machine =
                                     new GitMinimalWireMachine(
                                             channel.alloc(),
