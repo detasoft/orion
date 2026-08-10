@@ -217,6 +217,26 @@ public final class GitNativeClientOutput {
         }
     }
 
+    public SendResult sendError(String message) {
+        try {
+            Objects.requireNonNull(message, "message");
+            if (message.isBlank()) {
+                throw new IllegalArgumentException(
+                        "message must not be blank");
+            }
+            String payload = "ERR " + message + "\n";
+            validateAsciiPacket(payload);
+            return sendSerialization(
+                    new PktLineSerialization(
+                            payload,
+                            payload.length() + PKT_LINE_HEADER_SIZE));
+        } catch (RuntimeException error) {
+            return new SendResult.Failed(
+                    "Failed to serialize Git error response",
+                    error);
+        }
+    }
+
     public SendResult sendProtocolV2FetchAcknowledgments(
             List<GitObjectId> acknowledgments) {
         return sendProtocolV2FetchAcknowledgments(

@@ -324,6 +324,39 @@ class GitNativeClientOutputTest {
     }
 
     @Test
+    void sendsProtocolErrorAsPktLine() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendError("repository not found"))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("001dERR repository not found\n");
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void rejectsBlankProtocolErrorMessage() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+
+        try {
+            assertThat(output.sendError(" "))
+                    .isInstanceOfSatisfying(
+                            GitNativeClientOutput.SendResult.Failed.class,
+                            failed -> assertThat(failed.message()).isEqualTo(
+                                    "Failed to serialize Git error response"));
+            assertThat(outbound.writerIndex()).isZero();
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
     void streamsProtocolV2LsRefsWhenOutputIsAlreadyFull() {
         ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
         outbound.writerIndex(outbound.capacity());

@@ -99,9 +99,12 @@ final class LsRefsContinuation implements Continuation<ByteBuf> {
             return input -> result.transitionTo(
                     new UploadCommandContinuation(context, data));
         } catch (RuntimeException error) {
-            return Continuation.completedError(
-                    "Failed to serve protocol v2 ls-refs",
-                    error);
+            GitNativeClientOutput.SendResult result =
+                    context.clientOutput.sendError(error.getMessage());
+            return input -> result.transitionTo(
+                    Continuation.completedError(
+                            "Failed to serve protocol v2 ls-refs",
+                            error));
         }
     }
 

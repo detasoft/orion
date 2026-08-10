@@ -33,6 +33,7 @@ import pro.deta.orion.util.stream.StandardStreams;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.io.ByteArrayOutputStream;
 import java.lang.reflect.Constructor;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -382,6 +383,97 @@ class GitNativeTransportServiceTest {
         assertTrue(repositoryProvider.exists("/project.git"));
     }
 
+    @Test
+    void nativeImplementationFlushesEmptyProtocolV2LsRefsResponse() throws Exception {
+        System.setProperty(
+                GitNativeTransportService.IMPLEMENTATION_PROPERTY,
+                "native");
+        InMemoryNativeGitRepositoryProvider repositoryProvider =
+                new InMemoryNativeGitRepositoryProvider();
+        repositoryProvider.create("/orion.git")
+                .valueOrFailure("repository");
+        InetSocketAddress address = startNativeService(
+                new RecordingGitInternalService(),
+                repositoryProvider,
+                requestId -> repositorySecurityContext(
+                        requestId,
+                        "orion",
+                        false,
+                        true),
+                5_000);
+
+        try (Socket socket = connect(address)) {
+            socket.setSoTimeout(2_000);
+            socket.getOutputStream().write(pktLine(
+                    "git-upload-pack /orion.git\0"
+                            + "host=localhost\0"
+                            + "\0version=2\0"));
+            socket.getOutputStream().flush();
+
+            assertTrue(readPacketList(socket.getInputStream())
+                    .contains("version 2\n"));
+
+            socket.getOutputStream().write(lsRefsRequest());
+            socket.getOutputStream().flush();
+
+            assertEquals("0000", readPacketList(socket.getInputStream()));
+        }
+    }
+
+    @Test
+    void nativeImplementationCanBeClonedByGitCliFromEmptyRepository() throws Exception {
+        System.setProperty(
+                GitNativeTransportService.IMPLEMENTATION_PROPERTY,
+                "native");
+        InMemoryNativeGitRepositoryProvider repositoryProvider =
+                new InMemoryNativeGitRepositoryProvider();
+        repositoryProvider.create("/orion.git")
+                .valueOrFailure("repository");
+        InetSocketAddress address = startNativeService(
+                new RecordingGitInternalService(),
+                repositoryProvider,
+                requestId -> repositorySecurityContext(
+                        requestId,
+                        "orion",
+                        false,
+                        true),
+                5_000);
+
+        ProcessResult result = runGit(
+                "clone",
+                "git://127.0.0.1:" + address.getPort() + "/orion.git",
+                tempDir.resolve("cli-clone").toString());
+
+        assertEquals(0, result.exitCode(), result.output());
+        assertTrue(Files.isDirectory(tempDir.resolve("cli-clone").resolve(".git")));
+    }
+
+    @Test
+    void nativeImplementationReportsMissingRepositoryToGitCli() throws Exception {
+        System.setProperty(
+                GitNativeTransportService.IMPLEMENTATION_PROPERTY,
+                "native");
+        InetSocketAddress address = startNativeService(
+                new RecordingGitInternalService(),
+                new InMemoryNativeGitRepositoryProvider(),
+                requestId -> repositorySecurityContext(
+                        requestId,
+                        "missing",
+                        false,
+                        false),
+                5_000);
+
+        ProcessResult result = runGit(
+                "clone",
+                "git://127.0.0.1:" + address.getPort() + "/missing.git",
+                tempDir.resolve("missing-cli-clone").toString());
+
+        assertNotEquals(0, result.exitCode(), result.output());
+        assertFalse(
+                result.output().contains("expected flush after ref listing"),
+                result.output());
+    }
+
     private InetSocketAddress startService(
             GitInternalService gitService,
             int socketTimeoutMillis) throws Exception {
@@ -592,7 +684,61 @@ class GitNativeTransportServiceTest {
         return result;
     }
 
+    private static ProcessResult runGit(String... arguments)
+            throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>();
+        command.add("git");
+        command.addAll(List.of(arguments));
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start();
+        byte[] output = process.getInputStream().readAllBytes();
+        boolean exited = process.waitFor(8, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            fail("git command timed out: " + command);
+        }
+        return new ProcessResult(
+                process.exitValue(),
+                new String(output, StandardCharsets.UTF_8));
+    }
+
+    private static byte[] lsRefsRequest() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.writeBytes(pktLine("command=ls-refs\n"));
+        output.writeBytes("0001".getBytes(StandardCharsets.US_ASCII));
+        output.writeBytes(pktLine("peel\n"));
+        output.writeBytes(pktLine("symrefs\n"));
+        output.writeBytes(pktLine("ref-prefix HEAD\n"));
+        output.writeBytes(pktLine("ref-prefix refs/heads/\n"));
+        output.writeBytes(pktLine("ref-prefix refs/tags/\n"));
+        output.writeBytes("0000".getBytes(StandardCharsets.US_ASCII));
+        return output.toByteArray();
+    }
+
+    private static String readPacketList(InputStream input) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        while (true) {
+            byte[] header = input.readNBytes(4);
+            if (header.length < 4) {
+                return output.toString(StandardCharsets.US_ASCII);
+            }
+            output.writeBytes(header);
+            String lengthText = new String(header, StandardCharsets.US_ASCII);
+            if ("0000".equals(lengthText)
+                    || "0001".equals(lengthText)
+                    || "0002".equals(lengthText)) {
+                return output.toString(StandardCharsets.US_ASCII);
+            }
+            int length = Integer.parseInt(lengthText, 16);
+            output.writeBytes(input.readNBytes(length - 4));
+        }
+    }
+
     private record Call(SecurityContext securityContext, String clientId, String requestId, Throwable failure) {
+    }
+
+    private record ProcessResult(int exitCode, String output) {
     }
 
     private static final class RecordingGitInternalService extends GitInternalService {

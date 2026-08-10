@@ -476,6 +476,9 @@ class LsRefsContinuationTest {
                                         .hasMessageContaining(
                                                 "Native repository does not exist: /");
                             });
+            assertThat(outbound.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo(
+                            "002cERR Native repository does not exist: /\n");
         } finally {
             input.release();
             outbound.release();
