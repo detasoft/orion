@@ -1,43 +1,41 @@
-# Native Pack Publication Store Design
+# Native Object-Location Publication Design
 
 ## Goal
 
-Publish received packs for file-backed native repositories through an explicit
-pack publication store while keeping loose-object reads available during the
-transition to pack-backed object lookup.
+Publish received packs for file-backed native repositories by making object
+locations visible only after pack validation and object-location indexing
+complete.
 
 ## Selected Approach
 
-Use `PackPublicationStore` as the repository-internal storage boundary. The
-local implementation stages pack bytes, index bytes, and manifest metadata under
-`tmp/pack-publication`, then publishes the final pack, index, and manifest under
-`packs/`.
+Use object-location records as the first publication catalog. Each indexed object
+record should identify the object id and its physical location inside a durable
+pack. Readers discover objects through committed object-location records, not by
+scanning pack files.
 
-This replaces the earlier idea of a narrow `FilePackPublisher` that only wrote
-`<checksum>.pack` plus a simple JSON sidecar. Pack publication is now modeled as
-an object-database concern with a manifest and object directory, not as a raw
-file helper.
+Do not require a separate pack-level document in the first design. A pack-level
+record can be added later for maintenance, lifecycle summaries, or diagnostics
+if object-location records are not enough.
 
 ## Scope
 
-The first implementation should affect file-backed native repositories only.
-In-memory repositories may continue to ingest packs into loose quarantine without
+The first implementation should affect file-backed native repositories only. In
+memory repositories may continue to ingest packs into loose quarantine without
 writing pack files.
 
 Successful pack ingestion should publish:
 
 - the original pack bytes;
-- index bytes for object lookup;
-- a JSON manifest containing pack id/checksum, index checksum, byte length,
-  object count, object ids, external base ids, source, visibility, and
-  self-contained status;
+- object-location records containing object id, pack id/checksum, offset, type,
+  size, and any validation metadata needed by readers;
 - the existing loose objects used by current upload-pack and repository tests.
 
-Invalid or incomplete packs must not leave visible published pack/index files.
+Invalid or incomplete packs must not leave visible object-location records.
 
 ## Storage Shape
 
-Use the existing native repository directory and add a `packs/` directory:
+Use the existing native repository directory and add durable pack storage plus an
+object-location catalog:
 
 ```text
 <repository>/
@@ -45,32 +43,35 @@ Use the existing native repository directory and add a `packs/` directory:
   refs/
   packs/
     <pack-checksum>.pack
-    <pack-checksum>.idx
-    <pack-checksum>.json
   tmp/
     pack-publication/
 ```
 
-The manifest is the visibility boundary for later readers. Readers should list
-published manifests through `PackPublicationStore.publishedPacks()` and open
-content through `openPublishedPack(...)`, rather than walking backend paths
-directly.
+Pack file existence is not a visibility signal. A pack becomes readable only for
+objects that have committed object-location records. Packs without committed
+object-location records are invisible and can be reindexed or cleaned up.
+
+The object-location catalog may be Lucene-backed. If Lucene is used, its commit
+is the publication boundary for object visibility. The pack file must be fully
+written, flushed, and validated before object-location records are committed.
 
 ## Data Flow
 
-`PackIngestor` already validates the pack checksum and materializes objects into
-a quarantine `LooseObjectStore`. During successful ingestion, it builds a
-`PackPublicationRequest` from accepted pack bytes, generated index bytes, object
-ids, and external base ids, then asks the configured `PackPublicationStore` to
-publish it.
+`PackIngestor` validates the incoming pack and materializes objects into a
+quarantine `LooseObjectStore` for the current transition path. In parallel, it
+collects the object-location metadata needed to make pack-backed reads possible.
 
-`NativeGitRepository` composes `PackPublicationStore` and `PackObjectDirectory`
-with the existing loose object and ref stores. File-backed repositories use
-`LocalPackPublicationStore` and `LocalPackObjectDirectory`; in-memory
-repositories can keep `PackPublicationStore.NONE`.
+Publication order:
 
-If ref updates fail after pack publication, the pack remains valid but currently
-unreferenced, matching the broader object publication plan.
+1. Write the pack bytes under a content-addressed pack id.
+2. Flush and validate the pack checksum, object count, deltas, and object graph
+   required by the caller.
+3. Build object-location records for every object in the accepted pack.
+4. Commit object-location records.
+5. Update refs only after object-location records are visible to readers.
+
+If ref updates fail after object-location publication, the pack remains valid but
+currently unreferenced, matching the broader object publication plan.
 
 ## Error Handling
 
@@ -78,19 +79,23 @@ Pack parse and checksum failures stay reported through `PackParseException`.
 Publication I/O failures may be unchecked at this layer, consistent with current
 file-backed repository storage code.
 
-Do not publish a final manifest unless the final pack and index are already
-present. If a write fails before publication completes, clean up the transaction
-directory and leave no visible manifest for readers.
+Do not commit object-location records unless the pack bytes are durable and
+validated. If a write fails before object-location commit, leave no visible
+object records for readers. Recovery can either reindex durable unreferenced
+packs or delete them.
+
+If object-location records are visible but the referenced pack is missing or
+corrupt, treat it as storage corruption. The catalog should be rebuildable from
+durable pack files where practical.
 
 ## Testing
 
 Add focused tests under `core/git-native-storage`:
 
-- successful file-backed pack ingestion creates one `.pack` and one `.json`;
-- successful publication creates matching `.pack`, `.idx`, and `.json` files;
-- the manifest records checksum/id, index checksum, byte length, object count,
-  object ids, external base ids, source, visibility, and self-contained status;
-- published packs can be listed and opened through the publication store/object
-  directory APIs;
-- invalid or truncated pack input creates no visible pack/index files;
+- successful file-backed pack ingestion creates a durable pack file and visible
+  object-location records;
+- object-location records include enough data to open the object from the pack;
+- readers find objects through the object-location catalog, not directory scans;
+- invalid or truncated pack input creates no visible object-location records;
+- ref updates happen only after object-location publication succeeds;
 - existing loose-object ingestion behavior remains intact.
