@@ -6,6 +6,8 @@ import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.common.GitCommitAuthor;
+import pro.deta.orion.git.common.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
@@ -33,6 +35,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.zip.DataFormatException;
@@ -570,6 +573,86 @@ class NativeGitRepositoryTest {
         } finally {
             pack.release();
         }
+    }
+
+    @Test
+    void adapterSavesFilesToNewBranchAndLoadsThemBack() throws Exception {
+        NativeGitRepository nativeRepository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        NativeGitRepositoryAdapter repository = new NativeGitRepositoryAdapter(nativeRepository);
+
+        repository.saveFiles(
+                "main",
+                Map.of("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8)),
+                "initial acl",
+                GitCommitAuthor.EMPTY);
+
+        GitRepositoryFileSnapshot snapshot =
+                repository.loadFiles("main", List.of("orion.xml"));
+        assertThat(snapshot.files())
+                .containsEntry(
+                        "orion.xml",
+                        "initial acl".getBytes(StandardCharsets.UTF_8));
+        assertThat(nativeRepository.refs())
+                .containsKey("refs/heads/main");
+    }
+
+    @Test
+    void adapterSavesFilesOverExistingBranchContent() throws Exception {
+        NativeGitRepository nativeRepository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        NativeGitRepositoryAdapter repository = new NativeGitRepositoryAdapter(nativeRepository);
+
+        repository.saveFiles(
+                "main",
+                Map.of(
+                        "orion.xml",
+                        "initial acl".getBytes(StandardCharsets.UTF_8),
+                        "nested/acl.xml",
+                        "nested acl".getBytes(StandardCharsets.UTF_8)),
+                "initial acl",
+                GitCommitAuthor.EMPTY);
+
+        repository.saveFiles(
+                "main",
+                Map.of("orion.xml", "updated acl".getBytes(StandardCharsets.UTF_8)),
+                "updated acl",
+                GitCommitAuthor.EMPTY);
+
+        GitRepositoryFileSnapshot snapshot =
+                repository.loadFiles("main", List.of("orion.xml", "nested/acl.xml"));
+        assertThat(snapshot.files())
+                .containsEntry(
+                        "orion.xml",
+                        "updated acl".getBytes(StandardCharsets.UTF_8))
+                .containsEntry(
+                        "nested/acl.xml",
+                        "nested acl".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void adapterPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
+        NativeGitRepository nativeRepository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        NativeGitRepositoryAdapter repository = new NativeGitRepositoryAdapter(nativeRepository);
+
+        repository.saveFiles(
+                "master",
+                Map.of("orion.xml", "initial acl".getBytes(StandardCharsets.UTF_8)),
+                "initial acl",
+                GitCommitAuthor.EMPTY);
+
+        assertThat(nativeRepository.refs().get("refs/heads/main"))
+                .isEqualTo(nativeRepository.refs().get("refs/heads/master"));
     }
 
     @Test

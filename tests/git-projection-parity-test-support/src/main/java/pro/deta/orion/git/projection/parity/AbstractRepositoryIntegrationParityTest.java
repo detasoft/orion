@@ -23,6 +23,7 @@ import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.common.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.jgit.JGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryAdapter;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
@@ -260,7 +261,7 @@ public abstract class AbstractRepositoryIntegrationParityTest {
                 NativeGitRepository nativeRepository = mirrorToNative(repository, ids);
                 return new RepositoryFixture(
                         new JGitRepository("projection-parity.git", repository),
-                        nativeRepository);
+                        new NativeGitRepositoryAdapter(nativeRepository));
             } catch (Exception error) {
                 repository.close();
                 throw error;

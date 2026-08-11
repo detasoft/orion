@@ -18,8 +18,8 @@ import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.acl.storage.VersionedAccessControlStorage;
 import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.git.FileGitRepositoryProvider;
-import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.Result;
@@ -59,38 +59,47 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    void runtimeRepositoryProviderUsesFileStorageLocation() {
+    void runtimeRepositoryProviderUsesNativeRepositoryForFileStorageLocation() {
         OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
 
-        assertInstanceOf(FileGitRepositoryProvider.class, component.gitRepositoryProvider());
+        Result<GitRepository> result = component.gitRepositoryProvider().findOrCreate("orion");
+
+        GitRepository repository = result.valueOrFailure("runtime repository should be native");
+        assertEquals("/orion", repository.name());
+        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
     }
 
     @Test
-    void runtimeRepositoryProviderUsesS3StorageLocation() {
+    void runtimeRepositoryProviderUsesNativeRepositoryForS3StorageLocation() {
         OrionConfiguration configuration = defaultRuntimeConfiguration();
         configuration.getStorage().setLocation("s3://orion/repositories");
         OrionComponent component = runtimeComponent(configuration);
 
-        assertInstanceOf(S3GitRepositoryProvider.class, component.gitRepositoryProvider());
+        Result<GitRepository> result = component.gitRepositoryProvider().findOrCreate("orion");
+
+        GitRepository repository = result.valueOrFailure("runtime repository should be native");
+        assertEquals("/orion", repository.name());
+        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
     }
 
     @Test
-    void runtimeRepositoryProviderRejectsUnsupportedStorageLocation() {
+    void runtimeRepositoryProviderUsesNativeRepositoryForUnsupportedStorageLocation() {
         OrionConfiguration configuration = defaultRuntimeConfiguration();
         configuration.getStorage().setLocation("ssh://git@example.test/repositories");
         OrionComponent component = runtimeComponent(configuration);
 
-        IllegalArgumentException error = assertThrows(
-                IllegalArgumentException.class,
-                component::gitRepositoryProvider);
+        Result<GitRepository> result = component.gitRepositoryProvider().findOrCreate("orion");
 
-        assertEquals("Unsupported repository storage location: ssh://git@example.test/repositories", error.getMessage());
+        GitRepository repository = result.valueOrFailure("runtime repository should be native");
+        assertEquals("/orion", repository.name());
+        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
     }
 
     @Test
     void localGitAreaAclUsesVersionedStorageWithoutGitAccessArea() {
         OrionConfiguration configuration = configurationWithGitAcl("local:team/project");
-        FileGitRepositoryProvider repositoryProvider = new FileGitRepositoryProvider(new ConfigurationContext(configuration));
+        FileGitRepositoryProvider repositoryProvider =
+                new FileGitRepositoryProvider(new ConfigurationContext(configuration));
 
         AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
 
@@ -104,7 +113,8 @@ class OrionRuntimeModuleTest {
         Files.createDirectories(aclDirectory);
         Files.write(aclDirectory.resolve(ACL_FILE), aclBytes("file-user"));
         OrionConfiguration configuration = configurationWithGitAcl(aclDirectory.toUri().toString());
-        FileGitRepositoryProvider repositoryProvider = new FileGitRepositoryProvider(new ConfigurationContext(configuration));
+        FileGitRepositoryProvider repositoryProvider =
+                new FileGitRepositoryProvider(new ConfigurationContext(configuration));
         AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
 
         assertInstanceOf(LocalAccessControlStorage.class, storage);
@@ -136,12 +146,34 @@ class OrionRuntimeModuleTest {
                 new AccessControlSaveRequest("initial acl", new UserEmail("tester", "tester@example.test")));
 
         assertTrue(repositoryProvider.repositoryPath("orion").resolve("config").toFile().exists());
-        AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load from newly created local repository");
+        AccessControlSnapshot snapshot =
+                storage.load().valueOrFailure("ACL should load from newly created local repository");
         assertEquals(1, snapshot.files().size());
         assertTrue(snapshot.files().containsKey(ACL_FILE));
         assertEquals("initial acl", new String(snapshot.files().get(ACL_FILE), StandardCharsets.UTF_8));
         assertEquals(1, repositoryProvider.findOrCreateCalls);
         assertEquals(1, repositoryProvider.findCalls);
+    }
+
+    @Test
+    void runtimeLocalAclSavesThroughNativeRepositoryProvider() {
+        OrionConfiguration configuration = configurationWithGitAcl("local:orion");
+        OrionComponent component = runtimeComponent(configuration);
+        AccessControlStorage storage =
+                runtimeAccessControlStorage(configuration, component.gitRepositoryProvider());
+
+        storage.save(
+                AccessControlSnapshot.singleFile(ACL_FILE, "native acl".getBytes(StandardCharsets.UTF_8)),
+                new AccessControlSaveRequest("native acl", new UserEmail("tester", "tester@example.test")));
+
+        AccessControlSnapshot snapshot =
+                storage.load().valueOrFailure("ACL should load from native repository");
+        GitRepository repository = component.gitRepositoryProvider()
+                .find("orion")
+                .valueOrFailure("runtime repository should be native");
+        assertEquals("native acl", new String(snapshot.files().get(ACL_FILE), StandardCharsets.UTF_8));
+        assertEquals("/orion", repository.name());
+        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
     }
 
     @Test
@@ -161,7 +193,8 @@ class OrionRuntimeModuleTest {
     @Test
     void remoteGitAclIsUnsupportedUntilRemoteVersionedStorageIsAdded() {
         OrionConfiguration configuration = configurationWithGitAcl("ssh://git@example.test/acl.git");
-        FileGitRepositoryProvider repositoryProvider = new FileGitRepositoryProvider(new ConfigurationContext(configuration));
+        FileGitRepositoryProvider repositoryProvider =
+                new FileGitRepositoryProvider(new ConfigurationContext(configuration));
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
@@ -218,7 +251,8 @@ class OrionRuntimeModuleTest {
 
     private void assertStorageLoadsUser(AccessControlStorage storage, String userId) throws Exception {
         AccessControlSnapshot snapshot = storage.load().valueOrFailure("ACL should load from storage");
-        AccessControl accessControl = xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(ACL_FILE)));
+        AccessControl accessControl =
+                xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(ACL_FILE)));
         assertEquals(1, accessControl.getUsers().size());
         assertEquals(userId, accessControl.getUsers().getFirst().getId());
     }

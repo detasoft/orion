@@ -5,7 +5,6 @@ import pro.deta.orion.git.common.GitFetchAccessRequest;
 import pro.deta.orion.git.common.GitOperationException;
 import pro.deta.orion.git.common.GitReceiveRequest;
 import pro.deta.orion.git.common.GitRepository;
-import pro.deta.orion.git.common.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.common.GitUploadRequest;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
@@ -26,7 +25,6 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSource;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
@@ -169,12 +167,6 @@ public class NativeGitRepository implements GitRepository {
             return loose;
         }
         return packObjectDirectory.readPrefix(id, maxDataBytes);
-    }
-
-    @Override
-    public GitRepositoryFileSnapshot loadFiles(String branch, List<String> paths)
-            throws IOException, GitOperationException {
-        return new NativeRepositoryFileLoader(this).loadFiles(branch, paths);
     }
 
     @Override

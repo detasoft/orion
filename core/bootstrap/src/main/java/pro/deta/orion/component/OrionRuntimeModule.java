@@ -15,6 +15,7 @@ import pro.deta.orion.config.schema.OrionConfiguration;
 import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.crypto.ServerIdentityKeyService;
 import pro.deta.orion.crypto.ServerKeySigner;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 
 import jakarta.inject.Provider;
@@ -38,14 +39,16 @@ public class OrionRuntimeModule {
     }
 
     @Provides
-    OrionAccessControlService orionAccessControlService(OrionAccessControlServiceImpl orionAccessControlService) {
+    OrionAccessControlService orionAccessControlService(
+            OrionAccessControlServiceImpl orionAccessControlService) {
         return orionAccessControlService;
     };
 
     @Provides
     @Singleton
-    GitRepositoryProvider defaultGitRepositoryProvider(GitRepositoryProviderResolver resolver) {
-        return resolver.resolve();
+    GitRepositoryProvider defaultGitRepositoryProvider(
+            NativeGitRepositoryProvider nativeRepositoryProvider) {
+        return new NativeGitRepositoryProviderAdapter(nativeRepositoryProvider);
     }
 
     @Provides
@@ -71,7 +74,8 @@ public class OrionRuntimeModule {
     }
 
     @Provides
-    static AccessControlStorage accessControlStorage(AccessControlStorageResolver accessControlStorageResolver) {
+    static AccessControlStorage accessControlStorage(
+            AccessControlStorageResolver accessControlStorageResolver) {
         return accessControlStorageResolver.resolve();
     }
 }
