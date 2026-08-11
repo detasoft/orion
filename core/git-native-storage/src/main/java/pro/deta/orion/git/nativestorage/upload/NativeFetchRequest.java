@@ -192,6 +192,9 @@ public record NativeFetchRequest(
 
     private static void validateWantRef(String refName) {
         Objects.requireNonNull(refName, "wantRef");
+        if ("HEAD".equals(refName)) {
+            return;
+        }
         if (!refName.startsWith("refs/")
                 || refName.length() == "refs/".length()
                 || refName.endsWith("/")

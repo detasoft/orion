@@ -98,6 +98,7 @@ class FetchContinuationTest {
     @Test
     void acceptsWantRefsWhenRefInWantIsEnabled() {
         ByteBuf input = Unpooled.buffer();
+        writeData(input, "want-ref HEAD\n");
         writeData(input, "want-ref refs/heads/main\n");
         writeData(input, "want-ref refs/tags/v1\n");
         writeData(input, "done\n");
@@ -108,7 +109,7 @@ class FetchContinuationTest {
 
         assertThat(response.request().wants()).isEmpty();
         assertThat(response.request().wantRefs())
-                .containsExactly("refs/heads/main", "refs/tags/v1");
+                .containsExactly("HEAD", "refs/heads/main", "refs/tags/v1");
         assertThat(response.request().done()).isTrue();
     }
 
@@ -228,7 +229,6 @@ class FetchContinuationTest {
                 "want " + WANT + "\n",
                 "done\n",
                 "have " + HAVE + "\n"));
-        assertInvalid(request("want-ref HEAD\n", "done\n"));
         assertInvalid(request("want-ref refs/heads/main topic\n", "done\n"));
         assertInvalid(request("want-ref refs/heads/../main\n", "done\n"));
         assertInvalid(request(

@@ -224,6 +224,7 @@ public class NativeGitRepository implements GitRepository {
         return new NativeFetchPackBuilder(
                 looseRefStore,
                 looseObjectStore,
+                defaultHead,
                 Objects.requireNonNull(
                         packfileUriSource,
                         "packfileUriSource"))

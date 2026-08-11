@@ -158,7 +158,7 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
         private static FetchContinuation.FetchArgument refArgument(
                 String value) {
             String refName = value.substring("want-ref ".length());
-            return isValidFullRefName(refName)
+            return isValidWantedRefName(refName)
                     ? new FetchContinuation.RefArgument(refName)
                     : null;
         }
@@ -225,6 +225,10 @@ final class FetchPayloadContinuation implements Continuation<ByteBuf> {
         private static boolean isAsciiLetter(char character) {
             return character >= 'a' && character <= 'z'
                     || character >= 'A' && character <= 'Z';
+        }
+
+        private static boolean isValidWantedRefName(String refName) {
+            return "HEAD".equals(refName) || isValidFullRefName(refName);
         }
 
         private static boolean isValidFullRefName(String refName) {

@@ -1931,11 +1931,15 @@ public final class GitNativeClientOutput {
                 String refName,
                 String fieldName) {
             Objects.requireNonNull(refName, fieldName);
-            if (!isValidFullRefName(refName)) {
+            if (!isValidWantedRefName(refName)) {
                 throw new IllegalArgumentException(
-                        fieldName + " must be a full Git ref name");
+                        fieldName + " must be HEAD or a full Git ref name");
             }
             return refName;
+        }
+
+        private static boolean isValidWantedRefName(String refName) {
+            return "HEAD".equals(refName) || isValidFullRefName(refName);
         }
 
         private static boolean isValidFullRefName(String refName) {

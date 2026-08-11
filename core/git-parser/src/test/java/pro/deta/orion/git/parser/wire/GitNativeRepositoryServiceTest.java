@@ -77,6 +77,22 @@ class GitNativeRepositoryServiceTest {
     }
 
     @Test
+    void advertisesHeadFromExistingBranchWhenDefaultHeadTargetIsMissing() {
+        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
+        GitNativeRepositoryService service = new GitNativeRepositoryService(provider);
+
+        GitV1Advertisement advertisement = service.legacyUploadPackAdvertisement(request("/demo.git"));
+
+        assertThat(advertisement.refs()).containsExactly(
+                GitAdvertisedRef.direct(MAIN_ID, "HEAD"),
+                GitAdvertisedRef.direct(MAIN_ID, "refs/heads/master"));
+        assertThat(capabilityTokens(advertisement))
+                .contains("symref=HEAD:refs/heads/master");
+    }
+
+    @Test
     void omitsEachDisabledUploadPackCapabilityWithoutReorderingOthers() {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
         List<UploadCapabilityCase> cases = List.of(new UploadCapabilityCase(uploadConfiguration(false, true, true, true, true, true), List.of("thin-pack", "side-band-64k", "ofs-delta", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, false, true, true, true, true), List.of("multi_ack_detailed", "side-band-64k", "ofs-delta", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, true, false, true, true, true), List.of("multi_ack_detailed", "thin-pack", "ofs-delta", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, true, true, false, true, true), List.of("multi_ack_detailed", "thin-pack", "side-band-64k", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, true, true, true, false, true), List.of("multi_ack_detailed", "thin-pack", "side-band-64k", "ofs-delta", "agent=orion-native")), new UploadCapabilityCase(uploadConfiguration(true, true, true, true, true, false), List.of("multi_ack_detailed", "thin-pack", "side-band-64k", "ofs-delta", "symref=HEAD:refs/heads/main")));
@@ -302,6 +318,21 @@ class GitNativeRepositoryServiceTest {
         GitLsRefsResponse response = service.lsRefs(request("/demo.git"), new LsRefsRequest(false, true, false, List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "HEAD", Optional.of("refs/heads/main"), Optional.empty()));
+    }
+
+    @Test
+    void listsHeadFromExistingBranchWhenDefaultHeadTargetIsMissing() {
+        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
+        GitNativeRepositoryService service = new GitNativeRepositoryService(provider);
+
+        GitLsRefsResponse response = service.lsRefs(
+                request("/demo.git"),
+                new LsRefsRequest(false, true, true, List.of("HEAD")));
+
+        assertThat(response.refs()).containsExactly(
+                direct(MAIN_ID, "HEAD", Optional.of("refs/heads/master"), Optional.empty()));
     }
 
     @Test

@@ -3,6 +3,7 @@ package pro.deta.orion.component;
 import dagger.Component;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.transport.RefSpec;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.GitRepositoryProvider;
@@ -21,22 +22,30 @@ import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class OrionRuntimeModuleTest {
     private static final String BRANCH = "master";
@@ -177,6 +186,35 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
+    @Timeout(20)
+    void runServerDefaultLocalAclRepositoryCanBeClonedByGitCli() throws Exception {
+        int gitPort = freePort();
+        OrionConfiguration configuration = defaultRuntimeConfiguration();
+        configuration.getTransport().getGit().setEnabled(true);
+        configuration.getTransport().getGit().setAddress("127.0.0.1");
+        configuration.getTransport().getGit().setPort(gitPort);
+        OrionComponent component = runtimeComponent(configuration);
+        OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
+        try {
+            assertEquals(RUNNING, lifecycle.runApplication());
+
+            ProcessResult result = runGit(
+                    "clone",
+                    "git://127.0.0.1:" + gitPort + "/orion",
+                    tempDir.resolve("runtime-cli-clone").toString());
+
+            assertEquals(0, result.exitCode(), result.output());
+            assertTrue(
+                    Files.isRegularFile(
+                            tempDir.resolve("runtime-cli-clone")
+                                    .resolve(configuration.getBootstrap().getAccessControl().primaryPath())),
+                    result.output());
+        } finally {
+            assertEquals(FIN, lifecycle.shutdownApplication());
+        }
+    }
+
+    @Test
     void localAclRepositoryNamesAreResolvedFromSupportedSchemes() {
         Map<String, String> expectedRepositoryNames = Map.of(
                 "local:acl", "acl",
@@ -291,6 +329,38 @@ class OrionRuntimeModuleTest {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .build();
+    }
+
+    private static int freePort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            return socket.getLocalPort();
+        }
+    }
+
+    private static ProcessResult runGit(String... arguments)
+            throws IOException, InterruptedException {
+        List<String> command = new ArrayList<>();
+        command.add("git");
+        command.addAll(List.of(arguments));
+        ProcessBuilder processBuilder = new ProcessBuilder(command)
+                .redirectErrorStream(true);
+        processBuilder.environment().put("GIT_TRACE_PACKET", "1");
+        processBuilder.environment().put("GIT_TRACE", "1");
+        Process process = processBuilder.start();
+        byte[] output = process.getInputStream().readAllBytes();
+        boolean exited = process.waitFor(10, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            throw new AssertionError("git command timed out: " + command);
+        }
+        return new ProcessResult(
+                process.exitValue(),
+                new String(output, StandardCharsets.UTF_8));
+    }
+
+    private record ProcessResult(
+            int exitCode,
+            String output) {
     }
 
     private static final class RecordingGitRepositoryProvider extends FileGitRepositoryProvider {

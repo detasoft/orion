@@ -10,16 +10,21 @@ import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
 public final class NativeFetchPackBuilder {
+    private static final String DEFAULT_HEAD = "refs/heads/main";
+
     private final LooseRefStore refs;
     private final LooseObjectStore objects;
+    private final String defaultHead;
     private final NoDeltaPackBuilder noDeltaPackBuilder;
     private final DeltaPackBuilder deltaPackBuilder;
     private final NativePackfileUriSource packfileUriSource;
@@ -30,6 +35,7 @@ public final class NativeFetchPackBuilder {
         this(
                 refs,
                 objects,
+                DEFAULT_HEAD,
                 new NoDeltaPackBuilder(),
                 new DeltaPackBuilder(),
                 NativePackfileUriSource.NONE);
@@ -38,11 +44,13 @@ public final class NativeFetchPackBuilder {
     NativeFetchPackBuilder(
             LooseRefStore refs,
             LooseObjectStore objects,
+            String defaultHead,
             NoDeltaPackBuilder noDeltaPackBuilder,
             DeltaPackBuilder deltaPackBuilder) {
         this(
                 refs,
                 objects,
+                defaultHead,
                 noDeltaPackBuilder,
                 deltaPackBuilder,
                 NativePackfileUriSource.NONE);
@@ -55,6 +63,19 @@ public final class NativeFetchPackBuilder {
         this(
                 refs,
                 objects,
+                DEFAULT_HEAD,
+                packfileUriSource);
+    }
+
+    public NativeFetchPackBuilder(
+            LooseRefStore refs,
+            LooseObjectStore objects,
+            String defaultHead,
+            NativePackfileUriSource packfileUriSource) {
+        this(
+                refs,
+                objects,
+                defaultHead,
                 new NoDeltaPackBuilder(),
                 new DeltaPackBuilder(),
                 packfileUriSource);
@@ -63,11 +84,13 @@ public final class NativeFetchPackBuilder {
     NativeFetchPackBuilder(
             LooseRefStore refs,
             LooseObjectStore objects,
+            String defaultHead,
             NoDeltaPackBuilder noDeltaPackBuilder,
             DeltaPackBuilder deltaPackBuilder,
             NativePackfileUriSource packfileUriSource) {
         this.refs = Objects.requireNonNull(refs, "refs");
         this.objects = Objects.requireNonNull(objects, "objects");
+        this.defaultHead = Objects.requireNonNull(defaultHead, "defaultHead");
         this.noDeltaPackBuilder = Objects.requireNonNull(
                 noDeltaPackBuilder,
                 "noDeltaPackBuilder");
@@ -129,7 +152,10 @@ public final class NativeFetchPackBuilder {
         Map<String, String> snapshot = refs.snapshot();
         Map<String, GitObjectId> resolved = new LinkedHashMap<>();
         for (String wantRef : wantRefs) {
-            String objectId = snapshot.get(wantRef);
+            String refName = "HEAD".equals(wantRef)
+                    ? effectiveHeadTarget(snapshot)
+                    : wantRef;
+            String objectId = snapshot.get(refName);
             if (objectId == null) {
                 throw new GitUploadPackException(
                         GitUploadPackException.Kind.MISSING_REF,
@@ -138,6 +164,20 @@ public final class NativeFetchPackBuilder {
             resolved.put(wantRef, GitObjectId.of(objectId));
         }
         return resolved;
+    }
+
+    private String effectiveHeadTarget(Map<String, String> snapshot) {
+        if (snapshot.containsKey(defaultHead)) {
+            return defaultHead;
+        }
+        List<String> refNames = new ArrayList<>(snapshot.keySet());
+        refNames.sort(String::compareTo);
+        for (String refName : refNames) {
+            if (refName.startsWith("refs/heads/")) {
+                return refName;
+            }
+        }
+        return defaultHead;
     }
 
     private Set<GitObjectId> externalBaseIds(

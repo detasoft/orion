@@ -256,7 +256,7 @@ public final class GitNativeRepositoryService {
         List<GitLsRefsResponse.Ref> responseRefs = new ArrayList<>();
         PeelResolver peelResolver = new PeelResolver(repository);
         if (request.matches("HEAD")) {
-            String headTarget = repository.defaultHead();
+            String headTarget = effectiveHeadTarget(repository, refs);
             String headObjectId = refs.get(headTarget);
             if (headObjectId != null) {
                 Optional<String> symrefTarget = request.symrefs()
@@ -503,7 +503,7 @@ public final class GitNativeRepositoryService {
         Objects.requireNonNull(repository, "repository");
         Map<String, String> refs = repository.refs();
         List<GitAdvertisedRef> advertisedRefs = new ArrayList<>();
-        String headTarget = repository.defaultHead();
+        String headTarget = effectiveHeadTarget(repository, refs);
         String headObjectId = refs.get(headTarget);
         List<GitCapability> capabilities =
                 new ArrayList<>(baseCapabilities);
@@ -529,6 +529,26 @@ public final class GitNativeRepositoryService {
                     "capabilities^{}"));
         }
         return new GitV1Advertisement(capabilities, advertisedRefs);
+    }
+
+    private static String effectiveHeadTarget(
+            NativeGitRepository repository,
+            Map<String, String> refs) {
+        String defaultHead = repository.defaultHead();
+        if (refs.containsKey(defaultHead)) {
+            return defaultHead;
+        }
+        List<String> branchRefs = new ArrayList<>();
+        for (String refName : refs.keySet()) {
+            if (refName.startsWith("refs/heads/")) {
+                branchRefs.add(refName);
+            }
+        }
+        branchRefs.sort(String::compareTo);
+        if (!branchRefs.isEmpty()) {
+            return branchRefs.getFirst();
+        }
+        return defaultHead;
     }
 
     private Result<NativeGitRepository> receiveRepository(
