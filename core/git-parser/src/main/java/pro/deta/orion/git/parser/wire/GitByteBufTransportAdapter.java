@@ -354,7 +354,10 @@ public final class GitByteBufTransportAdapter {
         @Override
         public CompletionStage<Void> write(ByteBuf chunk) {
             try {
-                chunk.readBytes(output, chunk.readableBytes());
+                chunk.getBytes(
+                        chunk.readerIndex(),
+                        output,
+                        chunk.readableBytes());
                 output.flush();
                 return CompletableFuture.completedFuture(null);
             } catch (IOException error) {

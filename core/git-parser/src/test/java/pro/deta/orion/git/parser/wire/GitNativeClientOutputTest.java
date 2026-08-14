@@ -831,6 +831,106 @@ class GitNativeClientOutputTest {
     }
 
     @Test
+    void outputStreamBuffersUntilFlush() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitNativeClientOutput.OutputStream stream = output.getOutput();
+
+        try {
+            assertThat(stream.write(
+                    "hello".getBytes(StandardCharsets.US_ASCII)))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(sent).isEmpty();
+
+            assertThat(stream.flush())
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+
+            assertThat(sent).containsExactly(
+                    "hello".getBytes(StandardCharsets.US_ASCII));
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void outputStreamWriteCanYieldWhenBufferMustFlush() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        outbound.writerIndex(outbound.capacity());
+        outbound.setByte(outbound.writerIndex() - 1, 'x');
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitNativeClientOutput.OutputStream stream = output.getOutput();
+
+        try {
+            GitNativeClientOutput.SendResult.Streaming streaming =
+                    (GitNativeClientOutput.SendResult.Streaming)
+                            stream.write(new byte[] {'y'});
+
+            streaming.task().run();
+
+            assertThat(sent).hasSize(1);
+            assertThat(sent.getFirst()).hasSize(outbound.capacity());
+            assertThat(sent.getFirst()[outbound.capacity() - 1])
+                    .isEqualTo((byte) 'x');
+
+            assertThat(stream.flush())
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(sent).hasSize(2);
+            assertThat(sent.get(1)).containsExactly((byte) 'y');
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
+    void sideBandStreamFramesPayloadsAndFlushesOutput() {
+        ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
+        List<byte[]> sent = new ArrayList<>();
+        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitNativeClientOutput.OutputStream stream =
+                output.getSideBandStream(
+                        GitNativeClientOutput.SideBandChannel.PROGRESS);
+
+        try {
+            assertThat(stream.write(
+                    "hi".getBytes(StandardCharsets.US_ASCII)))
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+            assertThat(stream.flush())
+                    .isInstanceOf(
+                            GitNativeClientOutput.SendResult.Completed.class);
+
+            ByteBuf response = Unpooled.wrappedBuffer(
+                    sent.toArray(byte[][]::new));
+            try {
+                assertThat(response.readCharSequence(
+                        4,
+                        StandardCharsets.US_ASCII))
+                        .hasToString("0007");
+                assertThat(response.readByte())
+                        .isEqualTo(
+                                GitNativeClientOutput
+                                        .SideBandChannel
+                                        .PROGRESS
+                                        .wireValue());
+                assertThat(response.readCharSequence(
+                        2,
+                        StandardCharsets.US_ASCII))
+                        .hasToString("hi");
+                assertThat(response.isReadable()).isFalse();
+            } finally {
+                response.release();
+            }
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
     void fragmentsLegacySideBand64kPackAtPktLineLimit() {
         ByteBuf outbound = Unpooled.buffer(64 * 1024, 64 * 1024);
         List<byte[]> sent = new ArrayList<>();
@@ -1856,16 +1956,17 @@ class GitNativeClientOutputTest {
                             output.sendAdvertisement(
                                     new GitV1Advertisement(List.of(), refs));
             streaming.task().run();
-            assertThat(submitted).hasSize(2);
-            byte[] firstBeforeSecondCompletes = snapshot(
-                    submitted.getFirst());
+            assertThat(submitted).hasSize(1);
+            byte[] firstBeforeCompletion = snapshot(submitted.getFirst());
 
-            completions.get(1).complete(null);
-
+            assertThat(submitted).hasSize(1);
             assertThat(snapshot(submitted.getFirst()))
-                    .containsExactly(firstBeforeSecondCompletes);
-            assertThat(submitted).hasSizeGreaterThan(2);
-            assertThat(completions.getFirst().isDone()).isFalse();
+                    .containsExactly(firstBeforeCompletion);
+
+            completions.getFirst().complete(null);
+
+            assertThat(submitted).hasSize(2);
+            assertThat(completions.getFirst().isDone()).isTrue();
         } finally {
             output.close();
         }

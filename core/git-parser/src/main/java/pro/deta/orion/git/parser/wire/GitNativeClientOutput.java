@@ -12,13 +12,12 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.output.DoubleGitOutputBufferCoordinator;
-import pro.deta.orion.git.parser.wire.output.GitOutputBufferCoordinator;
 import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -39,7 +38,7 @@ import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 public final class GitNativeClientOutput {
     public static final int BUFFER_CAPACITY = 64 * 1024;
 
-    private final GitOutputBufferCoordinator outputCoordinator;
+    private final OutputWrite outputWrite;
     private ByteBuf output;
     private OutputSerialization serialization;
     private LegacySideBandResponse sideBandResponse;
@@ -47,30 +46,28 @@ public final class GitNativeClientOutput {
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
     public GitNativeClientOutput(ByteBuf output) {
-        this(new DirectOutputBufferCoordinator(output));
+        this(new DirectOutputWrite(output));
     }
 
     public GitNativeClientOutput(
             ByteBuf output,
             Consumer<ByteBuf> sendToClient) {
-        this(new CopyingOutputBufferCoordinator(output, sendToClient));
+        this(new CopyingOutputWrite(output, sendToClient));
     }
 
     public GitNativeClientOutput(
             ByteBufAllocator allocator,
             GitNativeClientWrite write) {
-        this(new DoubleGitOutputBufferCoordinator(
-                Objects.requireNonNull(allocator, "allocator")
-                        .buffer(BUFFER_CAPACITY, BUFFER_CAPACITY),
-                allocator.buffer(BUFFER_CAPACITY, BUFFER_CAPACITY),
+        this(new AsyncOutputWrite(
+                Objects.requireNonNull(allocator, "allocator"),
                 write));
     }
 
-    public GitNativeClientOutput(GitOutputBufferCoordinator outputCoordinator) {
-        this.outputCoordinator = Objects.requireNonNull(
-                outputCoordinator,
-                "outputCoordinator");
-        this.output = outputCoordinator.writableBuffer();
+    private GitNativeClientOutput(OutputWrite outputWrite) {
+        this.outputWrite = Objects.requireNonNull(
+                outputWrite,
+                "outputWrite");
+        this.output = outputWrite.writableBuffer();
     }
 
     private static void requireFixedCapacity(ByteBuf output) {
@@ -614,6 +611,16 @@ public final class GitNativeClientOutput {
 
     private SendResult sendSerialization(
             OutputSerialization operation) {
+        return writeSerialization(
+                operation,
+                true,
+                "Failed to deliver serialized client output");
+    }
+
+    private SendResult writeSerialization(
+            OutputSerialization operation,
+            boolean finishAtEnd,
+            String failureMessage) {
         if (serialization != null
                 || sideBandResponse != null
                 || legacyPackResponse != null
@@ -625,71 +632,94 @@ public final class GitNativeClientOutput {
         }
 
         if (writeAvailable(operation)) {
-            return completeOutput();
+            return finishAtEnd
+                    ? completeOutput(failureMessage)
+                    : new SendResult.Completed();
         }
         serialization = operation;
-        SerializationTask task = new SerializationTask();
+        SerializationTask task =
+                new SerializationTask(finishAtEnd, failureMessage);
         return new SendResult.Streaming(task, task::failure);
     }
 
-    private SendResult completeOutput() {
+    private SendResult completeOutput(String failureMessage) {
         try {
             return resultForCompletion(
-                    outputCoordinator.finish(),
-                    "Failed to deliver serialized client output");
+                    outputWrite.finish()
+                            .thenRun(this::refreshOutput),
+                    failureMessage);
         } catch (RuntimeException error) {
             return new SendResult.Failed(
-                    "Failed to deliver serialized client output",
+                    failureMessage,
                     error);
         }
     }
 
-    private CompletionStage<Void> finishStreaming() {
+    private CompletionStage<Void> finishStreaming(boolean finishAtEnd) {
         OutputSerialization operation = serialization;
         if (operation == null) {
             return failedStage(new IllegalStateException(
                     "Client output operation is not in progress"));
         }
-        CompletionStage<Void> completion = continueStreaming(operation);
+        CompletionStage<Void> completion =
+                continueStreaming(operation, finishAtEnd)
+                .thenRun(this::refreshOutput);
         return completion.whenComplete((ignored, failure) ->
                 serialization = null);
     }
 
     private CompletionStage<Void> continueStreaming(
-            OutputSerialization operation) {
+            OutputSerialization operation,
+            boolean finishAtEnd) {
         try {
             CompletionStage<Void> writable = submitOutput();
             return writable.thenCompose(
-                    ignored -> continueWhenWritable(operation));
+                    ignored -> continueWhenWritable(
+                            operation,
+                            finishAtEnd));
         } catch (Throwable failure) {
             return failedStage(failure);
         }
     }
 
     private CompletionStage<Void> continueWhenWritable(
-            OutputSerialization operation) {
+            OutputSerialization operation,
+            boolean finishAtEnd) {
         try {
             if (writeAvailable(operation)) {
-                return outputCoordinator.finish();
+                return finishAtEnd
+                        ? outputWrite.finish()
+                        : CompletableFuture.completedFuture(null);
             }
-            return continueStreaming(operation);
+            return continueStreaming(operation, finishAtEnd);
         } catch (Throwable failure) {
             return failedStage(failure);
         }
     }
 
     private final class SerializationTask implements ContinuationTask {
+        private final boolean finishAtEnd;
+        private final String failureMessage;
         private volatile SendResult.Failed failure;
         private volatile CompletionStage<Void> completion =
                 CompletableFuture.completedFuture(null);
 
+        private SerializationTask(
+                boolean finishAtEnd,
+                String failureMessage) {
+            this.finishAtEnd = finishAtEnd;
+            this.failureMessage = Objects.requireNonNull(
+                    failureMessage,
+                    "failureMessage");
+        }
+
         @Override
         public void run() {
-            completion = finishStreaming()
+            completion = finishStreaming(finishAtEnd)
                     .whenComplete((ignored, cause) -> {
                         if (cause != null) {
                             failure = new SendResult.Failed(
-                                    "Failed to deliver serialized client output",
+                                    failureMessage,
                                     unwrap(cause));
                         }
                     });
@@ -850,6 +880,7 @@ public final class GitNativeClientOutput {
     }
 
     private boolean writeAvailable(OutputSerialization operation) {
+        refreshOutput();
         return operation.writeAvailable(output);
     }
 
@@ -857,20 +888,19 @@ public final class GitNativeClientOutput {
         if (!output.isReadable()) {
             return CompletableFuture.completedFuture(null);
         }
-        outputCoordinator.submitReady();
-        CompletionStage<Void> writable = outputCoordinator.awaitWritable();
-        if (completedFailure(writable).isPresent()) {
-            return writable;
+        CompletionStage<Void> submitted = outputWrite.submit();
+        if (completedFailure(submitted).isPresent()) {
+            return submitted;
         }
-        if (writable.toCompletableFuture().isDone()) {
+        if (submitted.toCompletableFuture().isDone()) {
             refreshOutput();
             return CompletableFuture.completedFuture(null);
         }
-        return writable.thenRun(this::refreshOutput);
+        return submitted.thenRun(this::refreshOutput);
     }
 
     private void refreshOutput() {
-        output = outputCoordinator.writableBuffer();
+        output = outputWrite.writableBuffer();
     }
 
     private static List<byte[]> encodePackets(
@@ -996,8 +1026,169 @@ public final class GitNativeClientOutput {
                 hexDigit(packetLength & 0x0f));
     }
 
+    private SendResult flushOutput(String failureMessage) {
+        if (serialization != null
+                || sideBandResponse != null
+                || legacyPackResponse != null
+                || protocolV2PackfileResponse != null) {
+            return new SendResult.Failed(
+                    "Client output operation is already in progress",
+                    new IllegalStateException(
+                            "Client output operation is already in progress"));
+        }
+        return completeOutput(failureMessage);
+    }
+
+    private static byte[] copyBytes(
+            byte[] bytes,
+            int offset,
+            int length) {
+        Objects.requireNonNull(bytes, "bytes");
+        Objects.checkFromIndexSize(offset, length, bytes.length);
+        return Arrays.copyOfRange(bytes, offset, offset + length);
+    }
+
+    private static List<byte[]> sideBandPackets(
+            SideBandChannel channel,
+            byte[] payload) {
+        int maximumPayload =
+                MAX_PKT_LINE_LENGTH
+                        - PKT_LINE_HEADER_SIZE
+                        - 1;
+        List<byte[]> packets = new ArrayList<>();
+        int offset = 0;
+        while (offset < payload.length) {
+            int payloadLength = Math.min(
+                    maximumPayload,
+                    payload.length - offset);
+            int packetLength =
+                    PKT_LINE_HEADER_SIZE
+                            + 1
+                            + payloadLength;
+            byte[] packet = new byte[packetLength];
+            writeHeader(packet, packetLength);
+            packet[PKT_LINE_HEADER_SIZE] = channel.wireValue;
+            System.arraycopy(
+                    payload,
+                    offset,
+                    packet,
+                    PKT_LINE_HEADER_SIZE + 1,
+                    payloadLength);
+            packets.add(packet);
+            offset += payloadLength;
+        }
+        return packets;
+    }
+
     public void close() {
-        outputCoordinator.close();
+        outputWrite.close();
+    }
+
+    public OutputStream getOutput() {
+        return new RawOutputStream();
+    }
+
+    public OutputStream getSideBandStream() {
+        return getSideBandStream(SideBandChannel.DATA);
+    }
+
+    public OutputStream getSideBandStream(SideBandChannel channel) {
+        return new SideBandOutputStream(channel);
+    }
+
+    public interface OutputStream {
+        SendResult write(int value);
+
+        SendResult write(byte[] bytes);
+
+        SendResult write(byte[] bytes, int offset, int length);
+
+        SendResult flush();
+    }
+
+    private final class RawOutputStream implements OutputStream {
+        @Override
+        public SendResult write(int value) {
+            return write(new byte[] {(byte) value});
+        }
+
+        @Override
+        public SendResult write(byte[] bytes) {
+            Objects.requireNonNull(bytes, "bytes");
+            return write(bytes, 0, bytes.length);
+        }
+
+        @Override
+        public SendResult write(
+                byte[] bytes,
+                int offset,
+                int length) {
+            try {
+                byte[] payload = copyBytes(bytes, offset, length);
+                if (payload.length == 0) {
+                    return new SendResult.Completed();
+                }
+                return writeSerialization(
+                        new RawBytesSerialization(payload),
+                        false,
+                        "Failed to write client output");
+            } catch (RuntimeException error) {
+                return new SendResult.Failed(
+                        "Failed to write client output",
+                        error);
+            }
+        }
+
+        @Override
+        public SendResult flush() {
+            return flushOutput("Failed to flush client output");
+        }
+    }
+
+    private final class SideBandOutputStream implements OutputStream {
+        private final SideBandChannel channel;
+
+        private SideBandOutputStream(SideBandChannel channel) {
+            this.channel = Objects.requireNonNull(channel, "channel");
+        }
+
+        @Override
+        public SendResult write(int value) {
+            return write(new byte[] {(byte) value});
+        }
+
+        @Override
+        public SendResult write(byte[] bytes) {
+            Objects.requireNonNull(bytes, "bytes");
+            return write(bytes, 0, bytes.length);
+        }
+
+        @Override
+        public SendResult write(
+                byte[] bytes,
+                int offset,
+                int length) {
+            try {
+                byte[] payload = copyBytes(bytes, offset, length);
+                if (payload.length == 0) {
+                    return new SendResult.Completed();
+                }
+                return writeSerialization(
+                        new PacketListSerialization(
+                                sideBandPackets(channel, payload)),
+                        false,
+                        "Failed to write side-band output");
+            } catch (RuntimeException error) {
+                return new SendResult.Failed(
+                        "Failed to write side-band output",
+                        error);
+            }
+        }
+
+        @Override
+        public SendResult flush() {
+            return flushOutput("Failed to flush side-band output");
+        }
     }
 
     public sealed interface SendResult
@@ -1969,11 +2160,22 @@ public final class GitNativeClientOutput {
         }
     }
 
-    private static final class DirectOutputBufferCoordinator
-            implements GitOutputBufferCoordinator {
+    private interface OutputWrite extends AutoCloseable {
+        ByteBuf writableBuffer();
+
+        CompletionStage<Void> submit();
+
+        CompletionStage<Void> finish();
+
+        @Override
+        void close();
+    }
+
+    private static final class DirectOutputWrite
+            implements OutputWrite {
         private final ByteBuf output;
 
-        private DirectOutputBufferCoordinator(ByteBuf output) {
+        private DirectOutputWrite(ByteBuf output) {
             this.output = Objects.requireNonNull(output, "output");
             requireFixedCapacity(output);
         }
@@ -1984,19 +2186,9 @@ public final class GitNativeClientOutput {
         }
 
         @Override
-        public CompletionStage<Void> submitReady() {
-            if (output.isReadable()) {
-                throw new IllegalStateException("not implemented");
-            }
-            return CompletableFuture.completedFuture(null);
-        }
-
-        @Override
-        public CompletionStage<Void> awaitWritable() {
-            return output.isWritable()
-                    ? CompletableFuture.completedFuture(null)
-                    : failedStage(new IllegalStateException(
-                            "not implemented"));
+        public CompletionStage<Void> submit() {
+            return failedStage(new IllegalStateException(
+                    "Direct Git client output cannot stream buffered bytes"));
         }
 
         @Override
@@ -2009,12 +2201,12 @@ public final class GitNativeClientOutput {
         }
     }
 
-    private static final class CopyingOutputBufferCoordinator
-            implements GitOutputBufferCoordinator {
+    private static final class CopyingOutputWrite
+            implements OutputWrite {
         private final ByteBuf output;
         private final Consumer<ByteBuf> sendToClient;
 
-        private CopyingOutputBufferCoordinator(
+        private CopyingOutputWrite(
                 ByteBuf output,
                 Consumer<ByteBuf> sendToClient) {
             this.output = Objects.requireNonNull(output, "output");
@@ -2030,7 +2222,7 @@ public final class GitNativeClientOutput {
         }
 
         @Override
-        public CompletionStage<Void> submitReady() {
+        public CompletionStage<Void> submit() {
             if (!output.isReadable()) {
                 return CompletableFuture.completedFuture(null);
             }
@@ -2049,13 +2241,8 @@ public final class GitNativeClientOutput {
         }
 
         @Override
-        public CompletionStage<Void> awaitWritable() {
-            return CompletableFuture.completedFuture(null);
-        }
-
-        @Override
         public CompletionStage<Void> finish() {
-            return submitReady();
+            return submit();
         }
 
         @Override
@@ -2063,8 +2250,105 @@ public final class GitNativeClientOutput {
         }
     }
 
+    private static final class AsyncOutputWrite
+            implements OutputWrite {
+        private final ByteBufAllocator allocator;
+        private final GitNativeClientWrite write;
+        private ByteBuf output;
+
+        private AsyncOutputWrite(
+                ByteBufAllocator allocator,
+                GitNativeClientWrite write) {
+            this.allocator = Objects.requireNonNull(
+                    allocator,
+                    "allocator");
+            this.write = Objects.requireNonNull(write, "write");
+            output = newOutputBuffer();
+        }
+
+        @Override
+        public ByteBuf writableBuffer() {
+            return output;
+        }
+
+        @Override
+        public CompletionStage<Void> submit() {
+            if (!output.isReadable()) {
+                return CompletableFuture.completedFuture(null);
+            }
+            ByteBuf submitted = output;
+            output = newOutputBuffer();
+
+            CompletionStage<Void> completion;
+            try {
+                completion = Objects.requireNonNull(
+                        write.write(submitted),
+                        "write completion");
+            } catch (Throwable writeFailure) {
+                release(submitted);
+                return failedStage(writeFailure);
+            }
+            return completion.handle((ignored, writeFailure) -> {
+                Throwable unwrapped = writeFailure == null
+                        ? null
+                        : unwrap(writeFailure);
+                release(submitted);
+                if (unwrapped != null) {
+                    throw new CompletionException(unwrapped);
+                }
+                return null;
+            });
+        }
+
+        @Override
+        public CompletionStage<Void> finish() {
+            return submit();
+        }
+
+        @Override
+        public void close() {
+            release(output);
+        }
+
+        private ByteBuf newOutputBuffer() {
+            ByteBuf buffer = allocator.buffer(
+                    BUFFER_CAPACITY,
+                    BUFFER_CAPACITY);
+            requireFixedCapacity(buffer);
+            return buffer;
+        }
+
+        private static void release(ByteBuf buffer) {
+            if (buffer.refCnt() > 0) {
+                buffer.release();
+            }
+        }
+    }
+
     private interface OutputSerialization {
         boolean writeAvailable(ByteBuf output);
+    }
+
+    private static final class RawBytesSerialization
+            implements OutputSerialization {
+        private final byte[] bytes;
+        private int offset;
+
+        private RawBytesSerialization(byte[] bytes) {
+            this.bytes = bytes;
+        }
+
+        @Override
+        public boolean writeAvailable(ByteBuf output) {
+            while (offset < bytes.length && output.isWritable()) {
+                int length = Math.min(
+                        output.writableBytes(),
+                        bytes.length - offset);
+                output.writeBytes(bytes, offset, length);
+                offset += length;
+            }
+            return offset == bytes.length;
+        }
     }
 
     private static final class PacketListSerialization

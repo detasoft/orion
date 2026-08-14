@@ -14,7 +14,7 @@ tasks may be ready at the same time.
 - [x] [Connect receive-pack to PackIngestor](receive-pack-pack-ingestor/TASK.md)
 - [ ] [Move SSH and HTTP Git server paths to ByteBuf adapters](native-ssh-http-bytebuf-adapters/TASK.md)
 - [x] [Multiplex native Git side-band channels](native-git-side-band-channels/TASK.md)
-- [ ] [Replace copied native client output chunks](native-client-output-buffering/TASK.md)
+- [x] [Replace copied native client output chunks](native-client-output-buffering/TASK.md)
 - [ ] [Add native Git client state machines](native-git-client-state-machines/TASK.md)
 - [ ] [Add real native Git client transport](native-git-client-transport-compatibility/TASK.md)
 - [x] [Extend protocol v2 server fetch](protocol-v2-server-fetch-extensions/TASK.md)
