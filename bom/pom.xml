@@ -68,11 +68,6 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.core</groupId>
-                <artifactId>lifecycle-state-machine</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.core</groupId>
                 <artifactId>configuration</artifactId>
                 <version>${project.version}</version>
             </dependency>

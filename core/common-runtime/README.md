@@ -1,6 +1,6 @@
 # Lifecycle State Machine
 
-`core/lifecycle-state-machine` contains a small lifecycle state machine utility
+`core/common-runtime` contains a small lifecycle state machine utility
 for service-local state. It is intentionally independent from Orion application
 lifecycle classes, sockets, Git transports, storage, ACLs, and dependency
 injection.

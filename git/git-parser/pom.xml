@@ -15,15 +15,6 @@
 
     <dependencies>
         <dependency>
-            <groupId>io.netty</groupId>
-            <artifactId>netty-buffer</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>lifecycle-state-machine</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-native-storage</artifactId>
         </dependency>
