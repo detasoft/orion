@@ -1,0 +1,39 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.java]
+max_line_length = 112
+continuation_indent_size = 8
+ij_java_keep_line_breaks = true
+ij_java_keep_indents_on_empty_lines = false
+ij_java_align_multiline_parameters = false
+ij_java_align_multiline_parameters_in_calls = false
+ij_java_align_multiline_chained_methods = false
+ij_java_align_multiline_extends_list = false
+ij_java_align_multiline_throws_list = false
+ij_java_align_multiline_resources = false
+ij_java_call_parameters_wrap = chop_down_if_long
+ij_java_method_parameters_wrap = chop_down_if_long
+ij_java_method_call_chain_wrap = chop_down_if_long
+ij_java_extends_list_wrap = chop_down_if_long
+ij_java_throws_list_wrap = chop_down_if_long
+ij_java_resource_list_wrap = chop_down_if_long
+ij_java_binary_operation_wrap = chop_down_if_long
+ij_java_ternary_operation_wrap = chop_down_if_long
+ij_java_assignment_wrap = chop_down_if_long
+ij_java_wrap_first_method_in_call_chain = false
+
+[*.{xml,pom}]
+indent_size = 4
+max_line_length = 135
+
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
