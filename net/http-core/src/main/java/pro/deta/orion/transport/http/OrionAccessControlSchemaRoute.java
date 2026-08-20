@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.acl.schema.AccessControlXmlSchema;
+import pro.deta.orion.schema.acl.AccessControlXmlSchema;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;

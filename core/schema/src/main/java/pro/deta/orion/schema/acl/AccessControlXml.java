@@ -1,4 +1,4 @@
-package pro.deta.orion.acl.schema;
+package pro.deta.orion.schema.acl;
 
 import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.JAXBException;

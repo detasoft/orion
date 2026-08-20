@@ -1,4 +1,4 @@
-package pro.deta.orion.acl.schema;
+package pro.deta.orion.schema.acl;
 
 import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.JAXBException;
@@ -7,8 +7,8 @@ import jakarta.xml.bind.Unmarshaller;
 import jakarta.xml.bind.annotation.XmlElement;
 import jakarta.xml.bind.annotation.XmlElementWrapper;
 import jakarta.xml.bind.annotation.XmlType;
-import pro.deta.orion.acl.schema.v1.AccessControlV1;
-import pro.deta.orion.acl.schema.v1.AccessControlV1Mapper;
+import pro.deta.orion.schema.acl.v1.AccessControlV1;
+import pro.deta.orion.schema.acl.v1.AccessControlV1Mapper;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;

@@ -1,7 +1,7 @@
 package pro.deta.orion.git;
 
 import org.eclipse.jgit.util.SystemReader;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

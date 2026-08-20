@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlRepositoryGrantUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;

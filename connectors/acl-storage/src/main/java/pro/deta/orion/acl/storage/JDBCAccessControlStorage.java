@@ -2,7 +2,7 @@ package pro.deta.orion.acl.storage;
 
 import jakarta.inject.Inject;
 import lombok.RequiredArgsConstructor;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionEnableServiceSupport;
 import pro.deta.orion.util.Result;
 

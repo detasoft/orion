@@ -2,8 +2,8 @@ package pro.deta.orion.auth.check;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.acl.schema.AccessControlDraft;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
@@ -24,7 +24,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.acl.schema.AccessControl.TRUE_STRING;
+import static pro.deta.orion.schema.acl.AccessControl.TRUE_STRING;
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.auth.check.MatcherUtils.matchExpressionValue;
 

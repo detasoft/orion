@@ -15,10 +15,10 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.XmlService;
-import pro.deta.orion.acl.schema.ACLUtil;
-import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.acl.schema.AccessControlDraft;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 
 import java.io.ByteArrayOutputStream;

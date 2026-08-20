@@ -3,8 +3,8 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.shredzone.acme4j.util.KeyPairUtils;
-import pro.deta.orion.config.schema.AcmeConfig;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.AcmeConfig;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.io.IOException;
 import java.io.Reader;

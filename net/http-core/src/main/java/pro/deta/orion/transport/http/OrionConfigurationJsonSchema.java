@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;

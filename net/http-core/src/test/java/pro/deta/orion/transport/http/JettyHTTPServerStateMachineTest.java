@@ -1,7 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.util.Set;
 

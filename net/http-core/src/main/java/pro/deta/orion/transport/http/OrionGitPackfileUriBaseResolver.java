@@ -1,7 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.config.schema.GitPackfileUriConfig;
+import pro.deta.orion.schema.config.GitPackfileUriConfig;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;

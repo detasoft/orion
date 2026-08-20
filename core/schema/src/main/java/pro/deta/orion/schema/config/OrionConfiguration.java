@@ -1,4 +1,4 @@
-package pro.deta.orion.config.schema;
+package pro.deta.orion.schema.config;
 
 import lombok.Data;
 import lombok.RequiredArgsConstructor;

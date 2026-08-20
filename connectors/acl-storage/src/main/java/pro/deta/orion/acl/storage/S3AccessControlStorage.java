@@ -1,6 +1,6 @@
 package pro.deta.orion.acl.storage;
 
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;

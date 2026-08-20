@@ -1,9 +1,9 @@
 package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.schema.GitTransportConfig;
-import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.config.schema.SshTransportConfig;
+import pro.deta.orion.schema.config.GitTransportConfig;
+import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.SshTransportConfig;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;

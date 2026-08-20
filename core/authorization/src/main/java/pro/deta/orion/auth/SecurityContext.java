@@ -1,7 +1,7 @@
 package pro.deta.orion.auth;
 
 import lombok.ToString;
-import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.schema.acl.AccessControl;
 
 import java.util.List;
 import java.util.Objects;

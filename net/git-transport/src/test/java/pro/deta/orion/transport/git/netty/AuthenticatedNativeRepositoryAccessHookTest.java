@@ -1,8 +1,8 @@
 package pro.deta.orion.transport.git.netty;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.acl.schema.AccessControlDraft;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;

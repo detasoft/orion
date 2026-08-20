@@ -1,6 +1,6 @@
 package pro.deta.orion.auth.check.rule;
 
-import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.AccessRule;

@@ -1,6 +1,6 @@
-package pro.deta.orion.acl.schema.v1;
+package pro.deta.orion.schema.acl.v1;
 
-import pro.deta.orion.acl.schema.AccessControl;
+import pro.deta.orion.schema.acl.AccessControl;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -1,4 +1,4 @@
-package pro.deta.orion.acl.schema.v1;
+package pro.deta.orion.schema.acl.v1;
 
 import jakarta.xml.bind.annotation.XmlAccessType;
 import jakarta.xml.bind.annotation.XmlAccessorType;

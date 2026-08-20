@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.schema.GitPackfileUriConfig;
+import pro.deta.orion.schema.config.GitPackfileUriConfig;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;

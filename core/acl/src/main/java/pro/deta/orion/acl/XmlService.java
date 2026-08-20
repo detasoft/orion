@@ -1,8 +1,8 @@
 package pro.deta.orion.acl;
 
 import jakarta.xml.bind.JAXBException;
-import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.acl.schema.AccessControlXml;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlXml;
 
 import java.io.IOException;
 import java.io.InputStream;

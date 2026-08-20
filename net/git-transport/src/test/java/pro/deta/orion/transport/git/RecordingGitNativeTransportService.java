@@ -1,6 +1,6 @@
 package pro.deta.orion.transport.git;
 
-import pro.deta.orion.config.schema.GitTransportConfig;
+import pro.deta.orion.schema.config.GitTransportConfig;
 
 import java.util.concurrent.CountDownLatch;
 

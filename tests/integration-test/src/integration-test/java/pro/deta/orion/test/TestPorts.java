@@ -1,6 +1,6 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.util.NetworkUtils;
 
 import java.io.IOException;

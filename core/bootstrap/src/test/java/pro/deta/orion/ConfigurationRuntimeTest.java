@@ -2,7 +2,7 @@ package pro.deta.orion;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.config.LocationConfigurationProvider;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;

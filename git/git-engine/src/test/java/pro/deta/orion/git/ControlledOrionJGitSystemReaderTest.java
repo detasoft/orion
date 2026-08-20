@@ -5,7 +5,7 @@ import org.eclipse.jgit.lib.StoredConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

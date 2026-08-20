@@ -1,8 +1,8 @@
 package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.schema.OrionConfiguration;
-import pro.deta.orion.config.schema.SshTransportConfig;
+import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.SshTransportConfig;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;

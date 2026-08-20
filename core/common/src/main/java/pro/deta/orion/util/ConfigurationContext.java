@@ -2,7 +2,7 @@ package pro.deta.orion.util;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;

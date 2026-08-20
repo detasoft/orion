@@ -3,7 +3,7 @@ package pro.deta.orion.test;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.LocationConfigurationProvider;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.test.integration.git.GitHttpTestServer;
 import pro.deta.orion.test.integration.git.GitRepositoryFixture;
 import pro.deta.orion.test.integration.git.GitSshTestServer;

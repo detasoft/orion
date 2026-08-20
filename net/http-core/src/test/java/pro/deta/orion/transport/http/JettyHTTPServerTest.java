@@ -1,9 +1,9 @@
 package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.schema.HttpTransportConfig;
-import pro.deta.orion.config.schema.HttpsTransportConfig;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.HttpTransportConfig;
+import pro.deta.orion.schema.config.HttpsTransportConfig;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.util.NetworkUtils;
 
 import javax.net.ssl.HttpsURLConnection;

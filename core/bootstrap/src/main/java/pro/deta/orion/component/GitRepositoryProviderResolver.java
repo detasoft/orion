@@ -4,7 +4,7 @@ import dagger.Lazy;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.GitRepositoryProvider;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.git.FileGitRepositoryProvider;
 import pro.deta.orion.git.s3.S3GitRepositoryProvider;
 import pro.deta.orion.util.ResourceLocation;

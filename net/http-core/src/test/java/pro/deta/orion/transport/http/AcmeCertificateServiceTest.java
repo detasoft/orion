@@ -2,9 +2,9 @@ package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.config.schema.AcmeConfig;
-import pro.deta.orion.config.schema.HttpsTransportConfig;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.AcmeConfig;
+import pro.deta.orion.schema.config.HttpsTransportConfig;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

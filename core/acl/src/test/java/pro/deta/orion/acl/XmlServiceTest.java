@@ -1,8 +1,8 @@
 package pro.deta.orion.acl;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.acl.schema.AccessControl;
-import pro.deta.orion.acl.schema.ACLUtil;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.ACLUtil;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

@@ -3,7 +3,7 @@ package pro.deta.orion.acl.storage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.GitRepositoryProvider;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.util.Result;

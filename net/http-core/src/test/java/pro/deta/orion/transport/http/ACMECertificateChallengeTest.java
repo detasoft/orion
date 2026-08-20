@@ -6,9 +6,9 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.shredzone.acme4j.util.KeyPairUtils;
-import pro.deta.orion.config.schema.HttpTransportConfig;
-import pro.deta.orion.config.schema.HttpsTransportConfig;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.HttpTransportConfig;
+import pro.deta.orion.schema.config.HttpsTransportConfig;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.util.NetworkUtils;
 
 import javax.net.ssl.HttpsURLConnection;

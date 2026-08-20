@@ -1,8 +1,8 @@
-package pro.deta.orion.acl.schema;
+package pro.deta.orion.schema.acl;
 
 import jakarta.xml.bind.annotation.XmlRootElement;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.acl.schema.v1.AccessControlV1;
+import pro.deta.orion.schema.acl.v1.AccessControlV1;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -41,7 +41,7 @@ class AccessControlXmlSchemaTest {
     void schemaContractLivesInVersionedDtoPackage() {
         assertThat(AccessControl.class.getAnnotation(XmlRootElement.class)).isNull();
         assertThat(AccessControlV1.class.getAnnotation(XmlRootElement.class)).isNotNull();
-        assertThat(AccessControlV1.class.getPackageName()).endsWith(".schema.v1");
+        assertThat(AccessControlV1.class.getPackageName()).endsWith(".schema.acl.v1");
         assertThat(AccessControlXml.currentSchemaVersion()).isEqualTo(AccessControlXmlSchemaVersion.V1);
     }
 
@@ -184,7 +184,7 @@ class AccessControlXmlSchemaTest {
 
     @Test
     void readsLegacyFixtureWithoutSchemaVersionAndWritesLatestVersion() throws Exception {
-        String legacyXml = testResource("pro/deta/orion/acl/schema/legacy-orion.xml");
+        String legacyXml = testResource("pro/deta/orion/schema/acl/legacy-orion.xml");
 
         AccessControl accessControl = AccessControlXml.read(new ByteArrayInputStream(legacyXml.getBytes(StandardCharsets.UTF_8)));
         String latestXml = serialize(accessControl);

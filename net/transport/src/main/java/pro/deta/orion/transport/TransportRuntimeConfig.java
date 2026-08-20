@@ -1,6 +1,6 @@
 package pro.deta.orion.transport;
 
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 final class TransportRuntimeConfig {
     private TransportRuntimeConfig() {

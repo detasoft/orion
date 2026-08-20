@@ -2,7 +2,7 @@ package pro.deta.orion.config;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.config.schema.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

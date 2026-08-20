@@ -1,7 +1,7 @@
 package pro.deta.orion.util;
 
-import pro.deta.orion.config.schema.HttpTransportConfig;
-import pro.deta.orion.config.schema.TransportConfig;
+import pro.deta.orion.schema.config.HttpTransportConfig;
+import pro.deta.orion.schema.config.TransportConfig;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;

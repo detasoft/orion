@@ -3,7 +3,7 @@ package pro.deta.orion.transport.git;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.config.schema.GitTransportConfig;
+import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.lifecycle.state.*;
 import pro.deta.orion.lifecycle.state.Void;
 

@@ -1,4 +1,4 @@
-package pro.deta.orion.acl.schema;
+package pro.deta.orion.schema.acl;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
