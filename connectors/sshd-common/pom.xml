@@ -5,22 +5,18 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion.core</groupId>
-        <artifactId>core</artifactId>
+        <groupId>pro.deta.orion.connectors</groupId>
+        <artifactId>connectors</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>key-material</artifactId>
+    <artifactId>sshd-common</artifactId>
 
     <dependencies>
         <dependency>
-            <groupId>pro.deta.orion.connectors</groupId>
-            <artifactId>bc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.core.ref</groupId>
-            <artifactId>reference</artifactId>
+            <groupId>org.apache.sshd</groupId>
+            <artifactId>sshd-common</artifactId>
         </dependency>
     </dependencies>
 </project>

@@ -5,8 +5,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion.core</groupId>
-        <artifactId>core</artifactId>
+        <groupId>pro.deta.orion.connectors</groupId>
+        <artifactId>connectors</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>

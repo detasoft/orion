@@ -10,21 +10,14 @@
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-    <groupId>pro.deta.orion.core</groupId>
-    <artifactId>core</artifactId>
+    <groupId>pro.deta.orion.connectors</groupId>
+    <artifactId>connectors</artifactId>
     <packaging>pom</packaging>
 
     <modules>
-        <module>acl-model</module>
-        <module>parent-reference</module>
-        <module>acl</module>
-        <module>key-material</module>
-        <module>bootstrap</module>
-        <module>configuration</module>
-        <module>common</module>
-        <module>common-runtime</module>
-        <module>authorization</module>
-        <module>communication</module>
+        <module>bc</module>
+        <module>sshd-common</module>
+        <module>acl-storage</module>
     </modules>
 
     <dependencies>

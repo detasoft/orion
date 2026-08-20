@@ -43,7 +43,7 @@
             <version>2.15.1</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.sshd</groupId>
+            <groupId>pro.deta.orion.connectors</groupId>
             <artifactId>sshd-common</artifactId>
         </dependency>
         <dependency>
@@ -52,7 +52,7 @@
             <version>${eddsa.version}</version>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
+            <groupId>pro.deta.orion.connectors</groupId>
             <artifactId>bc</artifactId>
         </dependency>
     </dependencies>

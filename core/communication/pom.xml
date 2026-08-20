@@ -23,7 +23,7 @@
             <artifactId>netty-all</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
+            <groupId>pro.deta.orion.connectors</groupId>
             <artifactId>bc</artifactId>
         </dependency>
         <dependency>

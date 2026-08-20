@@ -47,6 +47,11 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
+                <groupId>pro.deta.orion.connectors</groupId>
+                <artifactId>acl-storage</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>pro.deta.orion.core</groupId>
                 <artifactId>authorization</artifactId>
                 <version>${project.version}</version>
@@ -92,8 +97,13 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion.core</groupId>
+                <groupId>pro.deta.orion.connectors</groupId>
                 <artifactId>bc</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.connectors</groupId>
+                <artifactId>sshd-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

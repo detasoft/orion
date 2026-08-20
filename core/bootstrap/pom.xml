@@ -23,6 +23,10 @@
             <artifactId>acl</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.connectors</groupId>
+            <artifactId>acl-storage</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-engine-s3</artifactId>
         </dependency>
