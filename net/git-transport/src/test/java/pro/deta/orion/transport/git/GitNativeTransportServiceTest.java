@@ -144,6 +144,25 @@ class GitNativeTransportServiceTest {
     }
 
     @Test
+    void nativeImplementationStopsWithoutWaitingForNettyQuietPeriod() throws Exception {
+        InetSocketAddress address = startNativeService(
+                new RecordingGitInternalService(),
+                new InMemoryNativeGitRepositoryProvider(),
+                requestId -> SecurityContext.createContext()
+                        .withRequestId(requestId),
+                5_000);
+        assertNotNull(address);
+
+        long started = System.nanoTime();
+        service.onStop();
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        assertTrue(
+                elapsedMillis < 1_000,
+                "native transport stop took " + elapsedMillis + " ms");
+    }
+
+    @Test
     void bindFailureIsReportedToCaller() throws Exception {
         try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
             GitTransportConfig config = new GitTransportConfig("127.0.0.1", occupied.getLocalPort());

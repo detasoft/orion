@@ -199,6 +199,9 @@ class GitMinimalWireHandlerJGitUserTest {
     }
 
     private static final class MinimalGitServer implements AutoCloseable {
+        private static final long NETTY_SHUTDOWN_QUIET_PERIOD_MILLIS = 0;
+        private static final long NETTY_SHUTDOWN_TIMEOUT_MILLIS = 1_000;
+
         private final InMemoryNativeGitRepositoryProvider repositoryProvider;
         private final SecurityContext securityContext;
         private final EventLoopGroup bossGroup = new NioEventLoopGroup(1);
@@ -306,8 +309,16 @@ class GitMinimalWireHandlerJGitUserTest {
             if (serverChannel != null) {
                 serverChannel.close().awaitUninterruptibly();
             }
-            bossGroup.shutdownGracefully().awaitUninterruptibly();
-            workerGroup.shutdownGracefully().awaitUninterruptibly();
+            shutdownGroup(bossGroup);
+            shutdownGroup(workerGroup);
+        }
+
+        private static void shutdownGroup(EventLoopGroup group) {
+            group.shutdownGracefully(
+                            NETTY_SHUTDOWN_QUIET_PERIOD_MILLIS,
+                            NETTY_SHUTDOWN_TIMEOUT_MILLIS,
+                            TimeUnit.MILLISECONDS)
+                    .awaitUninterruptibly();
         }
     }
 

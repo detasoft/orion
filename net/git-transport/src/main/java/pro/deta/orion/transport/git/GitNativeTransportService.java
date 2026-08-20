@@ -43,6 +43,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
@@ -53,6 +54,8 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     static final String IMPLEMENTATION_PROPERTY =
             "orion.git.transport.implementation";
     private static final int DEFAULT_SOCKET_TIMEOUT_MILLIS = 5 * 1000;
+    private static final long NETTY_SHUTDOWN_QUIET_PERIOD_MILLIS = 0;
+    private static final long NETTY_SHUTDOWN_TIMEOUT_MILLIS = 1_000;
 
     private final GitTransportConfig config;
     private final GitInternalService gitInternalService;
@@ -272,8 +275,8 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
             throw new RuntimeException(e);
         } finally {
             if (!started) {
-                bossGroup.shutdownGracefully().awaitUninterruptibly();
-                workerGroup.shutdownGracefully().awaitUninterruptibly();
+                shutdownNativeGroup(bossGroup);
+                shutdownNativeGroup(workerGroup);
             }
         }
     }
@@ -393,11 +396,19 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
         EventLoopGroup bossGroup = nativeBossGroup;
         nativeBossGroup = null;
         if (workerGroup != null) {
-            workerGroup.shutdownGracefully().awaitUninterruptibly();
+            shutdownNativeGroup(workerGroup);
         }
         if (bossGroup != null) {
-            bossGroup.shutdownGracefully().awaitUninterruptibly();
+            shutdownNativeGroup(bossGroup);
         }
+    }
+
+    private static void shutdownNativeGroup(EventLoopGroup group) {
+        group.shutdownGracefully(
+                        NETTY_SHUTDOWN_QUIET_PERIOD_MILLIS,
+                        NETTY_SHUTDOWN_TIMEOUT_MILLIS,
+                        TimeUnit.MILLISECONDS)
+                .awaitUninterruptibly();
     }
 
     InetSocketAddress boundAddress() {
