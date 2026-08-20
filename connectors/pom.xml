@@ -17,6 +17,7 @@
     <modules>
         <module>bc</module>
         <module>sshd-common</module>
+        <module>configuration-location</module>
         <module>acl-storage</module>
     </modules>
 
