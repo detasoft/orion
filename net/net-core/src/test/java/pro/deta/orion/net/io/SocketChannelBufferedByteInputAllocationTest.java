@@ -57,7 +57,9 @@ class SocketChannelBufferedByteInputAllocationTest {
         try (RecordingFile events = new RecordingFile(recordingFile)) {
             while (events.hasMoreEvents()) {
                 RecordedEvent event = events.readEvent();
-                if (isByteArrayAllocation(event) && hasInputStackFrame(event)) {
+                if (isByteArrayAllocation(event)
+                        && hasInputStackFrame(event)
+                        && !hasClassLoadingStackFrame(event)) {
                     allocations.add(event.toString());
                 }
             }
@@ -77,6 +79,25 @@ class SocketChannelBufferedByteInputAllocationTest {
         for (RecordedFrame frame : event.getStackTrace().getFrames()) {
             String className = frame.getMethod().getType().getName();
             if (SocketChannelBufferedByteInput.class.getName().equals(className)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasClassLoadingStackFrame(RecordedEvent event) {
+        if (event.getStackTrace() == null) {
+            return false;
+        }
+        for (RecordedFrame frame : event.getStackTrace().getFrames()) {
+            String className = frame.getMethod().getType().getName();
+            if (className.equals("java.lang.ClassLoader")
+                    || className.equals("jdk.internal.loader.BuiltinClassLoader")
+                    || className.equals("jdk.internal.loader.URLClassPath")
+                    || className.equals("jdk.internal.loader.Resource")
+                    || className.equals("java.util.jar.JarFile")
+                    || className.equals("java.util.zip.ZipFile")
+                    || className.equals("sun.net.www.protocol.jar.Handler")) {
                 return true;
             }
         }
