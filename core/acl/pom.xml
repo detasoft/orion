@@ -24,7 +24,7 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
-            <artifactId>configuration</artifactId>
+            <artifactId>schema</artifactId>
         </dependency>
     </dependencies>
 </project>

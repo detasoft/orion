@@ -11,9 +11,13 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>acl-model</artifactId>
+    <artifactId>schema</artifactId>
 
     <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
         <dependency>
             <groupId>jakarta.xml.bind</groupId>
             <artifactId>jakarta.xml.bind-api</artifactId>

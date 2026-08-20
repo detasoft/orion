@@ -33,7 +33,7 @@
 
             <dependency>
                 <groupId>pro.deta.orion.core</groupId>
-                <artifactId>acl-model</artifactId>
+                <artifactId>schema</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -74,11 +74,6 @@
             <dependency>
                 <groupId>pro.deta.orion.core</groupId>
                 <artifactId>common-runtime</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.core</groupId>
-                <artifactId>configuration</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

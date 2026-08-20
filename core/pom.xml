@@ -15,12 +15,11 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>acl-model</module>
+        <module>schema</module>
         <module>parent-reference</module>
         <module>acl</module>
         <module>key-material</module>
         <module>bootstrap</module>
-        <module>configuration</module>
         <module>common</module>
         <module>common-runtime</module>
         <module>authorization</module>
