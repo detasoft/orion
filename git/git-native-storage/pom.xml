@@ -5,8 +5,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion.core</groupId>
-        <artifactId>core</artifactId>
+        <groupId>pro.deta.orion.git</groupId>
+        <artifactId>git</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
@@ -19,7 +19,7 @@
             <artifactId>common</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
+            <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-common</artifactId>
         </dependency>
         <dependency>

@@ -10,22 +10,17 @@
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-    <groupId>pro.deta.orion.net</groupId>
-    <artifactId>net</artifactId>
+    <groupId>pro.deta.orion.git</groupId>
+    <artifactId>git</artifactId>
     <packaging>pom</packaging>
 
     <modules>
-        <module>net-core</module>
-        <module>git-transport</module>
-        <module>http-core</module>
-        <module>transport</module>
+        <module>git-parser</module>
+        <module>git-common</module>
+        <module>git-native-storage</module>
+        <module>git-storage</module>
+        <module>git-engine</module>
+        <module>git-engine-s3</module>
     </modules>
 
-    <dependencies>
-        <dependency>
-            <groupId>pro.deta.orion.tests</groupId>
-            <artifactId>test-duration-recorder</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
 </project>

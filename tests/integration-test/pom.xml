@@ -22,7 +22,7 @@
             <artifactId>communication</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
+            <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-engine-s3</artifactId>
         </dependency>
         <dependency>
