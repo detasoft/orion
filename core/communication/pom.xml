@@ -21,7 +21,6 @@
         <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-all</artifactId>
-            <version>4.2.1.Final</version>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
