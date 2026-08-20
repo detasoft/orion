@@ -5,26 +5,22 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion</groupId>
-        <artifactId>orion</artifactId>
+        <groupId>pro.deta.orion.net</groupId>
+        <artifactId>net</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-    <groupId>pro.deta.orion.net</groupId>
-    <artifactId>net</artifactId>
-    <packaging>pom</packaging>
 
-    <modules>
-        <module>net-core</module>
-        <module>git-transport</module>
-        <module>http-core</module>
-        <module>transport</module>
-    </modules>
+    <artifactId>net-core</artifactId>
 
     <dependencies>
         <dependency>
-            <groupId>pro.deta.orion.tests</groupId>
-            <artifactId>test-duration-recorder</artifactId>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-buffer</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
