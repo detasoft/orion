@@ -37,6 +37,24 @@ class SocketChannelBufferedByteInputTest {
     }
 
     @Test
+    void directReadsAndSkipsReuseTheLocalInputBufferWithoutAllocatingCopies() throws Exception {
+        CountingByteBufAllocator allocator = new CountingByteBufAllocator();
+        try (SocketPair sockets = SocketPair.open(); SocketChannelBufferedByteInput input =
+                new SocketChannelBufferedByteInput(sockets.client(), allocator, 4)) {
+            assertThat(allocator.allocations()).isEqualTo(1);
+            writeAscii(sockets.server(), "abcdef");
+
+            assertThat(input.readUnsignedByte()).isEqualTo('a');
+            assertThat(input.readUnsignedByte()).isEqualTo('b');
+            input.skipBytes(2);
+            assertThat(input.readUnsignedByte()).isEqualTo('e');
+            assertThat(input.readUnsignedByte()).isEqualTo('f');
+
+            assertThat(allocator.allocations()).isEqualTo(1);
+        }
+    }
+
+    @Test
     void readCopyReturnsOwnedBufferIndependentFromInputBuffer() throws Exception {
         try (SocketPair sockets = SocketPair.open(); SocketChannelBufferedByteInput input =
                 new SocketChannelBufferedByteInput(sockets.client(), UnpooledByteBufAllocator.DEFAULT, 8)) {
@@ -72,7 +90,7 @@ class SocketChannelBufferedByteInputTest {
         }
     }
 
-    private record SocketPair(SocketChannel client, SocketChannel server) implements AutoCloseable {
+    record SocketPair(SocketChannel client, SocketChannel server) implements AutoCloseable {
 
         static SocketPair open() throws Exception {
             try (ServerSocketChannel listener = ServerSocketChannel.open()) {

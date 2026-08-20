@@ -9,21 +9,16 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.Objects;
 
-public final class SocketChannelBufferedByteInput
-        implements BufferedByteInput, AutoCloseable {
+public final class SocketChannelBufferedByteInput implements BufferedByteInput, AutoCloseable {
     private final SocketChannel channel;
     private final ByteBufAllocator allocator;
     private final ByteBuf inputBuffer;
 
-    public SocketChannelBufferedByteInput(
-            SocketChannel channel,
-            ByteBufAllocator allocator,
-            int inputBufferSize) {
+    public SocketChannelBufferedByteInput(SocketChannel channel, ByteBufAllocator allocator, int inputBufferSize) {
         this.channel = Objects.requireNonNull(channel, "channel");
         this.allocator = Objects.requireNonNull(allocator, "allocator");
         if (inputBufferSize <= 0) {
-            throw new IllegalArgumentException(
-                    "inputBufferSize must be positive");
+            throw new IllegalArgumentException("inputBufferSize must be positive");
         }
         inputBuffer = allocator.directBuffer(inputBufferSize, inputBufferSize);
     }
@@ -58,9 +53,7 @@ public final class SocketChannelBufferedByteInput
         try {
             while (copy.writableBytes() > 0) {
                 requireAvailable();
-                int copied = Math.min(
-                        copy.writableBytes(),
-                        inputBuffer.readableBytes());
+                int copied = Math.min(copy.writableBytes(), inputBuffer.readableBytes());
                 copy.writeBytes(inputBuffer, copied);
             }
             return copy;
@@ -89,9 +82,7 @@ public final class SocketChannelBufferedByteInput
         if (!inputBuffer.isWritable()) {
             return;
         }
-        ByteBuffer target = inputBuffer.nioBuffer(
-                inputBuffer.writerIndex(),
-                inputBuffer.writableBytes());
+        ByteBuffer target = inputBuffer.nioBuffer(inputBuffer.writerIndex(), inputBuffer.writableBytes());
         int read = channel.read(target);
         if (read < 0) {
             throw new EOFException("Socket channel reached end of stream");
