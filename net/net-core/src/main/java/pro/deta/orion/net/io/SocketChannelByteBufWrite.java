@@ -3,32 +3,32 @@ package pro.deta.orion.net.io;
 import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 
-public final class SocketChannelByteBufWrite {
+public final class SocketChannelByteBufWrite implements BufferedByteOutput {
     private final SocketChannel channel;
 
     public SocketChannelByteBufWrite(SocketChannel channel) {
         this.channel = Objects.requireNonNull(channel, "channel");
+        if (!channel.isBlocking()) {
+            throw new IllegalArgumentException("channel must be blocking");
+        }
     }
 
-    public CompletionStage<Void> write(ByteBuf ownedBuffer) {
-        Objects.requireNonNull(ownedBuffer, "ownedBuffer");
-        ByteBuffer source = ownedBuffer.nioBuffer(
-                ownedBuffer.readerIndex(),
-                ownedBuffer.readableBytes());
-        try {
-            while (source.hasRemaining()) {
-                channel.write(source);
-            }
-            return CompletableFuture.completedFuture(null);
-        } catch (IOException error) {
-            throw new UncheckedIOException(error);
+    @Override
+    public void write(ByteBuf buffer) throws IOException {
+        Objects.requireNonNull(buffer, "buffer");
+        ByteBuffer source = buffer.nioBuffer(
+                buffer.readerIndex(),
+                buffer.readableBytes());
+        while (source.hasRemaining()) {
+            channel.write(source);
         }
+    }
+
+    @Override
+    public void flush() {
     }
 }
