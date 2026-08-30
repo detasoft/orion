@@ -1,6 +1,6 @@
 package pro.deta.orion.git.parser.wire.continuation.exchange;
 
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 
 import java.util.Objects;
 

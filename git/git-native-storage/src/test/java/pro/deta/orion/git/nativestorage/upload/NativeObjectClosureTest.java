@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage.upload;
 
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 

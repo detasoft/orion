@@ -2,7 +2,7 @@ package pro.deta.orion.git.nativestorage.pack;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 
 import java.io.IOException;
 import java.io.InputStream;

@@ -1,6 +1,6 @@
 package pro.deta.orion.git.nativestorage.object;
 
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 
 import java.util.Objects;
 

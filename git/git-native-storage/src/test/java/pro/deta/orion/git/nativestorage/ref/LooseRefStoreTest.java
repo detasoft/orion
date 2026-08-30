@@ -2,7 +2,7 @@ package pro.deta.orion.git.nativestorage.ref;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage.pack;
 
 import io.netty.buffer.ByteBuf;
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 

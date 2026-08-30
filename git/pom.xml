@@ -16,7 +16,6 @@
 
     <modules>
         <module>git-parser</module>
-        <module>git-common</module>
         <module>git-native-storage</module>
     </modules>
 

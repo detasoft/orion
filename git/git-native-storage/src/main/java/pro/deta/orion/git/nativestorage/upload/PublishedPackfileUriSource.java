@@ -1,6 +1,6 @@
 package pro.deta.orion.git.nativestorage.upload;
 
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.pack.PublishedPackManifest;
 

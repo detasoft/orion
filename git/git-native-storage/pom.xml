@@ -19,10 +19,6 @@
             <artifactId>common</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-common</artifactId>
-        </dependency>
-        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>

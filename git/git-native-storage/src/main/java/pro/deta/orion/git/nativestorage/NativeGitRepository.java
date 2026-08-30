@@ -1,9 +1,5 @@
 package pro.deta.orion.git.nativestorage;
 
-import pro.deta.orion.git.common.GitObjectId;
-import pro.deta.orion.git.common.GitCommitAuthor;
-import pro.deta.orion.git.common.GitOperationException;
-import pro.deta.orion.git.common.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;

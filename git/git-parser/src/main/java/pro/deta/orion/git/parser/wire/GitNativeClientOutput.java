@@ -5,7 +5,7 @@ import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.continuation.ContinuationTask;
-import pro.deta.orion.git.common.GitObjectId;
+import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
