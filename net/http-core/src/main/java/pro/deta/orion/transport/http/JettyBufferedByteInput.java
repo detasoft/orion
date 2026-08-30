@@ -1,29 +1,29 @@
-package pro.deta.orion.net.io;
+package pro.deta.orion.transport.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import jakarta.servlet.ServletInputStream;
+import pro.deta.orion.net.io.BufferedByteInput;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.SocketChannel;
 import java.util.Objects;
 
-public final class SocketChannelBufferedByteInput implements BufferedByteInput, AutoCloseable {
-    private final SocketChannel channel;
+public final class JettyBufferedByteInput implements BufferedByteInput, AutoCloseable {
+    private final ServletInputStream input;
     private final ByteBufAllocator allocator;
     private final ByteBuf inputBuffer;
 
-    public SocketChannelBufferedByteInput(
-            SocketChannel channel,
+    public JettyBufferedByteInput(
+            ServletInputStream input,
             ByteBufAllocator allocator,
             int inputBufferSize) {
-        this.channel = Objects.requireNonNull(channel, "channel");
+        this.input = Objects.requireNonNull(input, "input");
         this.allocator = Objects.requireNonNull(allocator, "allocator");
         if (inputBufferSize <= 0) {
             throw new IllegalArgumentException("inputBufferSize must be positive");
         }
-        inputBuffer = allocator.directBuffer(inputBufferSize, inputBufferSize);
+        inputBuffer = allocator.heapBuffer(inputBufferSize, inputBufferSize);
     }
 
     @Override
@@ -76,7 +76,7 @@ public final class SocketChannelBufferedByteInput implements BufferedByteInput, 
     @Override
     public void close() throws IOException {
         inputBuffer.release();
-        channel.close();
+        input.close();
     }
 
     private void requireAvailable() throws IOException {
@@ -92,12 +92,15 @@ public final class SocketChannelBufferedByteInput implements BufferedByteInput, 
         if (!inputBuffer.isWritable()) {
             return;
         }
-        ByteBuffer target = inputBuffer.nioBuffer(inputBuffer.writerIndex(), inputBuffer.writableBytes());
-        int read = channel.read(target);
+        int writerIndex = inputBuffer.writerIndex();
+        int read = input.read(
+                inputBuffer.array(),
+                inputBuffer.arrayOffset() + writerIndex,
+                inputBuffer.writableBytes());
         if (read < 0) {
-            throw new EOFException("Socket channel reached end of stream");
+            throw new EOFException("Servlet request body reached end of stream");
         }
-        inputBuffer.writerIndex(inputBuffer.writerIndex() + read);
+        inputBuffer.writerIndex(writerIndex + read);
     }
 
     private static void requireNonNegativeLength(int length) {

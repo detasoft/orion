@@ -9,7 +9,7 @@ public interface BufferedByteInput {
 
     int readUnsignedByte() throws IOException;
 
-    void skipBytes(int length) throws IOException;
-
     ByteBuf readCopy(int length) throws IOException;
+
+    int readInto(ByteBuf target, int maxLength) throws IOException;
 }

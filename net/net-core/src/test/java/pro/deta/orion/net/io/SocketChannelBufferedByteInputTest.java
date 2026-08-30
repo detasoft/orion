@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SocketChannelBufferedByteInputTest {
     @Test
-    void readsAndSkipsAcrossCompactedSocketRefills() throws Exception {
+    void readsIntoTargetAcrossCompactedSocketRefills() throws Exception {
         try (SocketPair sockets = SocketPair.open(); SocketChannelBufferedByteInput input =
                 new SocketChannelBufferedByteInput(sockets.client(), UnpooledByteBufAllocator.DEFAULT, 4)) {
             writeAscii(sockets.server(), "abcdef");
@@ -25,19 +25,21 @@ class SocketChannelBufferedByteInputTest {
             assertThat(input.readUnsignedByte()).isEqualTo('a');
             assertThat(input.readUnsignedByte()).isEqualTo('b');
 
-            input.skipBytes(1);
-            ByteBuf copy = input.readCopy(3);
+            ByteBuf target = UnpooledByteBufAllocator.DEFAULT.buffer(3, 3);
             try {
-                assertThat(copy.toString(StandardCharsets.US_ASCII)).isEqualTo("def");
+                assertThat(input.readInto(target, 1)).isEqualTo(1);
+                assertThat(input.readInto(target, 2)).isEqualTo(2);
+                assertThat(target.toString(StandardCharsets.US_ASCII)).isEqualTo("cde");
+                assertThat(input.readUnsignedByte()).isEqualTo('f');
                 assertThat(input.available()).isZero();
             } finally {
-                copy.release();
+                target.release();
             }
         }
     }
 
     @Test
-    void directReadsAndSkipsReuseTheLocalInputBufferWithoutAllocatingCopies() throws Exception {
+    void directReadsAndReadIntoReuseTheLocalInputBufferWithoutAllocatingCopies() throws Exception {
         CountingByteBufAllocator allocator = new CountingByteBufAllocator();
         try (SocketPair sockets = SocketPair.open(); SocketChannelBufferedByteInput input =
                 new SocketChannelBufferedByteInput(sockets.client(), allocator, 4)) {
@@ -46,7 +48,13 @@ class SocketChannelBufferedByteInputTest {
 
             assertThat(input.readUnsignedByte()).isEqualTo('a');
             assertThat(input.readUnsignedByte()).isEqualTo('b');
-            input.skipBytes(2);
+            ByteBuf target = UnpooledByteBufAllocator.DEFAULT.buffer(2, 2);
+            try {
+                assertThat(input.readInto(target, 2)).isEqualTo(2);
+                assertThat(target.toString(StandardCharsets.US_ASCII)).isEqualTo("cd");
+            } finally {
+                target.release();
+            }
             assertThat(input.readUnsignedByte()).isEqualTo('e');
             assertThat(input.readUnsignedByte()).isEqualTo('f');
 
@@ -68,6 +76,23 @@ class SocketChannelBufferedByteInputTest {
                 assertThat(input.readUnsignedByte()).isEqualTo('t');
             } finally {
                 copy.release();
+            }
+        }
+    }
+
+    @Test
+    void readIntoHonorsMaxLengthAndLeavesRemainingBytesBuffered() throws Exception {
+        try (SocketPair sockets = SocketPair.open(); SocketChannelBufferedByteInput input =
+                new SocketChannelBufferedByteInput(sockets.client(), UnpooledByteBufAllocator.DEFAULT, 8)) {
+            writeAscii(sockets.server(), "abcdef");
+            ByteBuf target = UnpooledByteBufAllocator.DEFAULT.buffer(6, 6);
+            try {
+                assertThat(input.readInto(target, 3)).isEqualTo(3);
+
+                assertThat(target.toString(StandardCharsets.US_ASCII)).isEqualTo("abc");
+                assertThat(input.readUnsignedByte()).isEqualTo('d');
+            } finally {
+                target.release();
             }
         }
     }
