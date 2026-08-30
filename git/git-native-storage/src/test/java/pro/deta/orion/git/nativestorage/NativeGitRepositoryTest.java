@@ -576,13 +576,12 @@ class NativeGitRepositoryTest {
     }
 
     @Test
-    void adapterSavesFilesToNewBranchAndLoadsThemBack() throws Exception {
-        NativeGitRepository nativeRepository = new NativeGitRepository(
+    void repositorySavesFilesToNewBranchAndLoadsThemBack() throws Exception {
+        NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
                 new LooseRefStore(),
                 new LooseObjectStore(),
                 "refs/heads/main");
-        NativeGitRepositoryAdapter repository = new NativeGitRepositoryAdapter(nativeRepository);
 
         repository.saveFiles(
                 "main",
@@ -596,18 +595,17 @@ class NativeGitRepositoryTest {
                 .containsEntry(
                         "orion.xml",
                         "initial acl".getBytes(StandardCharsets.UTF_8));
-        assertThat(nativeRepository.refs())
+        assertThat(repository.refs())
                 .containsKey("refs/heads/main");
     }
 
     @Test
-    void adapterSavesFilesOverExistingBranchContent() throws Exception {
-        NativeGitRepository nativeRepository = new NativeGitRepository(
+    void repositorySavesFilesOverExistingBranchContent() throws Exception {
+        NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
                 new LooseRefStore(),
                 new LooseObjectStore(),
                 "refs/heads/main");
-        NativeGitRepositoryAdapter repository = new NativeGitRepositoryAdapter(nativeRepository);
 
         repository.saveFiles(
                 "main",
@@ -637,13 +635,12 @@ class NativeGitRepositoryTest {
     }
 
     @Test
-    void adapterPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
-        NativeGitRepository nativeRepository = new NativeGitRepository(
+    void repositoryPopulatesDefaultHeadWhenSavingDifferentFirstBranch() throws Exception {
+        NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
                 new LooseRefStore(),
                 new LooseObjectStore(),
                 "refs/heads/main");
-        NativeGitRepositoryAdapter repository = new NativeGitRepositoryAdapter(nativeRepository);
 
         repository.saveFiles(
                 "master",
@@ -651,8 +648,8 @@ class NativeGitRepositoryTest {
                 "initial acl",
                 GitCommitAuthor.EMPTY);
 
-        assertThat(nativeRepository.refs().get("refs/heads/main"))
-                .isEqualTo(nativeRepository.refs().get("refs/heads/master"));
+        assertThat(repository.refs().get("refs/heads/main"))
+                .isEqualTo(repository.refs().get("refs/heads/master"));
     }
 
     @Test
