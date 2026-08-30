@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyByteBufAdaptersTest {
     @Test
@@ -67,15 +66,13 @@ class JettyByteBufAdaptersTest {
     }
 
     @Test
-    void outputRejectsDirectByteBufBecauseServletOutputRequiresAdapterCopy() {
+    void outputWritesDirectByteBufToServletResponseBody() throws Exception {
         BufferedByteOutput output = new JettyBufferedByteOutput(new RecordingServletOutputStream());
         ByteBuf buffer = UnpooledByteBufAllocator.DEFAULT.directBuffer(5, 5);
         try {
             buffer.writeCharSequence("hello", StandardCharsets.US_ASCII);
 
-            assertThatThrownBy(() -> output.write(buffer))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("buffer must expose a backing array");
+            output.write(buffer);
         } finally {
             buffer.release();
         }

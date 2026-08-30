@@ -12,10 +12,10 @@ import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
@@ -78,7 +78,7 @@ public final class GitByteBufTransportAdapter {
 
     public void advertise(
             InitialRequestData data,
-            OutputStream output)
+            BufferedByteOutput output)
             throws IOException {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(output, "output");
@@ -89,8 +89,8 @@ public final class GitByteBufTransportAdapter {
 
     public void serveCommand(
             InitialRequestData data,
-            InputStream input,
-            OutputStream output)
+            BufferedByteInput input,
+            BufferedByteOutput output)
             throws IOException {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(input, "input");
@@ -103,8 +103,8 @@ public final class GitByteBufTransportAdapter {
 
     public void serveSmartHttpPost(
             InitialRequestData data,
-            InputStream input,
-            OutputStream output)
+            BufferedByteInput input,
+            BufferedByteOutput output)
             throws IOException {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(input, "input");
@@ -117,7 +117,7 @@ public final class GitByteBufTransportAdapter {
         }
     }
 
-    private StreamSession commandSession(OutputStream output) {
+    private StreamSession commandSession(BufferedByteOutput output) {
         SessionContext sessionContext = sessionContext(output);
         return new StreamSession(
                 new GitMinimalWireMachine(
@@ -130,7 +130,7 @@ public final class GitByteBufTransportAdapter {
 
     private StreamSession smartHttpPostSession(
             InitialRequestData data,
-            OutputStream output) {
+            BufferedByteOutput output) {
         SessionContext sessionContext = sessionContext(output);
         GitMinimalWireMachine.Context context = sessionContext.context();
         return new StreamSession(
@@ -140,10 +140,10 @@ public final class GitByteBufTransportAdapter {
                 sessionContext.clientOutput());
     }
 
-    private SessionContext sessionContext(OutputStream output) {
+    private SessionContext sessionContext(BufferedByteOutput output) {
         GitNativeClientOutput clientOutput = new GitNativeClientOutput(
                 allocator,
-                new OutputStreamByteBufWrite(output));
+                new BufferedByteOutputClientWrite(output));
         return new SessionContext(
                 new GitMinimalWireMachine.Context(
                         allocator,
@@ -213,19 +213,21 @@ public final class GitByteBufTransportAdapter {
 
     private void pump(
             GitMinimalWireMachine machine,
-            InputStream input)
+            BufferedByteInput input)
             throws IOException {
-        byte[] bytes = new byte[inputBufferSize];
         while (!machine.terminal()) {
-            int read = input.read(bytes);
-            if (read < 0) {
-                return;
+            ByteBuf buffer = allocator.buffer(inputBufferSize, inputBufferSize);
+            int read;
+            try {
+                read = input.readInto(buffer, inputBufferSize);
+            } catch (Throwable error) {
+                buffer.release();
+                throw error;
             }
             if (read == 0) {
-                continue;
+                buffer.release();
+                return;
             }
-            ByteBuf buffer = allocator.buffer(read, read);
-            buffer.writeBytes(bytes, 0, read);
             drive(machine, buffer);
         }
     }
@@ -344,17 +346,17 @@ public final class GitByteBufTransportAdapter {
         return builder.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private record OutputStreamByteBufWrite(OutputStream output)
+    private record BufferedByteOutputClientWrite(BufferedByteOutput output)
             implements GitNativeClientWrite {
 
-        private OutputStreamByteBufWrite {
+        private BufferedByteOutputClientWrite {
             Objects.requireNonNull(output, "output");
         }
 
         @Override
         public CompletionStage<Void> write(ByteBuf chunk) {
             try {
-                chunk.readBytes(output, chunk.readableBytes());
+                output.write(chunk);
                 output.flush();
                 return CompletableFuture.completedFuture(null);
             } catch (IOException error) {

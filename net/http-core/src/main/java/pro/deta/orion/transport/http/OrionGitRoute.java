@@ -42,11 +42,10 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -197,7 +196,8 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setStatus(SC_OK);
         resp.setContentType(advertisementContentType(request.service()));
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
-        OutputStream output = resp.getOutputStream();
+        JettyBufferedByteOutput output =
+                new JettyBufferedByteOutput(resp.getOutputStream());
         writeServiceAnnouncement(output, request.service());
         adapter(req).advertise(request.data(), output);
     }
@@ -216,10 +216,15 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setStatus(SC_OK);
         resp.setContentType(resultContentType(request.service()));
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
-        adapter(req).serveSmartHttpPost(
-                request.data(),
+        try (JettyBufferedByteInput input = new JettyBufferedByteInput(
                 req.getInputStream(),
-                resp.getOutputStream());
+                UnpooledByteBufAllocator.DEFAULT,
+                GitByteBufTransportAdapter.DEFAULT_INPUT_BUFFER_SIZE)) {
+            adapter(req).serveSmartHttpPost(
+                    request.data(),
+                    input,
+                    new JettyBufferedByteOutput(resp.getOutputStream()));
+        }
     }
 
     private GitByteBufTransportAdapter adapter(HttpServletRequest request) {
@@ -337,22 +342,16 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     private static void writeServiceAnnouncement(
-            OutputStream output,
+            JettyBufferedByteOutput output,
             InitialRequestService service)
             throws IOException {
-        writePacket(output, "# service=" + service.wireName() + "\n");
-        output.write("0000".getBytes(StandardCharsets.US_ASCII));
-    }
-
-    private static void writePacket(
-            OutputStream output,
-            String payload)
-            throws IOException {
-        byte[] payloadBytes = payload.getBytes(StandardCharsets.US_ASCII);
-        int packetLength = payloadBytes.length + 4;
-        output.write("%04x".formatted(packetLength)
-                .getBytes(StandardCharsets.US_ASCII));
-        output.write(payloadBytes);
+        GitBufferedByteTransportAdapter adapter =
+                new GitBufferedByteTransportAdapter(
+                        null,
+                        output,
+                        UnpooledByteBufAllocator.DEFAULT);
+        adapter.writeTextLine("# service=" + service.wireName());
+        adapter.writeFlush();
     }
 
     private static String advertisementContentType(

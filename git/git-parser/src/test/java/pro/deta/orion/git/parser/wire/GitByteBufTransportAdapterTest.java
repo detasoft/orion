@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -23,7 +25,9 @@ class GitByteBufTransportAdapterTest {
         GitByteBufTransportAdapter adapter = adapter(provider);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-        adapter.advertise(uploadV2Request(), output);
+        adapter.advertise(
+                uploadV2Request(),
+                new OutputStreamBufferedByteOutput(output));
 
         String response = output.toString(StandardCharsets.US_ASCII);
         assertThat(response)
@@ -41,8 +45,11 @@ class GitByteBufTransportAdapterTest {
 
         adapter.serveSmartHttpPost(
                 uploadV2Request(),
-                new ByteArrayInputStream(lsRefsRequest()),
-                output);
+                new InputStreamBufferedByteInput(
+                        new ByteArrayInputStream(lsRefsRequest()),
+                        UnpooledByteBufAllocator.DEFAULT,
+                        8),
+                new OutputStreamBufferedByteOutput(output));
 
         String response = output.toString(StandardCharsets.US_ASCII);
         assertThat(response)
@@ -65,8 +72,11 @@ class GitByteBufTransportAdapterTest {
                         "project",
                         null,
                         Map.of("version", "2")),
-                new ByteArrayInputStream(lsRefsRequest()),
-                output);
+                new InputStreamBufferedByteInput(
+                        new ByteArrayInputStream(lsRefsRequest()),
+                        UnpooledByteBufAllocator.DEFAULT,
+                        8),
+                new OutputStreamBufferedByteOutput(output));
 
         String response = output.toString(StandardCharsets.US_ASCII);
         assertThat(response)

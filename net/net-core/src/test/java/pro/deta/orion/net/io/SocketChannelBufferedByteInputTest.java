@@ -28,7 +28,8 @@ class SocketChannelBufferedByteInputTest {
             ByteBuf target = UnpooledByteBufAllocator.DEFAULT.buffer(3, 3);
             try {
                 assertThat(input.readInto(target, 1)).isEqualTo(1);
-                assertThat(input.readInto(target, 2)).isEqualTo(2);
+                assertThat(input.readInto(target, 2)).isEqualTo(1);
+                assertThat(input.readInto(target, 2)).isEqualTo(1);
                 assertThat(target.toString(StandardCharsets.US_ASCII)).isEqualTo("cde");
                 assertThat(input.readUnsignedByte()).isEqualTo('f');
                 assertThat(input.available()).isZero();

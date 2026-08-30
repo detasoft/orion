@@ -61,16 +61,14 @@ public final class JettyBufferedByteInput implements BufferedByteInput, AutoClos
         if (maxLength == 0 || !target.isWritable()) {
             return 0;
         }
-        int remaining = Math.min(maxLength, target.writableBytes());
-        int total = 0;
-        while (remaining > 0) {
-            requireAvailable();
-            int copied = Math.min(remaining, inputBuffer.readableBytes());
-            target.writeBytes(inputBuffer, copied);
-            remaining -= copied;
-            total += copied;
+        if (!inputBuffer.isReadable() && !refill()) {
+            return 0;
         }
-        return total;
+        int copied = Math.min(
+                Math.min(maxLength, target.writableBytes()),
+                inputBuffer.readableBytes());
+        target.writeBytes(inputBuffer, copied);
+        return copied;
     }
 
     @Override
@@ -81,16 +79,18 @@ public final class JettyBufferedByteInput implements BufferedByteInput, AutoClos
 
     private void requireAvailable() throws IOException {
         while (!inputBuffer.isReadable()) {
-            refill();
+            if (!refill()) {
+                throw new EOFException("Servlet request body reached end of stream");
+            }
         }
     }
 
-    private void refill() throws IOException {
+    private boolean refill() throws IOException {
         if (!inputBuffer.isWritable()) {
             inputBuffer.discardReadBytes();
         }
         if (!inputBuffer.isWritable()) {
-            return;
+            return true;
         }
         int writerIndex = inputBuffer.writerIndex();
         int read = input.read(
@@ -98,9 +98,10 @@ public final class JettyBufferedByteInput implements BufferedByteInput, AutoClos
                 inputBuffer.arrayOffset() + writerIndex,
                 inputBuffer.writableBytes());
         if (read < 0) {
-            throw new EOFException("Servlet request body reached end of stream");
+            return false;
         }
         inputBuffer.writerIndex(writerIndex + read);
+        return read > 0;
     }
 
     private static void requireNonNegativeLength(int length) {

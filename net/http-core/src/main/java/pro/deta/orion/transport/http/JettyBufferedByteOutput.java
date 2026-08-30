@@ -17,12 +17,16 @@ public final class JettyBufferedByteOutput implements BufferedByteOutput {
     @Override
     public void write(ByteBuf buffer) throws IOException {
         Objects.requireNonNull(buffer, "buffer");
-        if (!buffer.hasArray()) {
-            throw new IllegalArgumentException("buffer must expose a backing array");
+        if (buffer.hasArray()) {
+            output.write(
+                    buffer.array(),
+                    buffer.arrayOffset() + buffer.readerIndex(),
+                    buffer.readableBytes());
+            return;
         }
-        output.write(
-                buffer.array(),
-                buffer.arrayOffset() + buffer.readerIndex(),
+        buffer.getBytes(
+                buffer.readerIndex(),
+                output,
                 buffer.readableBytes());
     }
 

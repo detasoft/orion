@@ -30,6 +30,8 @@ import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestServic
 import pro.deta.orion.git.util.GitUtils;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
+import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.transport.git.netty.AuthenticatedNativeRepositoryAccessHook;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.stream.*;
@@ -313,10 +315,18 @@ public class SshCommandFactory implements CommandFactory {
                                         securityContext),
                                 GitWireConfiguration.allSupported(),
                                 packfileUriSourceFactory());
-                adapter.serveCommand(
-                        initialRequestData(commandLine, environment),
-                        streams.getInputStream(),
-                        streams.getOutputStream());
+                try (InputStreamBufferedByteInput input =
+                        new InputStreamBufferedByteInput(
+                                streams.getInputStream(),
+                                UnpooledByteBufAllocator.DEFAULT,
+                                GitByteBufTransportAdapter
+                                        .DEFAULT_INPUT_BUFFER_SIZE)) {
+                    adapter.serveCommand(
+                            initialRequestData(commandLine, environment),
+                            input,
+                            new OutputStreamBufferedByteOutput(
+                                    streams.getOutputStream()));
+                }
             }
         }
     }

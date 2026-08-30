@@ -5,25 +5,25 @@ import io.netty.buffer.ByteBufAllocator;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.SocketChannel;
+import java.io.InputStream;
 import java.util.Objects;
 
-public final class SocketChannelBufferedByteInput implements BufferedByteInput, AutoCloseable {
-    private final SocketChannel channel;
+public final class InputStreamBufferedByteInput
+        implements BufferedByteInput, AutoCloseable {
+    private final InputStream input;
     private final ByteBufAllocator allocator;
     private final ByteBuf inputBuffer;
 
-    public SocketChannelBufferedByteInput(
-            SocketChannel channel,
+    public InputStreamBufferedByteInput(
+            InputStream input,
             ByteBufAllocator allocator,
             int inputBufferSize) {
-        this.channel = Objects.requireNonNull(channel, "channel");
+        this.input = Objects.requireNonNull(input, "input");
         this.allocator = Objects.requireNonNull(allocator, "allocator");
         if (inputBufferSize <= 0) {
             throw new IllegalArgumentException("inputBufferSize must be positive");
         }
-        inputBuffer = allocator.directBuffer(inputBufferSize, inputBufferSize);
+        inputBuffer = allocator.heapBuffer(inputBufferSize, inputBufferSize);
     }
 
     @Override
@@ -44,7 +44,9 @@ public final class SocketChannelBufferedByteInput implements BufferedByteInput, 
         try {
             while (copy.writableBytes() > 0) {
                 requireAvailable();
-                int copied = Math.min(copy.writableBytes(), inputBuffer.readableBytes());
+                int copied = Math.min(
+                        copy.writableBytes(),
+                        inputBuffer.readableBytes());
                 copy.writeBytes(inputBuffer, copied);
             }
             return copy;
@@ -74,13 +76,13 @@ public final class SocketChannelBufferedByteInput implements BufferedByteInput, 
     @Override
     public void close() throws IOException {
         inputBuffer.release();
-        channel.close();
+        input.close();
     }
 
     private void requireAvailable() throws IOException {
         while (!inputBuffer.isReadable()) {
             if (!refill()) {
-                throw new EOFException("Socket channel reached end of stream");
+                throw new EOFException("Input stream reached end of stream");
             }
         }
     }
@@ -92,12 +94,15 @@ public final class SocketChannelBufferedByteInput implements BufferedByteInput, 
         if (!inputBuffer.isWritable()) {
             return true;
         }
-        ByteBuffer target = inputBuffer.nioBuffer(inputBuffer.writerIndex(), inputBuffer.writableBytes());
-        int read = channel.read(target);
+        int writerIndex = inputBuffer.writerIndex();
+        int read = input.read(
+                inputBuffer.array(),
+                inputBuffer.arrayOffset() + writerIndex,
+                inputBuffer.writableBytes());
         if (read < 0) {
             return false;
         }
-        inputBuffer.writerIndex(inputBuffer.writerIndex() + read);
+        inputBuffer.writerIndex(writerIndex + read);
         return read > 0;
     }
 

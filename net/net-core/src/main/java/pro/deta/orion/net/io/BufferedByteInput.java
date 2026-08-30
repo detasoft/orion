@@ -11,5 +11,8 @@ public interface BufferedByteInput {
 
     ByteBuf readCopy(int length) throws IOException;
 
+    /**
+     * Reads up to {@code maxLength} bytes and returns zero when no byte is read.
+     */
     int readInto(ByteBuf target, int maxLength) throws IOException;
 }
