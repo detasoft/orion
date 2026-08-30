@@ -1,34 +1,25 @@
 package pro.deta.orion.git.nativestorage.service;
 
-import pro.deta.orion.git.common.GitRefUpdate;
-
 import java.util.List;
 import java.util.Objects;
 
 public record ReceiveResult(
         boolean packAccepted,
         String packError,
-        List<RefResult> refResults,
-        List<GitRefUpdate> refUpdates) {
+        List<RefResult> refResults) {
 
     public ReceiveResult {
         Objects.requireNonNull(refResults, "refResults");
-        Objects.requireNonNull(refUpdates, "refUpdates");
         refResults = List.copyOf(refResults);
-        refUpdates = List.copyOf(refUpdates);
     }
 
     public static ReceiveResult packFailure(String reason) {
         Objects.requireNonNull(reason, "reason");
-        return new ReceiveResult(false, reason, List.of(), List.of());
+        return new ReceiveResult(false, reason, List.of());
     }
 
     public static ReceiveResult success(List<RefResult> refResults) {
-        return success(refResults, List.of());
-    }
-
-    public static ReceiveResult success(List<RefResult> refResults, List<GitRefUpdate> refUpdates) {
-        return new ReceiveResult(true, null, refResults, refUpdates);
+        return new ReceiveResult(true, null, refResults);
     }
 
     public record RefResult(String refName, boolean ok, String reason) {

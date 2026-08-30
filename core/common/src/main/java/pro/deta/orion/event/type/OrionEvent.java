@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * or services.</p>
  */
 @Getter
-public sealed abstract class OrionEvent permits ApplicationShutdownRequestedEvent, GitReceiveOrionEvent, GitUploadOrionEvent, RequestToAclUpdate {
+public sealed abstract class OrionEvent
+        permits ApplicationShutdownRequestedEvent, RequestToAclUpdate {
     private final Instant createdAt = Instant.now();
     private final AtomicBoolean processed = new AtomicBoolean(false);
 

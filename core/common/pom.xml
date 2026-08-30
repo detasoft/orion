@@ -24,10 +24,6 @@
             <version>4.0.0</version>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-common</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>schema</artifactId>
         </dependency>
