@@ -18,7 +18,6 @@ import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
-import pro.deta.orion.git.GitInternalService;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
@@ -27,7 +26,7 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
-import pro.deta.orion.git.util.GitUtils;
+import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
@@ -43,7 +42,6 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +60,6 @@ public class SshCommandFactory implements CommandFactory {
     public static final String TOKEN = "token";
     public static final String STATE = "state";
     public static final String STATUS = "status";
-    private final GitInternalService gitInternalService;
     private final OrionExecutor orionExecutor;
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
@@ -73,26 +70,23 @@ public class SshCommandFactory implements CommandFactory {
 
     @Inject
     public SshCommandFactory(
-            GitInternalService gitInternalService,
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
             @Named("runtime") AggregateStateMachine runtimeStateMachine,
             NativeGitRepositoryProvider nativeRepositoryProvider,
             GitTransportConfig gitTransportConfig) {
-        this(gitInternalService, orionExecutor, orionProvider, accessControlService,
+        this(orionExecutor, orionProvider, accessControlService,
                 runtimeStateMachine, 30_000, nativeRepositoryProvider,
                 gitTransportConfig);
     }
 
     public SshCommandFactory(
-            GitInternalService gitInternalService,
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
             AggregateStateMachine runtimeStateMachine) {
         this(
-                gitInternalService,
                 orionExecutor,
                 orionProvider,
                 accessControlService,
@@ -101,14 +95,12 @@ public class SshCommandFactory implements CommandFactory {
     }
 
     SshCommandFactory(
-            GitInternalService gitInternalService,
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
             AggregateStateMachine runtimeStateMachine,
             long setKeyReadTimeoutMillis) {
         this(
-                gitInternalService,
                 orionExecutor,
                 orionProvider,
                 accessControlService,
@@ -119,7 +111,6 @@ public class SshCommandFactory implements CommandFactory {
     }
 
     SshCommandFactory(
-            GitInternalService gitInternalService,
             OrionExecutor orionExecutor,
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
@@ -127,7 +118,6 @@ public class SshCommandFactory implements CommandFactory {
             long setKeyReadTimeoutMillis,
             NativeGitRepositoryProvider nativeRepositoryProvider,
             GitTransportConfig gitTransportConfig) {
-        this.gitInternalService = gitInternalService;
         this.orionExecutor = orionExecutor;
         this.orionProvider = orionProvider;
         this.accessControlService = accessControlService;
@@ -270,11 +260,11 @@ public class SshCommandFactory implements CommandFactory {
                         accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
                         serveGitCommand(channelSession, environment, securityContext);
                     } catch (OrionSecurityException e) {
-                        GitUtils.writeProtocolError(outputStream, "ACCESS_DENIED");
+                        writeProtocolError("ACCESS_DENIED");
                         returnCode = 10;
                     } catch (Exception e) {
                         log.error("Exception: ", e);
-                        GitUtils.writeProtocolError(outputStream, e.getMessage());
+                        writeProtocolError(e.getMessage());
                         returnCode = -1;
                     } finally {
                         exitCallback.onExit(returnCode);
@@ -282,7 +272,7 @@ public class SshCommandFactory implements CommandFactory {
                 });
             } catch (RejectedExecutionException e) {
                 log.warn("Git SSH command rejected, executor saturated: {}", commandLine);
-                GitUtils.writeProtocolError(outputStream, "Service unavailable");
+                writeProtocolError("Service unavailable");
                 exitCallback.onExit(1);
             }
         }
@@ -295,18 +285,6 @@ public class SshCommandFactory implements CommandFactory {
                     inputStream,
                     outputStream,
                     errorStream)) {
-                if (nativeRepositoryProvider == null) {
-                    List<String> envs = gitEnvironmentValues(environment);
-                    gitInternalService.service(
-                            securityContext,
-                            channelSession.toString(),
-                            streams,
-                            securityContext.getRequestId(),
-                            ignoredInput -> GitInternalService.parseGitCommand(
-                                    commandLine,
-                                    envs));
-                    return;
-                }
                 GitByteBufTransportAdapter adapter =
                         new GitByteBufTransportAdapter(
                                 UnpooledByteBufAllocator.DEFAULT,
@@ -327,6 +305,20 @@ public class SshCommandFactory implements CommandFactory {
                             new OutputStreamBufferedByteOutput(
                                     streams.getOutputStream()));
                 }
+            }
+        }
+
+        private void writeProtocolError(String message) {
+            try {
+                GitBufferedByteTransportAdapter adapter =
+                        new GitBufferedByteTransportAdapter(
+                                null,
+                                new OutputStreamBufferedByteOutput(outputStream),
+                                UnpooledByteBufAllocator.DEFAULT);
+                adapter.writeTextLine("ERR " + message);
+                adapter.flush();
+            } catch (IOException error) {
+                log.warn("Failed to write SSH Git protocol error", error);
             }
         }
     }
@@ -359,16 +351,6 @@ public class SshCommandFactory implements CommandFactory {
         return SecurityContext.createContext()
                 .withUserIdentity(userIdentity)
                 .withRequestId(channelSession.getSession().toString());
-    }
-
-    private static List<String> gitEnvironmentValues(Environment environment) {
-        List<String> values = new ArrayList<>();
-        for (var entry : environment.getEnv().entrySet()) {
-            if (entry.getKey().startsWith("GIT_")) {
-                values.add(entry.getValue());
-            }
-        }
-        return values;
     }
 
     static InitialRequestData initialRequestData(

@@ -23,8 +23,6 @@ class OrionConfigurationBootstrapShapeTest {
                   baseDir: /tmp/orion
                   workDir: work
                   threadPoolSize: 7
-                  jgit:
-                    hostname: orion-test
                   accessControl:
                     location: local:orion
                     branch: master
@@ -77,7 +75,6 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals("/tmp/orion", configuration.getBootstrap().getBaseDir());
         assertEquals("work", configuration.getBootstrap().getWorkDir());
         assertEquals(7, configuration.getBootstrap().getThreadPoolSize());
-        assertEquals("orion-test", configuration.getBootstrap().getJgit().getHostname());
         assertEquals("local:orion", configuration.getBootstrap().getAccessControl().getLocation());
         assertEquals("acl/orion.xml", configuration.getBootstrap().getAccessControl().primaryPath());
         assertFalse(configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());

@@ -5,7 +5,6 @@ import dagger.Provides;
 
 import jakarta.inject.Singleton;
 import jakarta.inject.Named;
-import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.storage.AccessControlStorage;
@@ -15,7 +14,6 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.PublicKeysProvider;
 import pro.deta.orion.crypto.ServerIdentityKeyService;
 import pro.deta.orion.crypto.ServerKeySigner;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 
 import jakarta.inject.Provider;
@@ -43,13 +41,6 @@ public class OrionRuntimeModule {
             OrionAccessControlServiceImpl orionAccessControlService) {
         return orionAccessControlService;
     };
-
-    @Provides
-    @Singleton
-    GitRepositoryProvider defaultGitRepositoryProvider(
-            NativeGitRepositoryProvider nativeRepositoryProvider) {
-        return new NativeGitRepositoryProviderAdapter(nativeRepositoryProvider);
-    }
 
     @Provides
     @Singleton

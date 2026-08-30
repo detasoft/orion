@@ -92,11 +92,6 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion.git</groupId>
-                <artifactId>git-storage</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>pro.deta.orion.connectors</groupId>
                 <artifactId>bc</artifactId>
                 <version>${project.version}</version>
@@ -112,38 +107,13 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>pro.deta.orion.git</groupId>
-                <artifactId>git-engine</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>pro.deta.orion.tests</groupId>
                 <artifactId>git-engine-test-support</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.tests</groupId>
-                <artifactId>git-projection-parity-test-support</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.tests</groupId>
-                <artifactId>git-projection-parity-jgit-6</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.tests</groupId>
-                <artifactId>git-projection-parity-jgit-7</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.tests</groupId>
                 <artifactId>integration-test-support</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>pro.deta.orion.git</groupId>
-                <artifactId>git-engine-s3</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

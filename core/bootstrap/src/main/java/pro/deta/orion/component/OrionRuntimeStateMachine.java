@@ -4,7 +4,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlStateMachine;
 import pro.deta.orion.event.OrionEventManagerStateMachine;
-import pro.deta.orion.git.OrionJGitRuntimeStateMachine;
 import pro.deta.orion.internal.OrionExecutorStateMachine;
 import pro.deta.orion.lifecycle.state.ActionBinding;
 import pro.deta.orion.lifecycle.state.ActionId;
@@ -26,11 +25,11 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 /**
  * Root lifecycle state machine for the Orion process.
  *
- * <p>@AiRule Keep startup order explicit: executor, JGit runtime, event manager, ACL, then transports. The executor is
- * needed for lifecycle work, JGit global state must exist before git-backed storage is used, the event manager must be
- * running before ACL registers and publishes reload events, ACL must be loaded before any transport exposes
- * authenticated endpoints, and transports are the final externally visible services. Shutdown must use the reverse
- * order so transports close before auth/runtime dependencies and the executor stops last.</p>
+ * <p>@AiRule Keep startup order explicit: executor, event manager, ACL, then transports. The executor is needed for
+ * lifecycle work, the event manager must be running before ACL registers and publishes reload events, ACL must be loaded
+ * before any transport exposes authenticated endpoints, and transports are the final externally visible services.
+ * Shutdown must use the reverse order so transports close before auth/runtime dependencies and the executor stops
+ * last.</p>
  */
 @Singleton
 public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachineAdapter {
@@ -38,22 +37,19 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
     @Inject
     public OrionRuntimeStateMachine(
             OrionExecutorStateMachine executor,
-            OrionJGitRuntimeStateMachine jgitRuntime,
             OrionEventManagerStateMachine eventManager,
             OrionAccessControlStateMachine accessControl,
             TransportLifecycleStateMachine transports) {
-        super(rootStateMachine(executor, jgitRuntime, eventManager, accessControl, transports));
+        super(rootStateMachine(executor, eventManager, accessControl, transports));
     }
 
     private static AggregateStateMachine rootStateMachine(
             OrionExecutorStateMachine executor,
-            OrionJGitRuntimeStateMachine jgitRuntime,
             OrionEventManagerStateMachine eventManager,
             OrionAccessControlStateMachine accessControl,
             TransportLifecycleStateMachine transports) {
         List<RuntimeChild> startOrder = List.of(
                 child("executor", executor::start, executor::stop, executor::currentState),
-                child("jgit-runtime", jgitRuntime::start, jgitRuntime::stop, jgitRuntime::currentState),
                 child("event-manager", eventManager::start, eventManager::stop, eventManager::currentState),
                 child("access-control", accessControl::start, accessControl::stop, accessControl::currentState),
                 child("transports", transports::start, transports::stop, transports::currentState));
@@ -65,7 +61,6 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
                 .name("orion")
                 .childPropagationMode(StateMachineDefinition.ChildPropagationMode.NONE)
                 .child("executor", executor.stateMachine())
-                .child("jgit-runtime", jgitRuntime.stateMachine())
                 .child("event-manager", eventManager.stateMachine())
                 .child("access-control", accessControl.stateMachine())
                 .child("transports", transports.stateMachine())

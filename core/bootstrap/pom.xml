@@ -30,10 +30,6 @@
             <groupId>pro.deta.orion.connectors</groupId>
             <artifactId>configuration-location</artifactId>
         </dependency>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-engine-s3</artifactId>
-        </dependency>
     </dependencies>
 
     <build>

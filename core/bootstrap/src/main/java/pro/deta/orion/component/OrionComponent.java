@@ -5,7 +5,6 @@ import dagger.Component;
 
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
-import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -18,8 +17,6 @@ import pro.deta.orion.transport.OrionTransportModule;
 public interface OrionComponent {
 
     OrionApplicationLifecycle orionApplicationLifecycle();
-
-    GitRepositoryProvider gitRepositoryProvider();
 
     OrionAccessControlServiceImpl orionAccessControlService();
 

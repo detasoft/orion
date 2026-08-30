@@ -1,6 +1,7 @@
 package pro.deta.orion.transport;
 
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
@@ -192,7 +193,7 @@ class TransportLifecycleStateMachineTest {
         private RuntimeException startFailure;
 
         private RecordingGitNativeTransportService(OrionConfiguration configuration) {
-            super(configuration.getTransport().getGit(), null, null);
+            super(configuration.getTransport().getGit(), new InMemoryNativeGitRepositoryProvider());
             enabled = configuration.getTransport().getGit().isEnabled();
         }
 

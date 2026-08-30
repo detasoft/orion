@@ -16,9 +16,6 @@
 
     <modules>
         <module>git-engine-test-support</module>
-        <module>git-projection-parity-test-support</module>
-        <module>git-projection-parity-jgit-6</module>
-        <module>git-projection-parity-jgit-7</module>
         <module>integration-test-support</module>
         <module>test-duration-recorder</module>
         <module>integration-test</module>

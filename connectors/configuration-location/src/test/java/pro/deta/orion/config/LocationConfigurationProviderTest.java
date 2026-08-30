@@ -107,60 +107,6 @@ class LocationConfigurationProviderTest {
     }
 
     @Test
-    void readsExplicitGitSshLocation() {
-        RecordingGitClient client = new RecordingGitClient(yamlConfiguration(
-                "/tmp/orion-git-ssh",
-                "git-ssh.xml",
-                30080));
-        LocationConfigurationProvider provider = providerFor(
-                "git+ssh://git@example.test/team/orion.git?ref=main&path=config/orion.yml",
-                new GitConfigurationLocationReader(client));
-
-        OrionConfiguration configuration = provider.readConfiguration();
-
-        assertConfiguration(configuration, "/tmp/orion-git-ssh", "git-ssh.xml", 30080);
-        assertEquals("ssh://git@example.test/team/orion.git", client.remoteUri);
-        assertEquals("main", client.ref);
-        assertEquals("config/orion.yml", client.path);
-    }
-
-    @Test
-    void readsExplicitGitHttpLocation() {
-        RecordingGitClient client = new RecordingGitClient(tomlConfiguration(
-                "/tmp/orion-git-http",
-                "git-http.xml",
-                31080));
-        LocationConfigurationProvider provider = providerFor(
-                "git+http://example.test/team/orion.git?branch=develop&file=config/orion.toml",
-                new GitConfigurationLocationReader(client));
-
-        OrionConfiguration configuration = provider.readConfiguration();
-
-        assertConfiguration(configuration, "/tmp/orion-git-http", "git-http.xml", 31080);
-        assertEquals("http://example.test/team/orion.git", client.remoteUri);
-        assertEquals("develop", client.ref);
-        assertEquals("config/orion.toml", client.path);
-    }
-
-    @Test
-    void readsExplicitGitHttpsLocation() {
-        RecordingGitClient client = new RecordingGitClient(yamlConfiguration(
-                "/tmp/orion-git-https",
-                "git-https.xml",
-                32080));
-        LocationConfigurationProvider provider = providerFor(
-                "git+https://example.test/team/orion.git?path=config/orion.yml",
-                new GitConfigurationLocationReader(client));
-
-        OrionConfiguration configuration = provider.readConfiguration();
-
-        assertConfiguration(configuration, "/tmp/orion-git-https", "git-https.xml", 32080);
-        assertEquals("https://example.test/team/orion.git", client.remoteUri);
-        assertEquals("HEAD", client.ref);
-        assertEquals("config/orion.yml", client.path);
-    }
-
-    @Test
     void readsExplicitS3Location() {
         RecordingS3Client client = new RecordingS3Client(yamlConfiguration(
                 "/tmp/orion-s3",
@@ -220,25 +166,6 @@ class LocationConfigurationProviderTest {
         assertEquals(baseDir, configuration.getBootstrap().getBaseDir());
         assertEquals(accessControlPath, configuration.getBootstrap().getAccessControl().primaryPath());
         assertEquals(httpPort, configuration.getTransport().getHttp().getPort());
-    }
-
-    private static final class RecordingGitClient implements GitRepositoryFileClient {
-        private final byte[] content;
-        private String remoteUri;
-        private String ref;
-        private String path;
-
-        private RecordingGitClient(byte[] content) {
-            this.content = content;
-        }
-
-        @Override
-        public Optional<byte[]> readFile(GitConfigurationObject object) {
-            this.remoteUri = object.remoteUri();
-            this.ref = object.ref();
-            this.path = object.path();
-            return Optional.of(content);
-        }
     }
 
     private static final class RecordingS3Client implements S3ObjectClient {

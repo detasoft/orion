@@ -1,51 +1,30 @@
 package pro.deta.orion.component;
 
-import dagger.Component;
-import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.transport.RefSpec;
-import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.XmlService;
-import pro.deta.orion.schema.acl.ACLUtil;
-import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
-import pro.deta.orion.acl.storage.VersionedAccessControlStorage;
-import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.git.FileGitRepositoryProvider;
-import pro.deta.orion.git.common.GitRepository;
-import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.util.ConfigurationContext;
-import pro.deta.orion.util.Result;
+import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class OrionRuntimeModuleTest {
     private static final String BRANCH = "master";
@@ -68,210 +47,45 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
-    void runtimeRepositoryProviderUsesNativeRepositoryForFileStorageLocation() {
-        OrionComponent component = runtimeComponent(defaultRuntimeConfiguration());
-
-        Result<GitRepository> result = component.gitRepositoryProvider().findOrCreate("orion");
-
-        GitRepository repository = result.valueOrFailure("runtime repository should be native");
-        assertEquals("/orion", repository.name());
-        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
-    }
-
-    @Test
-    void runtimeRepositoryProviderUsesNativeRepositoryForS3StorageLocation() {
-        OrionConfiguration configuration = defaultRuntimeConfiguration();
-        configuration.getStorage().setLocation("s3://orion/repositories");
-        OrionComponent component = runtimeComponent(configuration);
-
-        Result<GitRepository> result = component.gitRepositoryProvider().findOrCreate("orion");
-
-        GitRepository repository = result.valueOrFailure("runtime repository should be native");
-        assertEquals("/orion", repository.name());
-        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
-    }
-
-    @Test
-    void runtimeRepositoryProviderUsesNativeRepositoryForUnsupportedStorageLocation() {
-        OrionConfiguration configuration = defaultRuntimeConfiguration();
-        configuration.getStorage().setLocation("ssh://git@example.test/repositories");
-        OrionComponent component = runtimeComponent(configuration);
-
-        Result<GitRepository> result = component.gitRepositoryProvider().findOrCreate("orion");
-
-        GitRepository repository = result.valueOrFailure("runtime repository should be native");
-        assertEquals("/orion", repository.name());
-        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
-    }
-
-    @Test
-    void localGitAreaAclUsesVersionedStorageWithoutGitAccessArea() {
-        OrionConfiguration configuration = configurationWithGitAcl("local:team/project");
-        FileGitRepositoryProvider repositoryProvider =
-                new FileGitRepositoryProvider(new ConfigurationContext(configuration));
-
-        AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
-
-        assertEquals(VersionedAccessControlStorage.class, storage.getClass());
-        assertEquals(ACL_FILE, storage.primaryPath());
-    }
-
-    @Test
     void fileAclStartsFromLocalDirectory() throws Exception {
         Path aclDirectory = tempDir.resolve("acl-directory");
         Files.createDirectories(aclDirectory);
         Files.write(aclDirectory.resolve(ACL_FILE), aclBytes("file-user"));
-        OrionConfiguration configuration = configurationWithGitAcl(aclDirectory.toUri().toString());
-        FileGitRepositoryProvider repositoryProvider =
-                new FileGitRepositoryProvider(new ConfigurationContext(configuration));
-        AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
+        OrionConfiguration configuration = configurationWithAcl(aclDirectory.toUri().toString());
+
+        AccessControlStorage storage = runtimeAccessControlStorage(configuration);
 
         assertInstanceOf(LocalAccessControlStorage.class, storage);
         assertStorageLoadsUser(storage, "file-user");
     }
 
     @Test
-    void gitAreaAclStartsFromVersionedStorage() throws Exception {
-        OrionConfiguration configuration = configurationWithGitAcl("local:team/project");
-        RecordingGitRepositoryProvider repositoryProvider = new RecordingGitRepositoryProvider(configuration);
-        seedBareRepository(repositoryProvider.repositoryPath("team/project"), "area-user");
-        AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
-
-        assertEquals(VersionedAccessControlStorage.class, storage.getClass());
-        assertStorageLoadsUser(storage, "area-user");
-        assertEquals(1, repositoryProvider.findCalls);
-        assertEquals(0, repositoryProvider.findOrCreateCalls);
-    }
-
-    @Test
-    void localGitAreaAclCreatesMissingRepositoryWhenInitialConfigurationIsSaved() {
-        OrionConfiguration configuration = configurationWithGitAcl("local:orion");
-        RecordingGitRepositoryProvider repositoryProvider = new RecordingGitRepositoryProvider(configuration);
-        AccessControlStorage storage = runtimeAccessControlStorage(configuration, repositoryProvider);
-
-        assertEquals(VersionedAccessControlStorage.class, storage.getClass());
-        storage.save(
-                AccessControlSnapshot.singleFile(ACL_FILE, "initial acl".getBytes(StandardCharsets.UTF_8)),
-                new AccessControlSaveRequest("initial acl", new UserEmail("tester", "tester@example.test")));
-
-        assertTrue(repositoryProvider.repositoryPath("orion").resolve("config").toFile().exists());
-        AccessControlSnapshot snapshot =
-                storage.load().valueOrFailure("ACL should load from newly created local repository");
-        assertEquals(1, snapshot.files().size());
-        assertTrue(snapshot.files().containsKey(ACL_FILE));
-        assertEquals("initial acl", new String(snapshot.files().get(ACL_FILE), StandardCharsets.UTF_8));
-        assertEquals(1, repositoryProvider.findOrCreateCalls);
-        assertEquals(1, repositoryProvider.findCalls);
-    }
-
-    @Test
-    void runtimeLocalAclSavesThroughNativeRepositoryProvider() {
-        OrionConfiguration configuration = configurationWithGitAcl("local:orion");
-        OrionComponent component = runtimeComponent(configuration);
-        AccessControlStorage storage =
-                runtimeAccessControlStorage(configuration, component.gitRepositoryProvider());
+    void localAclSavesToLocalDirectory() {
+        OrionConfiguration configuration = configurationWithAcl(tempDir.resolve("local-acl").toString());
+        AccessControlStorage storage = runtimeAccessControlStorage(configuration);
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_FILE, "native acl".getBytes(StandardCharsets.UTF_8)),
                 new AccessControlSaveRequest("native acl", new UserEmail("tester", "tester@example.test")));
 
         AccessControlSnapshot snapshot =
-                storage.load().valueOrFailure("ACL should load from native repository");
-        GitRepository repository = component.gitRepositoryProvider()
-                .find("orion")
-                .valueOrFailure("runtime repository should be native");
+                storage.load().valueOrFailure("ACL should load from local storage");
         assertEquals("native acl", new String(snapshot.files().get(ACL_FILE), StandardCharsets.UTF_8));
-        assertEquals("/orion", repository.name());
-        assertTrue(repository.unwrap(NativeGitRepository.class).isPresent());
     }
 
     @Test
-    @Timeout(20)
-    void runServerDefaultLocalAclRepositoryCanBeClonedByGitCli() throws Exception {
-        int gitPort = freePort();
-        OrionConfiguration configuration = defaultRuntimeConfiguration();
-        configuration.getTransport().getGit().setEnabled(true);
-        configuration.getTransport().getGit().setAddress("127.0.0.1");
-        configuration.getTransport().getGit().setPort(gitPort);
-        OrionComponent component = runtimeComponent(configuration);
-        OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
-        try {
-            assertEquals(RUNNING, lifecycle.runApplication());
-
-            ProcessResult result = runGit(
-                    "clone",
-                    "git://127.0.0.1:" + gitPort + "/orion",
-                    tempDir.resolve("runtime-cli-clone").toString());
-
-            assertEquals(0, result.exitCode(), result.output());
-            assertTrue(
-                    Files.isRegularFile(
-                            tempDir.resolve("runtime-cli-clone")
-                                    .resolve(configuration.getBootstrap().getAccessControl().primaryPath())),
-                    result.output());
-        } finally {
-            assertEquals(FIN, lifecycle.shutdownApplication());
-        }
-    }
-
-    @Test
-    void localAclRepositoryNamesAreResolvedFromSupportedSchemes() {
-        Map<String, String> expectedRepositoryNames = Map.of(
-                "local:acl", "acl",
-                "local:team/project", Path.of("team/project").toString(),
-                "local://team/project", Path.of("team/project").toString());
-
-        for (Map.Entry<String, String> entry : expectedRepositoryNames.entrySet()) {
-            assertTrue(AccessControlStorageResolver.isInternalLocalGitStorage(entry.getKey()));
-            assertEquals(entry.getValue(), AccessControlStorageResolver.localRepositoryName(entry.getKey()));
-        }
-        assertFalse(AccessControlStorageResolver.isInternalLocalGitStorage("ssh://git@example.test/acl.git"));
-    }
-
-    @Test
-    void remoteGitAclIsUnsupportedUntilRemoteVersionedStorageIsAdded() {
-        OrionConfiguration configuration = configurationWithGitAcl("ssh://git@example.test/acl.git");
-        FileGitRepositoryProvider repositoryProvider =
-                new FileGitRepositoryProvider(new ConfigurationContext(configuration));
+    void remoteGitAclIsUnsupported() {
+        OrionConfiguration configuration = configurationWithAcl("ssh://git@example.test/acl.git");
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
-                () -> runtimeAccessControlStorage(configuration, repositoryProvider));
+                () -> runtimeAccessControlStorage(configuration));
 
         assertEquals("Unsupported ACL location: ssh://git@example.test/acl.git", error.getMessage());
     }
 
-    private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration,
-                                                             GitRepositoryProvider repositoryProvider) {
-        return new AccessControlStorageResolver(configuration, repositoryProvider).resolve();
-    }
-
-    private void seedBareRepository(Path bareRepository, String userId) throws Exception {
-        Files.createDirectories(bareRepository.getParent());
-        try (Git ignored = Git.init()
-                .setBare(true)
-                .setGitDir(bareRepository.toFile())
-                .setInitialBranch(BRANCH)
-                .call()) {
-        }
-
-        Path seedWorktree = Files.createTempDirectory(tempDir, userId + "-seed-");
-        try (Git seed = Git.init()
-                .setDirectory(seedWorktree.toFile())
-                .setInitialBranch(BRANCH)
-                .call()) {
-            Files.write(seedWorktree.resolve(ACL_FILE), aclBytes(userId));
-            seed.add().addFilepattern(ACL_FILE).call();
-            seed.commit()
-                    .setAuthor("ACL Test", "acl@example.test")
-                    .setCommitter("ACL Test", "acl@example.test")
-                    .setMessage("seed ACL")
-                    .call();
-            seed.push()
-                    .setRemote(bareRepository.toUri().toString())
-                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
-                    .call();
-        }
+    private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration) {
+        return new AccessControlStorageResolver(configuration).resolve();
     }
 
     private byte[] aclBytes(String userId) throws Exception {
@@ -295,7 +109,7 @@ class OrionRuntimeModuleTest {
         assertEquals(userId, accessControl.getUsers().getFirst().getId());
     }
 
-    private OrionConfiguration configurationWithGitAcl(String location) {
+    private OrionConfiguration configurationWithAcl(String location) {
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getStorage().setLocation(tempDir.resolve("repos").toUri().toString());
@@ -330,58 +144,4 @@ class OrionRuntimeModuleTest {
                 .configurationProvider(() -> configuration)
                 .build();
     }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
-            return socket.getLocalPort();
-        }
-    }
-
-    private static ProcessResult runGit(String... arguments)
-            throws IOException, InterruptedException {
-        List<String> command = new ArrayList<>();
-        command.add("git");
-        command.addAll(List.of(arguments));
-        ProcessBuilder processBuilder = new ProcessBuilder(command)
-                .redirectErrorStream(true);
-        processBuilder.environment().put("GIT_TRACE_PACKET", "1");
-        processBuilder.environment().put("GIT_TRACE", "1");
-        Process process = processBuilder.start();
-        byte[] output = process.getInputStream().readAllBytes();
-        boolean exited = process.waitFor(10, TimeUnit.SECONDS);
-        if (!exited) {
-            process.destroyForcibly();
-            throw new AssertionError("git command timed out: " + command);
-        }
-        return new ProcessResult(
-                process.exitValue(),
-                new String(output, StandardCharsets.UTF_8));
-    }
-
-    private record ProcessResult(
-            int exitCode,
-            String output) {
-    }
-
-    private static final class RecordingGitRepositoryProvider extends FileGitRepositoryProvider {
-        private int findCalls;
-        private int findOrCreateCalls;
-
-        private RecordingGitRepositoryProvider(OrionConfiguration configuration) {
-            super(new ConfigurationContext(configuration));
-        }
-
-        @Override
-        public Result<GitRepository> find(String repositoryName) {
-            findCalls++;
-            return super.find(repositoryName);
-        }
-
-        @Override
-        public Result<GitRepository> findOrCreate(String repositoryName) {
-            findOrCreateCalls++;
-            return super.findOrCreate(repositoryName);
-        }
-    }
-
 }

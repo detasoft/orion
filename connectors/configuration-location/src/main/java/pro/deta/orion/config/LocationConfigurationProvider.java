@@ -3,16 +3,6 @@ package pro.deta.orion.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.moandjiezana.toml.Toml;
-import org.eclipse.jgit.api.CloneCommand;
-import org.eclipse.jgit.api.Git;
-import org.eclipse.jgit.api.TransportConfigCallback;
-import org.eclipse.jgit.api.errors.GitAPIException;
-import org.eclipse.jgit.transport.CredentialsProvider;
-import org.eclipse.jgit.transport.SshTransport;
-import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
-import org.eclipse.jgit.transport.sshd.KeyPasswordProvider;
-import org.eclipse.jgit.transport.sshd.SshdSessionFactory;
-import org.eclipse.jgit.transport.sshd.SshdSessionFactoryBuilder;
 import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.util.ResourceLocation;
@@ -37,10 +27,8 @@ import java.io.InputStream;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.GeneralSecurityException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -155,7 +143,6 @@ public class LocationConfigurationProvider implements ConfigurationProvider {
         return List.of(
                 new FileConfigurationLocationReader(),
                 new ClasspathConfigurationLocationReader(),
-                new GitConfigurationLocationReader(new JGitRepositoryFileClient()),
                 new S3ConfigurationLocationReader(new AwsS3ObjectClient()));
     }
 
@@ -248,48 +235,6 @@ final class ClasspathConfigurationLocationReader implements ConfigurationLocatio
     }
 }
 
-final class GitConfigurationLocationReader implements ConfigurationLocationReader {
-    private static final String GIT_SCHEME_PREFIX = "git+";
-    private static final String DEFAULT_REF = "HEAD";
-
-    private final GitRepositoryFileClient client;
-
-    GitConfigurationLocationReader(GitRepositoryFileClient client) {
-        this.client = client;
-    }
-
-    @Override
-    public boolean supports(ResourceLocation location) {
-        return location.scheme() instanceof ResourceScheme.Other other
-                && ("git+ssh".equals(other.value())
-                || "git+http".equals(other.value())
-                || "git+https".equals(other.value()));
-    }
-
-    @Override
-    public Optional<ConfigurationContent> read(ResourceLocation location) {
-        Map<String, String> query = ConfigurationLocationParameters.query(location);
-        String filePath = ConfigurationLocationParameters.firstPresent(query, "path", "file");
-        if (filePath == null || filePath.isBlank()) {
-            throw new IllegalArgumentException("Git configuration location must include path query parameter");
-        }
-        String ref = ConfigurationLocationParameters.firstPresent(query, "ref", "branch");
-        if (ref == null || ref.isBlank()) {
-            ref = DEFAULT_REF;
-        }
-        return client.readFile(new GitConfigurationObject(remoteUri(location), ref, filePath, query))
-                .map(content -> new ConfigurationContent(filePath, content));
-    }
-
-    private static String remoteUri(ResourceLocation location) {
-        if (!(location.scheme() instanceof ResourceScheme.Other other) || !other.value().startsWith(GIT_SCHEME_PREFIX)) {
-            throw new IllegalArgumentException("Unsupported git configuration scheme: " + location.scheme().value());
-        }
-        return ConfigurationLocationUri.stripQueryAndFragment(
-                location.withScheme(other.value().substring(GIT_SCHEME_PREFIX.length())).raw());
-    }
-}
-
 final class ConfigurationLocationParameters {
     private ConfigurationLocationParameters() {
     }
@@ -321,191 +266,6 @@ final class ConfigurationLocationParameters {
 
     private static String decode(String value) {
         return URLDecoder.decode(value, StandardCharsets.UTF_8);
-    }
-}
-
-final class ConfigurationLocationUri {
-    private ConfigurationLocationUri() {
-    }
-
-    static String stripQueryAndFragment(String value) {
-        int end = value.length();
-        int queryStart = value.indexOf('?');
-        if (queryStart >= 0) {
-            end = Math.min(end, queryStart);
-        }
-        int fragmentStart = value.indexOf('#');
-        if (fragmentStart >= 0) {
-            end = Math.min(end, fragmentStart);
-        }
-        return value.substring(0, end);
-    }
-}
-
-interface GitRepositoryFileClient {
-    Optional<byte[]> readFile(GitConfigurationObject object);
-}
-
-record GitConfigurationObject(String remoteUri, String ref, String path, Map<String, String> auth) {
-    GitConfigurationObject {
-        if (remoteUri == null || remoteUri.isBlank()) {
-            throw new IllegalArgumentException("Git configuration remote URI must not be blank");
-        }
-        if (ref == null || ref.isBlank()) {
-            throw new IllegalArgumentException("Git configuration ref must not be blank");
-        }
-        if (path == null || path.isBlank()) {
-            throw new IllegalArgumentException("Git configuration path must not be blank");
-        }
-        auth = Map.copyOf(auth == null ? Map.of() : auth);
-    }
-}
-
-final class JGitRepositoryFileClient implements GitRepositoryFileClient {
-    @Override
-    public Optional<byte[]> readFile(GitConfigurationObject object) {
-        Path cloneDirectory;
-        try {
-            cloneDirectory = Files.createTempDirectory("orion-config-git-");
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot create temporary git configuration clone directory", e);
-        }
-
-        try {
-            clone(object, cloneDirectory);
-            Path file = cloneDirectory.resolve(object.path()).normalize();
-            if (!file.startsWith(cloneDirectory)) {
-                throw new IllegalArgumentException("Git configuration path must stay inside repository: " + object.path());
-            }
-            if (!Files.exists(file)) {
-                return Optional.empty();
-            }
-            return Optional.of(Files.readAllBytes(file));
-        } catch (IOException e) {
-            throw new IllegalStateException(
-                    "Cannot read configuration file from git repository " + object.remoteUri(),
-                    e);
-        } finally {
-            deleteRecursively(cloneDirectory);
-        }
-    }
-
-    private static void clone(GitConfigurationObject object, Path directory) {
-        try {
-            CloneCommand clone = configure(
-                    Git.cloneRepository()
-                            .setURI(object.remoteUri())
-                            .setDirectory(directory.toFile()),
-                    object,
-                    directory);
-            if (!"HEAD".equals(object.ref())) {
-                clone.setBranch(object.ref());
-            }
-            try (Git ignored = clone.call()) {
-                // Repository is cloned so the requested file can be read from the work tree.
-            }
-        } catch (GitAPIException e) {
-            throw new IllegalStateException("Cannot clone configuration git repository " + object.remoteUri(), e);
-        }
-    }
-
-    private static CloneCommand configure(CloneCommand command, GitConfigurationObject object, Path worktree) {
-        CredentialsProvider credentialsProvider = credentialsProvider(object.auth());
-        if (credentialsProvider != null) {
-            command.setCredentialsProvider(credentialsProvider);
-        }
-        TransportConfigCallback transportConfigCallback = transportConfigCallback(object.auth(), worktree);
-        if (transportConfigCallback != null) {
-            command.setTransportConfigCallback(transportConfigCallback);
-        }
-        return command;
-    }
-
-    private static CredentialsProvider credentialsProvider(Map<String, String> auth) {
-        if (auth == null || (!auth.containsKey("username") && !auth.containsKey("password"))) {
-            return null;
-        }
-        String username = auth.getOrDefault("username", "");
-        String password = ConfigurationLocationSecret.optionalSecret("git.password", auth.get("password"));
-        return new UsernamePasswordCredentialsProvider(username, password);
-    }
-
-    private static TransportConfigCallback transportConfigCallback(Map<String, String> auth, Path worktree) {
-        if (auth == null || !auth.containsKey("privateKey")) {
-            return null;
-        }
-        Path privateKey = ConfigurationLocationSecret.fileReference("git.privateKey", auth.get("privateKey"));
-        Path sshDirectory = worktree.resolve(".ssh").toAbsolutePath().normalize();
-        SshdSessionFactoryBuilder builder = new SshdSessionFactoryBuilder()
-                .setHomeDirectory(worktree.toFile())
-                .setSshDirectory(sshDirectory.toFile())
-                .setDefaultIdentities(ignored -> List.of(privateKey));
-        if (auth.containsKey("knownHosts")) {
-            Path knownHosts = ConfigurationLocationSecret.fileReference("git.knownHosts", auth.get("knownHosts"));
-            builder.setDefaultKnownHostsFiles(ignored -> List.of(knownHosts));
-        }
-        if (auth.containsKey("passphrase")) {
-            char[] passphrase = ConfigurationLocationSecret.optionalSecret(
-                    "git.passphrase",
-                    auth.get("passphrase")).toCharArray();
-            builder.setKeyPasswordProvider(ignored -> new StaticKeyPasswordProvider(passphrase));
-        }
-        SshdSessionFactory sessionFactory = builder.build(null);
-        return transport -> {
-            if (transport instanceof SshTransport sshTransport) {
-                sshTransport.setSshSessionFactory(sessionFactory);
-            }
-        };
-    }
-
-    private static void deleteRecursively(Path path) {
-        if (path == null || !Files.exists(path)) {
-            return;
-        }
-        try {
-            if (Files.isDirectory(path)) {
-                try (DirectoryStream<Path> entries = Files.newDirectoryStream(path)) {
-                    for (Path entry : entries) {
-                        deleteRecursively(entry);
-                    }
-                }
-            }
-            Files.deleteIfExists(path);
-        } catch (IOException ignored) {
-        }
-    }
-
-    private static final class StaticKeyPasswordProvider implements KeyPasswordProvider {
-        private final char[] passphrase;
-        private int attempts;
-
-        private StaticKeyPasswordProvider(char[] passphrase) {
-            this.passphrase = passphrase.clone();
-        }
-
-        @Override
-        public char[] getPassphrase(org.eclipse.jgit.transport.URIish uri, int attempt) {
-            return passphrase.clone();
-        }
-
-        @Override
-        public void setAttempts(int attempts) {
-            this.attempts = attempts;
-        }
-
-        @Override
-        public int getAttempts() {
-            return attempts;
-        }
-
-        @Override
-        public boolean keyLoaded(org.eclipse.jgit.transport.URIish uri, int attempt, Exception error)
-                throws IOException, GeneralSecurityException {
-            if (error != null) {
-                throw new GeneralSecurityException(error);
-            }
-            return true;
-        }
     }
 }
 

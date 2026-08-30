@@ -22,7 +22,6 @@ public class OrionConfiguration {
         private String baseDir = "orion";
         private String workDir = "work";
         private int threadPoolSize = 10;
-        private JGitConfig jgit = new JGitConfig();
         private BootstrapAccessControlConfig accessControl = new BootstrapAccessControlConfig();
     }
 
@@ -47,20 +46,6 @@ public class OrionConfiguration {
         private String location = "file:orion/repos";
         private boolean createOnPush = true;
         private Map<String, String> auth = new LinkedHashMap<>();
-    }
-
-    @Data
-    public static class JGitConfig {
-        private String hostname = "localhost";
-        private String osName = "Linux";
-        private String defaultCharset = "UTF-8";
-        private String timezone = "UTC";
-        private String locale = "und";
-        private Map<String, String> properties = new LinkedHashMap<>();
-        private Map<String, String> environment = new LinkedHashMap<>();
-        private Map<String, String> systemConfig = new LinkedHashMap<>();
-        private Map<String, String> userConfig = new LinkedHashMap<>();
-        private Map<String, String> jgitConfig = new LinkedHashMap<>();
     }
 
     @Data

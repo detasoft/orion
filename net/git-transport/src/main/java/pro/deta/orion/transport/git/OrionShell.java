@@ -4,11 +4,11 @@ import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.shell.InteractiveProcessShellFactory;
-import org.eclipse.jgit.lib.Constants;
 import pro.deta.orion.transport.git.ssh.CloseOnDestroyCommand;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 
 import static pro.deta.orion.transport.git.ssh.SshCommandFactory.SET_KEY;
@@ -36,7 +36,7 @@ public class OrionShell extends InteractiveProcessShellFactory {
         @Override
         public void start(ChannelSession channel, Environment env) throws IOException {
             try {
-                errorStream.write(Constants.encode(getMessage()));
+                errorStream.write(getMessage().getBytes(StandardCharsets.UTF_8));
                 errorStream.flush();
             } finally {
                 exitCallback.onExit(127);

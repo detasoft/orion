@@ -26,10 +26,6 @@
             <artifactId>netty-transport</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-engine</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.apache.sshd</groupId>
             <artifactId>sshd-core</artifactId>
         </dependency>

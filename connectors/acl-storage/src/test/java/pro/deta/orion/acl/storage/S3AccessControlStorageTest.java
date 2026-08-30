@@ -2,9 +2,7 @@ package pro.deta.orion.acl.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.git.common.GitRepository;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.util.Result;
 
@@ -139,7 +137,7 @@ class S3AccessControlStorageTest {
         configuration.getBootstrap().getAccessControl().setLocation("s3://acl-bucket/bootstrap");
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
 
-        AccessControlStorage storage = new AccessControlStorageResolver(configuration, failingGitRepositoryProvider()).resolve();
+        AccessControlStorage storage = new AccessControlStorageResolver(configuration).resolve();
 
         assertThat(storage).isInstanceOf(S3AccessControlStorage.class);
     }
@@ -180,25 +178,6 @@ class S3AccessControlStorageTest {
         private String objectId(String bucket, String key) {
             return bucket + "/" + key;
         }
-    }
-
-    private GitRepositoryProvider failingGitRepositoryProvider() {
-        return new GitRepositoryProvider() {
-            @Override
-            public boolean exists(String repositoryName) {
-                throw new AssertionError("S3 ACL storage must not use local repository provider");
-            }
-
-            @Override
-            public Result<GitRepository> find(String repositoryName) {
-                throw new AssertionError("S3 ACL storage must not use local repository provider");
-            }
-
-            @Override
-            public Result<GitRepository> findOrCreate(String repositoryName) {
-                throw new AssertionError("S3 ACL storage must not use local repository provider");
-            }
-        };
     }
 
     private static final class FakeS3Server implements AutoCloseable {

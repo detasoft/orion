@@ -71,6 +71,7 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
         Path path = switch (location.scheme()) {
             case ResourceScheme.File ignored -> Paths.get(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
             case ResourceScheme.Empty ignored -> Path.of(config.getLocation());
+            case ResourceScheme.Local ignored -> Path.of(location.normalizedRelativePath());
             default -> throw new IllegalArgumentException("Unsupported local ACL location: " + config.getLocation());
         };
         return path.toAbsolutePath().normalize();

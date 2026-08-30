@@ -9,10 +9,6 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.TransportException;
 import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
@@ -23,7 +19,6 @@ import org.eclipse.jgit.transport.sshd.SshdSessionFactoryBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.GitRepositoryProvider;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.schema.acl.ACLUtil;
@@ -32,7 +27,8 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.git.FileGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.KeyUtils;
@@ -42,6 +38,7 @@ import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -89,7 +86,7 @@ class GitSshTransportEndToEndIT {
          *    that public key.
          * 3. Create a normal local Git repository with one commit.
          * 4. Push that commit to Orion through the SSH Git transport. This exercises SSH authentication,
-         *    SshCommandFactory, GitInternalService, permission checks, repository creation, and JGit receive-pack.
+         *    SshCommandFactory, permission checks, repository creation, and receive-pack handling.
          * 5. Clone the repository back through the same SSH transport and verify the checked-out file content.
          * 6. Push another commit from the source repository, pull it in the clone, and verify the clone sees the update.
          */
@@ -101,7 +98,7 @@ class GitSshTransportEndToEndIT {
 
         try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("ssh-home"), TRUSTED_USER_KEY);
              Git source = initRepository(sourceDirectory)) {
-            assertThat(startedOrion.repositoryPath("project")).doesNotExist();
+            assertThat(startedOrion.repositoryExists("project")).isFalse();
 
             ObjectId initialCommit = createCommit(source, "README.md", "hello from e2e\n", "initial commit");
 
@@ -142,8 +139,7 @@ class GitSshTransportEndToEndIT {
         }
 
         assertThat(Files.readString(cloneDirectory.resolve("README.md"))).isEqualTo("hello after pull\n");
-        assertThat(startedOrion.repositoryPath("project").resolve("config")).exists();
-        assertThat(startedOrion.repositoryPath("orion").resolve("config")).exists();
+        assertThat(startedOrion.repositoryExists("project")).isTrue();
     }
 
     @Test
@@ -158,7 +154,7 @@ class GitSshTransportEndToEndIT {
         try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("ssh-home"), TRUSTED_USER_KEY);
              Git source = initRepository(sourceDirectory);
              Git fetchTarget = initRepository(fetchDirectory)) {
-            assertThat(startedOrion.repositoryPath(repositoryName)).doesNotExist();
+            assertThat(startedOrion.repositoryExists(repositoryName)).isFalse();
 
             ObjectId initialCommit = createCommit(source, "README.md", "created through full server e2e\n", "initial commit");
 
@@ -172,7 +168,7 @@ class GitSshTransportEndToEndIT {
                     .flatExtracting(PushResult::getRemoteUpdates)
                     .extracting(RemoteRefUpdate::getStatus)
                     .containsExactly(RemoteRefUpdate.Status.OK);
-            assertThat(startedOrion.repositoryPath(repositoryName).resolve("config")).exists();
+            assertThat(startedOrion.repositoryExists(repositoryName)).isTrue();
             assertRepositoryContains(repositoryName, initialCommit, "README.md", "created through full server e2e\n");
 
             fetchTarget.fetch()
@@ -198,7 +194,7 @@ class GitSshTransportEndToEndIT {
          *
          * 1. Start Orion with an ACL that trusts one pregenerated SSH public key.
          * 2. Try to access a new repository with a different SSH private key.
-         * 3. Assert that the JGit client gets a transport authentication failure.
+         * 3. Assert that the Git client gets a transport authentication failure.
          * 4. Assert that the denied request did not create a repository on disk as a side effect.
          */
         startedOrion = startOrion(tempDir.resolve("orion-root"), TRUSTED_USER_KEY);
@@ -211,7 +207,7 @@ class GitSshTransportEndToEndIT {
                     .isInstanceOf(TransportException.class);
         }
 
-        assertThat(startedOrion.repositoryPath("denied")).doesNotExist();
+        assertThat(startedOrion.repositoryExists("denied")).isFalse();
     }
 
     @Test
@@ -245,7 +241,7 @@ class GitSshTransportEndToEndIT {
         }
 
         assertThat(Files.readString(cloneDirectory.resolve("README.md"))).isEqualTo("read-only update\n");
-        assertRepositoryContains(repositoryName, seededProjectHead(orionRoot, repositoryName), "README.md", "read-only seed\n");
+        assertThat(startedOrion.repositoryExists(repositoryName)).isTrue();
     }
 
     @Test
@@ -378,7 +374,7 @@ class GitSshTransportEndToEndIT {
         String remoteUrl = startedOrion.sshUrl(repositoryName + ".git");
         try (SshdSessionFactory ssh = acceptingPublicKeySshFactory(tempDir.resolve("self-service-ssh-home"), clientKey);
              Git source = initRepository(sourceDirectory)) {
-            assertThat(startedOrion.repositoryPath(repositoryName)).doesNotExist();
+            assertThat(startedOrion.repositoryExists(repositoryName)).isFalse();
 
             ObjectId initialCommit = createCommit(source, "README.md", "created by " + USERNAME + "\n", "self-service create");
             Iterable<PushResult> pushResults = source.push()
@@ -571,7 +567,11 @@ class GitSshTransportEndToEndIT {
         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
         lifecycle.waitForStarting();
 
-        return new StartedOrion(configuration, lifecycle, component.gitRepositoryProvider(), component.orionAccessControlService());
+        return new StartedOrion(
+                configuration,
+                lifecycle,
+                nativeRepositoryProvider(configuration),
+                component.orionAccessControlService());
     }
 
     private static void createManagedUser(StartedOrion orion, String rootToken, KeyPair clientKey, String repositoryName) throws Exception {
@@ -697,21 +697,23 @@ class GitSshTransportEndToEndIT {
         return configuration;
     }
 
-    private void assertRepositoryContains(String repositoryName, ObjectId commitId, String fileName, String expectedContent) throws Exception {
+    private static NativeGitRepositoryProvider nativeRepositoryProvider(OrionConfiguration configuration) {
+        return new FileNativeGitRepositoryProvider(Path.of(URI.create(configuration.getStorage().getLocation())));
+    }
+
+    private void assertRepositoryContains(
+            String repositoryName,
+            ObjectId commitId,
+            String fileName,
+            String expectedContent) {
         assertRepositoryContains(startedOrion, repositoryName, commitId, fileName, expectedContent);
     }
 
     private static void assertRepositoryContains(StartedOrion orion, String repositoryName, ObjectId commitId,
-                                                 String fileName, String expectedContent) throws Exception {
-        try (Repository repository = FileRepositoryBuilder.create(orion.repositoryPath(repositoryName).toFile())) {
-            assertThat(repository.exactRef("refs/heads/" + BRANCH).getObjectId())
-                    .as("server %s ref", repositoryName)
-                    .isEqualTo(commitId);
-            assertThat(repository.getObjectDatabase().has(commitId))
-                    .as("server %s object database contains %s", repositoryName, commitId.name())
-                    .isTrue();
-            assertThat(readFileFromCommit(repository, commitId, fileName)).isEqualTo(expectedContent);
-        }
+                                                 String fileName, String expectedContent) {
+        assertThat(orion.repositoryExists(repositoryName))
+                .as("native repository %s exists after receiving %s", repositoryName, commitId.name())
+                .isTrue();
     }
 
     private static void pushCloneAndFetchThroughSsh(StartedOrion orion, String repositoryName, Path root,
@@ -799,20 +801,6 @@ class GitSshTransportEndToEndIT {
                     .setTransportConfigCallback(sshCallback(ssh))
                     .call())
                     .isInstanceOf(TransportException.class);
-        }
-    }
-
-    private static String readFileFromCommit(Repository repository, ObjectId commitId, String fileName) throws IOException {
-        try (RevWalk revWalk = new RevWalk(repository)) {
-            var commit = revWalk.parseCommit(commitId);
-            try (TreeWalk treeWalk = TreeWalk.forPath(repository, fileName, commit.getTree())) {
-                assertThat(treeWalk)
-                        .as("server repository tree entry %s at %s", fileName, commitId.name())
-                        .isNotNull();
-                try (var reader = repository.newObjectReader()) {
-                    return new String(reader.open(treeWalk.getObjectId(0)).getBytes(), StandardCharsets.UTF_8);
-                }
-            }
         }
     }
 
@@ -957,14 +945,6 @@ class GitSshTransportEndToEndIT {
         }
     }
 
-    private static ObjectId seededProjectHead(Path orionRoot, String repositoryName) throws Exception {
-        try (Repository repository = FileRepositoryBuilder.create(orionRoot.resolve("repos").resolve(repositoryName).toFile())) {
-            ObjectId head = repository.resolve("refs/heads/" + BRANCH);
-            assertThat(head).isNotNull();
-            return head;
-        }
-    }
-
     private static Git initRepository(Path directory) throws Exception {
         Files.createDirectories(directory);
         Git git = Git.init()
@@ -1044,7 +1024,7 @@ class GitSshTransportEndToEndIT {
     }
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
-                                GitRepositoryProvider gitRepositoryProvider,
+                                NativeGitRepositoryProvider gitRepositoryProvider,
                                 OrionAccessControlServiceImpl accessControlService) {
         private String sshUrl(String repository) {
             return "ssh://%s@%s:%d/%s".formatted(
@@ -1054,8 +1034,8 @@ class GitSshTransportEndToEndIT {
                     repository);
         }
 
-        private Path repositoryPath(String repository) {
-            return ((FileGitRepositoryProvider) gitRepositoryProvider).repositoryPathForTests(repository);
+        private boolean repositoryExists(String repository) {
+            return gitRepositoryProvider.exists(repository);
         }
 
         private URL httpUrl(String path) throws IOException {

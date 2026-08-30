@@ -22,10 +22,6 @@
             <artifactId>communication</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-engine-s3</artifactId>
-        </dependency>
-        <dependency>
             <groupId>pro.deta.orion.integration</groupId>
             <artifactId>cloudflare-api</artifactId>
         </dependency>
@@ -44,6 +40,7 @@
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
             <artifactId>org.eclipse.jgit.ssh.apache</artifactId>
+            <version>${jgit.version}</version>
         </dependency>
     </dependencies>
 

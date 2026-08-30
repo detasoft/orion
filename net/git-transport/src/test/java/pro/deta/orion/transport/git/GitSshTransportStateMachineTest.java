@@ -57,7 +57,7 @@ class GitSshTransportStateMachineTest {
         configuration.getTransport().getSsh().setAddress("127.0.0.1");
         configuration.getTransport().getSsh().setPort(port);
         SshHostKeyService hostKeyService = new SshHostKeyService(new ConfigurationContext(configuration));
-        SshCommandFactory commandFactory = new SshCommandFactory(null, null, null, null, null);
+        SshCommandFactory commandFactory = new SshCommandFactory(null, null, null, null);
         OrionSSHPasswordAuthenticator authenticator = new OrionSSHPasswordAuthenticator(null);
         return new GitSshTransportService(configuration, commandFactory, () -> hostKeyService, authenticator);
     }

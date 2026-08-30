@@ -10,7 +10,7 @@ import java.util.function.Consumer;
 
 /**
  * Backend-independent repository handle used by Orion services. It is the boundary between server logic and the
- * concrete repository implementation, so callers should depend on this type instead of JGit's Repository directly.
+ * concrete repository implementation, so callers should depend on this type instead of concrete storage classes.
  */
 public interface GitRepository extends AutoCloseable {
     String name();
@@ -19,15 +19,29 @@ public interface GitRepository extends AutoCloseable {
 
     GitRepository withFetchAccessCheck(Consumer<GitFetchAccessRequest> fetchAccessCheck);
 
-    void upload(GitUploadRequest request, InputStream input, OutputStream output, OutputStream error) throws IOException, GitOperationException;
+    void upload(
+            GitUploadRequest request,
+            InputStream input,
+            OutputStream output,
+            OutputStream error) throws IOException, GitOperationException;
 
-    void receive(GitReceiveRequest request, InputStream input, OutputStream output, OutputStream error) throws IOException, GitOperationException;
+    void receive(
+            GitReceiveRequest request,
+            InputStream input,
+            OutputStream output,
+            OutputStream error) throws IOException, GitOperationException;
 
-    default GitRepositoryFileSnapshot loadFiles(String branch, List<String> paths) throws IOException, GitOperationException {
+    default GitRepositoryFileSnapshot loadFiles(
+            String branch,
+            List<String> paths) throws IOException, GitOperationException {
         throw new GitOperationException("Repository " + name() + " does not support file loading");
     }
 
-    default void saveFiles(String branch, Map<String, byte[]> files, String message, GitCommitAuthor author) throws IOException, GitOperationException {
+    default void saveFiles(
+            String branch,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws IOException, GitOperationException {
         throw new GitOperationException("Repository " + name() + " does not support file saving");
     }
 

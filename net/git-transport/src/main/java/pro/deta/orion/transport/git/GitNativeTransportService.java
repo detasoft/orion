@@ -15,30 +15,26 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.output.NullOutputStream;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.ClientConnectionResource;
 import pro.deta.orion.auth.check.rule.ConnectionAccessRules;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
-import pro.deta.orion.git.GitInternalService;
-import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
-import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.transport.git.netty.GitMinimalWireHandler;
-import pro.deta.orion.util.stream.StandardStreams;
-import pro.deta.orion.util.stream.StreamUtils;
 
-import java.io.*;
-import java.net.*;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -51,22 +47,15 @@ import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 @Slf4j
 @Singleton
 public class GitNativeTransportService implements ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
-    static final String IMPLEMENTATION_PROPERTY =
-            "orion.git.transport.implementation";
-    private static final int DEFAULT_SOCKET_TIMEOUT_MILLIS = 5 * 1000;
     private static final long NETTY_SHUTDOWN_QUIET_PERIOD_MILLIS = 0;
     private static final long NETTY_SHUTDOWN_TIMEOUT_MILLIS = 1_000;
 
     private final GitTransportConfig config;
-    private final GitInternalService gitInternalService;
-    private final OrionExecutor orionExecutor;
     private final NativeGitRepositoryProvider nativeRepositoryProvider;
     private final Function<String, SecurityContext> nativeSecurityContextFactory;
     private final NativePackfileUriSourceFactory packfileUriSourceFactory;
-    private final int socketTimeoutMillis;
     private final ChannelGroup nativeClientChannels =
             new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-    private volatile ServerSocket listenSock;
     private volatile Channel nativeServerChannel;
     private volatile EventLoopGroup nativeBossGroup;
     private volatile EventLoopGroup nativeWorkerGroup;
@@ -75,90 +64,31 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     @Inject
     public GitNativeTransportService(
             GitTransportConfig config,
-            GitInternalService gitInternalService,
-            OrionExecutor orionExecutor,
             NativeGitRepositoryProvider nativeRepositoryProvider) {
         this(
                 config,
-                gitInternalService,
-                orionExecutor,
                 nativeRepositoryProvider,
-                DEFAULT_SOCKET_TIMEOUT_MILLIS,
-                requestId -> SecurityContext.createContext()
-                        .withRequestId(requestId),
-                packfileUriSourceFactory(config));
-    }
-
-    public GitNativeTransportService(
-            GitTransportConfig config,
-            GitInternalService gitInternalService,
-            OrionExecutor orionExecutor) {
-        this(
-                config,
-                gitInternalService,
-                orionExecutor,
-                new InMemoryNativeGitRepositoryProvider(),
-                DEFAULT_SOCKET_TIMEOUT_MILLIS);
-    }
-
-    GitNativeTransportService(
-            GitTransportConfig config,
-            GitInternalService gitInternalService,
-            OrionExecutor orionExecutor,
-            int socketTimeoutMillis) {
-        this(
-                config,
-                gitInternalService,
-                orionExecutor,
-                new InMemoryNativeGitRepositoryProvider(),
-                socketTimeoutMillis);
-    }
-
-    GitNativeTransportService(
-            GitTransportConfig config,
-            GitInternalService gitInternalService,
-            OrionExecutor orionExecutor,
-            NativeGitRepositoryProvider nativeRepositoryProvider,
-            int socketTimeoutMillis) {
-        this(
-                config,
-                gitInternalService,
-                orionExecutor,
-                nativeRepositoryProvider,
-                socketTimeoutMillis,
-                requestId -> SecurityContext.createContext()
-                        .withRequestId(requestId),
+                requestId -> SecurityContext.createContext().withRequestId(requestId),
                 packfileUriSourceFactory(config));
     }
 
     GitNativeTransportService(
             GitTransportConfig config,
-            GitInternalService gitInternalService,
-            OrionExecutor orionExecutor,
             NativeGitRepositoryProvider nativeRepositoryProvider,
-            int socketTimeoutMillis,
             Function<String, SecurityContext> nativeSecurityContextFactory) {
         this(
                 config,
-                gitInternalService,
-                orionExecutor,
                 nativeRepositoryProvider,
-                socketTimeoutMillis,
                 nativeSecurityContextFactory,
                 packfileUriSourceFactory(config));
     }
 
     GitNativeTransportService(
             GitTransportConfig config,
-            GitInternalService gitInternalService,
-            OrionExecutor orionExecutor,
             NativeGitRepositoryProvider nativeRepositoryProvider,
-            int socketTimeoutMillis,
             Function<String, SecurityContext> nativeSecurityContextFactory,
             NativePackfileUriSourceFactory packfileUriSourceFactory) {
         this.config = config;
-        this.gitInternalService = gitInternalService;
-        this.orionExecutor = orionExecutor;
         this.nativeRepositoryProvider = nativeRepositoryProvider;
         this.nativeSecurityContextFactory = Objects.requireNonNull(
                 nativeSecurityContextFactory,
@@ -166,17 +96,12 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
         this.packfileUriSourceFactory = Objects.requireNonNull(
                 packfileUriSourceFactory,
                 "packfileUriSourceFactory");
-        this.socketTimeoutMillis = socketTimeoutMillis;
     }
 
     public void onStart() {
         if (isEnabled()) {
             stopRequested = false;
-            if (isNativeImplementation()) {
-                listenNativeService();
-            } else {
-                listenJGitService();
-            }
+            listenNativeService();
         }
     }
 
@@ -186,56 +111,6 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
 
     public boolean isRunning() {
         return boundAddress() != null;
-    }
-
-    private boolean isNativeImplementation() {
-        String implementation = System.getProperty(IMPLEMENTATION_PROPERTY);
-        return implementation == null
-                || implementation.isBlank()
-                || "native".equalsIgnoreCase(implementation);
-    }
-
-    private void listenJGitService() {
-        if (gitInternalService == null || orionExecutor == null) {
-            throw new IllegalStateException(
-                    "JGit git:// transport requires GitInternalService and OrionExecutor");
-        }
-        try {
-            InetAddress serverSocketAddress = InetAddress.getByName(config.getAddress());
-            ServerSocket serverSocket = new ServerSocket(
-                    config.getPort(),
-                    config.getBacklog(),
-                    serverSocketAddress);
-            listenSock = serverSocket;
-            if (stopRequested) {
-                serverSocket.close();
-                return;
-            }
-            log.warn("Listening on {}:{} [{}]", config.getAddress(), config.getPort(), serverSocketAddress);
-            orionExecutor.newDedicatedThread(() -> {
-                try {
-                    Socket socket;
-                    while (!stopRequested && (socket = serverSocket.accept()) != null) {
-                        Socket finalSocket = socket;
-                        orionExecutor.submit(() -> {
-                            newConnectionInternal(finalSocket);
-                        });
-                    }
-                } catch (SocketException e) {
-                    if (!"Socket closed".equals(e.getMessage())) {
-                        log.error("Socket exception: ", e);
-                        throw new RuntimeException(e);
-                    } else {
-                        log.warn("Socket closed");
-                    }
-                } catch (IOException e) {
-                    log.error("Socket exception: ", e);
-                    throw new RuntimeException(e);
-                }
-            }).start();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private void listenNativeService() {
@@ -300,7 +175,7 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
                     clientOutput,
                     nativeRepositoryProvider,
                     GitNativeRepositoryAccessHook.ALLOW_ALL,
-                    pro.deta.orion.git.parser.wire.GitWireConfiguration.allSupported(),
+                    GitWireConfiguration.allSupported(),
                     packfileUriSourceFactory);
             channel.pipeline().addLast(new GitMinimalWireHandler(machine));
         } catch (OrionSecurityException e) {
@@ -337,51 +212,9 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
         return securityContext;
     }
 
-    private void newConnectionInternal(Socket finalSocket) {
-        String requestId = UUID.randomUUID().toString();
-        SecurityContext securityContext = SecurityContext.createContext().withRequestId(requestId);
-
-        try {
-            accessEnforcer().require(
-                    securityContext,
-                    ClientConnectionResource.of(finalSocket.getRemoteSocketAddress()),
-                    ConnectionAccessRules.localOnly());
-            log.debug("Client connected {} via {}", requestId, config);
-            finalSocket.setSoTimeout(socketTimeoutMillis);
-            try (StandardStreams streams = StreamUtils.newInstance(
-                    finalSocket.getInputStream(),
-                    finalSocket.getOutputStream(),
-                    NullOutputStream.INSTANCE)) {
-                gitInternalService.service(
-                        securityContext,
-                        finalSocket.getRemoteSocketAddress().toString(),
-                        streams,
-                        requestId,
-                        GitInternalService::parse);
-            }
-        } catch (OrionSecurityException e) {
-            log.warn(e.getMessage());
-        } catch (IOException e) {
-            log.error("Error while serving client {}", requestId, e);
-        } finally {
-            try {
-                finalSocket.close();
-            } catch (IOException ignored) {
-            }
-        }
-    }
-
     public void onStop() {
         stopRequested = true;
         stopNativeService();
-        try {
-            if (listenSock != null)
-                listenSock.close();
-        } catch (IOException e) {
-            log.error("Error while closing socket.", e);
-        } finally {
-            listenSock = null;
-        }
     }
 
     private void stopNativeService() {
@@ -412,10 +245,6 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     }
 
     InetSocketAddress boundAddress() {
-        ServerSocket socket = listenSock;
-        if (socket != null && socket.isBound() && !socket.isClosed()) {
-            return (InetSocketAddress) socket.getLocalSocketAddress();
-        }
         Channel channel = nativeServerChannel;
         if (channel != null
                 && channel.isOpen()

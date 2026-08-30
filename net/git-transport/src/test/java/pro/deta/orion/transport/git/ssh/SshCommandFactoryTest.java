@@ -40,7 +40,7 @@ class SshCommandFactoryTest {
     void readKeyTimesOutAndUnblocksThreadWhenClientStalls() throws Exception {
         // Two threads required: one blocked inside readKey(), one free to run the watchdog.
         executor = new OrionExecutor(2, new OrionThreadFactory());
-        SshCommandFactory factory = new SshCommandFactory(null, executor, null, null, null, 200);
+        SshCommandFactory factory = new SshCommandFactory(executor, null, null, null, 200);
 
         InputStream stalling = new InputStream() {
             @Override
@@ -80,7 +80,7 @@ class SshCommandFactoryTest {
     @Test
     void readKeyReturnsFullKeyWhenStreamCompletesNormally() throws Exception {
         executor = new OrionExecutor(2, new OrionThreadFactory());
-        SshCommandFactory factory = new SshCommandFactory(null, executor, null, null, null, 30_000);
+        SshCommandFactory factory = new SshCommandFactory(executor, null, null, null, 30_000);
 
         String key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB test-key";
         String result = factory.readKey(new ByteArrayInputStream(key.getBytes(StandardCharsets.US_ASCII)));
@@ -91,7 +91,7 @@ class SshCommandFactoryTest {
     @Test
     void readKeyDoesNotSetInterruptFlagOnNormalCompletion() throws Exception {
         executor = new OrionExecutor(2, new OrionThreadFactory());
-        SshCommandFactory factory = new SshCommandFactory(null, executor, null, null, null, 30_000);
+        SshCommandFactory factory = new SshCommandFactory(executor, null, null, null, 30_000);
 
         factory.readKey(new ByteArrayInputStream(new byte[0]));
 

@@ -3,17 +3,19 @@ package pro.deta.orion.transport.http;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.GitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.util.Map;
 
 public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
     private final ObjectMapper objectMapper;
-    private final GitRepositoryProvider gitRepositoryProvider;
+    private final NativeGitRepositoryProvider gitRepositoryProvider;
 
     @Inject
-    public OrionAdminCreateRepositoryRoute(GitRepositoryProvider gitRepositoryProvider, ObjectMapper objectMapper) {
+    public OrionAdminCreateRepositoryRoute(NativeGitRepositoryProvider gitRepositoryProvider, ObjectMapper objectMapper) {
         super(OrionAdminPaths.REPOSITORIES, "POST");
         this.gitRepositoryProvider = gitRepositoryProvider;
         this.objectMapper = objectMapper;
@@ -25,8 +27,28 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
         if (request.name() == null || request.name().isBlank()) {
             throw new IllegalArgumentException("Repository name is required");
         }
-        gitRepositoryProvider.findOrCreate(request.name()).valueOrFailure("Cannot create repository " + request.name());
+        String repositoryName = normalizeRepositoryName(request.name());
+        Result<NativeGitRepository> created = gitRepositoryProvider.create(repositoryName);
+        if (created instanceof Result.Failure<NativeGitRepository> failure
+                && failure.code() != Result.FailureCode.FILE_ALREADY_EXISTS) {
+            failure.valueOrFailure("Cannot create repository " + repositoryName);
+        }
         return OrionHttpResponse.created(Map.of("status", "ok"));
+    }
+
+    private static String normalizeRepositoryName(String rawRepositoryName) {
+        String repositoryName = rawRepositoryName;
+        while (repositoryName.startsWith("/")) {
+            repositoryName = repositoryName.substring(1);
+        }
+        repositoryName = repositoryName.replaceFirst("\\.git$", "");
+        if (repositoryName.isBlank()
+                || repositoryName.contains("\0")
+                || repositoryName.contains("\\")
+                || repositoryName.contains("..")) {
+            throw new IllegalArgumentException("Invalid Git repository path");
+        }
+        return repositoryName;
     }
 
     public record AdminRepositoryRequest(String name) {
