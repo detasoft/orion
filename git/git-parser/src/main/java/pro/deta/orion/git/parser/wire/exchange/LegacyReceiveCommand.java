@@ -37,15 +37,27 @@ public record LegacyReceiveCommand(
         }
         for (int index = 0; index < checkedRefName.length(); index++) {
             char character = checkedRefName.charAt(index);
-            if (character <= 32 || character == 127) {
+            if (isForbiddenRefNameCharacter(character)) {
                 throw new IllegalArgumentException(
-                        "Receive command ref name must not contain control characters or spaces");
+                        "Receive command ref name contains a forbidden Git ref character");
             }
         }
         if (type != typeOf(oldObjectId, newObjectId)) {
             throw new IllegalArgumentException(
                     "Receive command type does not match its object IDs");
         }
+    }
+
+    private static boolean isForbiddenRefNameCharacter(char character) {
+        return character <= 32
+                || character == 127
+                || character == '~'
+                || character == '^'
+                || character == ':'
+                || character == '?'
+                || character == '*'
+                || character == '['
+                || character == '\\';
     }
 
     private static void validateObjectId(GitObjectId objectId) {

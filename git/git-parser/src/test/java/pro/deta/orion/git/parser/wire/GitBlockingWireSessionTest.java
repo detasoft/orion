@@ -309,6 +309,30 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void smartHttpPostRejectsLegacyReceiveRefNameWithForbiddenGitCharacters()
+            throws Exception {
+        for (String character : List.of("~", "^", ":", "?", "*", "[", "\\")) {
+            try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                    UnpooledByteBufAllocator.DEFAULT,
+                    Duration.ofSeconds(1))) {
+                RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+                input.feed(legacyReceiveRequest(
+                        MAIN_ID
+                                + " "
+                                + NULL_ID
+                                + " refs/heads/feature"
+                                + character
+                                + "x\0report-status\n"));
+
+                assertThatThrownBy(() -> session(input, output, providerWithMainRef())
+                        .serveSmartHttpPost(receiveV1Request()))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("invalid command");
+            }
+        }
+    }
+
+    @Test
     void smartHttpPostRejectsLegacyReceiveInvalidObjectId()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
