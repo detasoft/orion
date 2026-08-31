@@ -13,7 +13,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -102,6 +104,21 @@ class GitBufferedByteTransportAdapterTest {
         assertThat(output.ascii()).isEqualTo("000d\u0002counting000b\u0003failed");
     }
 
+    @Test
+    void writesSidebandHeaderSeparatelyFromPayload() throws Exception {
+        RecordingOutput output = new RecordingOutput();
+        GitBufferedByteTransportAdapter adapter = outputAdapter(output);
+        ByteBuf payload = Unpooled.copiedBuffer("hello", StandardCharsets.UTF_8);
+        try {
+            adapter.writeSidebandData(payload);
+
+            assertThat(output.writeLengths()).containsExactly(5, 5);
+            assertThat(output.ascii()).isEqualTo("000a\u0001hello");
+        } finally {
+            payload.release();
+        }
+    }
+
     private GitBufferedByteTransportAdapter inputAdapter(String ascii) {
         return new GitBufferedByteTransportAdapter(
                 new ArrayInput(ascii.getBytes(StandardCharsets.US_ASCII)),
@@ -165,11 +182,13 @@ class GitBufferedByteTransportAdapterTest {
 
     private static final class RecordingOutput implements BufferedByteOutput {
         private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+        private final List<Integer> writeLengths = new ArrayList<>();
 
         @Override
         public void write(ByteBuf buffer) {
             byte[] bytes = new byte[buffer.readableBytes()];
             buffer.getBytes(buffer.readerIndex(), bytes);
+            writeLengths.add(bytes.length);
             output.write(bytes, 0, bytes.length);
         }
 
@@ -183,6 +202,10 @@ class GitBufferedByteTransportAdapterTest {
 
         private String ascii() {
             return output.toString(StandardCharsets.US_ASCII);
+        }
+
+        private List<Integer> writeLengths() {
+            return writeLengths;
         }
     }
 }

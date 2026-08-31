@@ -123,18 +123,12 @@ public final class GitBufferedByteTransportAdapter {
         Objects.requireNonNull(payload, "payload");
         int payloadOffset = payload.readerIndex();
         int remaining = payload.readableBytes();
+        BufferedByteOutput output = requireOutput();
         do {
             int chunkLength = Math.min(remaining, MAX_SIDEBAND_PAYLOAD_LENGTH);
             int packetLength = SIDEBAND_HEADER_SIZE + chunkLength;
-            ByteBuf packet = allocator.buffer(packetLength, packetLength);
-            try {
-                writeLengthHeader(packet, packetLength);
-                packet.writeByte(channel.wireValue());
-                packet.writeBytes(payload, payloadOffset, chunkLength);
-                requireOutput().write(packet);
-            } finally {
-                packet.release();
-            }
+            output.write(sidebandHeader(packetLength, channel));
+            output.write(payload.slice(payloadOffset, chunkLength));
             payloadOffset += chunkLength;
             remaining -= chunkLength;
         } while (remaining > 0);
@@ -175,6 +169,18 @@ public final class GitBufferedByteTransportAdapter {
         output.writeByte(hexDigit((packetLength >>> 8) & 0x0f));
         output.writeByte(hexDigit((packetLength >>> 4) & 0x0f));
         output.writeByte(hexDigit(packetLength & 0x0f));
+    }
+
+    private static byte[] sidebandHeader(
+            int packetLength,
+            SidebandChannel channel) {
+        return new byte[]{
+                hexDigit((packetLength >>> 12) & 0x0f),
+                hexDigit((packetLength >>> 8) & 0x0f),
+                hexDigit((packetLength >>> 4) & 0x0f),
+                hexDigit(packetLength & 0x0f),
+                channel.wireValue()
+        };
     }
 
     public record GitPktLine(ControlState control, ByteBuf payload) {
