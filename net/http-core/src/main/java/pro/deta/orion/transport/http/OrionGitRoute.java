@@ -16,12 +16,12 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
+import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -143,14 +143,14 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
         JettyBufferedByteOutput output =
                 new JettyBufferedByteOutput(resp.getOutputStream());
-        GitBufferedByteTransportAdapter pkt =
-                new GitBufferedByteTransportAdapter(null, output);
+        GitBlockingWireTransport wire =
+                new GitBlockingWireTransport(output);
         if (request.data().getProtocolVersion()
                 .filter(InitialRequestData.ProtocolVersion.V2::equals)
                 .isEmpty()) {
-            writeServiceAnnouncement(pkt, request.service());
+            writeServiceAnnouncement(wire, request.service());
         }
-        session(req, pkt).advertise(request.data());
+        session(req, wire).advertise(request.data());
     }
 
     private void handleNativePost(
@@ -173,25 +173,25 @@ public class OrionGitRoute implements OrionHttpRoute {
                 GitBlockingWireSession.DEFAULT_INPUT_BUFFER_SIZE)) {
             JettyBufferedByteOutput output =
                     new JettyBufferedByteOutput(resp.getOutputStream());
-            GitBufferedByteTransportAdapter pkt =
-                    new GitBufferedByteTransportAdapter(input, output);
+            GitBlockingWireTransport wire =
+                    new GitBlockingWireTransport(input, output);
             session(
                     req,
-                    pkt)
+                    wire)
                     .serveSmartHttpPost(request.data());
         }
     }
 
     private GitBlockingWireSession session(
             HttpServletRequest request,
-            GitBufferedByteTransportAdapter pkt) {
+            GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
                 UnpooledByteBufAllocator.DEFAULT,
                 nativeRepositoryProvider,
                 new NativeHttpRepositoryAccessHook(securityContextFrom(request)),
                 GitWireConfiguration.allSupported(),
                 packfileUriSourceFactory(request),
-                pkt);
+                wire);
     }
 
     private NativePackfileUriSourceFactory packfileUriSourceFactory(
@@ -300,11 +300,11 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     private static void writeServiceAnnouncement(
-            GitBufferedByteTransportAdapter adapter,
+            GitBlockingWireTransport wire,
             InitialRequestService service)
             throws IOException {
-        adapter.writeTextLine("# service=" + service.wireName());
-        adapter.writeFlush();
+        wire.writeTextLine("# service=" + service.wireName());
+        wire.writeFlush();
     }
 
     private static String advertisementContentType(

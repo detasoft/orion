@@ -95,7 +95,7 @@ class TestAnalyticsReportTest {
                 "test;java.util.ServiceLoader$LazyClassPathLookupIterator.hasNextService;"
                         + "java.lang.ClassLoader.getResources"));
         assertTrue(TestAnalyticsReport.isTestAllocationStack(
-                "test;pro.deta.orion.git.parser.wire.GitNativeClientOutput.write"));
+                "test;pro.deta.orion.git.parser.wire.GitBlockingWireTransport.write"));
     }
 
     private static String testDurationLine(String testId, String status, long durationMillis, String reason) {

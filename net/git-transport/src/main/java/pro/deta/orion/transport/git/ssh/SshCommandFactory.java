@@ -22,6 +22,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
+import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
@@ -294,8 +295,8 @@ public class SshCommandFactory implements CommandFactory {
                     OutputStreamBufferedByteOutput output =
                             new OutputStreamBufferedByteOutput(
                                     streams.getOutputStream());
-                    GitBufferedByteTransportAdapter pkt =
-                            new GitBufferedByteTransportAdapter(input, output);
+                    GitBlockingWireTransport wire =
+                            new GitBlockingWireTransport(input, output);
                     try {
                         new GitBlockingWireSession(
                                 UnpooledByteBufAllocator.DEFAULT,
@@ -304,7 +305,7 @@ public class SshCommandFactory implements CommandFactory {
                                         securityContext),
                                 GitWireConfiguration.allSupported(),
                                 packfileUriSourceFactory(),
-                                pkt)
+                                wire)
                                 .serveCommand(
                                         initialRequestData(
                                                 commandLine,

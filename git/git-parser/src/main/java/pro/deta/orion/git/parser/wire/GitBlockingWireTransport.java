@@ -8,7 +8,10 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
+import pro.deta.orion.git.parser.wire.control.ControlState;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
+import pro.deta.orion.net.io.BufferedByteInput;
+import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -27,17 +30,72 @@ import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_L
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 
-public final class GitNativeClientOutput {
+public final class GitBlockingWireTransport {
     public static final int BUFFER_CAPACITY = 64 * 1024;
 
-    private final GitBufferedByteTransportAdapter pkt;
+    private final BufferedByteInput input;
+    private final BufferedByteOutput outputSink;
+    private final GitPktLineWriter pktLineWriter;
     private ByteBuf output;
     private LegacySideBandResponse sideBandResponse;
     private LegacyPackResponse legacyPackResponse;
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
-    public GitNativeClientOutput(GitBufferedByteTransportAdapter pkt) {
-        this.pkt = Objects.requireNonNull(pkt, "pkt");
+    public GitBlockingWireTransport(BufferedByteOutput outputSink) {
+        this(null, outputSink);
+    }
+
+    public GitBlockingWireTransport(
+            BufferedByteInput input,
+            BufferedByteOutput outputSink) {
+        this.input = input;
+        this.outputSink = Objects.requireNonNull(outputSink, "outputSink");
+        pktLineWriter = new GitPktLineWriter();
+    }
+
+    public ControlState readControlState() throws IOException {
+        int headerValue = 0;
+        for (int i = 0; i < PKT_LINE_HEADER_SIZE; i++) {
+            headerValue = (headerValue << 8)
+                    | requireInput().readUnsignedByte();
+        }
+        Result<ControlState> control = ControlState.readControlType(
+                headerValue);
+        if (control instanceof Result.Success<ControlState> success) {
+            return success.value();
+        }
+        Result.Failure<ControlState> failure =
+                (Result.Failure<ControlState>) control;
+        throw new IOException(
+                "Invalid Git pkt-line header: " + failure.getMessage(),
+                failure.throwable());
+    }
+
+    public ByteBuf readPayload(ControlState control) throws IOException {
+        Objects.requireNonNull(control, "control");
+        return requireInput().readCopy(control.payloadLength());
+    }
+
+    public int readRawInto(
+            ByteBuf target,
+            int maxLength) throws IOException {
+        return requireInput().readInto(target, maxLength);
+    }
+
+    public void writeTextLine(String payload) throws IOException {
+        byte[] text = utf8(payload);
+        byte[] line = new byte[text.length + 1];
+        System.arraycopy(text, 0, line, 0, text.length);
+        line[line.length - 1] = '\n';
+        writeData(line);
+    }
+
+    public void writeFlush() throws IOException {
+        outputSink.write(pktLineWriter.writeFlush());
+    }
+
+    public void flush() throws IOException {
+        outputSink.flush();
     }
 
     private static void requireFixedCapacity(ByteBuf output) {
@@ -397,7 +455,7 @@ public final class GitNativeClientOutput {
             throw new IllegalArgumentException(
                     failureMessage,
                     new IllegalArgumentException(
-                            "Git pkt-line exceeds maximum length"));
+                            "Git wire-line exceeds maximum length"));
         }
         sendSerialization(
                 new PktLineSerialization(payloadBytes, packetLength));
@@ -449,7 +507,7 @@ public final class GitNativeClientOutput {
         for (int index = 0; index < payload.length(); index++) {
             if (payload.charAt(index) > 0x7f) {
                 throw new IllegalArgumentException(
-                        "Git pkt-line response must be ASCII");
+                        "Git wire-line response must be ASCII");
             }
         }
         if (payload.length()
@@ -457,7 +515,7 @@ public final class GitNativeClientOutput {
                 + PKT_LINE_HEADER_SIZE
                 > MAX_PKT_LINE_LENGTH) {
             throw new IllegalArgumentException(
-                    "Git pkt-line exceeds maximum length");
+                    "Git wire-line exceeds maximum length");
         }
     }
 
@@ -530,12 +588,12 @@ public final class GitNativeClientOutput {
     private void sendSerialization(
             OutputSerialization operation) throws IOException {
         ensureNoActiveResponse();
-        operation.writeTo(pkt, this::output);
+        operation.writeTo(this, this::output);
     }
 
     private ByteBuf output() {
         if (output == null) {
-            output = pkt.outputBuffer();
+            output = outputSink.getByteBuf();
             requireFixedCapacity(output);
         }
         return output;
@@ -551,22 +609,48 @@ public final class GitNativeClientOutput {
     }
 
     private static void flushOutput(
-            GitBufferedByteTransportAdapter pkt,
+            GitBlockingWireTransport wire,
             ByteBuf output) throws IOException {
         if (!output.isReadable()) {
             return;
         }
-        pkt.writeRaw(output);
+        wire.writeRaw(output);
         output.clear();
     }
 
     private void flushOutput() throws IOException {
-        flushOutput(pkt, output());
+        flushOutput(this, output());
     }
 
     private void finishOutput() throws IOException {
         flushOutput();
-        pkt.flush();
+        flush();
+    }
+
+    private BufferedByteInput requireInput() {
+        if (input == null) {
+            throw new IllegalStateException("input is not configured");
+        }
+        return input;
+    }
+
+    private void writeRaw(byte[] bytes) throws IOException {
+        outputSink.write(bytes);
+    }
+
+    private void writeRaw(ByteBuf buffer) throws IOException {
+        outputSink.write(buffer);
+    }
+
+    private void writeData(byte[] payload) throws IOException {
+        Objects.requireNonNull(payload, "payload");
+        outputSink.write(pktLineWriter.writeDataHeader(payload.length));
+        outputSink.write(payload);
+    }
+
+    private static byte[] utf8(String payload) {
+        Objects.requireNonNull(payload, "payload");
+        return payload.getBytes(StandardCharsets.UTF_8);
     }
 
     private static List<byte[]> encodePackets(
@@ -576,7 +660,7 @@ public final class GitNativeClientOutput {
             int packetLength = line.length + PKT_LINE_HEADER_SIZE;
             if (packetLength > MAX_PKT_LINE_LENGTH) {
                 throw new IllegalArgumentException(
-                        "Advertisement line exceeds Git pkt-line limit");
+                        "Advertisement line exceeds Git wire-line limit");
             }
             byte[] packet = new byte[packetLength];
             writeHeader(packet, packetLength);
@@ -1465,14 +1549,14 @@ public final class GitNativeClientOutput {
 
     private interface OutputSerialization {
         void writeTo(
-                GitBufferedByteTransportAdapter pkt,
+                GitBlockingWireTransport wire,
                 Supplier<ByteBuf> output) throws IOException;
 
         static void writeBytes(
-                GitBufferedByteTransportAdapter pkt,
+                GitBlockingWireTransport wire,
                 Supplier<ByteBuf> output,
                 byte[] bytes) throws IOException {
-            pkt.writeRaw(bytes);
+            wire.writeRaw(bytes);
         }
     }
 
@@ -1488,13 +1572,13 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                GitBufferedByteTransportAdapter pkt,
+                GitBlockingWireTransport wire,
                 Supplier<ByteBuf> output) throws IOException {
             while (packetIndex < packets.size()) {
                 byte[] packet = packets.get(packetIndex);
                 if (packetOffset == 0) {
                     OutputSerialization.writeBytes(
-                            pkt,
+                            wire,
                             output,
                             packet);
                 } else {
@@ -1506,14 +1590,14 @@ public final class GitNativeClientOutput {
                             0,
                             remaining.length);
                     OutputSerialization.writeBytes(
-                            pkt,
+                            wire,
                             output,
                             remaining);
                 }
                 packetIndex++;
                 packetOffset = 0;
             }
-            pkt.flush();
+            wire.flush();
         }
     }
 
@@ -1532,15 +1616,15 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                GitBufferedByteTransportAdapter pkt,
+                GitBlockingWireTransport wire,
                 Supplier<ByteBuf> output) throws IOException {
             byte[] packet = new byte[packetLength - packetOffset];
             for (int index = 0; index < packet.length; index++) {
                 packet[index] = byteAt(packetOffset + index);
             }
             packetOffset = packetLength;
-            OutputSerialization.writeBytes(pkt, output, packet);
-            pkt.flush();
+            OutputSerialization.writeBytes(wire, output, packet);
+            wire.flush();
         }
 
         private byte byteAt(int offset) {
@@ -1565,12 +1649,12 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                GitBufferedByteTransportAdapter pkt,
+                GitBlockingWireTransport wire,
                 Supplier<ByteBuf> output) throws IOException {
             PacketListSerialization packets =
                     new PacketListSerialization(
                             encodeAsciiPackets(payloads, false));
-            packets.writeTo(pkt, output);
+            packets.writeTo(wire, output);
             packetIndex = payloads.size() + 1;
             packetOffset = 0;
         }
@@ -1594,7 +1678,7 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                GitBufferedByteTransportAdapter pkt,
+                GitBlockingWireTransport wire,
                 Supplier<ByteBuf> output) throws IOException {
             while (packetIndex < packetCount()) {
                 int packetSize = packetSize();
@@ -1602,11 +1686,11 @@ public final class GitNativeClientOutput {
                 for (int index = 0; index < packet.length; index++) {
                     packet[index] = byteAt(packetOffset + index);
                 }
-                OutputSerialization.writeBytes(pkt, output, packet);
+                OutputSerialization.writeBytes(wire, output, packet);
                 packetIndex++;
                 packetOffset = 0;
             }
-            pkt.flush();
+            wire.flush();
         }
 
         private int packetCount() {

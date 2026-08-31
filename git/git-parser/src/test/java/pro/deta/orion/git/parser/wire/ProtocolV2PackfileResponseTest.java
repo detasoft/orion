@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
-import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -25,9 +24,9 @@ class ProtocolV2PackfileResponseTest {
     void writesPackfileSectionSideBandDataAndFlush() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
-        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitBlockingWireTransport output = collectingOutput(outbound, sent);
         byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
-        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(producer(pack));
 
         try {
@@ -64,10 +63,10 @@ class ProtocolV2PackfileResponseTest {
     void writesShallowInfoBeforePackfileSection() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
-        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitBlockingWireTransport output = collectingOutput(outbound, sent);
         GitObjectId boundary = GitObjectId.of("1".repeat(40));
         byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
-        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(pack),
                         Set.of(boundary));
@@ -99,10 +98,10 @@ class ProtocolV2PackfileResponseTest {
     void writesWantedRefsBeforePackfileSection() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
-        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitBlockingWireTransport output = collectingOutput(outbound, sent);
         GitObjectId refId = GitObjectId.of("2".repeat(40));
         byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
-        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(pack),
                         Set.of(),
@@ -135,12 +134,12 @@ class ProtocolV2PackfileResponseTest {
     void writesPackfileUrisBeforePackfileSection() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
-        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitBlockingWireTransport output = collectingOutput(outbound, sent);
         NativePackfileUri packfileUri = new NativePackfileUri(
                 "3".repeat(40),
                 "https://e/p.pack");
         byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
-        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(pack),
                         Set.of(),
@@ -174,14 +173,14 @@ class ProtocolV2PackfileResponseTest {
     void writesWholeResponseInsideSidebandAll() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
-        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitBlockingWireTransport output = collectingOutput(outbound, sent);
         GitObjectId boundary = GitObjectId.of("1".repeat(40));
         GitObjectId refId = GitObjectId.of("2".repeat(40));
         NativePackfileUri packfileUri = new NativePackfileUri(
                 "3".repeat(40),
                 "https://e/p.pack");
         byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
-        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(pack),
                         Set.of(boundary),
@@ -222,11 +221,11 @@ class ProtocolV2PackfileResponseTest {
     void streamsLargePackAndClosesProducer() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
-        GitNativeClientOutput output = collectingOutput(outbound, sent);
+        GitBlockingWireTransport output = collectingOutput(outbound, sent);
         byte[] pack = new byte[100_000];
         java.util.Arrays.fill(pack, (byte) 7);
         AtomicBoolean closed = new AtomicBoolean();
-        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(pack, closed));
 
@@ -245,11 +244,11 @@ class ProtocolV2PackfileResponseTest {
     void reportsDeliveryFailureAndClosesProducer() {
         ByteBuf outbound = outputBuffer();
         AtomicBoolean closed = new AtomicBoolean();
-        GitNativeClientOutput output = output(
+        GitBlockingWireTransport output = output(
                 new SubmittedByteBufOutput(outbound, ignored -> {
                     throw new IllegalStateException("delivery failed");
                 }));
-        GitNativeClientOutput.ProtocolV2PackfileResponse response =
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(
                                 "PACK".getBytes(StandardCharsets.US_ASCII),
@@ -268,12 +267,12 @@ class ProtocolV2PackfileResponseTest {
     }
 
     private static void complete(
-            GitNativeClientOutput.ProtocolV2PackfileResponse response)
+            GitBlockingWireTransport.ProtocolV2PackfileResponse response)
             throws Exception {
         response.advance();
     }
 
-    private static GitNativeClientOutput collectingOutput(
+    private static GitBlockingWireTransport collectingOutput(
             ByteBuf outbound,
             List<byte[]> sent) {
         return output(
@@ -285,9 +284,8 @@ class ProtocolV2PackfileResponseTest {
                 }));
     }
 
-    private static GitNativeClientOutput output(SubmittedByteBufOutput sink) {
-        return new GitNativeClientOutput(
-                new GitBufferedByteTransportAdapter(null, sink));
+    private static GitBlockingWireTransport output(SubmittedByteBufOutput sink) {
+        return new GitBlockingWireTransport(sink);
     }
 
     private static NativePackProducer producer(byte[] bytes) {
@@ -329,7 +327,7 @@ class ProtocolV2PackfileResponseTest {
 
     private static ByteBuf outputBuffer() {
         return Unpooled.buffer(
-                GitNativeClientOutput.BUFFER_CAPACITY,
-                GitNativeClientOutput.BUFFER_CAPACITY);
+                GitBlockingWireTransport.BUFFER_CAPACITY,
+                GitBlockingWireTransport.BUFFER_CAPACITY);
     }
 }

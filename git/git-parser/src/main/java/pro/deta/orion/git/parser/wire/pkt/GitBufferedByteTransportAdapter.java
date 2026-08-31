@@ -54,24 +54,6 @@ public final class GitBufferedByteTransportAdapter {
         return new GitPktLine(control, readPayload(control));
     }
 
-    public int readRawInto(
-            ByteBuf target,
-            int maxLength) throws IOException {
-        return requireInput().readInto(target, maxLength);
-    }
-
-    public ByteBuf outputBuffer() {
-        return requireOutput().getByteBuf();
-    }
-
-    public void writeRaw(byte[] bytes) throws IOException {
-        requireOutput().write(bytes);
-    }
-
-    public void writeRaw(ByteBuf buffer) throws IOException {
-        requireOutput().write(buffer);
-    }
-
     public void writeData(ByteBuf payload) throws IOException {
         Objects.requireNonNull(payload, "payload");
         int payloadLength = payload.readableBytes();

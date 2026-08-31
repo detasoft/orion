@@ -8,7 +8,6 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -377,15 +376,15 @@ class GitBlockingWireSessionTest {
             QueueBufferedByteInput input,
             RecordingBufferedByteOutput output,
             InMemoryNativeGitRepositoryProvider provider) {
-        GitBufferedByteTransportAdapter pkt =
-                new GitBufferedByteTransportAdapter(input, output);
+        GitBlockingWireTransport wire =
+                new GitBlockingWireTransport(input, output);
         return new GitBlockingWireSession(
                 UnpooledByteBufAllocator.DEFAULT,
                 provider,
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
                 GitWireConfiguration.allSupported(),
                 NativePackfileUriSourceFactory.NONE,
-                pkt);
+                wire);
     }
 
     private static InMemoryNativeGitRepositoryProvider providerWithMainRef() {

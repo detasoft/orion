@@ -25,7 +25,6 @@ import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.git.parser.wire.error.GitWireError;
-import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -45,8 +44,7 @@ public final class GitBlockingWireSession {
     private static final String NULL_ID = "0".repeat(40);
 
     private final ByteBufAllocator allocator;
-    private final GitBufferedByteTransportAdapter pkt;
-    private final GitNativeClientOutput clientOutput;
+    private final GitBlockingWireTransport wire;
     private final GitNativeRepositoryService repositoryService;
     private final GitWireConfiguration configuration;
 
@@ -56,13 +54,12 @@ public final class GitBlockingWireSession {
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration,
             NativePackfileUriSourceFactory packfileUriSourceFactory,
-            GitBufferedByteTransportAdapter pkt) {
+            GitBlockingWireTransport wire) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
-        this.pkt = Objects.requireNonNull(pkt, "pkt");
+        this.wire = Objects.requireNonNull(wire, "wire");
         this.configuration = Objects.requireNonNull(
                 configuration,
                 "configuration");
-        clientOutput = new GitNativeClientOutput(pkt);
         repositoryService = new GitNativeRepositoryService(
                 Objects.requireNonNull(
                         repositoryProvider,
@@ -80,16 +77,16 @@ public final class GitBlockingWireSession {
                 && data.getProtocolVersion()
                         .orElse(null)
                 == InitialRequestData.ProtocolVersion.V2) {
-            clientOutput.sendV2UploadPackAdvertisement(
+            wire.sendV2UploadPackAdvertisement(
                     configuration.protocolV2());
             return;
         }
         if (data.getService() == InitialRequestService.UPLOAD_PACK) {
-            clientOutput.sendAdvertisement(
+            wire.sendAdvertisement(
                     repositoryService.legacyUploadPackAdvertisement(data));
             return;
         }
-        clientOutput.sendAdvertisement(
+        wire.sendAdvertisement(
                 repositoryService.legacyReceivePackAdvertisement(data));
     }
 
@@ -122,13 +119,12 @@ public final class GitBlockingWireSession {
 
     private void readV2UploadCommands(InitialRequestData data)
             throws IOException {
-        GitBufferedByteTransportAdapter pkt = pkt();
         V2Command command = null;
         while (true) {
-            ControlState control = pkt.readControlState();
+            ControlState control = wire.readControlState();
             switch (control.type()) {
                 case DATA -> {
-                    String payload = readAsciiPayload(pkt, control);
+                    String payload = readAsciiPayload(wire, control);
                     if (command == null) {
                         command = readV2CommandPayload(payload);
                     } else if (!isSupportedV2CommandCapability(payload)) {
@@ -139,7 +135,7 @@ public final class GitBlockingWireSession {
                     if (command == null) {
                         throw invalidV2Request();
                     }
-                    serveV2Command(data, command, pkt);
+                    serveV2Command(data, command, wire);
                     return;
                 }
                 case FLUSH -> {
@@ -171,26 +167,26 @@ public final class GitBlockingWireSession {
     private void serveV2Command(
             InitialRequestData data,
             V2Command command,
-            GitBufferedByteTransportAdapter pkt) throws IOException {
+            GitBlockingWireTransport wire) throws IOException {
         switch (command) {
-            case LS_REFS -> serveLsRefs(data, pkt);
-            case FETCH -> serveFetch(data, pkt);
+            case LS_REFS -> serveLsRefs(data, wire);
+            case FETCH -> serveFetch(data, wire);
         }
     }
 
     private void serveLsRefs(
             InitialRequestData data,
-            GitBufferedByteTransportAdapter pkt) throws IOException {
+            GitBlockingWireTransport wire) throws IOException {
         LsRefsAccumulator request = new LsRefsAccumulator(configuration);
         while (true) {
-            ControlState control = pkt.readControlState();
+            ControlState control = wire.readControlState();
             switch (control.type()) {
-                case DATA -> request.accept(readAsciiPayload(pkt, control));
+                case DATA -> request.accept(readAsciiPayload(wire, control));
                 case FLUSH -> {
                     GitLsRefsResponse response = repositoryService.lsRefs(
                             data,
                             request.complete());
-                    clientOutput.sendLsRefs(response);
+                    wire.sendLsRefs(response);
                     return;
                 }
                 case DELIMITER, RESPONSE_END -> throw invalidV2Request();
@@ -199,9 +195,9 @@ public final class GitBlockingWireSession {
     }
 
     private String readAsciiPayload(
-            GitBufferedByteTransportAdapter pkt,
+            GitBlockingWireTransport wire,
             ControlState control) throws IOException {
-        ByteBuf payload = pkt.readPayload(control);
+        ByteBuf payload = wire.readPayload(control);
         try {
             return asciiLine(payload);
         } finally {
@@ -226,10 +222,6 @@ public final class GitBlockingWireSession {
             throw invalidV2Request();
         }
         return builder.toString();
-    }
-
-    private GitBufferedByteTransportAdapter pkt() {
-        return pkt;
     }
 
     private static IOException invalidV2Request() {
@@ -268,12 +260,12 @@ public final class GitBlockingWireSession {
 
     private void serveFetch(
             InitialRequestData data,
-            GitBufferedByteTransportAdapter pkt) throws IOException {
+            GitBlockingWireTransport wire) throws IOException {
         FetchAccumulator fetch = new FetchAccumulator(configuration);
         while (true) {
-            ControlState control = pkt.readControlState();
+            ControlState control = wire.readControlState();
             switch (control.type()) {
-                case DATA -> fetch.accept(readAsciiPayload(pkt, control));
+                case DATA -> fetch.accept(readAsciiPayload(wire, control));
                 case FLUSH -> {
                     serveFetch(data, fetch.complete());
                     return;
@@ -288,18 +280,18 @@ public final class GitBlockingWireSession {
             FetchRequest request) throws IOException {
         NativeFetchRequest nativeRequest = request.nativeRequest();
         if (!nativeRequest.done()) {
-            clientOutput.sendProtocolV2FetchAcknowledgments(
+            wire.sendProtocolV2FetchAcknowledgments(
                     repositoryService.protocolV2FetchAcknowledgments(
                             data,
                             nativeRequest),
                     request.sidebandAll());
             return;
         }
-        GitNativeClientOutput.ProtocolV2PackfileResponse response = null;
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response = null;
         try {
             NativeFetchResponse fetch =
                     repositoryService.protocolV2Fetch(data, nativeRequest);
-            response = clientOutput.beginProtocolV2Packfile(
+            response = wire.beginProtocolV2Packfile(
                     fetch.packProducer(),
                     fetch.shallowBoundaries(),
                     fetch.wantedRefs(),
@@ -344,23 +336,23 @@ public final class GitBlockingWireSession {
         LegacyUploadRequest request = readLegacyUploadRequest(
                 data,
                 advertisement,
-                pkt());
-        readLegacyUploadNegotiation(request, pkt());
+                wire);
+        readLegacyUploadNegotiation(request, wire);
     }
 
     private LegacyUploadRequest readLegacyUploadRequest(
             InitialRequestData data,
             GitV1Advertisement advertisement,
-            GitBufferedByteTransportAdapter pkt) throws IOException {
+            GitBlockingWireTransport wire) throws IOException {
         Set<GitObjectId> wants = new LinkedHashSet<>();
         Set<String> capabilities = new LinkedHashSet<>();
         while (true) {
-            ControlState control = pkt.readControlState();
+            ControlState control = wire.readControlState();
             switch (control.type()) {
                 case DATA -> acceptLegacyUploadWant(
                         wants,
                         capabilities,
-                        readAsciiPayload(pkt, control));
+                        readAsciiPayload(wire, control));
                 case FLUSH -> {
                     if (wants.isEmpty()) {
                         throw invalidLegacyUploadRequest(
@@ -417,21 +409,21 @@ public final class GitBlockingWireSession {
 
     private void readLegacyUploadNegotiation(
             LegacyUploadRequest request,
-            GitBufferedByteTransportAdapter pkt) throws IOException {
+            GitBlockingWireTransport wire) throws IOException {
         Set<GitObjectId> haves = new LinkedHashSet<>();
         while (true) {
-            ControlState control = pkt.readControlState();
+            ControlState control = wire.readControlState();
             switch (control.type()) {
                 case DATA -> {
                     LegacyUploadNegotiation negotiation =
                             acceptLegacyUploadNegotiation(request, haves,
-                                    readAsciiPayload(pkt, control));
+                                    readAsciiPayload(wire, control));
                     if (negotiation != null) {
                         serveLegacyUploadResponse(negotiation);
                         return;
                     }
                 }
-                case FLUSH -> clientOutput.sendNak();
+                case FLUSH -> wire.sendNak();
                 case DELIMITER, RESPONSE_END ->
                         throw invalidLegacyUploadRequest(
                                 GitWireError.Kind
@@ -464,11 +456,11 @@ public final class GitBlockingWireSession {
     private void serveLegacyUploadResponse(
             LegacyUploadNegotiation negotiation) throws IOException {
         if (negotiation.negotiated(GitCapability.SIDE_BAND_64K)) {
-            GitNativeClientOutput.LegacySideBandResponse response = null;
+            GitBlockingWireTransport.LegacySideBandResponse response = null;
             try {
-                response = clientOutput.beginLegacySideBand64k(
+                response = wire.beginLegacySideBand64k(
                         legacyUploadProducer(negotiation),
-                        GitNativeClientOutput.SideBandChannel.DATA);
+                        GitBlockingWireTransport.SideBandChannel.DATA);
                 response.advance();
             } finally {
                 if (response != null) {
@@ -477,9 +469,9 @@ public final class GitBlockingWireSession {
             }
             return;
         }
-        GitNativeClientOutput.LegacyPackResponse response = null;
+        GitBlockingWireTransport.LegacyPackResponse response = null;
         try {
-            response = clientOutput.beginLegacyPack(
+            response = wire.beginLegacyPack(
                     legacyUploadProducer(negotiation));
             response.advance();
         } finally {
@@ -503,7 +495,7 @@ public final class GitBlockingWireSession {
         LegacyReceiveCommandSection section = readLegacyReceiveCommands(
                 data,
                 advertisement,
-                pkt());
+                wire);
         LegacyReceivePack receivePack = section.requiresPack()
                 ? readLegacyReceivePack(section)
                 : new LegacyReceivePack(section, new LooseObjectStore());
@@ -513,18 +505,18 @@ public final class GitBlockingWireSession {
     private LegacyReceiveCommandSection readLegacyReceiveCommands(
             InitialRequestData data,
             GitV1Advertisement advertisement,
-            GitBufferedByteTransportAdapter pkt) throws IOException {
+            GitBlockingWireTransport wire) throws IOException {
         List<LegacyReceiveCommand> commands = new ArrayList<>();
         Set<String> capabilities = new LinkedHashSet<>();
         Set<String> refNames = new LinkedHashSet<>();
         while (true) {
-            ControlState control = pkt.readControlState();
+            ControlState control = wire.readControlState();
             switch (control.type()) {
                 case DATA -> acceptLegacyReceiveCommand(
                         commands,
                         capabilities,
                         refNames,
-                        readPayloadBytes(pkt, control));
+                        readPayloadBytes(wire, control));
                 case FLUSH -> {
                     if (commands.isEmpty()) {
                         throw invalidLegacyReceiveRequest(
@@ -678,12 +670,12 @@ public final class GitBlockingWireSession {
     }
 
     private byte[] readPayloadBytes(
-            GitBufferedByteTransportAdapter pkt,
+            GitBlockingWireTransport wire,
             ControlState control) throws IOException {
         if (control.payloadLength() == 0) {
             return new byte[0];
         }
-        ByteBuf payload = pkt.readPayload(control);
+        ByteBuf payload = wire.readPayload(control);
         try {
             byte[] bytes = new byte[payload.readableBytes()];
             payload.readBytes(bytes);
@@ -702,7 +694,7 @@ public final class GitBlockingWireSession {
             while (true) {
                 ByteBuf buffer = allocator.buffer(DEFAULT_INPUT_BUFFER_SIZE);
                 try {
-                    int read = pkt.readRawInto(
+                    int read = wire.readRawInto(
                             buffer,
                             DEFAULT_INPUT_BUFFER_SIZE);
                     PackIngestionResult result = read == 0
@@ -736,12 +728,12 @@ public final class GitBlockingWireSession {
 
     private void completeLegacyReceivePack(LegacyReceivePack receivePack)
             throws IOException {
-        List<GitNativeClientOutput.ReceiveCommandStatus> outputStatuses =
+        List<GitBlockingWireTransport.ReceiveCommandStatus> outputStatuses =
                 new ArrayList<>();
         for (GitNativeRepositoryService.ReceivePackStatus status
                 : repositoryService.completeLegacyReceivePack(receivePack)) {
             outputStatuses.add(
-                    new GitNativeClientOutput.ReceiveCommandStatus(
+                    new GitBlockingWireTransport.ReceiveCommandStatus(
                             status.refName(),
                             status.ok(),
                             status.message()));
@@ -754,7 +746,7 @@ public final class GitBlockingWireSession {
         }
         boolean sideBand64k = configuration.receivePack().sideBand64k()
                 && requestedCapabilities.contains("side-band-64k");
-        clientOutput.sendLegacyReceivePackStatus(
+        wire.sendLegacyReceivePackStatus(
                 outputStatuses,
                 sideBand64k);
     }
