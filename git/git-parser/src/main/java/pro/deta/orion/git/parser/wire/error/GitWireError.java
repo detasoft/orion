@@ -5,7 +5,6 @@ import java.util.Objects;
 public record GitWireError(
         Kind kind,
         Phase phase) {
-    public static final long UNKNOWN_INDEX = -1;
 
     public GitWireError {
         Objects.requireNonNull(kind, "kind");
