@@ -63,6 +63,7 @@
     <orion.testDurations.runId>${orion.test.analytics.runId}</orion.testDurations.runId>
     <orion.test.log.level>DEBUG</orion.test.log.level>
     <orion.test.log.categories>pro.deta.orion</orion.test.log.categories>
+    <orion.test.timeout.default>60 s</orion.test.timeout.default>
   </properties>
 
   <modules>
@@ -275,6 +276,11 @@
               <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
               <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
             </systemPropertyVariables>
+            <properties>
+              <configurationParameters>
+                junit.jupiter.execution.timeout.default = ${orion.test.timeout.default}
+              </configurationParameters>
+            </properties>
           </configuration>
         </plugin>
         <plugin>
@@ -290,6 +296,11 @@
               <orion.test.log.level>${orion.test.log.level}</orion.test.log.level>
               <orion.test.log.categories>${orion.test.log.categories}</orion.test.log.categories>
             </systemPropertyVariables>
+            <properties>
+              <configurationParameters>
+                junit.jupiter.execution.timeout.default = ${orion.test.timeout.default}
+              </configurationParameters>
+            </properties>
           </configuration>
         </plugin>
         <plugin>
