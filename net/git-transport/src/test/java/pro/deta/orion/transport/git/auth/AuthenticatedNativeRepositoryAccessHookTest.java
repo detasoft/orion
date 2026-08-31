@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.git.netty;
+package pro.deta.orion.transport.git.auth;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;

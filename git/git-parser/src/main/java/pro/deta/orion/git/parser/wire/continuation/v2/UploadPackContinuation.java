@@ -4,10 +4,11 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
-import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 
 import java.util.Objects;
+
+import static pro.deta.orion.git.parser.wire.continuation.OutputTransitions.transitionAfterOutput;
 
 public final class UploadPackContinuation implements Continuation<ByteBuf> {
     private final GitMinimalWireMachine.Context context;
@@ -28,17 +29,10 @@ public final class UploadPackContinuation implements Continuation<ByteBuf> {
 
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
-        try {
-            GitNativeClientOutput.SendResult result =
-                    context.clientOutput.sendV2UploadPackAdvertisement(
-                            context.configuration.protocolV2());
-            UploadCommandContinuation next =
-                    new UploadCommandContinuation(context, data);
-            return result.transitionTo(next);
-        } catch (RuntimeException error) {
-            return ContinuationFlow.completedError(
-                    "Failed to advertise protocol v2 upload-pack capabilities",
-                    error);
-        }
+        return transitionAfterOutput(
+                () -> context.clientOutput.sendV2UploadPackAdvertisement(
+                        context.configuration.protocolV2()),
+                new UploadCommandContinuation(context, data),
+                "Failed to advertise protocol v2 upload-pack capabilities");
     }
 }

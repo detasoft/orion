@@ -78,7 +78,7 @@ class UploadResponseContinuationTest {
     }
 
     @Test
-    void yieldsWhenSideBandResponseDoesNotFitCurrentOutput() {
+    void transitionsWhenSideBandResponseIsWrittenWithBlockingOutput() {
         ByteBuf outbound = fixedOutput();
         outbound.writerIndex(outbound.capacity());
         UploadResponseContinuation continuation = continuation(
@@ -90,15 +90,6 @@ class UploadResponseContinuationTest {
                 continuation.process(Unpooled.EMPTY_BUFFER);
 
         try {
-            int yields = 0;
-            while (flow instanceof
-                    ContinuationFlow.Yield<ByteBuf> yielded) {
-                yields++;
-                yielded.task().run();
-                flow = continuation.process(
-                        Unpooled.EMPTY_BUFFER);
-            }
-            assertThat(yields).isGreaterThanOrEqualTo(2);
             assertThat(flow)
                     .isInstanceOf(ContinuationFlow.Transition.class);
         } finally {

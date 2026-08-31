@@ -226,12 +226,7 @@ class ReceivePackContinuationTest {
     void reportsOutputOperationFailureThroughContinuationFlow() {
         ByteBuf outbound = outputBuffer();
         outbound.writerIndex(outbound.capacity());
-        GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ByteBuf::release);
-        assertThat(output.sendNak())
-                .isInstanceOf(
-                        GitNativeClientOutput.SendResult.Streaming.class);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
         ByteBuf input = Unpooled.buffer();
         try {
             ContinuationFlow<ByteBuf> flow = continuation(output)
@@ -242,8 +237,14 @@ class ReceivePackContinuationTest {
             assertThat(((ContinuationFlow.Transition<?>) flow).next())
                     .isInstanceOfSatisfying(
                             Continuation.CompletedError.class,
-                            error -> assertThat(error.message())
-                                    .contains("already in progress"));
+                            error -> {
+                                assertThat(error.message()).isEqualTo(
+                                        "Failed to advertise native Git"
+                                                + " repository for receive-pack");
+                                assertThat(error.throwable())
+                                        .hasMessage(
+                                                "Native client output buffer is full");
+                            });
         } finally {
             input.release();
             outbound.release();

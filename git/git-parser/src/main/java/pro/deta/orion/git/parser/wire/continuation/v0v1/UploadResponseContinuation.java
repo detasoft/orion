@@ -32,37 +32,24 @@ final class UploadResponseContinuation implements Continuation<ByteBuf> {
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
         try {
-            GitNativeClientOutput.SendResult result;
             if (negotiation.negotiated(GitCapability.SIDE_BAND_64K)) {
                 if (response == null) {
                     response = context.clientOutput.beginLegacySideBand64k(
                             producer(),
                             GitNativeClientOutput.SideBandChannel.DATA);
                 }
-                result = response.advance();
+                response.advance();
             } else {
                 if (packResponse == null) {
                     packResponse = context.clientOutput.beginLegacyPack(
                             producer());
                 }
-                result = packResponse.advance();
+                packResponse.advance();
             }
-            return switch (result) {
-                case GitNativeClientOutput.SendResult.Completed ignored -> {
-                    close();
-                    yield ContinuationFlow.transition(
-                            Continuation.completedSuccess(this));
-                }
-                case GitNativeClientOutput.SendResult.Streaming streaming ->
-                        ContinuationFlow.yield(streaming.task());
-                case GitNativeClientOutput.SendResult.Failed failed -> {
-                    close();
-                    yield ContinuationFlow.completedError(
-                            failed.message(),
-                            failed.cause());
-                }
-            };
-        } catch (RuntimeException error) {
+            close();
+            return ContinuationFlow.transition(
+                    Continuation.completedSuccess(this));
+        } catch (Exception error) {
             close();
             return ContinuationFlow.completedError(
                     "Failed to write legacy upload-pack response",

@@ -90,15 +90,14 @@ final class ReceivePackIngestionContinuation
                     context.configuration.receivePack().sideBand64k()
                             && requestedCapabilities.contains(
                                     "side-band-64k");
-            GitNativeClientOutput.SendResult result =
-                    context.clientOutput.sendLegacyReceivePackStatus(
-                            outputStatuses,
-                            sideBand64k);
-            return input -> result.transitionTo(
+            context.clientOutput.sendLegacyReceivePackStatus(
+                    outputStatuses,
+                    sideBand64k);
+            return input -> ContinuationFlow.transition(
                     Continuation.completedSuccess(
                             new CompletedReceivePackContinuation(
                                     receivePack)));
-        } catch (RuntimeException error) {
+        } catch (Exception error) {
             return Continuation.completedError(
                     "Failed to complete native Git receive pack",
                     error);

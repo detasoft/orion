@@ -313,17 +313,10 @@ class LsRefsContinuationTest {
 
             assertThat(driver.lastFlow)
                     .isInstanceOfSatisfying(
-                            ContinuationFlow.TransitionAndYield.class,
-                            yielded -> {
-                                yielded.task().run();
-                                assertThat(yielded.next().process(input))
-                                        .isInstanceOfSatisfying(
-                                                ContinuationFlow.Transition.class,
-                                                resumed -> assertThat(
-                                                        resumed.next())
-                                                        .isInstanceOf(
-                                                                UploadCommandContinuation.class));
-                            });
+                            ContinuationFlow.Transition.class,
+                            transition -> assertThat(transition.next())
+                                    .isInstanceOf(
+                                            UploadCommandContinuation.class));
         } finally {
             input.release();
             outbound.release();
@@ -351,19 +344,11 @@ class LsRefsContinuationTest {
             RuntimeFlow flow = runtime.accept(input);
 
             assertThat(flow)
-                    .isInstanceOf(ContinuationFlow.Yield.class);
-            assertThat(runtime.isYielding()).isTrue();
-            assertThat(input.toString(StandardCharsets.US_ASCII))
-                    .isEqualTo("0001");
-
-            ((ContinuationFlow.Yield<?>) flow).task().run();
+                    .isInstanceOf(RuntimeFlow.Terminal.class);
+            assertThat(runtime.isYielding()).isFalse();
             assertThat(submitted.getLast().toString(
                     StandardCharsets.US_ASCII))
                     .isEqualTo("0000");
-
-            assertThat(runtime.resumeTask())
-                    .isInstanceOf(RuntimeFlow.Terminal.class);
-            assertThat(runtime.isYielding()).isFalse();
             assertThat(runtime.terminal()).isTrue();
             assertThat(input.isReadable()).isFalse();
         } finally {
@@ -397,20 +382,13 @@ class LsRefsContinuationTest {
             RuntimeFlow flow = runtime.accept(input);
 
             assertThat(flow)
-                    .isInstanceOf(ContinuationFlow.Yield.class);
-            assertThatCode(
-                    ((ContinuationFlow.Yield<?>) flow).task()::run)
-                    .doesNotThrowAnyException();
-
-            assertThat(runtime.resumeTask())
                     .isInstanceOf(RuntimeFlow.Terminal.class);
             assertThat(runtime.currentContinuation())
                     .isInstanceOfSatisfying(
                             Continuation.CompletedError.class,
                             error -> {
                                 assertThat(error.message()).isEqualTo(
-                                        "Failed to deliver"
-                                                + " serialized client output");
+                                        "Failed to serve protocol v2 ls-refs");
                                 assertThat(error.throwable())
                                         .isSameAs(failure);
                             });
@@ -424,12 +402,7 @@ class LsRefsContinuationTest {
     void propagatesExpectedOutputFailure() {
         ByteBuf outbound = outputBuffer();
         outbound.writerIndex(outbound.capacity());
-        GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ByteBuf::release);
-        assertThat(output.sendNak())
-                .isInstanceOf(
-                        GitNativeClientOutput.SendResult.Streaming.class);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
         Driver driver = new Driver(
                 context(
                         new InMemoryNativeGitRepositoryProvider(),
@@ -442,9 +415,13 @@ class LsRefsContinuationTest {
             assertThat(driver.current)
                     .isInstanceOfSatisfying(
                             Continuation.CompletedError.class,
-                            error -> assertThat(error.message())
-                                    .isEqualTo(
-                                            "Client output operation is already in progress"));
+                            error -> {
+                                assertThat(error.message()).isEqualTo(
+                                        "Failed to serve protocol v2 ls-refs");
+                                assertThat(error.throwable())
+                                        .hasMessage(
+                                                "Native client output buffer is full");
+                            });
         } finally {
             input.release();
             outbound.release();

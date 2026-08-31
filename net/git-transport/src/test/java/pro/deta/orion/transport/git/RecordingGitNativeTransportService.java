@@ -55,6 +55,11 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
     }
 
     @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    @Override
     public boolean isRunning() {
         return running;
     }

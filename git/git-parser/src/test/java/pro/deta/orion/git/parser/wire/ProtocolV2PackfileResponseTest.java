@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProtocolV2PackfileResponseTest {
 
     @Test
-    void writesPackfileSectionSideBandDataAndFlush() {
+    void writesPackfileSectionSideBandDataAndFlush() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
         GitNativeClientOutput output = collectingOutput(outbound, sent);
@@ -60,7 +60,7 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
-    void writesShallowInfoBeforePackfileSection() {
+    void writesShallowInfoBeforePackfileSection() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
         GitNativeClientOutput output = collectingOutput(outbound, sent);
@@ -95,7 +95,7 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
-    void writesWantedRefsBeforePackfileSection() {
+    void writesWantedRefsBeforePackfileSection() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
         GitNativeClientOutput output = collectingOutput(outbound, sent);
@@ -131,7 +131,7 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
-    void writesPackfileUrisBeforePackfileSection() {
+    void writesPackfileUrisBeforePackfileSection() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
         GitNativeClientOutput output = collectingOutput(outbound, sent);
@@ -170,7 +170,7 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
-    void writesWholeResponseInsideSidebandAll() {
+    void writesWholeResponseInsideSidebandAll() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
         GitNativeClientOutput output = collectingOutput(outbound, sent);
@@ -218,7 +218,7 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
-    void streamsLargePackAndClosesProducer() {
+    void streamsLargePackAndClosesProducer() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();
         GitNativeClientOutput output = collectingOutput(outbound, sent);
@@ -256,16 +256,10 @@ class ProtocolV2PackfileResponseTest {
                                 closed));
 
         try {
-            GitNativeClientOutput.SendResult.Streaming streaming =
-                    (GitNativeClientOutput.SendResult.Streaming)
-                            response.advance();
-            streaming.task().run();
-
-            assertThat(response.advance())
-                    .isInstanceOfSatisfying(
-                            GitNativeClientOutput.SendResult.Failed.class,
-                            failed -> assertThat(failed.cause())
-                                    .hasMessage("delivery failed"));
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                    response::advance)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("delivery failed");
             assertThat(closed).isTrue();
         } finally {
             response.close();
@@ -274,19 +268,9 @@ class ProtocolV2PackfileResponseTest {
     }
 
     private static void complete(
-            GitNativeClientOutput.ProtocolV2PackfileResponse response) {
-        while (true) {
-            GitNativeClientOutput.SendResult result = response.advance();
-            if (result instanceof
-                    GitNativeClientOutput.SendResult.Streaming streaming) {
-                streaming.task().run();
-                continue;
-            }
-            assertThat(result)
-                    .isInstanceOf(
-                            GitNativeClientOutput.SendResult.Completed.class);
-            return;
-        }
+            GitNativeClientOutput.ProtocolV2PackfileResponse response)
+            throws Exception {
+        response.advance();
     }
 
     private static GitNativeClientOutput collectingOutput(

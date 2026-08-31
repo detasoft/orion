@@ -59,12 +59,9 @@ class UploadPackContinuationTest {
             UploadPackContinuation continuation =
                     continuation(output);
 
-            ContinuationFlow.TransitionAndYield<ByteBuf> flow =
-                    (ContinuationFlow.TransitionAndYield<ByteBuf>)
-                            continuation.process(input);
-            flow.task().run();
+            ContinuationFlow<ByteBuf> flow = continuation.process(input);
 
-            assertThat(flow.next().process(input))
+            assertThat(flow)
                     .isInstanceOfSatisfying(
                             ContinuationFlow.Transition.class,
                             resumed -> assertAdvertisement(
@@ -82,12 +79,7 @@ class UploadPackContinuationTest {
         ByteBuf outbound = outputBuffer();
         outbound.writerIndex(outbound.capacity());
         ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
-        GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ByteBuf::release);
-        assertThat(output.sendNak())
-                .isInstanceOf(
-                        GitNativeClientOutput.SendResult.Streaming.class);
+        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
 
         try {
             ContinuationFlow<ByteBuf> flow =
@@ -98,8 +90,13 @@ class UploadPackContinuationTest {
             assertThat(((ContinuationFlow.Transition<?>) flow).next())
                     .isInstanceOfSatisfying(
                             Continuation.CompletedError.class,
-                            error -> assertThat(error.message())
-                                    .contains("already in progress"));
+                            error -> {
+                                assertThat(error.message()).isEqualTo(
+                                        "Failed to advertise native Git repository");
+                                assertThat(error.throwable())
+                                        .hasMessage(
+                                                "Native client output buffer is full");
+                            });
         } finally {
             input.release();
             outbound.release();

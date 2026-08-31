@@ -5,11 +5,12 @@ import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
-import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.util.Objects;
+
+import static pro.deta.orion.git.parser.wire.continuation.OutputTransitions.transitionAfterOutput;
 
 final class FetchNegotiationResponseContinuation
         implements Continuation<ByteBuf> {
@@ -31,21 +32,15 @@ final class FetchNegotiationResponseContinuation
 
     @Override
     public ContinuationFlow<ByteBuf> process(ByteBuf input) {
-        try {
-            GitNativeClientOutput.SendResult result =
-                    context.clientOutput.sendProtocolV2FetchAcknowledgments(
-                            context.repositoryService
-                                    .protocolV2FetchAcknowledgments(
-                                            data,
-                                            request),
-                            sidebandAll);
-            return result.transitionTo(
-                    new UploadCommandContinuation(context, data));
-        } catch (RuntimeException error) {
-            return ContinuationFlow.completedError(
-                    "Failed to write protocol v2 fetch negotiation response",
-                    error);
-        }
+        return transitionAfterOutput(
+                () -> context.clientOutput.sendProtocolV2FetchAcknowledgments(
+                        context.repositoryService
+                                .protocolV2FetchAcknowledgments(
+                                        data,
+                                        request),
+                        sidebandAll),
+                new UploadCommandContinuation(context, data),
+                "Failed to write protocol v2 fetch negotiation response");
     }
 
     @TestOnly

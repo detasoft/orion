@@ -48,22 +48,11 @@ final class FetchResponseContinuation implements Continuation<ByteBuf> {
                         packfileUrisForClient(fetch),
                         sidebandAll);
             }
-            return switch (response.advance()) {
-                case GitNativeClientOutput.SendResult.Completed ignored -> {
-                    close();
-                    yield ContinuationFlow.transition(
-                            Continuation.completedSuccess(this));
-                }
-                case GitNativeClientOutput.SendResult.Streaming streaming ->
-                        ContinuationFlow.yield(streaming.task());
-                case GitNativeClientOutput.SendResult.Failed failed -> {
-                    close();
-                    yield ContinuationFlow.completedError(
-                            failed.message(),
-                            failed.cause());
-                }
-            };
-        } catch (RuntimeException error) {
+            response.advance();
+            close();
+            return ContinuationFlow.transition(
+                    Continuation.completedSuccess(this));
+        } catch (Exception error) {
             close();
             return ContinuationFlow.completedError(
                     "Failed to write protocol v2 fetch response",

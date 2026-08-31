@@ -113,15 +113,12 @@ class UploadPackContinuationTest {
                 outbound,
                 ByteBuf::release);
         try {
-            ContinuationFlow.TransitionAndYield<ByteBuf> flow =
-                    (ContinuationFlow.TransitionAndYield<ByteBuf>)
-                            new UploadPackContinuation(
-                                    context(output),
-                                    initialRequest())
-                                    .process(input);
+            ContinuationFlow<ByteBuf> flow = new UploadPackContinuation(
+                    context(output),
+                    initialRequest())
+                    .process(input);
 
-            flow.task().run();
-            assertThat(flow.next().process(input))
+            assertThat(flow)
                     .isInstanceOfSatisfying(
                             ContinuationFlow.Transition.class,
                             resumed -> assertThat(resumed.next())

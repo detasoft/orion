@@ -113,12 +113,8 @@ class UploadNegotiationContinuationTest {
         }
 
         try {
-            ContinuationFlow.TransitionAndYield<ByteBuf> yielded =
-                    (ContinuationFlow.TransitionAndYield<ByteBuf>) flow;
-            yielded.task().run();
-            assertThat(yielded.next().process(Unpooled.EMPTY_BUFFER))
-                    .isEqualTo(
-                            ContinuationFlow.transition(negotiation));
+            assertThat(flow)
+                    .isEqualTo(ContinuationFlow.transition(negotiation));
             assertThat(sent).hasSize(2);
             assertThat(sent.getLast()
                     .toString(StandardCharsets.US_ASCII))
@@ -135,14 +131,8 @@ class UploadNegotiationContinuationTest {
     void completesWithErrorWhenNakOutputRejectsOperation() {
         ByteBuf outbound = fixedOutput();
         outbound.writerIndex(outbound.capacity());
-        GitNativeClientOutput clientOutput = new GitNativeClientOutput(
-                outbound,
-                ByteBuf::release);
-        GitNativeClientOutput.SendResult active =
-                clientOutput.sendNak();
-        assertThat(active)
-                .isInstanceOf(
-                        GitNativeClientOutput.SendResult.Streaming.class);
+        GitNativeClientOutput clientOutput =
+                new GitNativeClientOutput(outbound);
         UploadNegotiationContinuation negotiation =
                 new UploadNegotiationContinuation(
                         context(clientOutput),
@@ -163,11 +153,17 @@ class UploadNegotiationContinuationTest {
 
         assertThat(flow)
                 .isInstanceOf(ContinuationFlow.Transition.class);
-        assertThat(((ContinuationFlow.Transition<?>) flow).next())
-                .isInstanceOfSatisfying(
-                        Continuation.CompletedError.class,
-                        error -> assertThat(error.message())
-                                .contains("already in progress"));
+            assertThat(((ContinuationFlow.Transition<?>) flow).next())
+                    .isInstanceOfSatisfying(
+                            Continuation.CompletedError.class,
+                            error -> {
+                                assertThat(error.message()).isEqualTo(
+                                        "Failed to write legacy upload-pack"
+                                                + " negotiation response");
+                                assertThat(error.throwable())
+                                        .hasMessage(
+                                                "Native client output buffer is full");
+                            });
     }
 
     @Test

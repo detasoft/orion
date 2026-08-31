@@ -4,7 +4,7 @@ import io.netty.buffer.ByteBuf;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
-import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.continuation.ControlHeaderContinuation;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -87,24 +87,33 @@ final class LsRefsContinuation implements Continuation<ByteBuf> {
     }
 
     private Continuation<ByteBuf> completeRequest() {
+        LsRefsRequest request = new LsRefsRequest(
+                peel,
+                symrefs,
+                unborn,
+                refPrefixes);
+        GitLsRefsResponse response;
         try {
-            LsRefsRequest request = new LsRefsRequest(
-                    peel,
-                    symrefs,
-                    unborn,
-                    refPrefixes);
-            GitNativeClientOutput.SendResult result =
-                    context.clientOutput.sendLsRefs(
-                            context.repositoryService.lsRefs(data, request));
-            return input -> result.transitionTo(
-                    new UploadCommandContinuation(context, data));
+            response = context.repositoryService.lsRefs(data, request);
         } catch (RuntimeException error) {
-            GitNativeClientOutput.SendResult result =
-                    context.clientOutput.sendError(error.getMessage());
-            return input -> result.transitionTo(
-                    Continuation.completedError(
-                            "Failed to serve protocol v2 ls-refs",
-                            error));
+            try {
+                context.clientOutput.sendError(error.getMessage());
+                return Continuation.completedError(
+                        "Failed to serve protocol v2 ls-refs",
+                        error);
+            } catch (Exception writeError) {
+                return Continuation.completedError(
+                        "Failed to write protocol v2 ls-refs error",
+                        writeError);
+            }
+        }
+        try {
+            context.clientOutput.sendLsRefs(response);
+            return new UploadCommandContinuation(context, data);
+        } catch (Exception error) {
+            return Continuation.completedError(
+                    "Failed to serve protocol v2 ls-refs",
+                    error);
         }
     }
 

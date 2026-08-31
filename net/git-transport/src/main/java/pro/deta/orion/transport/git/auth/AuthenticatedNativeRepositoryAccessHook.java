@@ -1,4 +1,4 @@
-package pro.deta.orion.transport.git.netty;
+package pro.deta.orion.transport.git.auth;
 
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;

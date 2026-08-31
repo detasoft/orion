@@ -20,7 +20,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
@@ -143,7 +142,7 @@ public final class GitByteBufTransportAdapter {
     private SessionContext sessionContext(BufferedByteOutput output) {
         GitNativeClientOutput clientOutput = new GitNativeClientOutput(
                 allocator,
-                new BufferedByteOutputClientWrite(output));
+                output);
         return new SessionContext(
                 new GitMinimalWireMachine.Context(
                         allocator,
@@ -346,22 +345,4 @@ public final class GitByteBufTransportAdapter {
         return builder.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private record BufferedByteOutputClientWrite(BufferedByteOutput output)
-            implements GitNativeClientWrite {
-
-        private BufferedByteOutputClientWrite {
-            Objects.requireNonNull(output, "output");
-        }
-
-        @Override
-        public CompletionStage<Void> write(ByteBuf chunk) {
-            try {
-                output.write(chunk);
-                output.flush();
-                return CompletableFuture.completedFuture(null);
-            } catch (IOException error) {
-                throw new UncheckedIOException(error);
-            }
-        }
-    }
 }
