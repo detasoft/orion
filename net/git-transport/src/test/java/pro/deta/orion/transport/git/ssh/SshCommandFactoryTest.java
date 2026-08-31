@@ -4,8 +4,8 @@ import org.apache.sshd.server.Environment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 

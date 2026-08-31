@@ -15,12 +15,12 @@ import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
-import pro.deta.orion.git.parser.wire.GitByteBufTransportAdapter;
+import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 
 import java.io.IOException;
@@ -144,7 +144,7 @@ public class OrionGitRoute implements OrionHttpRoute {
         JettyBufferedByteOutput output =
                 new JettyBufferedByteOutput(resp.getOutputStream());
         writeServiceAnnouncement(output, request.service());
-        adapter(req).advertise(request.data(), output);
+        session(req, null, output).advertise(request.data());
     }
 
     private void handleNativePost(
@@ -164,21 +164,27 @@ public class OrionGitRoute implements OrionHttpRoute {
         try (JettyBufferedByteInput input = new JettyBufferedByteInput(
                 req.getInputStream(),
                 UnpooledByteBufAllocator.DEFAULT,
-                GitByteBufTransportAdapter.DEFAULT_INPUT_BUFFER_SIZE)) {
-            adapter(req).serveSmartHttpPost(
-                    request.data(),
+                GitBlockingWireSession.DEFAULT_INPUT_BUFFER_SIZE)) {
+            session(
+                    req,
                     input,
-                    new JettyBufferedByteOutput(resp.getOutputStream()));
+                    new JettyBufferedByteOutput(resp.getOutputStream()))
+                    .serveSmartHttpPost(request.data());
         }
     }
 
-    private GitByteBufTransportAdapter adapter(HttpServletRequest request) {
-        return new GitByteBufTransportAdapter(
+    private GitBlockingWireSession session(
+            HttpServletRequest request,
+            JettyBufferedByteInput input,
+            JettyBufferedByteOutput output) {
+        return new GitBlockingWireSession(
                 UnpooledByteBufAllocator.DEFAULT,
                 nativeRepositoryProvider,
                 new NativeHttpRepositoryAccessHook(securityContextFrom(request)),
                 GitWireConfiguration.allSupported(),
-                packfileUriSourceFactory(request));
+                packfileUriSourceFactory(request),
+                input,
+                output);
     }
 
     private NativePackfileUriSourceFactory packfileUriSourceFactory(

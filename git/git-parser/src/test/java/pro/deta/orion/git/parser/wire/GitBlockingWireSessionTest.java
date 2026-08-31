@@ -6,8 +6,8 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

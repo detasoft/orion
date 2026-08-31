@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire.continuation.exchange;
+package pro.deta.orion.git.parser.wire.exchange;
 
 public enum InitialRequestService {
     UPLOAD_PACK("git-upload-pack"),

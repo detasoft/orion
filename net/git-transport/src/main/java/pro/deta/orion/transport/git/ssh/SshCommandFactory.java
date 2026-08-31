@@ -21,11 +21,11 @@ import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
-import pro.deta.orion.git.parser.wire.GitByteBufTransportAdapter;
+import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
@@ -285,26 +285,27 @@ public class SshCommandFactory implements CommandFactory {
                     inputStream,
                     outputStream,
                     errorStream)) {
-                GitByteBufTransportAdapter adapter =
-                        new GitByteBufTransportAdapter(
+                try (InputStreamBufferedByteInput input =
+                        new InputStreamBufferedByteInput(
+                                streams.getInputStream(),
+                                UnpooledByteBufAllocator.DEFAULT,
+                                GitBlockingWireSession
+                                        .DEFAULT_INPUT_BUFFER_SIZE)) {
+                    try {
+                        new GitBlockingWireSession(
                                 UnpooledByteBufAllocator.DEFAULT,
                                 nativeRepositoryProvider,
                                 new AuthenticatedNativeRepositoryAccessHook(
                                         securityContext),
                                 GitWireConfiguration.allSupported(),
-                                packfileUriSourceFactory());
-                try (InputStreamBufferedByteInput input =
-                        new InputStreamBufferedByteInput(
-                                streams.getInputStream(),
-                                UnpooledByteBufAllocator.DEFAULT,
-                                GitByteBufTransportAdapter
-                                        .DEFAULT_INPUT_BUFFER_SIZE)) {
-                    try {
-                        adapter.serveCommand(
-                                initialRequestData(commandLine, environment),
+                                packfileUriSourceFactory(),
                                 input,
                                 new OutputStreamBufferedByteOutput(
-                                        streams.getOutputStream()));
+                                        streams.getOutputStream()))
+                                .serveCommand(
+                                        initialRequestData(
+                                                commandLine,
+                                                environment));
                     } catch (Exception error) {
                         writeGitProtocolException(
                                 streams.getOutputStream(),

@@ -16,10 +16,10 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommand;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceivePack;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
+import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.util.Result;
 

@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire.continuation.exchange;
+package pro.deta.orion.git.parser.wire.exchange;
 
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;

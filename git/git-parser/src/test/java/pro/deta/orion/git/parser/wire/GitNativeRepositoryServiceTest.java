@@ -15,9 +15,9 @@ import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;

@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire.continuation.exchange;
+package pro.deta.orion.git.parser.wire.exchange;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;

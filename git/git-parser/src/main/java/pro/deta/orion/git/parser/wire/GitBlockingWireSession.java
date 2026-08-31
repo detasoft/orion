@@ -14,14 +14,14 @@ import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
-import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommand;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommandSection;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceivePack;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadNegotiation;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadRequest;
-import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
+import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommandSection;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
+import pro.deta.orion.git.parser.wire.exchange.LegacyUploadNegotiation;
+import pro.deta.orion.git.parser.wire.exchange.LegacyUploadRequest;
+import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.git.parser.wire.error.GitWireError;
@@ -39,10 +39,11 @@ import java.util.Objects;
 import java.util.Set;
 
 public final class GitBlockingWireSession {
+    public static final int DEFAULT_INPUT_BUFFER_SIZE = 16 * 1024;
+
     private static final String REF_PREFIX = "ref-prefix ";
     private static final int MAX_REF_PREFIX_COUNT = 256;
     private static final int MAX_REF_PREFIX_CHARS = 65_536;
-    private static final int INPUT_BUFFER_SIZE = 16 * 1024;
     private static final String NULL_ID = "0".repeat(40);
 
     private final ByteBufAllocator allocator;
@@ -681,9 +682,11 @@ public final class GitBlockingWireSession {
                         section.initialRequest());
         try {
             while (true) {
-                ByteBuf buffer = allocator.buffer(INPUT_BUFFER_SIZE);
+                ByteBuf buffer = allocator.buffer(DEFAULT_INPUT_BUFFER_SIZE);
                 try {
-                    int read = input.readInto(buffer, INPUT_BUFFER_SIZE);
+                    int read = input.readInto(
+                            buffer,
+                            DEFAULT_INPUT_BUFFER_SIZE);
                     PackIngestionResult result = read == 0
                             ? session.endOfInput()
                             : session.accept(buffer);
