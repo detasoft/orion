@@ -141,12 +141,18 @@ public class OrionGitRoute implements OrionHttpRoute {
                 new JettyBufferedByteOutput(resp.getOutputStream());
         GitBlockingWireTransport wire =
                 new GitBlockingWireTransport(output);
+        NativePackfileUriSourceFactory packfileUriSourceFactory =
+                packfileUriSourceFactory(req);
         if (request.data().getProtocolVersion()
                 .filter(InitialRequestData.ProtocolVersion.V2::equals)
                 .isEmpty()) {
             writeServiceAnnouncement(wire, request.service());
         }
-        session(req, wire).advertise(request.data());
+        session(
+                req,
+                packfileUriSourceFactory,
+                wire)
+                .advertise(request.data());
     }
 
     private void handleNativePost(
@@ -169,8 +175,11 @@ public class OrionGitRoute implements OrionHttpRoute {
                     new JettyBufferedByteOutput(resp.getOutputStream());
             GitBlockingWireTransport wire =
                     new GitBlockingWireTransport(input, output);
+            NativePackfileUriSourceFactory packfileUriSourceFactory =
+                    packfileUriSourceFactory(req);
             session(
                     req,
+                    packfileUriSourceFactory,
                     wire)
                     .serveSmartHttpPost(request.data());
         }
@@ -178,6 +187,7 @@ public class OrionGitRoute implements OrionHttpRoute {
 
     private GitBlockingWireSession session(
             HttpServletRequest request,
+            NativePackfileUriSourceFactory packfileUriSourceFactory,
             GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
                 nativeRepositoryProvider,
@@ -185,7 +195,7 @@ public class OrionGitRoute implements OrionHttpRoute {
                         securityContextFrom(request),
                         true),
                 GitWireConfiguration.allSupported(),
-                packfileUriSourceFactory(request),
+                packfileUriSourceFactory,
                 wire);
     }
 
