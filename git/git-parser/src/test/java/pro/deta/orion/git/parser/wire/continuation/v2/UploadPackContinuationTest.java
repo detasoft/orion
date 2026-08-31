@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.wire.continuation.v2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
@@ -365,13 +364,6 @@ class UploadPackContinuationTest {
     }
 
     private static Continuation<ByteBuf> driveOneByteAtATime(
-            ByteBuf input) {
-        return driveOneByteAtATime(
-                input,
-                defaultContext());
-    }
-
-    private static Continuation<ByteBuf> driveOneByteAtATime(
             ByteBuf input,
             GitMinimalWireMachine.Context context) {
         Driver driver = new Driver(context);
@@ -436,7 +428,6 @@ class UploadPackContinuationTest {
     private static GitMinimalWireMachine.Context context(
             GitNativeClientOutput output) {
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 output,
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
@@ -448,7 +439,6 @@ class UploadPackContinuationTest {
         GitWireConfiguration supported =
                 GitWireConfiguration.allSupported();
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 output,
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
@@ -512,7 +502,6 @@ class UploadPackContinuationTest {
     private static GitMinimalWireMachine.Context defaultContext() {
         ByteBuf outbound = outputBuffer();
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);

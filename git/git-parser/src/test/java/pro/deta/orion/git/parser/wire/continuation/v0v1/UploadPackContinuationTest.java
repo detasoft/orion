@@ -110,7 +110,6 @@ class UploadPackContinuationTest {
             GitNativeClientOutput output) {
         GitMinimalWireMachine.Context context =
                 GitMinimalWireMachine.testContext(
-                        UnpooledByteBufAllocator.DEFAULT,
                         output,
                         new InMemoryNativeGitRepositoryProvider(),
                         GitNativeRepositoryAccessHook.ALLOW_ALL);

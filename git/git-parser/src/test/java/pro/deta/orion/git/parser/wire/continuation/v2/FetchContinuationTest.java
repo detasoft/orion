@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.wire.continuation.v2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
@@ -177,7 +176,6 @@ class FetchContinuationTest {
         ByteBuf outbound = outputBuffer();
         Driver driver = new Driver(
                 GitMinimalWireMachine.testContext(
-                        UnpooledByteBufAllocator.DEFAULT,
                         new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                         provider,
                         GitNativeRepositoryAccessHook.ALLOW_ALL));
@@ -502,7 +500,6 @@ class FetchContinuationTest {
     private static GitMinimalWireMachine.Context defaultContext() {
         ByteBuf outbound = outputBuffer();
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
@@ -513,7 +510,6 @@ class FetchContinuationTest {
         ByteBuf outbound = outputBuffer();
         GitWireConfiguration supported = GitWireConfiguration.allSupported();
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL,

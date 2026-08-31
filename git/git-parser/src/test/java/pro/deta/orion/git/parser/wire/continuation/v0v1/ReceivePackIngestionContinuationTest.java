@@ -168,7 +168,6 @@ class ReceivePackIngestionContinuationTest {
                 new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound));
         GitMinimalWireMachine.Context context =
                 GitMinimalWireMachine.testContext(
-                        UnpooledByteBufAllocator.DEFAULT,
                         output,
                         provider,
                         GitNativeRepositoryAccessHook.ALLOW_ALL,
@@ -185,7 +184,6 @@ class ReceivePackIngestionContinuationTest {
     private static GitMinimalWireMachine.Context defaultContext() {
         ByteBuf outbound = outputBuffer();
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);

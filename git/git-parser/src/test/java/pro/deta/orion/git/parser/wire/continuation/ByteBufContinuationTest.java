@@ -18,7 +18,6 @@ abstract class ByteBufContinuationTest {
                 GitNativeClientOutput.BUFFER_CAPACITY,
                 GitNativeClientOutput.BUFFER_CAPACITY);
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);

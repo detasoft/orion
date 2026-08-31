@@ -21,7 +21,6 @@ class GitMinimalWireMachineTest {
         try {
             GitMinimalWireMachine.Context context =
                     GitMinimalWireMachine.testContext(
-                            UnpooledByteBufAllocator.DEFAULT,
                             output.clientOutput(),
                             new InMemoryNativeGitRepositoryProvider(),
                             GitNativeRepositoryAccessHook.ALLOW_ALL);
@@ -41,7 +40,6 @@ class GitMinimalWireMachineTest {
         try {
             GitMinimalWireMachine.Context context =
                     GitMinimalWireMachine.testContext(
-                            UnpooledByteBufAllocator.DEFAULT,
                             output.clientOutput(),
                             new InMemoryNativeGitRepositoryProvider(),
                             GitNativeRepositoryAccessHook.ALLOW_ALL,
@@ -63,7 +61,6 @@ class GitMinimalWireMachineTest {
 
         try {
             GitMinimalWireMachine machine = new GitMinimalWireMachine(
-                    UnpooledByteBufAllocator.DEFAULT,
                     output.clientOutput(),
                     new InMemoryNativeGitRepositoryProvider(),
                     GitNativeRepositoryAccessHook.ALLOW_ALL,
@@ -82,7 +79,6 @@ class GitMinimalWireMachineTest {
         try {
             assertThatNullPointerException()
                     .isThrownBy(() -> new GitMinimalWireMachine(
-                            UnpooledByteBufAllocator.DEFAULT,
                             output.clientOutput(),
                             new InMemoryNativeGitRepositoryProvider(),
                             GitNativeRepositoryAccessHook.ALLOW_ALL,

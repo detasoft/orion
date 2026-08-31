@@ -318,7 +318,6 @@ class UploadNegotiationContinuationTest {
     private static GitMinimalWireMachine.Context context(
             GitNativeClientOutput output) {
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 output,
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);

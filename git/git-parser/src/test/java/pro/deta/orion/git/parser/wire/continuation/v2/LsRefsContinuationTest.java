@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.wire.continuation.v2;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
@@ -30,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static pro.deta.orion.git.parser.wire.error.GitWireError.Kind.INVALID_PROTOCOL_V2_REQUEST;
 
 class LsRefsContinuationTest {
@@ -598,7 +596,6 @@ class LsRefsContinuationTest {
             GitNativeClientOutput output) {
         repository(provider);
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 output,
                 new GitNativeRepositoryService(
                         provider,
@@ -613,7 +610,6 @@ class LsRefsContinuationTest {
         GitWireConfiguration supported =
                 GitWireConfiguration.allSupported();
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 output,
                 provider,
                 GitNativeRepositoryAccessHook.ALLOW_ALL,

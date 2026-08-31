@@ -1,7 +1,6 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationRuntime;
 import pro.deta.orion.continuation.RuntimeFlow;
@@ -22,12 +21,10 @@ public final class GitMinimalWireMachine {
     private final ContinuationRuntime<ByteBuf> runtime;
 
     public GitMinimalWireMachine(
-            ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook) {
         this(
-                allocator,
                 clientOutput,
                 repositoryProvider,
                 accessHook,
@@ -35,13 +32,11 @@ public final class GitMinimalWireMachine {
     }
 
     public GitMinimalWireMachine(
-            ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration) {
         this(
-                allocator,
                 clientOutput,
                 repositoryProvider,
                 accessHook,
@@ -50,14 +45,12 @@ public final class GitMinimalWireMachine {
     }
 
     public GitMinimalWireMachine(
-            ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration,
             NativePackfileUriSourceFactory packfileUriSourceFactory) {
         this.context = new Context(
-                Objects.requireNonNull(allocator, "allocator"),
                 Objects.requireNonNull(clientOutput, "clientOutput"),
                 new GitNativeRepositoryService(
                         Objects.requireNonNull(
@@ -108,12 +101,10 @@ public final class GitMinimalWireMachine {
 
     @TestOnly
     public static Context testContext(
-            ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook) {
         return testContext(
-                allocator,
                 clientOutput,
                 repositoryProvider,
                 accessHook,
@@ -122,11 +113,9 @@ public final class GitMinimalWireMachine {
 
     @TestOnly
     public static Context testContext(
-            ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             GitNativeRepositoryService repositoryService) {
         return new Context(
-                Objects.requireNonNull(allocator, "allocator"),
                 Objects.requireNonNull(clientOutput, "clientOutput"),
                 Objects.requireNonNull(
                         repositoryService,
@@ -136,14 +125,12 @@ public final class GitMinimalWireMachine {
 
     @TestOnly
     public static Context testContext(
-            ByteBufAllocator allocator,
             GitNativeClientOutput clientOutput,
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration) {
         Objects.requireNonNull(configuration, "configuration");
         return new Context(
-                Objects.requireNonNull(allocator, "allocator"),
                 Objects.requireNonNull(clientOutput, "clientOutput"),
                 new GitNativeRepositoryService(
                         Objects.requireNonNull(
@@ -157,17 +144,14 @@ public final class GitMinimalWireMachine {
     }
 
     public static final class Context {
-        public final ByteBufAllocator allocator;
         public final GitNativeClientOutput clientOutput;
         public final GitNativeRepositoryService repositoryService;
         public final GitWireConfiguration configuration;
 
         Context(
-                ByteBufAllocator allocator,
                 GitNativeClientOutput clientOutput,
                 GitNativeRepositoryService repositoryService,
                 GitWireConfiguration configuration) {
-            this.allocator = allocator;
             this.clientOutput = clientOutput;
             this.repositoryService = repositoryService;
             this.configuration = configuration;

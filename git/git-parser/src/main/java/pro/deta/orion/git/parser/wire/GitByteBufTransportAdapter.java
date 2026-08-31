@@ -142,7 +142,6 @@ public final class GitByteBufTransportAdapter {
                 output);
         return new SessionContext(
                 new GitMinimalWireMachine.Context(
-                        allocator,
                         clientOutput,
                         new GitNativeRepositoryService(
                                 repositoryProvider,

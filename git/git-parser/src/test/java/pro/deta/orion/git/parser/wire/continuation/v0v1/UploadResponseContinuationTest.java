@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.wire.continuation.v0v1;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.continuation.Continuation;
 import pro.deta.orion.continuation.ContinuationFlow;
@@ -158,7 +157,6 @@ class UploadResponseContinuationTest {
                                 "refs/heads/main"))));
         GitMinimalWireMachine.Context context =
                 GitMinimalWireMachine.testContext(
-                        UnpooledByteBufAllocator.DEFAULT,
                         output,
                         provider,
                         GitNativeRepositoryAccessHook.ALLOW_ALL);

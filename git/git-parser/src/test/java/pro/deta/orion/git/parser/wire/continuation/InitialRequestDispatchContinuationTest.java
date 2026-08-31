@@ -114,7 +114,6 @@ class InitialRequestDispatchContinuationTest extends ByteBufContinuationTest {
                 new InMemoryNativeGitRepositoryProvider();
         provider.create("/project.git").valueOrFailure("repository");
         return GitMinimalWireMachine.testContext(
-                UnpooledByteBufAllocator.DEFAULT,
                 new GitNativeClientOutput(new RecordingBufferedByteOutput()),
                 provider,
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
