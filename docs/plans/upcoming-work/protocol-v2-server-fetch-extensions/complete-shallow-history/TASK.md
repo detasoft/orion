@@ -1,7 +1,7 @@
 # Complete Shallow History Support
 
 Status: ready
-Source: follow-up from current protocol v2 fetch review.
+Source: follow-up from Git protocol parity audit divergence 3.
 
 Protocol v2 server fetch currently supports depth-based shallow fetch through
 `deepen <depth>`. Complete shallow history support so the advertised shallow
