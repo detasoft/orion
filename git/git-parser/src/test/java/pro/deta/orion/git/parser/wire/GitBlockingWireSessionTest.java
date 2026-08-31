@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitBlockingWireSessionTest {
     private static final String MAIN_ID = "1".repeat(40);
     private static final String WANT = "2".repeat(40);
+    private static final String NULL_ID = "0".repeat(40);
 
     @Test
     void advertiseWritesProtocolV2Capabilities() throws Exception {
@@ -211,6 +212,74 @@ class GitBlockingWireSessionTest {
         }
     }
 
+    @Test
+    void smartHttpPostWritesLegacyReceivePackStatusForDelete()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    MAIN_ID
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/main\0report-status\n"));
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(output.ascii())
+                    .isEqualTo(
+                            "000eunpack ok\n"
+                                    + "0017ok refs/heads/main\n"
+                                    + "0000");
+            assertThat(provider.find("project")
+                    .valueOrFailure("repository")
+                    .refs())
+                    .doesNotContainKey("refs/heads/main");
+        }
+    }
+
+    @Test
+    void smartHttpPostRejectsLegacyReceiveInvalidObjectId()
+            throws Exception {
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    "invalid "
+                            + NULL_ID
+                            + " refs/heads/main\0report-status\n"));
+
+            assertThatThrownBy(() -> session(input, output, providerWithMainRef())
+                    .serveSmartHttpPost(receiveV1Request()))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining(
+                            "Legacy receive-pack command must contain 40-digit");
+        }
+    }
+
+    @Test
+    void smartHttpPostFailsWhenLegacyReceivePackBodyTimesOut()
+            throws Exception {
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofMillis(25))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    NULL_ID
+                            + " "
+                            + WANT
+                            + " refs/heads/new\0report-status\n"));
+
+            assertThatThrownBy(() -> session(input, output, providerWithMainRef())
+                    .serveSmartHttpPost(receiveV1Request()))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("Timed out");
+        }
+    }
+
     private static GitBlockingWireSession session(
             QueueBufferedByteInput input,
             RecordingBufferedByteOutput output,
@@ -249,6 +318,14 @@ class GitBlockingWireSessionTest {
                 Map.of());
     }
 
+    private static InitialRequestData receiveV1Request() {
+        return new InitialRequestData(
+                InitialRequestService.RECEIVE_PACK,
+                "project",
+                "git.example",
+                Map.of());
+    }
+
     private static byte[] lsRefsRequest() {
         ByteArrayBuilder output = new ByteArrayBuilder();
         output.write(command("ls-refs"));
@@ -276,6 +353,15 @@ class GitBlockingWireSessionTest {
         for (int index = 1; index < lines.length; index++) {
             output.writePacket(lines[index]);
         }
+        return output.bytes();
+    }
+
+    private static byte[] legacyReceiveRequest(String... lines) {
+        ByteArrayBuilder output = new ByteArrayBuilder();
+        for (String line : lines) {
+            output.writePacket(line);
+        }
+        output.writeAscii("0000");
         return output.bytes();
     }
 

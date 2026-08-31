@@ -4,6 +4,9 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
@@ -13,6 +16,9 @@ import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommand;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceiveCommandSection;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadNegotiation;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadRequest;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
@@ -23,7 +29,9 @@ import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
+import java.io.EOFException;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -34,6 +42,8 @@ public final class GitBlockingWireSession {
     private static final String REF_PREFIX = "ref-prefix ";
     private static final int MAX_REF_PREFIX_COUNT = 256;
     private static final int MAX_REF_PREFIX_CHARS = 65_536;
+    private static final int INPUT_BUFFER_SIZE = 16 * 1024;
+    private static final String NULL_ID = "0".repeat(40);
 
     private final ByteBufAllocator allocator;
     private final BufferedByteInput input;
@@ -96,18 +106,21 @@ public final class GitBlockingWireSession {
         Objects.requireNonNull(data, "data");
         InitialRequestData.ProtocolVersion version =
                 data.getProtocolVersion().orElse(null);
-        if (data.getService() != InitialRequestService.UPLOAD_PACK
-                || version == InitialRequestData.ProtocolVersion.V2
-                && !configuration.protocolV2().fetch()
-                && !configuration.protocolV2().lsRefs()) {
-            throw new IOException(
-                    "Blocking parser only supports upload-pack");
-        }
         if (version == InitialRequestData.ProtocolVersion.V2) {
+            if (data.getService() != InitialRequestService.UPLOAD_PACK
+                    || !configuration.protocolV2().fetch()
+                    && !configuration.protocolV2().lsRefs()) {
+                throw new IOException(
+                        "Blocking parser only supports protocol v2 upload-pack");
+            }
             readV2UploadCommands(data);
             return;
         }
-        serveLegacyUpload(data);
+        if (data.getService() == InitialRequestService.UPLOAD_PACK) {
+            serveLegacyUpload(data);
+            return;
+        }
+        serveLegacyReceive(data);
     }
 
     private void readV2UploadCommands(InitialRequestData data)
@@ -240,6 +253,13 @@ public final class GitBlockingWireSession {
     }
 
     private static IOException invalidLegacyUploadRequest(
+            GitWireError.Kind kind) {
+        return new IOException(
+                kind.getMessage(),
+                new GitGeneralException(kind));
+    }
+
+    private static IOException invalidLegacyReceiveRequest(
             GitWireError.Kind kind) {
         return new IOException(
                 kind.getMessage(),
@@ -479,6 +499,243 @@ public final class GitBlockingWireSession {
         return repositoryService.legacyUploadPack(
                 negotiation.request().initialRequest(),
                 negotiation.nativeFetchRequest());
+    }
+
+    private void serveLegacyReceive(InitialRequestData data)
+            throws IOException {
+        GitV1Advertisement advertisement =
+                repositoryService.legacyReceivePackAdvertisement(data);
+        LegacyReceiveCommandSection section = readLegacyReceiveCommands(
+                data,
+                advertisement,
+                pkt());
+        LegacyReceivePack receivePack = section.requiresPack()
+                ? readLegacyReceivePack(section)
+                : new LegacyReceivePack(section, new LooseObjectStore());
+        completeLegacyReceivePack(receivePack);
+    }
+
+    private LegacyReceiveCommandSection readLegacyReceiveCommands(
+            InitialRequestData data,
+            GitV1Advertisement advertisement,
+            GitBufferedByteTransportAdapter pkt) throws IOException {
+        List<LegacyReceiveCommand> commands = new ArrayList<>();
+        Set<String> capabilities = new LinkedHashSet<>();
+        Set<String> refNames = new LinkedHashSet<>();
+        while (true) {
+            ControlState control = pkt.readControlState();
+            switch (control.type()) {
+                case DATA -> acceptLegacyReceiveCommand(
+                        commands,
+                        capabilities,
+                        refNames,
+                        readPayloadBytes(pkt, control));
+                case FLUSH -> {
+                    if (commands.isEmpty()) {
+                        throw invalidLegacyReceiveRequest(
+                                GitWireError.Kind
+                                        .MISSING_LEGACY_RECEIVE_COMMAND);
+                    }
+                    return new LegacyReceiveCommandSection(
+                            data,
+                            commands,
+                            capabilities,
+                            advertisement);
+                }
+                case DELIMITER, RESPONSE_END ->
+                        throw invalidLegacyReceiveRequest(
+                                GitWireError.Kind
+                                        .UNSUPPORTED_LEGACY_RECEIVE_CONTROL);
+            }
+        }
+    }
+
+    private static void acceptLegacyReceiveCommand(
+            List<LegacyReceiveCommand> commands,
+            Set<String> capabilities,
+            Set<String> refNames,
+            byte[] rawPayload) throws IOException {
+        int length = rawPayload.length;
+        if (length > 0 && rawPayload[length - 1] == '\n') {
+            length--;
+        }
+        if (length == 0) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.EMPTY_LEGACY_RECEIVE_COMMAND);
+        }
+        int separator = receivePayloadSeparator(rawPayload, length);
+        if (!commands.isEmpty() && separator >= 0) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.LATE_LEGACY_RECEIVE_CAPABILITIES);
+        }
+
+        int commandLength = separator >= 0 ? separator : length;
+        String commandLine = new String(
+                rawPayload,
+                0,
+                commandLength,
+                StandardCharsets.US_ASCII);
+        String[] tokens = commandLine.split(" ", -1);
+        if (tokens.length != 3 || tokens[2].isEmpty()) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
+        }
+        if (!isObjectId(tokens[0]) || !isObjectId(tokens[1])) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_OBJECT_ID);
+        }
+        if (NULL_ID.equalsIgnoreCase(tokens[0])
+                && NULL_ID.equalsIgnoreCase(tokens[1])) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
+        }
+        if (!refNames.add(tokens[2])) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.DUPLICATE_LEGACY_RECEIVE_REF);
+        }
+
+        try {
+            commands.add(new LegacyReceiveCommand(
+                    GitObjectId.of(tokens[0].toLowerCase()),
+                    GitObjectId.of(tokens[1].toLowerCase()),
+                    tokens[2]));
+        } catch (IllegalArgumentException error) {
+            refNames.remove(tokens[2]);
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
+        }
+        if (separator >= 0) {
+            acceptLegacyReceiveCapabilities(
+                    capabilities,
+                    rawPayload,
+                    separator,
+                    length);
+        }
+    }
+
+    private static int receivePayloadSeparator(
+            byte[] rawPayload,
+            int length) throws IOException {
+        int separator = -1;
+        for (int index = 0; index < length; index++) {
+            int value = rawPayload[index] & 0xff;
+            if (value == 0) {
+                if (separator >= 0) {
+                    throw invalidLegacyReceiveRequest(
+                            GitWireError.Kind
+                                    .INVALID_LEGACY_RECEIVE_COMMAND);
+                }
+                separator = index;
+            } else if (value < 32 || value >= 127) {
+                throw invalidLegacyReceiveRequest(
+                        GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
+            }
+        }
+        return separator;
+    }
+
+    private static void acceptLegacyReceiveCapabilities(
+            Set<String> capabilities,
+            byte[] rawPayload,
+            int separator,
+            int length) throws IOException {
+        String capabilityLine = new String(
+                rawPayload,
+                separator + 1,
+                length - separator - 1,
+                StandardCharsets.US_ASCII).trim();
+        if (capabilityLine.isEmpty()) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.EMPTY_LEGACY_RECEIVE_CAPABILITY);
+        }
+        String[] capabilityTokens = capabilityLine.split(" ", -1);
+        for (String capability : capabilityTokens) {
+            if (capability.isEmpty()) {
+                throw invalidLegacyReceiveRequest(
+                        GitWireError.Kind.EMPTY_LEGACY_RECEIVE_CAPABILITY);
+            }
+            capabilities.add(capability);
+        }
+    }
+
+    private byte[] readPayloadBytes(
+            GitBufferedByteTransportAdapter pkt,
+            ControlState control) throws IOException {
+        if (control.payloadLength() == 0) {
+            return new byte[0];
+        }
+        ByteBuf payload = pkt.readPayload(control);
+        try {
+            byte[] bytes = new byte[payload.readableBytes()];
+            payload.readBytes(bytes);
+            return bytes;
+        } finally {
+            payload.release();
+        }
+    }
+
+    private LegacyReceivePack readLegacyReceivePack(
+            LegacyReceiveCommandSection section) throws IOException {
+        PackIngestionSession session =
+                repositoryService.beginLegacyReceivePack(
+                        section.initialRequest());
+        try {
+            while (true) {
+                ByteBuf buffer = allocator.buffer(INPUT_BUFFER_SIZE);
+                try {
+                    int read = input.readInto(buffer, INPUT_BUFFER_SIZE);
+                    PackIngestionResult result = read == 0
+                            ? session.endOfInput()
+                            : session.accept(buffer);
+                    switch (result) {
+                        case PackIngestionResult.NeedInput ignored -> {
+                        }
+                        case PackIngestionResult.Complete complete -> {
+                            return new LegacyReceivePack(
+                                    section,
+                                    complete.quarantine());
+                        }
+                        case PackIngestionResult.Failed failed ->
+                                throw new IOException(
+                                        "Failed to ingest native Git receive pack",
+                                        failed.failure());
+                    }
+                    if (read == 0) {
+                        throw new EOFException(
+                                "Legacy receive-pack body ended before pack completed");
+                    }
+                } finally {
+                    buffer.release();
+                }
+            }
+        } finally {
+            session.close();
+        }
+    }
+
+    private void completeLegacyReceivePack(LegacyReceivePack receivePack)
+            throws IOException {
+        List<GitNativeClientOutput.ReceiveCommandStatus> outputStatuses =
+                new ArrayList<>();
+        for (GitNativeRepositoryService.ReceivePackStatus status
+                : repositoryService.completeLegacyReceivePack(receivePack)) {
+            outputStatuses.add(
+                    new GitNativeClientOutput.ReceiveCommandStatus(
+                            status.refName(),
+                            status.ok(),
+                            status.message()));
+        }
+        Set<String> requestedCapabilities =
+                receivePack.commandSection().capabilities();
+        if (!configuration.receivePack().reportStatus()
+                || !requestedCapabilities.contains("report-status")) {
+            return;
+        }
+        boolean sideBand64k = configuration.receivePack().sideBand64k()
+                && requestedCapabilities.contains("side-band-64k");
+        clientOutput.sendLegacyReceivePackStatus(
+                outputStatuses,
+                sideBand64k);
     }
 
     private static boolean isObjectId(String value) {
