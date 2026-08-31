@@ -29,4 +29,17 @@ class OutputStreamBufferedByteOutputTest {
             buffer.release();
         }
     }
+
+    @Test
+    void writesByteArrayRangeToOutputStream() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        OutputStreamBufferedByteOutput output =
+                new OutputStreamBufferedByteOutput(bytes);
+
+        output.write("xxhello!".getBytes(StandardCharsets.US_ASCII), 2, 5);
+        output.flush();
+
+        assertThat(bytes.toString(StandardCharsets.US_ASCII))
+                .isEqualTo("hello");
+    }
 }

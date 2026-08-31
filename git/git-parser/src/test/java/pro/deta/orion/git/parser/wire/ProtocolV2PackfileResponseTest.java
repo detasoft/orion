@@ -245,10 +245,9 @@ class ProtocolV2PackfileResponseTest {
         ByteBuf outbound = outputBuffer();
         AtomicBoolean closed = new AtomicBoolean();
         GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ignored -> {
+                new SubmittedByteBufOutput(outbound, ignored -> {
                     throw new IllegalStateException("delivery failed");
-                });
+                }));
         GitNativeClientOutput.ProtocolV2PackfileResponse response =
                 output.beginProtocolV2Packfile(
                         producer(
@@ -277,13 +276,12 @@ class ProtocolV2PackfileResponseTest {
             ByteBuf outbound,
             List<byte[]> sent) {
         return new GitNativeClientOutput(
-                outbound,
-                buffer -> {
+                new SubmittedByteBufOutput(outbound, buffer -> {
                     byte[] bytes = new byte[buffer.readableBytes()];
                     buffer.readBytes(bytes);
                     sent.add(bytes);
                     buffer.release();
-                });
+                }));
     }
 
     private static NativePackProducer producer(byte[] bytes) {

@@ -2,7 +2,6 @@ package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
@@ -10,9 +9,11 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,24 +33,20 @@ class GitNativeClientOutputTest {
 
     @Test
     void sendsProtocolV2UploadPackAdvertisement() throws Exception {
-        ByteBuf outbound = outputBuffer();
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        RecordingBufferedByteOutput sink = new RecordingBufferedByteOutput();
+        GitNativeClientOutput output = new GitNativeClientOutput(sink);
 
-        try {
-            output.sendV2UploadPackAdvertisement(
-                    GitWireConfiguration.allSupported().protocolV2());
+        output.sendV2UploadPackAdvertisement(
+                GitWireConfiguration.allSupported().protocolV2());
 
-            assertThat(outbound.toString(StandardCharsets.US_ASCII))
-                    .isEqualTo(
-                            "000eversion 2\n"
-                                    + "0013ls-refs=unborn\n"
-                                    + "004efetch=shallow wait-for-done filter "
-                                    + "ref-in-want sideband-all packfile-uris\n"
-                                    + "0012server-option\n"
-                                    + "0000");
-        } finally {
-            outbound.release();
-        }
+        assertThat(sink.ascii())
+                .isEqualTo(
+                        "000eversion 2\n"
+                                + "0013ls-refs=unborn\n"
+                                + "004efetch=shallow wait-for-done filter "
+                                + "ref-in-want sideband-all packfile-uris\n"
+                                + "0012server-option\n"
+                                + "0000");
     }
 
     @Test
@@ -57,7 +54,6 @@ class GitNativeClientOutputTest {
             throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         GitNativeClientOutput output = new GitNativeClientOutput(
-                UnpooledByteBufAllocator.DEFAULT,
                 new OutputStreamBufferedByteOutput(bytes));
         List<GitLsRefsResponse.Ref> refs = new ArrayList<>();
         for (int index = 0; index < 2_000; index++) {
@@ -68,27 +64,23 @@ class GitNativeClientOutputTest {
                     Optional.empty()));
         }
 
-        try {
-            output.sendLsRefs(new GitLsRefsResponse(refs));
+        output.sendLsRefs(new GitLsRefsResponse(refs));
 
-            byte[] wire = bytes.toByteArray();
-            assertThat(wire.length)
-                    .isGreaterThan(GitNativeClientOutput.BUFFER_CAPACITY);
-            assertThat(new String(
-                    wire,
-                    wire.length - 4,
-                    4,
-                    StandardCharsets.US_ASCII))
-                    .isEqualTo("0000");
-        } finally {
-            output.close();
-        }
+        byte[] wire = bytes.toByteArray();
+        assertThat(wire.length)
+                .isGreaterThan(GitNativeClientOutput.BUFFER_CAPACITY);
+        assertThat(new String(
+                wire,
+                wire.length - 4,
+                4,
+                StandardCharsets.US_ASCII))
+                .isEqualTo("0000");
     }
 
     @Test
     void sendsLegacyAdvertisement() throws Exception {
-        ByteBuf outbound = outputBuffer();
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        RecordingBufferedByteOutput sink = new RecordingBufferedByteOutput();
+        GitNativeClientOutput output = new GitNativeClientOutput(sink);
         GitV1Advertisement advertisement = new GitV1Advertisement(
                 List.of(GitCapability.MULTI_ACK),
                 List.of(
@@ -101,78 +93,60 @@ class GitNativeClientOutputTest {
                                 "refs/tags/v1",
                                 Optional.of(PEELED_TAG_ID))));
 
-        try {
-            output.sendAdvertisement(advertisement);
+        output.sendAdvertisement(advertisement);
 
-            assertThat(outbound.toString(StandardCharsets.UTF_8))
-                    .isEqualTo(
-                            "0047" + MAIN_ID
-                                    + " refs/heads/main\0multi_ack\n"
-                                    + "003a" + TAG_ID
-                                    + " refs/tags/v1\n"
-                                    + "003d" + PEELED_TAG_ID
-                                    + " refs/tags/v1^{}\n"
-                                    + "0000");
-        } finally {
-            outbound.release();
-        }
+        assertThat(sink.ascii())
+                .isEqualTo(
+                        "0047" + MAIN_ID
+                                + " refs/heads/main\0multi_ack\n"
+                                + "003a" + TAG_ID
+                                + " refs/tags/v1\n"
+                                + "003d" + PEELED_TAG_ID
+                                + " refs/tags/v1^{}\n"
+                                + "0000");
     }
 
     @Test
     void rejectsInvalidLsRefsObjectId() {
-        ByteBuf outbound = outputBuffer();
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                new RecordingBufferedByteOutput());
 
-        try {
-            assertThatThrownBy(() -> output.sendLsRefs(
-                    new GitLsRefsResponse(List.of(
-                            new GitLsRefsResponse.DirectRef(
-                                    "not-an-object-id",
-                                    "refs/heads/main",
-                                    Optional.empty(),
-                                    Optional.empty())))))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage(
-                            "Git object ID must contain 40 hexadecimal digits");
-        } finally {
-            outbound.release();
-        }
+        assertThatThrownBy(() -> output.sendLsRefs(
+                new GitLsRefsResponse(List.of(
+                        new GitLsRefsResponse.DirectRef(
+                                "not-an-object-id",
+                                "refs/heads/main",
+                                Optional.empty(),
+                                Optional.empty())))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage(
+                        "Git object ID must contain 40 hexadecimal digits");
     }
 
     @Test
     void rejectsBlankGitErrorMessage() {
-        ByteBuf outbound = outputBuffer();
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                new RecordingBufferedByteOutput());
 
-        try {
-            assertThatThrownBy(() -> output.sendError(" "))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("message must not be blank");
-        } finally {
-            outbound.release();
-        }
+        assertThatThrownBy(() -> output.sendError(" "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("message must not be blank");
     }
 
     @Test
-    void reportsFullDirectBufferAsBlockingOutputFailure() {
-        ByteBuf outbound = outputBuffer();
-        outbound.writerIndex(outbound.capacity());
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+    void writesSimpleSerializationToByteArrayOutput() throws Exception {
+        ByteArrayRecordingOutput sink = new ByteArrayRecordingOutput();
+        GitNativeClientOutput output = new GitNativeClientOutput(sink);
 
-        try {
-            assertThatThrownBy(output::sendNak)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("Native client output buffer is full");
-        } finally {
-            outbound.release();
-        }
+        output.sendNak();
+
+        assertThat(sink.ascii()).isEqualTo("0008NAK\n");
     }
 
     @Test
     void writesLegacySideBandResponse() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         GitNativeClientOutput output = new GitNativeClientOutput(
-                UnpooledByteBufAllocator.DEFAULT,
                 new OutputStreamBufferedByteOutput(bytes));
         GitNativeClientOutput.LegacySideBandResponse response =
                 output.beginLegacySideBand64k(
@@ -195,14 +169,13 @@ class GitNativeClientOutputTest {
         } finally {
             progress.release();
             response.close();
-            output.close();
         }
     }
 
     @Test
     void closesProducerWhenConcurrentPackResponseIsRejected() {
-        ByteBuf outbound = outputBuffer();
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                new RecordingBufferedByteOutput());
         TrackingProducer rejected = new TrackingProducer("PACK");
         GitNativeClientOutput.LegacyPackResponse active =
                 output.beginLegacyPack(producer("active"));
@@ -214,7 +187,6 @@ class GitNativeClientOutputTest {
             assertThat(rejected.closed).isTrue();
         } finally {
             active.close();
-            outbound.release();
         }
     }
 
@@ -222,7 +194,6 @@ class GitNativeClientOutputTest {
     void rejectsProducerThatMakesNoProgress() {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         GitNativeClientOutput output = new GitNativeClientOutput(
-                UnpooledByteBufAllocator.DEFAULT,
                 new OutputStreamBufferedByteOutput(bytes));
         GitNativeClientOutput.LegacyPackResponse response =
                 output.beginLegacyPack(new NativePackProducer() {
@@ -242,7 +213,6 @@ class GitNativeClientOutputTest {
                     .hasMessage("Native pack producer made no progress");
         } finally {
             response.close();
-            output.close();
         }
     }
 
@@ -250,30 +220,50 @@ class GitNativeClientOutputTest {
     void allowsOutputAfterCompletedPackResponse() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         GitNativeClientOutput output = new GitNativeClientOutput(
-                UnpooledByteBufAllocator.DEFAULT,
                 new OutputStreamBufferedByteOutput(bytes));
         GitNativeClientOutput.LegacyPackResponse response =
                 output.beginLegacyPack(producer("PACK"));
 
-        try {
-            response.advance();
+        response.advance();
 
-            assertThatCode(output::sendNak).doesNotThrowAnyException();
-            assertThat(new String(bytes.toByteArray(), StandardCharsets.US_ASCII))
-                    .isEqualTo("0008NAK\nPACK0008NAK\n");
-        } finally {
-            output.close();
-        }
-    }
-
-    private static ByteBuf outputBuffer() {
-        return Unpooled.buffer(
-                GitNativeClientOutput.BUFFER_CAPACITY,
-                GitNativeClientOutput.BUFFER_CAPACITY);
+        assertThatCode(output::sendNak).doesNotThrowAnyException();
+        assertThat(new String(bytes.toByteArray(), StandardCharsets.US_ASCII))
+                .isEqualTo("0008NAK\nPACK0008NAK\n");
     }
 
     private static NativePackProducer producer(String value) {
         return new TrackingProducer(value);
+    }
+
+    private static final class ByteArrayRecordingOutput
+            implements BufferedByteOutput {
+        private final ByteArrayOutputStream bytes =
+                new ByteArrayOutputStream();
+
+        @Override
+        public ByteBuf getByteBuf() {
+            throw new AssertionError(
+                    "Simple serialization should not borrow a ByteBuf");
+        }
+
+        @Override
+        public void write(byte[] source, int offset, int length) {
+            bytes.write(source, offset, length);
+        }
+
+        @Override
+        public void write(ByteBuf buffer) {
+            throw new AssertionError(
+                    "Simple serialization should use byte-array writes");
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        private String ascii() throws IOException {
+            return bytes.toString(StandardCharsets.US_ASCII);
+        }
     }
 
     private static final class TrackingProducer implements NativePackProducer {

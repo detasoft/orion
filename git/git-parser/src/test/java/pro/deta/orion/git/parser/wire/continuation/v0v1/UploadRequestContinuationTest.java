@@ -10,6 +10,7 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -287,7 +288,7 @@ class UploadRequestContinuationTest {
                 GitNativeClientOutput.BUFFER_CAPACITY);
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
-                new GitNativeClientOutput(outbound),
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
     }

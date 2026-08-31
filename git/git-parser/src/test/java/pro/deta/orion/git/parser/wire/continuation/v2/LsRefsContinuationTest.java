@@ -14,9 +14,11 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
+import pro.deta.orion.git.parser.wire.SubmittedByteBufOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -190,7 +192,7 @@ class LsRefsContinuationTest {
         Driver driver = new Driver(
                 context(
                         provider,
-                        new GitNativeClientOutput(outbound),
+                        new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                         new GitWireConfiguration.ProtocolV2(
                                 true, false, true, false)),
                 initialRequest());
@@ -300,8 +302,7 @@ class LsRefsContinuationTest {
         ByteBuf outbound = outputBuffer();
         outbound.writerIndex(outbound.capacity());
         GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ByteBuf::release);
+                new SubmittedByteBufOutput(outbound, ByteBuf::release));
         Driver driver = new Driver(
                 context(
                         new InMemoryNativeGitRepositoryProvider(),
@@ -329,8 +330,7 @@ class LsRefsContinuationTest {
         outbound.writerIndex(outbound.capacity());
         List<ByteBuf> submitted = new ArrayList<>();
         GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                submitted::add);
+                new SubmittedByteBufOutput(outbound, submitted::add));
         ContinuationRuntime<ByteBuf> runtime =
                 new ContinuationRuntime<>(
                         new LsRefsContinuation(
@@ -367,10 +367,9 @@ class LsRefsContinuationTest {
         IllegalStateException failure =
                 new IllegalStateException("delivery failed");
         GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ignored -> {
+                new SubmittedByteBufOutput(outbound, ignored -> {
                     throw failure;
-                });
+                }));
         InspectableRuntime runtime = new InspectableRuntime(
                 new LsRefsContinuation(
                         context(
@@ -401,8 +400,10 @@ class LsRefsContinuationTest {
     @Test
     void propagatesExpectedOutputFailure() {
         ByteBuf outbound = outputBuffer();
-        outbound.writerIndex(outbound.capacity());
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                new SubmittedByteBufOutput(outbound, ignored -> {
+                    throw new IllegalStateException("delivery failed");
+                }));
         Driver driver = new Driver(
                 context(
                         new InMemoryNativeGitRepositoryProvider(),
@@ -420,7 +421,7 @@ class LsRefsContinuationTest {
                                         "Failed to serve protocol v2 ls-refs");
                                 assertThat(error.throwable())
                                         .hasMessage(
-                                                "Native client output buffer is full");
+                                                "delivery failed");
                             });
         } finally {
             input.release();
@@ -589,7 +590,7 @@ class LsRefsContinuationTest {
             ByteBuf outbound) {
         return context(
                 provider,
-                new GitNativeClientOutput(outbound));
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)));
     }
 
     private static GitMinimalWireMachine.Context context(

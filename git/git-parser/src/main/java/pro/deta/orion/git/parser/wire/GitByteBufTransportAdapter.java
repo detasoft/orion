@@ -123,8 +123,7 @@ public final class GitByteBufTransportAdapter {
                         sessionContext.context(),
                         new ControlHeaderContinuation(
                                 sessionContext.context(),
-                                ProtocolStage.INITIAL_REQUEST)),
-                sessionContext.clientOutput());
+                                ProtocolStage.INITIAL_REQUEST)));
     }
 
     private StreamSession smartHttpPostSession(
@@ -135,13 +134,11 @@ public final class GitByteBufTransportAdapter {
         return new StreamSession(
                 new GitMinimalWireMachine(
                         context,
-                        smartHttpPostContinuation(context, data)),
-                sessionContext.clientOutput());
+                        smartHttpPostContinuation(context, data)));
     }
 
     private SessionContext sessionContext(BufferedByteOutput output) {
         GitNativeClientOutput clientOutput = new GitNativeClientOutput(
-                allocator,
                 output);
         return new SessionContext(
                 new GitMinimalWireMachine.Context(
@@ -152,23 +149,19 @@ public final class GitByteBufTransportAdapter {
                                 accessHook,
                                 configuration,
                                 packfileUriSourceFactory),
-                        configuration),
-                clientOutput);
+                        configuration));
     }
 
     private record SessionContext(
-            GitMinimalWireMachine.Context context,
-            GitNativeClientOutput clientOutput) {
+            GitMinimalWireMachine.Context context) {
     }
 
     private record StreamSession(
-            GitMinimalWireMachine machine,
-            GitNativeClientOutput clientOutput) implements AutoCloseable {
+            GitMinimalWireMachine machine) implements AutoCloseable {
 
         @Override
         public void close() {
             machine.close();
-            clientOutput.close();
         }
     }
 

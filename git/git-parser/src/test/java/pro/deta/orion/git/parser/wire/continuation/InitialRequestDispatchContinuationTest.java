@@ -10,6 +10,7 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.continuation.v0v1.ReceivePackContinuation;
@@ -114,10 +115,7 @@ class InitialRequestDispatchContinuationTest extends ByteBufContinuationTest {
         provider.create("/project.git").valueOrFailure("repository");
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
-                new GitNativeClientOutput(
-                        UnpooledByteBufAllocator.DEFAULT.buffer(
-                                GitNativeClientOutput.BUFFER_CAPACITY,
-                                GitNativeClientOutput.BUFFER_CAPACITY)),
+                new GitNativeClientOutput(new RecordingBufferedByteOutput()),
                 provider,
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
     }

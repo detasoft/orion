@@ -1,7 +1,6 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
@@ -22,7 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
@@ -32,44 +31,13 @@ public final class GitNativeClientOutput {
     public static final int BUFFER_CAPACITY = 64 * 1024;
 
     private final BufferedByteOutput outputSink;
-    private final boolean releaseOutputOnClose;
-    private final ByteBuf output;
+    private ByteBuf output;
     private LegacySideBandResponse sideBandResponse;
     private LegacyPackResponse legacyPackResponse;
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
-    public GitNativeClientOutput(ByteBuf output) {
-        this(output, null, false);
-    }
-
-    public GitNativeClientOutput(
-            ByteBuf output,
-            Consumer<ByteBuf> sendToClient) {
-        this(
-                output,
-                new CopyingBufferedByteOutput(
-                        Objects.requireNonNull(sendToClient, "sendToClient")),
-                false);
-    }
-
-    public GitNativeClientOutput(
-            ByteBufAllocator allocator,
-            BufferedByteOutput output) {
-        this(
-                Objects.requireNonNull(allocator, "allocator")
-                        .buffer(BUFFER_CAPACITY, BUFFER_CAPACITY),
-                output,
-                true);
-    }
-
-    private GitNativeClientOutput(
-            ByteBuf output,
-            BufferedByteOutput outputSink,
-            boolean releaseOutputOnClose) {
-        this.output = Objects.requireNonNull(output, "output");
-        this.outputSink = outputSink;
-        this.releaseOutputOnClose = releaseOutputOnClose;
-        requireFixedCapacity(output);
+    public GitNativeClientOutput(BufferedByteOutput outputSink) {
+        this.outputSink = Objects.requireNonNull(outputSink, "outputSink");
     }
 
     private static void requireFixedCapacity(ByteBuf output) {
@@ -290,6 +258,7 @@ public final class GitNativeClientOutput {
     public LegacySideBandResponse beginLegacySideBand64k(
             NativePackProducer producer,
             SideBandChannel channel) {
+        output();
         Objects.requireNonNull(channel, "channel");
         Result<NativePackProducer> availableProducer =
                 availableProducer(producer);
@@ -305,6 +274,7 @@ public final class GitNativeClientOutput {
 
     public LegacyPackResponse beginLegacyPack(
             NativePackProducer producer) {
+        output();
         Result<NativePackProducer> availableProducer =
                 availableProducer(producer);
         if (availableProducer instanceof
@@ -372,6 +342,7 @@ public final class GitNativeClientOutput {
             Map<String, GitObjectId> wantedRefs,
             List<NativePackfileUri> packfileUris,
             boolean sidebandAll) {
+        output();
         Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
         Objects.requireNonNull(wantedRefs, "wantedRefs");
         Objects.requireNonNull(packfileUris, "packfileUris");
@@ -563,10 +534,16 @@ public final class GitNativeClientOutput {
     private void sendSerialization(
             OutputSerialization operation) throws IOException {
         ensureNoActiveResponse();
-        while (!operation.writeAvailable(output)) {
-            flushOutput();
+        operation.writeTo(outputSink, this::output);
+    }
+
+    private ByteBuf output() {
+        if (output == null) {
+            output = Objects.requireNonNull(outputSink, "outputSink")
+                    .getByteBuf();
+            requireFixedCapacity(output);
         }
-        finishOutput();
+        return output;
     }
 
     private void ensureNoActiveResponse() {
@@ -578,22 +555,21 @@ public final class GitNativeClientOutput {
         }
     }
 
-    private void flushOutput() throws IOException {
+    private static void flushOutput(
+            BufferedByteOutput outputSink,
+            ByteBuf output) throws IOException {
         if (!output.isReadable()) {
             return;
-        }
-        if (outputSink == null) {
-            throw new IllegalStateException(
-                    "Native client output buffer is full");
         }
         outputSink.write(output);
         output.clear();
     }
 
+    private void flushOutput() throws IOException {
+        flushOutput(outputSink, output());
+    }
+
     private void finishOutput() throws IOException {
-        if (outputSink == null) {
-            return;
-        }
         flushOutput();
         outputSink.flush();
     }
@@ -719,12 +695,6 @@ public final class GitNativeClientOutput {
         output.setByte(
                 offset + 3,
                 hexDigit(packetLength & 0x0f));
-    }
-
-    public void close() {
-        if (releaseOutputOnClose && output.refCnt() > 0) {
-            output.release();
-        }
     }
 
     public enum AckStatus {
@@ -1498,39 +1468,17 @@ public final class GitNativeClientOutput {
         }
     }
 
-    private static final class CopyingBufferedByteOutput
-            implements BufferedByteOutput {
-        private final Consumer<ByteBuf> sendToClient;
-
-        private CopyingBufferedByteOutput(Consumer<ByteBuf> sendToClient) {
-            this.sendToClient = Objects.requireNonNull(
-                    sendToClient,
-                    "sendToClient");
-        }
-
-        @Override
-        public void write(ByteBuf buffer) {
-            if (!buffer.isReadable()) {
-                return;
-            }
-            ByteBuf submitted = buffer.copy(
-                    buffer.readerIndex(),
-                    buffer.readableBytes());
-            try {
-                sendToClient.accept(submitted);
-            } catch (Throwable failure) {
-                submitted.release();
-                throw failure;
-            }
-        }
-
-        @Override
-        public void flush() {
-        }
-    }
-
     private interface OutputSerialization {
-        boolean writeAvailable(ByteBuf output);
+        void writeTo(
+                BufferedByteOutput outputSink,
+                Supplier<ByteBuf> output) throws IOException;
+
+        static void writeBytes(
+                BufferedByteOutput outputSink,
+                Supplier<ByteBuf> output,
+                byte[] bytes) throws IOException {
+            outputSink.write(bytes);
+        }
     }
 
     private static final class PacketListSerialization
@@ -1544,24 +1492,33 @@ public final class GitNativeClientOutput {
         }
 
         @Override
-        public boolean writeAvailable(ByteBuf output) {
+        public void writeTo(
+                BufferedByteOutput outputSink,
+                Supplier<ByteBuf> output) throws IOException {
             while (packetIndex < packets.size()) {
                 byte[] packet = packets.get(packetIndex);
-                int remaining = packet.length - packetOffset;
-                int writable = Math.min(
-                        output.writableBytes(),
-                        remaining);
-                output.writeBytes(packet, packetOffset, writable);
-                packetOffset += writable;
-                if (packetOffset == packet.length) {
-                    packetIndex++;
-                    packetOffset = 0;
+                if (packetOffset == 0) {
+                    OutputSerialization.writeBytes(
+                            outputSink,
+                            output,
+                            packet);
+                } else {
+                    byte[] remaining = new byte[packet.length - packetOffset];
+                    System.arraycopy(
+                            packet,
+                            packetOffset,
+                            remaining,
+                            0,
+                            remaining.length);
+                    OutputSerialization.writeBytes(
+                            outputSink,
+                            output,
+                            remaining);
                 }
-                if (!output.isWritable()) {
-                    return false;
-                }
+                packetIndex++;
+                packetOffset = 0;
             }
-            return true;
+            outputSink.flush();
         }
     }
 
@@ -1579,13 +1536,16 @@ public final class GitNativeClientOutput {
         }
 
         @Override
-        public boolean writeAvailable(ByteBuf output) {
-            while (packetOffset < packetLength
-                    && output.isWritable()) {
-                output.writeByte(byteAt(packetOffset));
-                packetOffset++;
+        public void writeTo(
+                BufferedByteOutput outputSink,
+                Supplier<ByteBuf> output) throws IOException {
+            byte[] packet = new byte[packetLength - packetOffset];
+            for (int index = 0; index < packet.length; index++) {
+                packet[index] = byteAt(packetOffset + index);
             }
-            return packetOffset == packetLength;
+            packetOffset = packetLength;
+            OutputSerialization.writeBytes(outputSink, output, packet);
+            outputSink.flush();
         }
 
         private byte byteAt(int offset) {
@@ -1610,54 +1570,16 @@ public final class GitNativeClientOutput {
         }
 
         @Override
-        public boolean writeAvailable(ByteBuf output) {
-            while (packetIndex <= payloads.size()
-                    && output.isWritable()) {
-                String payload = packetIndex < payloads.size()
-                        ? payloads.get(packetIndex)
-                        : "";
-                int packetLength = packetIndex < payloads.size()
-                        ? payload.length() + PKT_LINE_HEADER_SIZE
-                        : 0;
-                while (packetOffset
-                        < packetSize(payload, packetLength)
-                        && output.isWritable()) {
-                    output.writeByte(byteAt(
-                            payload,
-                            packetLength,
-                            packetOffset));
-                    packetOffset++;
-                }
-                if (packetOffset
-                        == packetSize(payload, packetLength)) {
-                    packetIndex++;
-                    packetOffset = 0;
-                }
-            }
-            return packetIndex > payloads.size();
+        public void writeTo(
+                BufferedByteOutput outputSink,
+                Supplier<ByteBuf> output) throws IOException {
+            PacketListSerialization packets =
+                    new PacketListSerialization(
+                            encodeAsciiPackets(payloads, false));
+            packets.writeTo(outputSink, output);
+            packetIndex = payloads.size() + 1;
+            packetOffset = 0;
         }
-
-        private static int packetSize(
-                String payload,
-                int packetLength) {
-            return packetLength == 0
-                    ? PKT_LINE_HEADER_SIZE
-                    : payload.length() + PKT_LINE_HEADER_SIZE;
-        }
-
-        private static byte byteAt(
-                String payload,
-                int packetLength,
-                int offset) {
-            if (offset < PKT_LINE_HEADER_SIZE) {
-                int shift =
-                        (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
-                return hexDigit((packetLength >>> shift) & 0x0f);
-            }
-            return (byte) payload.charAt(
-                    offset - PKT_LINE_HEADER_SIZE);
-        }
-
     }
 
     private static final class ReceivePackStatusSerialization
@@ -1677,21 +1599,20 @@ public final class GitNativeClientOutput {
         }
 
         @Override
-        public boolean writeAvailable(ByteBuf output) {
-            while (packetIndex < packetCount()
-                    && output.isWritable()) {
+        public void writeTo(
+                BufferedByteOutput outputSink,
+                Supplier<ByteBuf> output) throws IOException {
+            while (packetIndex < packetCount()) {
                 int packetSize = packetSize();
-                while (packetOffset < packetSize
-                        && output.isWritable()) {
-                    output.writeByte(byteAt(packetOffset));
-                    packetOffset++;
+                byte[] packet = new byte[packetSize - packetOffset];
+                for (int index = 0; index < packet.length; index++) {
+                    packet[index] = byteAt(packetOffset + index);
                 }
-                if (packetOffset == packetSize) {
-                    packetIndex++;
-                    packetOffset = 0;
-                }
+                OutputSerialization.writeBytes(outputSink, output, packet);
+                packetIndex++;
+                packetOffset = 0;
             }
-            return packetIndex == packetCount();
+            outputSink.flush();
         }
 
         private int packetCount() {

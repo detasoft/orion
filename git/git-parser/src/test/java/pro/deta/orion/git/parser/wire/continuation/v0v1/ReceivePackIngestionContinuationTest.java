@@ -13,6 +13,7 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
@@ -164,7 +165,7 @@ class ReceivePackIngestionContinuationTest {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         GitNativeClientOutput output =
-                new GitNativeClientOutput(outbound);
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound));
         GitMinimalWireMachine.Context context =
                 GitMinimalWireMachine.testContext(
                         UnpooledByteBufAllocator.DEFAULT,
@@ -185,7 +186,7 @@ class ReceivePackIngestionContinuationTest {
         ByteBuf outbound = outputBuffer();
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
-                new GitNativeClientOutput(outbound),
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
     }

@@ -100,7 +100,7 @@ class GitMinimalWireMachineTest {
                         GitNativeClientOutput.BUFFER_CAPACITY);
         return new OutputFixture(
                 outbound,
-                new GitNativeClientOutput(outbound));
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)));
     }
 
     private static InitialRequestData receiveRequest() {

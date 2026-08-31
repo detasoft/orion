@@ -9,7 +9,9 @@ import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.SubmittedByteBufOutput;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -29,7 +31,7 @@ class UploadPackContinuationTest {
         ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
         try {
             UploadPackContinuation continuation = continuation(
-                    new GitNativeClientOutput(outbound));
+                    new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)));
 
             ContinuationFlow<ByteBuf> flow =
                     continuation.process(input);
@@ -53,8 +55,7 @@ class UploadPackContinuationTest {
         outbound.writerIndex(outbound.capacity() - 1);
         ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
         GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ByteBuf::release);
+                new SubmittedByteBufOutput(outbound, ByteBuf::release));
         try {
             UploadPackContinuation continuation =
                     continuation(output);
@@ -77,9 +78,11 @@ class UploadPackContinuationTest {
     @Test
     void completesWithErrorWhenAdvertisementOutputRejectsOperation() {
         ByteBuf outbound = outputBuffer();
-        outbound.writerIndex(outbound.capacity());
         ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                new SubmittedByteBufOutput(outbound, ignored -> {
+                    throw new IllegalStateException("delivery failed");
+                }));
 
         try {
             ContinuationFlow<ByteBuf> flow =
@@ -95,7 +98,7 @@ class UploadPackContinuationTest {
                                         "Failed to advertise native Git repository");
                                 assertThat(error.throwable())
                                         .hasMessage(
-                                                "Native client output buffer is full");
+                                                "delivery failed");
                             });
         } finally {
             input.release();

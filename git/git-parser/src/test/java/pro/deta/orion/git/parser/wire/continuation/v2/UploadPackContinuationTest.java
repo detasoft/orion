@@ -9,8 +9,10 @@ import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
+import pro.deta.orion.git.parser.wire.SubmittedByteBufOutput;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -41,7 +43,7 @@ class UploadPackContinuationTest {
         try {
             UploadPackContinuation continuation =
                     new UploadPackContinuation(
-                            context(new GitNativeClientOutput(outbound)),
+                            context(new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound))),
                             initialRequest());
 
             ContinuationFlow<ByteBuf> flow =
@@ -79,7 +81,7 @@ class UploadPackContinuationTest {
             UploadPackContinuation continuation =
                     new UploadPackContinuation(
                             context(
-                                    new GitNativeClientOutput(outbound),
+                                    new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                                     protocolV2),
                             initialRequest());
 
@@ -110,8 +112,7 @@ class UploadPackContinuationTest {
         outbound.writerIndex(outbound.capacity());
         ByteBuf input = Unpooled.wrappedBuffer(new byte[] {1});
         GitNativeClientOutput output = new GitNativeClientOutput(
-                outbound,
-                ByteBuf::release);
+                new SubmittedByteBufOutput(outbound, ByteBuf::release));
         try {
             ContinuationFlow<ByteBuf> flow = new UploadPackContinuation(
                     context(output),
@@ -140,7 +141,7 @@ class UploadPackContinuationTest {
             Continuation<ByteBuf> completed = driveOneByteAtATime(
                     input,
                     context(
-                            new GitNativeClientOutput(outbound),
+                            new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                             new GitWireConfiguration.ProtocolV2(
                                     true, false, false, false)));
 
@@ -159,7 +160,7 @@ class UploadPackContinuationTest {
             Continuation<ByteBuf> completed = driveOneByteAtATime(
                     input,
                     context(
-                            new GitNativeClientOutput(outbound),
+                            new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                             new GitWireConfiguration.ProtocolV2(
                                     true, false, false, false)));
 
@@ -181,7 +182,7 @@ class UploadPackContinuationTest {
         ByteBuf outbound = outputBuffer();
         try {
             Driver driver = new Driver(context(
-                    new GitNativeClientOutput(outbound),
+                    new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                     new GitWireConfiguration.ProtocolV2(
                             false, false, true, false)));
             driver.drive(input);
@@ -201,7 +202,7 @@ class UploadPackContinuationTest {
         ByteBuf input = request("command=ls-refs\n");
         try {
             Driver driver = new Driver(context(
-                    new GitNativeClientOutput(outbound),
+                    new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                     new GitWireConfiguration.ProtocolV2(
                             false, false, true, false)));
 
@@ -220,7 +221,7 @@ class UploadPackContinuationTest {
         ByteBuf input = request("command=fetch\n");
         try {
             Driver driver = new Driver(context(
-                    new GitNativeClientOutput(outbound),
+                    new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                     new GitWireConfiguration.ProtocolV2(
                             true, true, false, false)));
 
@@ -242,7 +243,7 @@ class UploadPackContinuationTest {
         writeDelimiter(input);
         try {
             Driver driver = new Driver(context(
-                    new GitNativeClientOutput(outbound),
+                    new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                     new GitWireConfiguration.ProtocolV2(
                             false, false, true, false)));
 
@@ -264,7 +265,7 @@ class UploadPackContinuationTest {
         writeDelimiter(input);
         try {
             Driver driver = new Driver(context(
-                    new GitNativeClientOutput(outbound),
+                    new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                     new GitWireConfiguration.ProtocolV2(
                             false, false, true, true)));
 
@@ -512,7 +513,7 @@ class UploadPackContinuationTest {
         ByteBuf outbound = outputBuffer();
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
-                new GitNativeClientOutput(outbound),
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
     }

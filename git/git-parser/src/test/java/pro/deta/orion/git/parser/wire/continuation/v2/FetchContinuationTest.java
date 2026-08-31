@@ -14,6 +14,7 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -177,7 +178,7 @@ class FetchContinuationTest {
         Driver driver = new Driver(
                 GitMinimalWireMachine.testContext(
                         UnpooledByteBufAllocator.DEFAULT,
-                        new GitNativeClientOutput(outbound),
+                        new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                         provider,
                         GitNativeRepositoryAccessHook.ALLOW_ALL));
         ByteBuf input = Unpooled.buffer();
@@ -502,7 +503,7 @@ class FetchContinuationTest {
         ByteBuf outbound = outputBuffer();
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
-                new GitNativeClientOutput(outbound),
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL);
     }
@@ -513,7 +514,7 @@ class FetchContinuationTest {
         GitWireConfiguration supported = GitWireConfiguration.allSupported();
         return GitMinimalWireMachine.testContext(
                 UnpooledByteBufAllocator.DEFAULT,
-                new GitNativeClientOutput(outbound),
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)),
                 new InMemoryNativeGitRepositoryProvider(),
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
                 new GitWireConfiguration(

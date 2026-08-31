@@ -11,7 +11,9 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.SubmittedByteBufOutput;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -62,7 +64,7 @@ class UploadNegotiationContinuationTest {
     void parsesFragmentedHavesAcrossFlushRounds() {
         ByteBuf outbound = fixedOutput();
         GitNativeClientOutput clientOutput =
-                new GitNativeClientOutput(outbound);
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound));
         Driver driver = new Driver(context(clientOutput));
         ByteBuf input = Unpooled.buffer();
         writeData(input, "have " + FIRST_ID + "\n");
@@ -88,13 +90,12 @@ class UploadNegotiationContinuationTest {
     }
 
     @Test
-    void yieldsWhenNakOutputNeedsStreaming() {
+    void writesNakToClientOutputWithoutScratchCapacity() {
         ByteBuf outbound = fixedOutput();
         outbound.writerIndex(outbound.capacity());
         List<ByteBuf> sent = new ArrayList<>();
         GitNativeClientOutput clientOutput = new GitNativeClientOutput(
-                outbound,
-                sent::add);
+                new SubmittedByteBufOutput(outbound, sent::add));
         UploadNegotiationContinuation negotiation =
                 new UploadNegotiationContinuation(
                         context(clientOutput),
@@ -115,7 +116,7 @@ class UploadNegotiationContinuationTest {
         try {
             assertThat(flow)
                     .isEqualTo(ContinuationFlow.transition(negotiation));
-            assertThat(sent).hasSize(2);
+            assertThat(sent).hasSize(1);
             assertThat(sent.getLast()
                     .toString(StandardCharsets.US_ASCII))
                     .isEqualTo("0008NAK\n");
@@ -132,7 +133,11 @@ class UploadNegotiationContinuationTest {
         ByteBuf outbound = fixedOutput();
         outbound.writerIndex(outbound.capacity());
         GitNativeClientOutput clientOutput =
-                new GitNativeClientOutput(outbound);
+                new GitNativeClientOutput(new SubmittedByteBufOutput(
+                        outbound,
+                        ignored -> {
+                            throw new IllegalStateException("delivery failed");
+                        }));
         UploadNegotiationContinuation negotiation =
                 new UploadNegotiationContinuation(
                         context(clientOutput),
@@ -162,7 +167,7 @@ class UploadNegotiationContinuationTest {
                                                 + " negotiation response");
                                 assertThat(error.throwable())
                                         .hasMessage(
-                                                "Native client output buffer is full");
+                                                "delivery failed");
                             });
     }
 
@@ -307,7 +312,7 @@ class UploadNegotiationContinuationTest {
     }
 
     private static GitMinimalWireMachine.Context context() {
-        return context(new GitNativeClientOutput(fixedOutput()));
+        return context(new GitNativeClientOutput(new RecordingBufferedByteOutput(fixedOutput())));
     }
 
     private static GitMinimalWireMachine.Context context(

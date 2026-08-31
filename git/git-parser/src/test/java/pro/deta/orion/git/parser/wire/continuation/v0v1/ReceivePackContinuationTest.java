@@ -9,7 +9,9 @@ import pro.deta.orion.continuation.ContinuationFlow;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.RecordingBufferedByteOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.SubmittedByteBufOutput;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
@@ -225,8 +227,10 @@ class ReceivePackContinuationTest {
     @Test
     void reportsOutputOperationFailureThroughContinuationFlow() {
         ByteBuf outbound = outputBuffer();
-        outbound.writerIndex(outbound.capacity());
-        GitNativeClientOutput output = new GitNativeClientOutput(outbound);
+        GitNativeClientOutput output = new GitNativeClientOutput(
+                new SubmittedByteBufOutput(outbound, ignored -> {
+                    throw new IllegalStateException("delivery failed");
+                }));
         ByteBuf input = Unpooled.buffer();
         try {
             ContinuationFlow<ByteBuf> flow = continuation(output)
@@ -243,7 +247,7 @@ class ReceivePackContinuationTest {
                                                 + " repository for receive-pack");
                                 assertThat(error.throwable())
                                         .hasMessage(
-                                                "Native client output buffer is full");
+                                                "delivery failed");
                             });
         } finally {
             input.release();
@@ -278,7 +282,7 @@ class ReceivePackContinuationTest {
     private static ReceiveCommandContinuation advertisedCommands(
             ByteBuf outbound) {
         ContinuationFlow<ByteBuf> flow = continuation(
-                new GitNativeClientOutput(outbound))
+                new GitNativeClientOutput(new RecordingBufferedByteOutput(outbound)))
                 .process(Unpooled.EMPTY_BUFFER);
         assertThat(flow)
                 .isInstanceOf(ContinuationFlow.Transition.class);

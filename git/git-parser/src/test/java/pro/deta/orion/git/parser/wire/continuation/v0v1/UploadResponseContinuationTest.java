@@ -12,6 +12,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.parser.wire.GitMinimalWireMachine;
 import pro.deta.orion.git.parser.wire.GitNativeClientOutput;
+import pro.deta.orion.git.parser.wire.SubmittedByteBufOutput;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -35,9 +36,7 @@ class UploadResponseContinuationTest {
         ByteBuf outbound = fixedOutput();
         List<ByteBuf> sent = new ArrayList<>();
         UploadResponseContinuation continuation = continuation(
-                new GitNativeClientOutput(
-                        outbound,
-                        sent::add),
+                new GitNativeClientOutput(new SubmittedByteBufOutput(outbound, sent::add)),
                 Set.of("side-band-64k"),
                 List.of(GitCapability.SIDE_BAND_64K));
 
@@ -82,7 +81,7 @@ class UploadResponseContinuationTest {
         ByteBuf outbound = fixedOutput();
         outbound.writerIndex(outbound.capacity());
         UploadResponseContinuation continuation = continuation(
-                new GitNativeClientOutput(outbound, ByteBuf::release),
+                new GitNativeClientOutput(new SubmittedByteBufOutput(outbound, ByteBuf::release)),
                 Set.of("side-band-64k"),
                 List.of(GitCapability.SIDE_BAND_64K));
 
@@ -102,9 +101,7 @@ class UploadResponseContinuationTest {
         ByteBuf outbound = fixedOutput();
         List<ByteBuf> sent = new ArrayList<>();
         UploadResponseContinuation continuation = continuation(
-                new GitNativeClientOutput(
-                        outbound,
-                        sent::add),
+                new GitNativeClientOutput(new SubmittedByteBufOutput(outbound, sent::add)),
                 Set.of(),
                 List.of(GitCapability.SIDE_BAND_64K));
 
