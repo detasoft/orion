@@ -356,8 +356,7 @@ public class SshCommandFactory implements CommandFactory {
             GitBufferedByteTransportAdapter adapter =
                     new GitBufferedByteTransportAdapter(
                             null,
-                            new OutputStreamBufferedByteOutput(outputStream),
-                            UnpooledByteBufAllocator.DEFAULT);
+                            new OutputStreamBufferedByteOutput(outputStream));
             adapter.writeSidebandError(stackTrace(error));
             adapter.flush();
             return;
@@ -371,8 +370,7 @@ public class SshCommandFactory implements CommandFactory {
         GitBufferedByteTransportAdapter adapter =
                 new GitBufferedByteTransportAdapter(
                         null,
-                        new OutputStreamBufferedByteOutput(outputStream),
-                        UnpooledByteBufAllocator.DEFAULT);
+                        new OutputStreamBufferedByteOutput(outputStream));
         adapter.writeTextLine("ERR " + message);
         adapter.flush();
     }

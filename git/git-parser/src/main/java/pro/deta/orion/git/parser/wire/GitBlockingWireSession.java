@@ -236,7 +236,7 @@ public final class GitBlockingWireSession {
         if (input == null) {
             throw new IllegalStateException("input is not configured");
         }
-        return new GitBufferedByteTransportAdapter(input, null, allocator);
+        return new GitBufferedByteTransportAdapter(input, null);
     }
 
     private static IOException invalidV2Request() {

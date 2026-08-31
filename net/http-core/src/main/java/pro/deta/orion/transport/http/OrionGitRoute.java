@@ -303,8 +303,7 @@ public class OrionGitRoute implements OrionHttpRoute {
         GitBufferedByteTransportAdapter adapter =
                 new GitBufferedByteTransportAdapter(
                         null,
-                        output,
-                        UnpooledByteBufAllocator.DEFAULT);
+                        output);
         adapter.writeTextLine("# service=" + service.wireName());
         adapter.writeFlush();
     }

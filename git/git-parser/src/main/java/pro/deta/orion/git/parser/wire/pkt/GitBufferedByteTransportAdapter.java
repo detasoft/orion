@@ -1,7 +1,6 @@
 package pro.deta.orion.git.parser.wire.pkt;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
@@ -22,17 +21,14 @@ public final class GitBufferedByteTransportAdapter {
 
     private final BufferedByteInput input;
     private final BufferedByteOutput output;
-    private final ByteBufAllocator allocator;
     private final GitPktLineWriter pktLineWriter;
 
     public GitBufferedByteTransportAdapter(
             BufferedByteInput input,
-            BufferedByteOutput output,
-            ByteBufAllocator allocator) {
+            BufferedByteOutput output) {
         this.input = input;
         this.output = output;
-        this.allocator = Objects.requireNonNull(allocator, "allocator");
-        pktLineWriter = new GitPktLineWriter(allocator);
+        pktLineWriter = new GitPktLineWriter();
     }
 
     public ControlState readControlState() throws IOException {
@@ -59,27 +55,35 @@ public final class GitBufferedByteTransportAdapter {
     }
 
     public void writeData(ByteBuf payload) throws IOException {
-        writePacket(pktLineWriter.writeData(payload));
+        Objects.requireNonNull(payload, "payload");
+        int payloadLength = payload.readableBytes();
+        BufferedByteOutput output = requireOutput();
+        output.write(pktLineWriter.writeDataHeader(payloadLength));
+        output.write(payload.slice(payload.readerIndex(), payloadLength));
     }
 
     public void writeText(String payload) throws IOException {
-        writePacket(pktLineWriter.writeText(payload));
+        writeData(utf8(payload));
     }
 
     public void writeTextLine(String payload) throws IOException {
-        writePacket(pktLineWriter.writeTextLine(payload));
+        byte[] text = utf8(payload);
+        byte[] line = new byte[text.length + 1];
+        System.arraycopy(text, 0, line, 0, text.length);
+        line[line.length - 1] = '\n';
+        writeData(line);
     }
 
     public void writeFlush() throws IOException {
-        writePacket(pktLineWriter.writeFlush());
+        requireOutput().write(pktLineWriter.writeFlush());
     }
 
     public void writeDelimiter() throws IOException {
-        writePacket(pktLineWriter.writeDelimiter());
+        requireOutput().write(pktLineWriter.writeDelimiter());
     }
 
     public void writeResponseEnd() throws IOException {
-        writePacket(pktLineWriter.writeResponseEnd());
+        requireOutput().write(pktLineWriter.writeResponseEnd());
     }
 
     public void writeSidebandData(ByteBuf payload) throws IOException {
@@ -91,12 +95,7 @@ public final class GitBufferedByteTransportAdapter {
     }
 
     public void writeSidebandProgress(String payload) throws IOException {
-        ByteBuf buffer = copiedUtf8(payload);
-        try {
-            writeSidebandProgress(buffer);
-        } finally {
-            buffer.release();
-        }
+        writeSideband(SidebandChannel.PROGRESS, utf8(payload));
     }
 
     public void writeSidebandError(ByteBuf payload) throws IOException {
@@ -104,12 +103,7 @@ public final class GitBufferedByteTransportAdapter {
     }
 
     public void writeSidebandError(String payload) throws IOException {
-        ByteBuf buffer = copiedUtf8(payload);
-        try {
-            writeSidebandError(buffer);
-        } finally {
-            buffer.release();
-        }
+        writeSideband(SidebandChannel.ERROR, utf8(payload));
     }
 
     public void flush() throws IOException {
@@ -134,20 +128,34 @@ public final class GitBufferedByteTransportAdapter {
         } while (remaining > 0);
     }
 
-    private ByteBuf copiedUtf8(String payload) {
+    private void writeSideband(
+            SidebandChannel channel,
+            byte[] payload) throws IOException {
+        Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(payload, "payload");
-        byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
-        ByteBuf buffer = allocator.buffer(bytes.length, bytes.length);
-        buffer.writeBytes(bytes);
-        return buffer;
+        int payloadOffset = 0;
+        int remaining = payload.length;
+        BufferedByteOutput output = requireOutput();
+        do {
+            int chunkLength = Math.min(remaining, MAX_SIDEBAND_PAYLOAD_LENGTH);
+            int packetLength = SIDEBAND_HEADER_SIZE + chunkLength;
+            output.write(sidebandHeader(packetLength, channel));
+            output.write(payload, payloadOffset, chunkLength);
+            payloadOffset += chunkLength;
+            remaining -= chunkLength;
+        } while (remaining > 0);
     }
 
-    private void writePacket(ByteBuf packet) throws IOException {
-        try {
-            requireOutput().write(packet);
-        } finally {
-            packet.release();
-        }
+    private static byte[] utf8(String payload) {
+        Objects.requireNonNull(payload, "payload");
+        return payload.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private void writeData(byte[] payload) throws IOException {
+        Objects.requireNonNull(payload, "payload");
+        BufferedByteOutput output = requireOutput();
+        output.write(pktLineWriter.writeDataHeader(payload.length));
+        output.write(payload);
     }
 
     private BufferedByteInput requireInput() {

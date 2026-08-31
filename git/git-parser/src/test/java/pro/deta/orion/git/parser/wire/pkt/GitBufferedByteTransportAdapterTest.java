@@ -61,6 +61,9 @@ class GitBufferedByteTransportAdapterTest {
             adapter.writeFlush();
             adapter.flush();
 
+            assertThat(output.writeLengths()).containsExactly(4, 5, 4);
+            assertThat(output.byteArrayWriteLengths()).containsExactly(4, 4);
+            assertThat(output.byteBufWriteLengths()).containsExactly(5);
             assertThat(output.ascii()).isEqualTo("0009hello0000");
         } finally {
             payload.release();
@@ -119,15 +122,26 @@ class GitBufferedByteTransportAdapterTest {
         }
     }
 
+    @Test
+    void writesStringSidebandWithoutAllocatorBuffer() throws Exception {
+        RecordingOutput output = new RecordingOutput();
+        GitBufferedByteTransportAdapter adapter = outputAdapter(output);
+
+        adapter.writeSidebandProgress("counting");
+
+        assertThat(output.byteArrayWriteLengths()).containsExactly(5, 8);
+        assertThat(output.byteBufWriteLengths()).isEmpty();
+        assertThat(output.ascii()).isEqualTo("000d\u0002counting");
+    }
+
     private GitBufferedByteTransportAdapter inputAdapter(String ascii) {
         return new GitBufferedByteTransportAdapter(
                 new ArrayInput(ascii.getBytes(StandardCharsets.US_ASCII)),
-                null,
-                allocator);
+                null);
     }
 
     private GitBufferedByteTransportAdapter outputAdapter(RecordingOutput output) {
-        return new GitBufferedByteTransportAdapter(null, output, allocator);
+        return new GitBufferedByteTransportAdapter(null, output);
     }
 
     private static byte[] repeated(byte value, int length) {
@@ -183,13 +197,26 @@ class GitBufferedByteTransportAdapterTest {
     private static final class RecordingOutput implements BufferedByteOutput {
         private final ByteArrayOutputStream output = new ByteArrayOutputStream();
         private final List<Integer> writeLengths = new ArrayList<>();
+        private final List<Integer> byteArrayWriteLengths = new ArrayList<>();
+        private final List<Integer> byteBufWriteLengths = new ArrayList<>();
 
         @Override
         public void write(ByteBuf buffer) {
             byte[] bytes = new byte[buffer.readableBytes()];
             buffer.getBytes(buffer.readerIndex(), bytes);
             writeLengths.add(bytes.length);
+            byteBufWriteLengths.add(bytes.length);
             output.write(bytes, 0, bytes.length);
+        }
+
+        @Override
+        public void write(
+                byte[] bytes,
+                int offset,
+                int length) {
+            writeLengths.add(length);
+            byteArrayWriteLengths.add(length);
+            output.write(bytes, offset, length);
         }
 
         @Override
@@ -206,6 +233,14 @@ class GitBufferedByteTransportAdapterTest {
 
         private List<Integer> writeLengths() {
             return writeLengths;
+        }
+
+        private List<Integer> byteArrayWriteLengths() {
+            return byteArrayWriteLengths;
+        }
+
+        private List<Integer> byteBufWriteLengths() {
+            return byteBufWriteLengths;
         }
     }
 }
