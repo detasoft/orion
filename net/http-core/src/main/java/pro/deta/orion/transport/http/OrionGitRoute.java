@@ -186,7 +186,6 @@ public class OrionGitRoute implements OrionHttpRoute {
             HttpServletRequest request,
             GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
-                UnpooledByteBufAllocator.DEFAULT,
                 nativeRepositoryProvider,
                 new NativeHttpRepositoryAccessHook(securityContextFrom(request)),
                 GitWireConfiguration.allSupported(),

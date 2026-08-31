@@ -1,7 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
@@ -43,19 +43,16 @@ public final class GitBlockingWireSession {
     private static final int MAX_REF_PREFIX_CHARS = 65_536;
     private static final String NULL_ID = "0".repeat(40);
 
-    private final ByteBufAllocator allocator;
     private final GitBlockingWireTransport wire;
     private final GitNativeRepositoryService repositoryService;
     private final GitWireConfiguration configuration;
 
     public GitBlockingWireSession(
-            ByteBufAllocator allocator,
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration,
             NativePackfileUriSourceFactory packfileUriSourceFactory,
             GitBlockingWireTransport wire) {
-        this.allocator = Objects.requireNonNull(allocator, "allocator");
         this.wire = Objects.requireNonNull(wire, "wire");
         this.configuration = Objects.requireNonNull(
                 configuration,
@@ -692,7 +689,7 @@ public final class GitBlockingWireSession {
                         section.initialRequest());
         try {
             while (true) {
-                ByteBuf buffer = allocator.buffer(DEFAULT_INPUT_BUFFER_SIZE);
+                ByteBuf buffer = Unpooled.buffer(DEFAULT_INPUT_BUFFER_SIZE);
                 try {
                     int read = wire.readRawInto(
                             buffer,

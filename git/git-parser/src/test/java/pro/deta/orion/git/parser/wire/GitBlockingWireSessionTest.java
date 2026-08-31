@@ -379,7 +379,6 @@ class GitBlockingWireSessionTest {
         GitBlockingWireTransport wire =
                 new GitBlockingWireTransport(input, output);
         return new GitBlockingWireSession(
-                UnpooledByteBufAllocator.DEFAULT,
                 provider,
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
                 GitWireConfiguration.allSupported(),

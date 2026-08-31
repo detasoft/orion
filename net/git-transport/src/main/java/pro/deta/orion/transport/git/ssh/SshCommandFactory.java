@@ -301,7 +301,6 @@ public class SshCommandFactory implements CommandFactory {
                             new GitBlockingWireTransport(input, output);
                     try {
                         new GitBlockingWireSession(
-                                UnpooledByteBufAllocator.DEFAULT,
                                 nativeRepositoryProvider,
                                 new AuthenticatedNativeRepositoryAccessHook(
                                         securityContext),
