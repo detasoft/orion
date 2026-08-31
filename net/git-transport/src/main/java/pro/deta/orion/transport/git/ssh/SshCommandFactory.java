@@ -36,7 +36,6 @@ import pro.deta.orion.transport.git.auth.AuthenticatedNativeRepositoryAccessHook
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.stream.*;
 
-import io.netty.buffer.UnpooledByteBufAllocator;
 import jakarta.inject.Named;
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -290,10 +289,7 @@ public class SshCommandFactory implements CommandFactory {
                     errorStream)) {
                 try (InputStreamBufferedByteInput input =
                         new InputStreamBufferedByteInput(
-                                streams.getInputStream(),
-                                UnpooledByteBufAllocator.DEFAULT,
-                                GitBlockingWireSession
-                                        .DEFAULT_INPUT_BUFFER_SIZE)) {
+                                streams.getInputStream())) {
                     OutputStreamBufferedByteOutput output =
                             new OutputStreamBufferedByteOutput(
                                     streams.getOutputStream());

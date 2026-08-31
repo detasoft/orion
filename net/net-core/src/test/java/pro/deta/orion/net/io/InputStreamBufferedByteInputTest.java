@@ -15,9 +15,7 @@ class InputStreamBufferedByteInputTest {
     void readIntoReturnsAvailableBytesWithoutFillingRequestedLength()
             throws Exception {
         InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
-                new OneByteAtATimeInputStream("abc".getBytes(StandardCharsets.US_ASCII)),
-                UnpooledByteBufAllocator.DEFAULT,
-                8);
+                new OneByteAtATimeInputStream("abc".getBytes(StandardCharsets.US_ASCII)));
         ByteBuf target = UnpooledByteBufAllocator.DEFAULT.buffer(8, 8);
         try {
             assertThat(input.readInto(target, 8)).isEqualTo(1);
@@ -32,9 +30,7 @@ class InputStreamBufferedByteInputTest {
     void readIntoReturnsZeroWhenEndOfStreamArrivesBeforeAnyByte()
             throws Exception {
         InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
-                new ByteArrayInputStream(new byte[0]),
-                UnpooledByteBufAllocator.DEFAULT,
-                8);
+                new ByteArrayInputStream(new byte[0]));
         ByteBuf target = UnpooledByteBufAllocator.DEFAULT.buffer(8, 8);
         try {
             assertThat(input.readInto(target, 8)).isZero();
@@ -45,11 +41,26 @@ class InputStreamBufferedByteInputTest {
     }
 
     @Test
+    void readUnsignedByteReadsDirectlyWithoutPrefetching() throws Exception {
+        RecordingInputStream source = new RecordingInputStream(
+                "abc".getBytes(StandardCharsets.US_ASCII));
+        InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(source);
+        try {
+            assertThat(input.readUnsignedByte()).isEqualTo('a');
+
+            assertThat(source.singleByteReads).isEqualTo(1);
+            assertThat(source.bulkReads).isZero();
+            assertThat(source.available()).isEqualTo(2);
+            assertThat(input.available()).isEqualTo(2);
+        } finally {
+            input.close();
+        }
+    }
+
+    @Test
     void readCopyStillRequiresExactRequestedBytes() throws Exception {
         InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
-                new ByteArrayInputStream("abc".getBytes(StandardCharsets.US_ASCII)),
-                UnpooledByteBufAllocator.DEFAULT,
-                8);
+                new ByteArrayInputStream("abc".getBytes(StandardCharsets.US_ASCII)));
         try {
             assertThatThrownBy(() -> input.readCopy(4, UnpooledByteBufAllocator.DEFAULT))
                     .isInstanceOf(java.io.EOFException.class);
@@ -68,6 +79,27 @@ class InputStreamBufferedByteInputTest {
         @Override
         public synchronized int read(byte[] buffer, int offset, int length) {
             return super.read(buffer, offset, Math.min(length, 1));
+        }
+    }
+
+    private static final class RecordingInputStream extends ByteArrayInputStream {
+        private int singleByteReads;
+        private int bulkReads;
+
+        private RecordingInputStream(byte[] data) {
+            super(data);
+        }
+
+        @Override
+        public synchronized int read() {
+            singleByteReads++;
+            return super.read();
+        }
+
+        @Override
+        public synchronized int read(byte[] buffer, int offset, int length) {
+            bulkReads++;
+            return super.read(buffer, offset, length);
         }
     }
 }

@@ -6,6 +6,10 @@
   `docs/`.
 - Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
 - Use `make test` for routine full-project tests and the commit workflow. For focused checks, use the `dev` Maven profile, for example `mvn test -Pdev -T 4 -q -pl ...`.
+- When running focused Maven tests for a module that needs reactor dependencies,
+  include `-am`; when also passing `-Dtest=...`, include
+  `-Dsurefire.failIfNoSpecifiedTests=false` so helper modules without the
+  selected test do not fail the build.
 - Do not run integration tests automatically after every commit; `make test` is enough for the commit workflow.
 - Use `mvn verify -Pdev -T 4` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
 - The project allows running `mvn verify` from the repository root without asking for additional confirmation when it is explicitly needed.

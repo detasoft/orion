@@ -1,6 +1,5 @@
 package pro.deta.orion.transport.http;
 
-import io.netty.buffer.UnpooledByteBufAllocator;
 import jakarta.inject.Inject;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,6 +21,7 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -167,10 +167,8 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setStatus(SC_OK);
         resp.setContentType(resultContentType(request.service()));
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
-        try (JettyBufferedByteInput input = new JettyBufferedByteInput(
-                req.getInputStream(),
-                UnpooledByteBufAllocator.DEFAULT,
-                GitBlockingWireSession.DEFAULT_INPUT_BUFFER_SIZE)) {
+        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
+                req.getInputStream())) {
             JettyBufferedByteOutput output =
                     new JettyBufferedByteOutput(resp.getOutputStream());
             GitBlockingWireTransport wire =
