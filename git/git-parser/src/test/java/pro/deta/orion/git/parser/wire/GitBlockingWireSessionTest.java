@@ -42,7 +42,6 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostReadsLsRefsRequestOneByteAtATime() throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -72,7 +71,6 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostFailsWhenLsRefsPayloadTimesOut() throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofMillis(25))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed("0012command=ls");
@@ -95,7 +93,6 @@ class GitBlockingWireSessionTest {
                 ObjectType.BLOB,
                 "have".getBytes(StandardCharsets.US_ASCII));
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -124,7 +121,6 @@ class GitBlockingWireSessionTest {
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -155,7 +151,6 @@ class GitBlockingWireSessionTest {
                 GitCommitAuthor.EMPTY);
         String mainId = repository.refs().get("refs/heads/main");
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             ByteArrayBuilder request = new ByteArrayBuilder();
@@ -193,7 +188,6 @@ class GitBlockingWireSessionTest {
                 "payload".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef("refs/heads/main", NULL_ID, blob.value());
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -224,7 +218,6 @@ class GitBlockingWireSessionTest {
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequestWithCapabilities(
@@ -242,7 +235,6 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostRejectsDuplicateFetchWantRef() throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
@@ -261,7 +253,6 @@ class GitBlockingWireSessionTest {
     void smartHttpPostRejectsFetchWithoutWantsOrWantRefs()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest("have " + WANT + "\n", "done\n"));
@@ -276,7 +267,6 @@ class GitBlockingWireSessionTest {
     @Test
     void smartHttpPostFailsWhenFetchPayloadTimesOut() throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofMillis(25))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(command("fetch"));
@@ -300,7 +290,6 @@ class GitBlockingWireSessionTest {
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             byte[] request = legacyUploadRequest(
@@ -320,7 +309,6 @@ class GitBlockingWireSessionTest {
     void smartHttpPostRejectsLegacyUploadInvalidObjectId()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyUploadRequest("want invalid\n", "done\n"));
@@ -338,7 +326,6 @@ class GitBlockingWireSessionTest {
             throws Exception {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -368,7 +355,6 @@ class GitBlockingWireSessionTest {
         provider.find("project").valueOrFailure("repository")
                 .updateRef(refName, NULL_ID, MAIN_ID);
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -391,8 +377,7 @@ class GitBlockingWireSessionTest {
             throws Exception {
         for (String character : List.of("~", "^", ":", "?", "*", "[", "\\")) {
             try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                    UnpooledByteBufAllocator.DEFAULT,
-                    Duration.ofSeconds(1))) {
+                        Duration.ofSeconds(1))) {
                 RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
                 input.feed(legacyReceiveRequest(
                         MAIN_ID
@@ -414,7 +399,6 @@ class GitBlockingWireSessionTest {
     void smartHttpPostRejectsLegacyReceiveInvalidObjectId()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(
@@ -434,7 +418,6 @@ class GitBlockingWireSessionTest {
     void smartHttpPostFailsWhenLegacyReceivePackBodyTimesOut()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
                 Duration.ofMillis(25))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(legacyReceiveRequest(

@@ -11,7 +11,6 @@ import java.util.Objects;
 public final class InputStreamBufferedByteInput
         implements BufferedByteInput, AutoCloseable {
     private final InputStream input;
-    private final ByteBufAllocator allocator;
     private final ByteBuf inputBuffer;
 
     public InputStreamBufferedByteInput(
@@ -19,7 +18,6 @@ public final class InputStreamBufferedByteInput
             ByteBufAllocator allocator,
             int inputBufferSize) {
         this.input = Objects.requireNonNull(input, "input");
-        this.allocator = Objects.requireNonNull(allocator, "allocator");
         if (inputBufferSize <= 0) {
             throw new IllegalArgumentException("inputBufferSize must be positive");
         }
@@ -38,8 +36,9 @@ public final class InputStreamBufferedByteInput
     }
 
     @Override
-    public ByteBuf readCopy(int length) throws IOException {
+    public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
         requireNonNegativeLength(length);
+        Objects.requireNonNull(allocator, "allocator");
         ByteBuf copy = allocator.buffer(length, length);
         try {
             while (copy.writableBytes() > 0) {

@@ -69,7 +69,7 @@ class SocketChannelBufferedByteInputTest {
                 new SocketChannelBufferedByteInput(sockets.client(), UnpooledByteBufAllocator.DEFAULT, 8)) {
             writeAscii(sockets.server(), "payloadtail");
 
-            ByteBuf copy = input.readCopy(7);
+            ByteBuf copy = input.readCopy(7, UnpooledByteBufAllocator.DEFAULT);
             try {
                 copy.setByte(0, 'P');
 
@@ -105,7 +105,8 @@ class SocketChannelBufferedByteInputTest {
             writeAscii(sockets.server(), "abc");
             sockets.server().shutdownOutput();
 
-            assertThatThrownBy(() -> input.readCopy(4)).isInstanceOf(java.io.EOFException.class);
+            assertThatThrownBy(() -> input.readCopy(4, UnpooledByteBufAllocator.DEFAULT))
+                    .isInstanceOf(java.io.EOFException.class);
         }
     }
 

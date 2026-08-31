@@ -15,14 +15,11 @@ import java.util.concurrent.TimeUnit;
 final class QueueBufferedByteInput implements BufferedByteInput, AutoCloseable {
     private final Object lock = new Object();
     private final ArrayDeque<Byte> queue = new ArrayDeque<>();
-    private final ByteBufAllocator allocator;
     private final Duration timeout;
     private boolean closed;
 
     QueueBufferedByteInput(
-            ByteBufAllocator allocator,
             Duration timeout) {
-        this.allocator = Objects.requireNonNull(allocator, "allocator");
         this.timeout = Objects.requireNonNull(timeout, "timeout");
         if (timeout.isNegative() || timeout.isZero()) {
             throw new IllegalArgumentException("timeout must be positive");
@@ -42,8 +39,9 @@ final class QueueBufferedByteInput implements BufferedByteInput, AutoCloseable {
     }
 
     @Override
-    public ByteBuf readCopy(int length) throws IOException {
+    public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
         requireNonNegativeLength(length);
+        Objects.requireNonNull(allocator, "allocator");
         ByteBuf copy = allocator.buffer(length, length);
         try {
             while (copy.writableBytes() > 0) {

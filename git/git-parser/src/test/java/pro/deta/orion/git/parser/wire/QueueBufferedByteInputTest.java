@@ -18,13 +18,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class QueueBufferedByteInputTest {
     @Test
     void readCopyWaitsForBytesFedFromAnotherThread() throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
-                Duration.ofSeconds(1))) {
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(Duration.ofSeconds(1))) {
             ExecutorService executor = Executors.newSingleThreadExecutor();
             try {
                 Future<String> result = executor.submit(() -> {
-                    ByteBuf copy = input.readCopy(3);
+                    ByteBuf copy = input.readCopy(3, UnpooledByteBufAllocator.DEFAULT);
                     try {
                         return copy.toString(StandardCharsets.US_ASCII);
                     } finally {
@@ -46,10 +44,8 @@ class QueueBufferedByteInputTest {
     @Test
     void readCopyFailsWhenTimeoutExpiresBeforeRequestedBytesArrive()
             throws Exception {
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                UnpooledByteBufAllocator.DEFAULT,
-                Duration.ofMillis(25))) {
-            assertThatThrownBy(() -> input.readCopy(1))
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(Duration.ofMillis(25))) {
+            assertThatThrownBy(() -> input.readCopy(1, UnpooledByteBufAllocator.DEFAULT))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("Timed out");
         }

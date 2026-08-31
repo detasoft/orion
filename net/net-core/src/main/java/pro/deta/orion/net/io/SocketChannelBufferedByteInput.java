@@ -11,7 +11,6 @@ import java.util.Objects;
 
 public final class SocketChannelBufferedByteInput implements BufferedByteInput, AutoCloseable {
     private final SocketChannel channel;
-    private final ByteBufAllocator allocator;
     private final ByteBuf inputBuffer;
 
     public SocketChannelBufferedByteInput(
@@ -19,7 +18,6 @@ public final class SocketChannelBufferedByteInput implements BufferedByteInput, 
             ByteBufAllocator allocator,
             int inputBufferSize) {
         this.channel = Objects.requireNonNull(channel, "channel");
-        this.allocator = Objects.requireNonNull(allocator, "allocator");
         if (inputBufferSize <= 0) {
             throw new IllegalArgumentException("inputBufferSize must be positive");
         }
@@ -38,8 +36,9 @@ public final class SocketChannelBufferedByteInput implements BufferedByteInput, 
     }
 
     @Override
-    public ByteBuf readCopy(int length) throws IOException {
+    public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
         requireNonNegativeLength(length);
+        Objects.requireNonNull(allocator, "allocator");
         ByteBuf copy = allocator.buffer(length, length);
         try {
             while (copy.writableBytes() > 0) {

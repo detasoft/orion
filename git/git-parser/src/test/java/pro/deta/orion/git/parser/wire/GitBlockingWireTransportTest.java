@@ -425,7 +425,7 @@ class GitBlockingWireTransportTest {
         }
 
         @Override
-        public ByteBuf readCopy(int length) throws IOException {
+        public ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException {
             if (length < 0) {
                 throw new IllegalArgumentException(
                         "length must be non-negative");

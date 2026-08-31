@@ -32,7 +32,7 @@ class JettyByteBufAdaptersTest {
             try {
                 assertThat(input.readInto(target, 2)).isEqualTo(2);
                 assertThat(target.toString(StandardCharsets.US_ASCII)).isEqualTo("bc");
-                copy = input.readCopy(3);
+                copy = input.readCopy(3, UnpooledByteBufAllocator.DEFAULT);
                 assertThat(copy.toString(StandardCharsets.US_ASCII)).isEqualTo("def");
                 assertThat(input.available()).isZero();
             } finally {

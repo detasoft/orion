@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.UnpooledByteBufAllocator;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
@@ -71,7 +72,7 @@ public final class GitBlockingWireTransport {
 
     public ByteBuf readPayload(ControlState control) throws IOException {
         Objects.requireNonNull(control, "control");
-        return requireInput().readCopy(control.payloadLength());
+        return requireInput().readCopy(control.payloadLength(), UnpooledByteBufAllocator.DEFAULT);
     }
 
     public GitPktLine readPacket() throws IOException {

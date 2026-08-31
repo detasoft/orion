@@ -1,6 +1,7 @@
 package pro.deta.orion.net.io;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 
 import java.io.IOException;
 
@@ -18,7 +19,7 @@ public interface BufferedByteInput {
 
     int readUnsignedByte() throws IOException;
 
-    ByteBuf readCopy(int length) throws IOException;
+    ByteBuf readCopy(int length, ByteBufAllocator allocator) throws IOException;
 
     /**
      * Reads up to {@code maxLength} bytes and returns zero when no byte is read.

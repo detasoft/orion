@@ -51,7 +51,7 @@ class InputStreamBufferedByteInputTest {
                 UnpooledByteBufAllocator.DEFAULT,
                 8);
         try {
-            assertThatThrownBy(() -> input.readCopy(4))
+            assertThatThrownBy(() -> input.readCopy(4, UnpooledByteBufAllocator.DEFAULT))
                     .isInstanceOf(java.io.EOFException.class);
         } finally {
             input.close();
