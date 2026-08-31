@@ -24,7 +24,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
@@ -36,7 +35,6 @@ public final class GitBlockingWireTransport {
     private final BufferedByteInput input;
     private final BufferedByteOutput outputSink;
     private final GitPktLineWriter pktLineWriter;
-    private ByteBuf output;
     private LegacySideBandResponse sideBandResponse;
     private LegacyPackResponse legacyPackResponse;
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
@@ -96,19 +94,6 @@ public final class GitBlockingWireTransport {
 
     public void flush() throws IOException {
         outputSink.flush();
-    }
-
-    private static void requireFixedCapacity(ByteBuf output) {
-        Objects.requireNonNull(output, "output");
-        validateFixedCapacity(output);
-    }
-
-    private static void validateFixedCapacity(ByteBuf output) {
-        if (output.capacity() != BUFFER_CAPACITY
-                || output.maxCapacity() != BUFFER_CAPACITY) {
-            throw new IllegalArgumentException(
-                    "Native client output buffer must have a fixed 64 KiB capacity");
-        }
     }
 
     public void sendAdvertisement(
@@ -317,7 +302,6 @@ public final class GitBlockingWireTransport {
     public LegacySideBandResponse beginLegacySideBand64k(
             NativePackProducer producer,
             SideBandChannel channel) {
-        output();
         Objects.requireNonNull(channel, "channel");
         Result<NativePackProducer> availableProducer =
                 availableProducer(producer);
@@ -326,14 +310,15 @@ public final class GitBlockingWireTransport {
             throw outputUnavailable(failure);
         }
         LegacySideBandResponse response =
-                new LegacySideBandResponse(producer, channel);
+                new LegacySideBandResponse(
+                        producer,
+                        channel);
         sideBandResponse = response;
         return response;
     }
 
     public LegacyPackResponse beginLegacyPack(
             NativePackProducer producer) {
-        output();
         Result<NativePackProducer> availableProducer =
                 availableProducer(producer);
         if (availableProducer instanceof
@@ -401,7 +386,6 @@ public final class GitBlockingWireTransport {
             Map<String, GitObjectId> wantedRefs,
             List<NativePackfileUri> packfileUris,
             boolean sidebandAll) {
-        output();
         Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
         Objects.requireNonNull(wantedRefs, "wantedRefs");
         Objects.requireNonNull(packfileUris, "packfileUris");
@@ -588,15 +572,7 @@ public final class GitBlockingWireTransport {
     private void sendSerialization(
             OutputSerialization operation) throws IOException {
         ensureNoActiveResponse();
-        operation.writeTo(this, this::output);
-    }
-
-    private ByteBuf output() {
-        if (output == null) {
-            output = outputSink.getByteBuf();
-            requireFixedCapacity(output);
-        }
-        return output;
+        operation.writeTo(this);
     }
 
     private void ensureNoActiveResponse() {
@@ -606,25 +582,6 @@ public final class GitBlockingWireTransport {
             throw new IllegalStateException(
                     "Client output operation is already in progress");
         }
-    }
-
-    private static void flushOutput(
-            GitBlockingWireTransport wire,
-            ByteBuf output) throws IOException {
-        if (!output.isReadable()) {
-            return;
-        }
-        wire.writeRaw(output);
-        output.clear();
-    }
-
-    private void flushOutput() throws IOException {
-        flushOutput(this, output());
-    }
-
-    private void finishOutput() throws IOException {
-        flushOutput();
-        flush();
     }
 
     private BufferedByteInput requireInput() {
@@ -648,9 +605,168 @@ public final class GitBlockingWireTransport {
         outputSink.write(payload);
     }
 
+    private void writeSideBand(
+            SideBandChannel channel,
+            ByteBuf payload) throws IOException {
+        Objects.requireNonNull(channel, "channel");
+        Objects.requireNonNull(payload, "payload");
+        int payloadOffset = payload.readerIndex();
+        int remaining = payload.readableBytes();
+        if (remaining == 0) {
+            return;
+        }
+        do {
+            int chunkLength = Math.min(
+                    remaining,
+                    SideBandOutput.MAXIMUM_PAYLOAD);
+            int packetLength = PKT_LINE_HEADER_SIZE + 1 + chunkLength;
+            outputSink.write(sideBandHeader(packetLength, channel));
+            outputSink.write(payload.slice(payloadOffset, chunkLength));
+            payloadOffset += chunkLength;
+            remaining -= chunkLength;
+        } while (remaining > 0);
+    }
+
+    private void writeSideBand(
+            SideBandChannel channel,
+            byte[] payload,
+            int offset,
+            int length) throws IOException {
+        Objects.requireNonNull(channel, "channel");
+        Objects.requireNonNull(payload, "payload");
+        int payloadOffset = offset;
+        int remaining = length;
+        if (remaining == 0) {
+            return;
+        }
+        do {
+            int chunkLength = Math.min(
+                    remaining,
+                    SideBandOutput.MAXIMUM_PAYLOAD);
+            int packetLength = PKT_LINE_HEADER_SIZE + 1 + chunkLength;
+            outputSink.write(sideBandHeader(packetLength, channel));
+            outputSink.write(payload, payloadOffset, chunkLength);
+            payloadOffset += chunkLength;
+            remaining -= chunkLength;
+        } while (remaining > 0);
+    }
+
+    private static byte[] sideBandHeader(
+            int packetLength,
+            SideBandChannel channel) {
+        return new byte[] {
+                hexDigit((packetLength >>> 12) & 0x0f),
+                hexDigit((packetLength >>> 8) & 0x0f),
+                hexDigit((packetLength >>> 4) & 0x0f),
+                hexDigit(packetLength & 0x0f),
+                channel.wireValue()
+        };
+    }
+
     private static byte[] utf8(String payload) {
         Objects.requireNonNull(payload, "payload");
         return payload.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private void producePack(
+            NativePackProducer producer,
+            PackOutput output) throws IOException {
+        NativePackProducer.Result result;
+        do {
+            long before = output.bytesWritten();
+            result = producer.produce(output);
+            if (result == NativePackProducer.Result.MORE
+                    && output.bytesWritten() == before) {
+                throw new IllegalStateException(
+                        "Native pack producer made no progress");
+            }
+        } while (result == NativePackProducer.Result.MORE);
+    }
+
+    private interface PackOutput extends BufferedByteOutput {
+        long bytesWritten();
+    }
+
+    private final class RawPackOutput implements PackOutput {
+        private long bytesWritten;
+
+        @Override
+        public void write(
+                byte[] bytes,
+                int offset,
+                int length) throws IOException {
+            if (length == 0) {
+                return;
+            }
+            outputSink.write(bytes, offset, length);
+            bytesWritten += length;
+        }
+
+        @Override
+        public void write(ByteBuf buffer) throws IOException {
+            int length = buffer.readableBytes();
+            if (length == 0) {
+                return;
+            }
+            outputSink.write(buffer);
+            bytesWritten += length;
+        }
+
+        @Override
+        public void flush() throws IOException {
+            outputSink.flush();
+        }
+
+        @Override
+        public long bytesWritten() {
+            return bytesWritten;
+        }
+    }
+
+    private final class SideBandOutput implements PackOutput {
+        private static final int MAXIMUM_PAYLOAD =
+                MAX_PKT_LINE_LENGTH
+                        - PKT_LINE_HEADER_SIZE
+                        - 1;
+
+        private final SideBandChannel channel;
+        private long bytesWritten;
+
+        private SideBandOutput(SideBandChannel channel) {
+            this.channel = Objects.requireNonNull(channel, "channel");
+        }
+
+        @Override
+        public void write(
+                byte[] bytes,
+                int offset,
+                int length) throws IOException {
+            if (length == 0) {
+                return;
+            }
+            writeSideBand(channel, bytes, offset, length);
+            bytesWritten += length;
+        }
+
+        @Override
+        public void write(ByteBuf buffer) throws IOException {
+            int length = buffer.readableBytes();
+            if (length == 0) {
+                return;
+            }
+            writeSideBand(channel, buffer);
+            bytesWritten += length;
+        }
+
+        @Override
+        public void flush() throws IOException {
+            outputSink.flush();
+        }
+
+        @Override
+        public long bytesWritten() {
+            return bytesWritten;
+        }
     }
 
     private static List<byte[]> encodePackets(
@@ -758,24 +874,6 @@ public final class GitBlockingWireTransport {
         output[3] = hexDigit(packetLength & 0x0f);
     }
 
-    private static void writeHeader(
-            ByteBuf output,
-            int offset,
-            int packetLength) {
-        output.setByte(
-                offset,
-                hexDigit((packetLength >>> 12) & 0x0f));
-        output.setByte(
-                offset + 1,
-                hexDigit((packetLength >>> 8) & 0x0f));
-        output.setByte(
-                offset + 2,
-                hexDigit((packetLength >>> 4) & 0x0f));
-        output.setByte(
-                offset + 3,
-                hexDigit(packetLength & 0x0f));
-    }
-
     public enum AckStatus {
         FINAL(""),
         CONTINUE(" continue"),
@@ -821,19 +919,11 @@ public final class GitBlockingWireTransport {
                 {'0', '0', '0', '8', 'N', 'A', 'K', '\n'};
         private static final byte[] FLUSH =
                 {'0', '0', '0', '0'};
-        private static final int MAXIMUM_PAYLOAD =
-                MAX_PKT_LINE_LENGTH
-                        - PKT_LINE_HEADER_SIZE
-                        - 1;
 
         private final NativePackProducer producer;
         private final SideBandChannel channel;
         private final ArrayDeque<SideBandMessage> messages =
                 new ArrayDeque<>();
-        private Phase phase = Phase.NAK;
-        private SideBandMessage currentMessage;
-        private int outputStartIndex;
-        private int controlOffset;
         private boolean acceptingMessages = true;
         private boolean closed;
 
@@ -842,7 +932,6 @@ public final class GitBlockingWireTransport {
                 SideBandChannel channel) {
             this.producer = producer;
             this.channel = channel;
-            outputStartIndex = output.writerIndex();
         }
 
         public void progress(ByteBuf message) {
@@ -863,36 +952,24 @@ public final class GitBlockingWireTransport {
                         "Legacy side-band response is closed");
             }
             try {
-                while (phase != Phase.COMPLETED) {
-                    if (!output.isWritable()) {
-                        flushOutput();
+                writeRaw(NAK);
+                SideBandOutput packOutput = new SideBandOutput(channel);
+                drainMessages();
+                NativePackProducer.Result result;
+                do {
+                    long before = packOutput.bytesWritten();
+                    result = producer.produce(packOutput);
+                    if (result == NativePackProducer.Result.MORE
+                            && packOutput.bytesWritten() == before) {
+                        throw new IllegalStateException(
+                                "Native pack producer made no progress");
                     }
-                    switch (phase) {
-                        case NAK -> writeControl(NAK, Phase.PACK);
-                        case PACK -> {
-                            if (!writeSideBandPacket()) {
-                                flushOutput();
-                            }
-                        }
-                        case DRAINING -> {
-                            acceptingMessages = false;
-                            if (currentMessage != null
-                                    || !messages.isEmpty()) {
-                                if (!writeMessagePacket()) {
-                                    flushOutput();
-                                }
-                            } else {
-                                phase = Phase.FLUSH;
-                            }
-                        }
-                        case FLUSH -> writeControl(
-                                FLUSH,
-                                Phase.COMPLETED);
-                        case COMPLETED -> {
-                        }
-                    }
-                }
-                finishOutput();
+                    drainMessages();
+                } while (result == NativePackProducer.Result.MORE);
+                acceptingMessages = false;
+                drainMessages();
+                writeRaw(FLUSH);
+                flush();
                 complete();
             } catch (IOException | RuntimeException error) {
                 closeAfterFailure(error);
@@ -932,123 +1009,23 @@ public final class GitBlockingWireTransport {
             }
         }
 
+        private void drainMessages() throws IOException {
+            SideBandMessage message;
+            while ((message = messages.pollFirst()) != null) {
+                try {
+                    writeSideBand(message.channel, message.payload);
+                } finally {
+                    message.payload.release();
+                }
+            }
+        }
+
         private void closeAfterFailure(Throwable failure) {
             try {
                 close();
             } catch (Throwable closeFailure) {
                 failure.addSuppressed(closeFailure);
             }
-        }
-
-        private void writeControl(
-                byte[] control,
-                Phase next) {
-            int length = Math.min(
-                    output.writableBytes(),
-                    control.length - controlOffset);
-            output.writeBytes(
-                    control,
-                    controlOffset,
-                    length);
-            controlOffset += length;
-            if (controlOffset == control.length) {
-                controlOffset = 0;
-                phase = next;
-            }
-        }
-
-        private boolean writeSideBandPacket() {
-            if (currentMessage != null || !messages.isEmpty()) {
-                return writeMessagePacket();
-            }
-            return writePackPacket();
-        }
-
-        private boolean writeMessagePacket() {
-            if (currentMessage == null) {
-                currentMessage = messages.removeFirst();
-            }
-            int packetCapacity = packetCapacity();
-            if (packetCapacity < 0
-                    || (packetCapacity == 0
-                            && currentMessage.payload.isReadable())) {
-                return false;
-            }
-            int payloadLength = Math.min(
-                    packetCapacity,
-                    currentMessage.payload.readableBytes());
-            int packetOffset = output.writerIndex();
-            output.writerIndex(
-                    packetOffset
-                            + PKT_LINE_HEADER_SIZE
-                            + 1);
-            output.setByte(
-                    packetOffset + PKT_LINE_HEADER_SIZE,
-                    currentMessage.channel.wireValue);
-            output.writeBytes(
-                    currentMessage.payload,
-                    payloadLength);
-            writeHeader(
-                    output,
-                    packetOffset,
-                    PKT_LINE_HEADER_SIZE
-                            + 1
-                            + payloadLength);
-            if (!currentMessage.payload.isReadable()) {
-                currentMessage.payload.release();
-                currentMessage = null;
-            }
-            return true;
-        }
-
-        private boolean writePackPacket() {
-            int packetCapacity = packetCapacity();
-            if (packetCapacity <= 0) {
-                return false;
-            }
-            int packetOffset = output.writerIndex();
-            output.writerIndex(
-                    packetOffset
-                            + PKT_LINE_HEADER_SIZE
-                            + 1);
-            output.setByte(
-                    packetOffset + PKT_LINE_HEADER_SIZE,
-                    channel.wireValue);
-            ByteBuf payload = output.slice(
-                    output.writerIndex(),
-                    packetCapacity).clear();
-            NativePackProducer.Result result =
-                    producer.produce(payload);
-            int payloadLength = payload.writerIndex();
-            if (payloadLength == 0
-                    && result == NativePackProducer.Result.MORE) {
-                throw new IllegalStateException(
-                        "Native pack producer made no progress");
-            }
-            output.writerIndex(
-                    output.writerIndex() + payloadLength);
-            writeHeader(
-                    output,
-                    packetOffset,
-                    PKT_LINE_HEADER_SIZE
-                            + 1
-                            + payloadLength);
-            if (result
-                    == NativePackProducer.Result.COMPLETED) {
-                phase = Phase.DRAINING;
-            }
-            return true;
-        }
-
-        private int packetCapacity() {
-            int packetCapacity = Math.min(
-                    MAXIMUM_PAYLOAD,
-                    output.writableBytes()
-                            - PKT_LINE_HEADER_SIZE
-                            - 1);
-            return packetCapacity >= 0
-                    ? packetCapacity
-                    : -1;
         }
 
         @Override
@@ -1058,7 +1035,6 @@ public final class GitBlockingWireTransport {
             }
             closed = true;
             acceptingMessages = false;
-            rollbackOutput();
             try {
                 if (producer != null) {
                     producer.close();
@@ -1071,17 +1047,7 @@ public final class GitBlockingWireTransport {
             }
         }
 
-        private void rollbackOutput() {
-            if (output.writerIndex() >= outputStartIndex) {
-                output.writerIndex(outputStartIndex);
-            }
-        }
-
         private void releaseMessages() {
-            if (currentMessage != null) {
-                currentMessage.payload.release();
-                currentMessage = null;
-            }
             SideBandMessage message;
             while ((message = messages.pollFirst()) != null) {
                 message.payload.release();
@@ -1103,14 +1069,6 @@ public final class GitBlockingWireTransport {
                 this.payload = payload;
             }
         }
-
-        private enum Phase {
-            NAK,
-            PACK,
-            DRAINING,
-            FLUSH,
-            COMPLETED
-        }
     }
 
     public final class LegacyPackResponse
@@ -1119,14 +1077,11 @@ public final class GitBlockingWireTransport {
                 {'0', '0', '0', '8', 'N', 'A', 'K', '\n'};
 
         private final NativePackProducer producer;
-        private Phase phase = Phase.NAK;
-        private int outputStartIndex;
-        private int controlOffset;
         private boolean closed;
 
-        private LegacyPackResponse(NativePackProducer producer) {
+        private LegacyPackResponse(
+                NativePackProducer producer) {
             this.producer = producer;
-            outputStartIndex = output.writerIndex();
         }
 
         public void advance() throws IOException {
@@ -1135,68 +1090,15 @@ public final class GitBlockingWireTransport {
                         "Legacy pack response is closed");
             }
             try {
-                while (phase != Phase.COMPLETED) {
-                    if (!output.isWritable()) {
-                        flushOutput();
-                    }
-                    switch (phase) {
-                        case NAK -> writeControl(NAK, Phase.PACK);
-                        case PACK -> {
-                            if (!writePackBytes()) {
-                                flushOutput();
-                            }
-                        }
-                        case COMPLETED -> {
-                        }
-                    }
-                }
-                finishOutput();
+                writeRaw(NAK);
+                RawPackOutput packOutput = new RawPackOutput();
+                producePack(producer, packOutput);
+                flush();
                 close();
             } catch (IOException | RuntimeException error) {
                 closeAfterFailure(error);
                 throw error;
             }
-        }
-
-        private void writeControl(
-                byte[] control,
-                Phase next) {
-            int length = Math.min(
-                    output.writableBytes(),
-                    control.length - controlOffset);
-            output.writeBytes(
-                    control,
-                    controlOffset,
-                    length);
-            controlOffset += length;
-            if (controlOffset == control.length) {
-                controlOffset = 0;
-                phase = next;
-            }
-        }
-
-        private boolean writePackBytes() {
-            int packetCapacity = output.writableBytes();
-            if (packetCapacity <= 0) {
-                return false;
-            }
-            ByteBuf payload = output.slice(
-                    output.writerIndex(),
-                    packetCapacity).clear();
-            NativePackProducer.Result result =
-                    producer.produce(payload);
-            int payloadLength = payload.writerIndex();
-            if (payloadLength == 0
-                    && result == NativePackProducer.Result.MORE) {
-                throw new IllegalStateException(
-                        "Native pack producer made no progress");
-            }
-            output.writerIndex(
-                    output.writerIndex() + payloadLength);
-            if (result == NativePackProducer.Result.COMPLETED) {
-                phase = Phase.COMPLETED;
-            }
-            return true;
         }
 
         private void closeAfterFailure(Throwable failure) {
@@ -1213,9 +1115,6 @@ public final class GitBlockingWireTransport {
                 return;
             }
             closed = true;
-            if (output.writerIndex() >= outputStartIndex) {
-                output.writerIndex(outputStartIndex);
-            }
             try {
                 if (producer != null) {
                     producer.close();
@@ -1225,12 +1124,6 @@ public final class GitBlockingWireTransport {
                     legacyPackResponse = null;
                 }
             }
-        }
-
-        private enum Phase {
-            NAK,
-            PACK,
-            COMPLETED
         }
     }
 
@@ -1243,18 +1136,10 @@ public final class GitBlockingWireTransport {
                 {'0', '0', '0', '1'};
         private static final byte[] FLUSH =
                 {'0', '0', '0', '0'};
-        private static final int MAXIMUM_PAYLOAD =
-                MAX_PKT_LINE_LENGTH
-                        - PKT_LINE_HEADER_SIZE
-                        - 1;
 
         private final NativePackProducer producer;
         private final List<byte[]> prePackSectionPackets;
         private final byte[] packfileHeader;
-        private Phase phase;
-        private int outputStartIndex;
-        private int controlOffset;
-        private int prePackSectionPacketIndex;
         private boolean closed;
 
         private ProtocolV2PackfileResponse(
@@ -1272,10 +1157,6 @@ public final class GitBlockingWireTransport {
             this.packfileHeader = sidebandAll
                     ? encodeAsciiPacket("packfile\n", true)
                     : PACKFILE_HEADER;
-            this.phase = prePackSectionPackets.isEmpty()
-                    ? Phase.HEADER
-                    : Phase.PRE_PACK_SECTIONS;
-            outputStartIndex = output.writerIndex();
         }
 
         public void advance() throws IOException {
@@ -1284,116 +1165,20 @@ public final class GitBlockingWireTransport {
                         "Protocol v2 packfile response is closed");
             }
             try {
-                while (phase != Phase.COMPLETED) {
-                    if (!output.isWritable()) {
-                        flushOutput();
-                    }
-                    switch (phase) {
-                        case PRE_PACK_SECTIONS -> {
-                            if (!writePrePackSections()) {
-                                flushOutput();
-                            }
-                        }
-                        case HEADER -> writeControl(
-                                packfileHeader,
-                                Phase.PACK);
-                        case PACK -> {
-                            if (!writePackPacket()) {
-                                flushOutput();
-                            }
-                        }
-                        case FLUSH -> writeControl(
-                                FLUSH,
-                                Phase.COMPLETED);
-                        case COMPLETED -> {
-                        }
-                    }
+                for (byte[] packet : prePackSectionPackets) {
+                    writeRaw(packet);
                 }
-                finishOutput();
+                writeRaw(packfileHeader);
+                producePack(
+                        producer,
+                        new SideBandOutput(SideBandChannel.DATA));
+                writeRaw(FLUSH);
+                flush();
                 close();
             } catch (IOException | RuntimeException error) {
                 closeAfterFailure(error);
                 throw error;
             }
-        }
-
-        private void writeControl(
-                byte[] control,
-                Phase next) {
-            int length = Math.min(
-                    output.writableBytes(),
-                    control.length - controlOffset);
-            output.writeBytes(
-                    control,
-                    controlOffset,
-                    length);
-            controlOffset += length;
-            if (controlOffset == control.length) {
-                controlOffset = 0;
-                phase = next;
-            }
-        }
-
-        private boolean writePrePackSections() {
-            while (prePackSectionPacketIndex < prePackSectionPackets.size()) {
-                byte[] packet =
-                        prePackSectionPackets.get(
-                                prePackSectionPacketIndex);
-                int length = Math.min(
-                        output.writableBytes(),
-                        packet.length - controlOffset);
-                output.writeBytes(packet, controlOffset, length);
-                controlOffset += length;
-                if (controlOffset < packet.length) {
-                    return false;
-                }
-                prePackSectionPacketIndex++;
-                controlOffset = 0;
-            }
-            phase = Phase.HEADER;
-            return true;
-        }
-
-        private boolean writePackPacket() {
-            int packetCapacity = Math.min(
-                    MAXIMUM_PAYLOAD,
-                    output.writableBytes()
-                            - PKT_LINE_HEADER_SIZE
-                            - 1);
-            if (packetCapacity <= 0) {
-                return false;
-            }
-            int packetOffset = output.writerIndex();
-            output.writerIndex(
-                    packetOffset
-                            + PKT_LINE_HEADER_SIZE
-                            + 1);
-            output.setByte(
-                    packetOffset + PKT_LINE_HEADER_SIZE,
-                    SideBandChannel.DATA.wireValue);
-            ByteBuf payload = output.slice(
-                    output.writerIndex(),
-                    packetCapacity).clear();
-            NativePackProducer.Result result =
-                    producer.produce(payload);
-            int payloadLength = payload.writerIndex();
-            if (payloadLength == 0
-                    && result == NativePackProducer.Result.MORE) {
-                throw new IllegalStateException(
-                        "Native pack producer made no progress");
-            }
-            output.writerIndex(
-                    output.writerIndex() + payloadLength);
-            writeHeader(
-                    output,
-                    packetOffset,
-                    PKT_LINE_HEADER_SIZE
-                            + 1
-                            + payloadLength);
-            if (result == NativePackProducer.Result.COMPLETED) {
-                phase = Phase.FLUSH;
-            }
-            return true;
         }
 
         private void closeAfterFailure(Throwable failure) {
@@ -1410,9 +1195,6 @@ public final class GitBlockingWireTransport {
                 return;
             }
             closed = true;
-            if (output.writerIndex() >= outputStartIndex) {
-                output.writerIndex(outputStartIndex);
-            }
             try {
                 if (producer != null) {
                     producer.close();
@@ -1422,14 +1204,6 @@ public final class GitBlockingWireTransport {
                     protocolV2PackfileResponse = null;
                 }
             }
-        }
-
-        private enum Phase {
-            PRE_PACK_SECTIONS,
-            HEADER,
-            PACK,
-            FLUSH,
-            COMPLETED
         }
 
         private static List<byte[]> prePackSectionPackets(
@@ -1548,13 +1322,10 @@ public final class GitBlockingWireTransport {
     }
 
     private interface OutputSerialization {
-        void writeTo(
-                GitBlockingWireTransport wire,
-                Supplier<ByteBuf> output) throws IOException;
+        void writeTo(GitBlockingWireTransport wire) throws IOException;
 
         static void writeBytes(
                 GitBlockingWireTransport wire,
-                Supplier<ByteBuf> output,
                 byte[] bytes) throws IOException {
             wire.writeRaw(bytes);
         }
@@ -1571,15 +1342,12 @@ public final class GitBlockingWireTransport {
         }
 
         @Override
-        public void writeTo(
-                GitBlockingWireTransport wire,
-                Supplier<ByteBuf> output) throws IOException {
+        public void writeTo(GitBlockingWireTransport wire) throws IOException {
             while (packetIndex < packets.size()) {
                 byte[] packet = packets.get(packetIndex);
                 if (packetOffset == 0) {
                     OutputSerialization.writeBytes(
                             wire,
-                            output,
                             packet);
                 } else {
                     byte[] remaining = new byte[packet.length - packetOffset];
@@ -1591,7 +1359,6 @@ public final class GitBlockingWireTransport {
                             remaining.length);
                     OutputSerialization.writeBytes(
                             wire,
-                            output,
                             remaining);
                 }
                 packetIndex++;
@@ -1615,15 +1382,13 @@ public final class GitBlockingWireTransport {
         }
 
         @Override
-        public void writeTo(
-                GitBlockingWireTransport wire,
-                Supplier<ByteBuf> output) throws IOException {
+        public void writeTo(GitBlockingWireTransport wire) throws IOException {
             byte[] packet = new byte[packetLength - packetOffset];
             for (int index = 0; index < packet.length; index++) {
                 packet[index] = byteAt(packetOffset + index);
             }
             packetOffset = packetLength;
-            OutputSerialization.writeBytes(wire, output, packet);
+            OutputSerialization.writeBytes(wire, packet);
             wire.flush();
         }
 
@@ -1648,13 +1413,11 @@ public final class GitBlockingWireTransport {
         }
 
         @Override
-        public void writeTo(
-                GitBlockingWireTransport wire,
-                Supplier<ByteBuf> output) throws IOException {
+        public void writeTo(GitBlockingWireTransport wire) throws IOException {
             PacketListSerialization packets =
                     new PacketListSerialization(
                             encodeAsciiPackets(payloads, false));
-            packets.writeTo(wire, output);
+            packets.writeTo(wire);
             packetIndex = payloads.size() + 1;
             packetOffset = 0;
         }
@@ -1677,16 +1440,14 @@ public final class GitBlockingWireTransport {
         }
 
         @Override
-        public void writeTo(
-                GitBlockingWireTransport wire,
-                Supplier<ByteBuf> output) throws IOException {
+        public void writeTo(GitBlockingWireTransport wire) throws IOException {
             while (packetIndex < packetCount()) {
                 int packetSize = packetSize();
                 byte[] packet = new byte[packetSize - packetOffset];
                 for (int index = 0; index < packet.length; index++) {
                     packet[index] = byteAt(packetOffset + index);
                 }
-                OutputSerialization.writeBytes(wire, output, packet);
+                OutputSerialization.writeBytes(wire, packet);
                 packetIndex++;
                 packetOffset = 0;
             }

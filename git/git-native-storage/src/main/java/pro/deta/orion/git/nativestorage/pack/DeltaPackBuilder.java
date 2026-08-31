@@ -5,8 +5,10 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -445,6 +447,26 @@ public final class DeltaPackBuilder {
                     : Result.MORE;
         }
 
+        @Override
+        public Result produce(BufferedByteOutput destination)
+                throws IOException {
+            Objects.requireNonNull(destination, "destination");
+            if (closed) {
+                throw new IllegalStateException(
+                        "Native pack producer is closed");
+            }
+            while (true) {
+                if (pending != null) {
+                    writePending(destination);
+                    continue;
+                }
+                prepareNext();
+                if (phase == Phase.COMPLETED && pending == null) {
+                    return Result.COMPLETED;
+                }
+            }
+        }
+
         private void writePending(ByteBuf destination) {
             int length = Math.min(
                     destination.writableBytes(),
@@ -460,6 +482,19 @@ public final class DeltaPackBuilder {
                 pendingLength = 0;
                 digestPending = false;
             }
+        }
+
+        private void writePending(BufferedByteOutput destination)
+                throws IOException {
+            int length = pendingLength - pendingOffset;
+            destination.write(pending, pendingOffset, length);
+            if (digestPending) {
+                digest.update(pending, pendingOffset, length);
+            }
+            pending = null;
+            pendingOffset = 0;
+            pendingLength = 0;
+            digestPending = false;
         }
 
         private void prepareNext() {

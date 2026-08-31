@@ -14,6 +14,7 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,14 @@ class GitBlockingWireTransportTest {
             "2222222222222222222222222222222222222222";
     private static final String PEELED_TAG_ID =
             "3333333333333333333333333333333333333333";
+
+    @Test
+    void doesNotKeepReusableOutputBufferOnTransport() {
+        assertThat(GitBlockingWireTransport.class.getDeclaredFields())
+                .filteredOn(field -> !Modifier.isStatic(field.getModifiers()))
+                .filteredOn(field -> ByteBuf.class.equals(field.getType()))
+                .isEmpty();
+    }
 
     @Test
     void sendsProtocolV2UploadPackAdvertisement() throws Exception {
@@ -139,6 +148,18 @@ class GitBlockingWireTransportTest {
         output.sendNak();
 
         assertThat(sink.ascii()).isEqualTo("0008NAK\n");
+    }
+
+    @Test
+    void streamsLegacyPackToByteArrayOutput() throws Exception {
+        ByteArrayRecordingOutput sink = new ByteArrayRecordingOutput();
+        GitBlockingWireTransport output = output(sink);
+        GitBlockingWireTransport.LegacyPackResponse response =
+                output.beginLegacyPack(producer("PACK"));
+
+        response.advance();
+
+        assertThat(sink.ascii()).isEqualTo("0008NAK\nPACK");
     }
 
     @Test
@@ -282,6 +303,15 @@ class GitBlockingWireTransportTest {
                     destination.writableBytes(),
                     value.length - offset);
             destination.writeBytes(value, offset, length);
+            offset += length;
+            return offset == value.length ? Result.COMPLETED : Result.MORE;
+        }
+
+        @Override
+        public Result produce(BufferedByteOutput destination)
+                throws IOException {
+            int length = Math.min(8 * 1024, value.length - offset);
+            destination.write(value, offset, length);
             offset += length;
             return offset == value.length ? Result.COMPLETED : Result.MORE;
         }

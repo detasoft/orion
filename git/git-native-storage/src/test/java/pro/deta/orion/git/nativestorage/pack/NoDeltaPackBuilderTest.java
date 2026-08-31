@@ -9,7 +9,10 @@ import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -86,6 +89,25 @@ class NoDeltaPackBuilderTest {
         }
     }
 
+    @Test
+    void writesPackToBufferedByteOutput() throws Exception {
+        GitObjectId id = objects.write(
+                ObjectType.BLOB,
+                "buffered\n".getBytes(StandardCharsets.UTF_8));
+        CompositeByteBuf fragmented =
+                produce(
+                        builder.producer(objects, List.of(id)),
+                        3);
+
+        try {
+            assertThat(produceBuffered(
+                    builder.producer(objects, List.of(id))))
+                    .containsExactly(ByteBufUtil.getBytes(fragmented));
+        } finally {
+            fragmented.release();
+        }
+    }
+
     private static CompositeByteBuf produce(
             NativePackProducer producer,
             int fragmentSize) {
@@ -113,6 +135,19 @@ class NoDeltaPackBuilderTest {
             complete.release();
             throw error;
         }
+    }
+
+    private static byte[] produceBuffered(NativePackProducer producer)
+            throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        OutputStreamBufferedByteOutput output =
+                new OutputStreamBufferedByteOutput(bytes);
+        try (producer) {
+            while (producer.produce(output)
+                    == NativePackProducer.Result.MORE) {
+            }
+        }
+        return bytes.toByteArray();
     }
 
     private static byte[] sha1(

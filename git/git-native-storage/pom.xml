@@ -15,6 +15,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.net</groupId>
+            <artifactId>net-core</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>common</artifactId>
         </dependency>

@@ -19,8 +19,10 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -117,6 +119,24 @@ class DeltaPackBuilderTest {
         }
     }
 
+    @Test
+    void writesDeltaPackToBufferedByteOutput() throws Exception {
+        BlobPair pair = similarBlobPair();
+
+        byte[] packBytes = produceBuffered(
+                builder.producer(
+                        objects,
+                        List.of(pair.baseId(), pair.targetId())));
+
+        assertThat(packEntryTypes(packBytes))
+                .containsExactly(
+                        ObjectType.BLOB.packTypeId(),
+                        REF_DELTA_TYPE);
+        assertThat(ingest(packBytes).read(pair.targetId()).orElseThrow()
+                .data())
+                .isEqualTo(pair.targetData());
+    }
+
     private BlobPair similarBlobPair() {
         byte[] base = ("shared prefix\n".repeat(80)
                 + "base line\n"
@@ -156,6 +176,19 @@ class DeltaPackBuilderTest {
             complete.release();
             throw error;
         }
+    }
+
+    private static byte[] produceBuffered(NativePackProducer producer)
+            throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        OutputStreamBufferedByteOutput output =
+                new OutputStreamBufferedByteOutput(bytes);
+        try (producer) {
+            while (producer.produce(output)
+                    == NativePackProducer.Result.MORE) {
+            }
+        }
+        return bytes.toByteArray();
     }
 
     private static LooseObjectStore ingest(byte[] pack) {
