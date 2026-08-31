@@ -27,7 +27,6 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
-import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
@@ -357,12 +356,10 @@ public class SshCommandFactory implements CommandFactory {
         Objects.requireNonNull(outputStream, "outputStream");
         Objects.requireNonNull(error, "error");
         if (isReceivePack(commandLine)) {
-            GitBufferedByteTransportAdapter adapter =
-                    new GitBufferedByteTransportAdapter(
-                            null,
-                            new OutputStreamBufferedByteOutput(outputStream));
-            adapter.writeSidebandError(stackTrace(error));
-            adapter.flush();
+            GitBlockingWireTransport transport = new GitBlockingWireTransport(
+                    new OutputStreamBufferedByteOutput(outputStream));
+            transport.writeSideBandError(stackTrace(error));
+            transport.flush();
             return;
         }
         writeGitProtocolError(outputStream, error.getMessage());
@@ -371,12 +368,10 @@ public class SshCommandFactory implements CommandFactory {
     private static void writeGitProtocolError(
             OutputStream outputStream,
             String message) throws IOException {
-        GitBufferedByteTransportAdapter adapter =
-                new GitBufferedByteTransportAdapter(
-                        null,
-                        new OutputStreamBufferedByteOutput(outputStream));
-        adapter.writeTextLine("ERR " + message);
-        adapter.flush();
+        GitBlockingWireTransport transport = new GitBlockingWireTransport(
+                new OutputStreamBufferedByteOutput(outputStream));
+        transport.writeTextLine("ERR " + message);
+        transport.flush();
     }
 
     private static boolean isReceivePack(String commandLine) {

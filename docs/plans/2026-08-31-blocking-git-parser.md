@@ -264,7 +264,7 @@ For this task, support:
 - response through `context.repositoryService.lsRefs(...)` and
   `context.clientOutput.sendLsRefs(...)`.
 
-Use `GitBufferedByteTransportAdapter` as the pkt-line reader:
+Use `GitBlockingWireTransport` as the pkt-line reader:
 
 ```java
 GitPktLine packet = pkt.readPacket();

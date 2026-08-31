@@ -74,10 +74,26 @@ public final class GitBlockingWireTransport {
         return requireInput().readCopy(control.payloadLength());
     }
 
+    public GitPktLine readPacket() throws IOException {
+        ControlState control = readControlState();
+        return new GitPktLine(control, readPayload(control));
+    }
+
     public int readRawInto(
             ByteBuf target,
             int maxLength) throws IOException {
         return requireInput().readInto(target, maxLength);
+    }
+
+    public void writeData(ByteBuf payload) throws IOException {
+        Objects.requireNonNull(payload, "payload");
+        int payloadLength = payload.readableBytes();
+        outputSink.write(pktLineWriter.writeDataHeader(payloadLength));
+        outputSink.write(payload.slice(payload.readerIndex(), payloadLength));
+    }
+
+    public void writeText(String payload) throws IOException {
+        writeData(utf8(payload));
     }
 
     public void writeTextLine(String payload) throws IOException {
@@ -90,6 +106,36 @@ public final class GitBlockingWireTransport {
 
     public void writeFlush() throws IOException {
         outputSink.write(pktLineWriter.writeFlush());
+    }
+
+    public void writeDelimiter() throws IOException {
+        outputSink.write(pktLineWriter.writeDelimiter());
+    }
+
+    public void writeResponseEnd() throws IOException {
+        outputSink.write(pktLineWriter.writeResponseEnd());
+    }
+
+    public void writeSideBandData(ByteBuf payload) throws IOException {
+        writeSideBand(SideBandChannel.DATA, payload);
+    }
+
+    public void writeSideBandProgress(ByteBuf payload) throws IOException {
+        writeSideBand(SideBandChannel.PROGRESS, payload);
+    }
+
+    public void writeSideBandProgress(String payload) throws IOException {
+        byte[] bytes = utf8(payload);
+        writeSideBand(SideBandChannel.PROGRESS, bytes, 0, bytes.length);
+    }
+
+    public void writeSideBandError(ByteBuf payload) throws IOException {
+        writeSideBand(SideBandChannel.ERROR, payload);
+    }
+
+    public void writeSideBandError(String payload) throws IOException {
+        byte[] bytes = utf8(payload);
+        writeSideBand(SideBandChannel.ERROR, bytes, 0, bytes.length);
     }
 
     public void flush() throws IOException {
@@ -599,7 +645,7 @@ public final class GitBlockingWireTransport {
         outputSink.write(buffer);
     }
 
-    private void writeData(byte[] payload) throws IOException {
+    public void writeData(byte[] payload) throws IOException {
         Objects.requireNonNull(payload, "payload");
         outputSink.write(pktLineWriter.writeDataHeader(payload.length));
         outputSink.write(payload);
@@ -900,6 +946,13 @@ public final class GitBlockingWireTransport {
 
         public byte wireValue() {
             return wireValue;
+        }
+    }
+
+    public record GitPktLine(ControlState control, ByteBuf payload) {
+        public GitPktLine {
+            Objects.requireNonNull(control, "control");
+            Objects.requireNonNull(payload, "payload");
         }
     }
 
