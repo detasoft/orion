@@ -9,8 +9,12 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
+import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.continuation.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadNegotiation;
+import pro.deta.orion.git.parser.wire.continuation.exchange.LegacyUploadRequest;
 import pro.deta.orion.git.parser.wire.continuation.exchange.LsRefsRequest;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
@@ -93,11 +97,17 @@ public final class GitBlockingWireSession {
         InitialRequestData.ProtocolVersion version =
                 data.getProtocolVersion().orElse(null);
         if (data.getService() != InitialRequestService.UPLOAD_PACK
-                || version != InitialRequestData.ProtocolVersion.V2) {
+                || version == InitialRequestData.ProtocolVersion.V2
+                && !configuration.protocolV2().fetch()
+                && !configuration.protocolV2().lsRefs()) {
             throw new IOException(
-                    "Blocking parser only supports protocol v2 ls-refs");
+                    "Blocking parser only supports upload-pack");
         }
-        readV2UploadCommands(data);
+        if (version == InitialRequestData.ProtocolVersion.V2) {
+            readV2UploadCommands(data);
+            return;
+        }
+        serveLegacyUpload(data);
     }
 
     private void readV2UploadCommands(InitialRequestData data)
@@ -229,6 +239,13 @@ public final class GitBlockingWireSession {
                         GitWireError.Kind.INVALID_PROTOCOL_V2_FETCH_REQUEST));
     }
 
+    private static IOException invalidLegacyUploadRequest(
+            GitWireError.Kind kind) {
+        return new IOException(
+                kind.getMessage(),
+                new GitGeneralException(kind));
+    }
+
     private enum V2Command {
         LS_REFS,
         FETCH
@@ -303,6 +320,183 @@ public final class GitBlockingWireSession {
         private FetchRequest {
             Objects.requireNonNull(nativeRequest, "nativeRequest");
         }
+    }
+
+    private void serveLegacyUpload(InitialRequestData data)
+            throws IOException {
+        GitV1Advertisement advertisement =
+                repositoryService.legacyUploadPackAdvertisement(data);
+        LegacyUploadRequest request = readLegacyUploadRequest(
+                data,
+                advertisement,
+                pkt());
+        readLegacyUploadNegotiation(request, pkt());
+    }
+
+    private LegacyUploadRequest readLegacyUploadRequest(
+            InitialRequestData data,
+            GitV1Advertisement advertisement,
+            GitBufferedByteTransportAdapter pkt) throws IOException {
+        Set<GitObjectId> wants = new LinkedHashSet<>();
+        Set<String> capabilities = new LinkedHashSet<>();
+        while (true) {
+            ControlState control = pkt.readControlState();
+            switch (control.type()) {
+                case DATA -> acceptLegacyUploadWant(
+                        wants,
+                        capabilities,
+                        readAsciiPayload(pkt, control));
+                case FLUSH -> {
+                    if (wants.isEmpty()) {
+                        throw invalidLegacyUploadRequest(
+                                GitWireError.Kind.MISSING_LEGACY_UPLOAD_WANT);
+                    }
+                    return new LegacyUploadRequest(
+                            data,
+                            wants,
+                            capabilities,
+                            advertisement);
+                }
+                case DELIMITER, RESPONSE_END ->
+                        throw invalidLegacyUploadRequest(
+                                GitWireError.Kind
+                                        .UNSUPPORTED_LEGACY_UPLOAD_CONTROL);
+            }
+        }
+    }
+
+    private static void acceptLegacyUploadWant(
+            Set<GitObjectId> wants,
+            Set<String> capabilities,
+            String line) throws IOException {
+        if (!line.startsWith("want ")) {
+            throw invalidLegacyUploadRequest(
+                    GitWireError.Kind.UNSUPPORTED_LEGACY_UPLOAD_COMMAND);
+        }
+        String arguments = line.substring("want ".length());
+        String[] tokens = arguments.split(" ", -1);
+        if (tokens.length == 0 || !isObjectId(tokens[0])) {
+            throw invalidLegacyUploadRequest(
+                    GitWireError.Kind.INVALID_LEGACY_UPLOAD_OBJECT_ID);
+        }
+        boolean firstWant = wants.isEmpty();
+        if (!firstWant && tokens.length > 1) {
+            throw invalidLegacyUploadRequest(
+                    GitWireError.Kind.LATE_LEGACY_UPLOAD_CAPABILITIES);
+        }
+        if (firstWant) {
+            for (int index = 1; index < tokens.length; index++) {
+                if (tokens[index].isEmpty()) {
+                    throw invalidLegacyUploadRequest(
+                            GitWireError.Kind.EMPTY_LEGACY_UPLOAD_CAPABILITY);
+                }
+            }
+        }
+        wants.add(GitObjectId.of(tokens[0]));
+        if (firstWant) {
+            for (int index = 1; index < tokens.length; index++) {
+                capabilities.add(tokens[index]);
+            }
+        }
+    }
+
+    private void readLegacyUploadNegotiation(
+            LegacyUploadRequest request,
+            GitBufferedByteTransportAdapter pkt) throws IOException {
+        Set<GitObjectId> haves = new LinkedHashSet<>();
+        while (true) {
+            ControlState control = pkt.readControlState();
+            switch (control.type()) {
+                case DATA -> {
+                    LegacyUploadNegotiation negotiation =
+                            acceptLegacyUploadNegotiation(request, haves,
+                                    readAsciiPayload(pkt, control));
+                    if (negotiation != null) {
+                        serveLegacyUploadResponse(negotiation);
+                        return;
+                    }
+                }
+                case FLUSH -> clientOutput.sendNak();
+                case DELIMITER, RESPONSE_END ->
+                        throw invalidLegacyUploadRequest(
+                                GitWireError.Kind
+                                        .UNSUPPORTED_LEGACY_UPLOAD_CONTROL);
+            }
+        }
+    }
+
+    private static LegacyUploadNegotiation acceptLegacyUploadNegotiation(
+            LegacyUploadRequest request,
+            Set<GitObjectId> haves,
+            String line) throws IOException {
+        if ("done".equals(line)) {
+            return new LegacyUploadNegotiation(request, haves);
+        }
+        if (!line.startsWith("have ")) {
+            throw invalidLegacyUploadRequest(
+                    GitWireError.Kind
+                            .UNSUPPORTED_LEGACY_UPLOAD_NEGOTIATION_COMMAND);
+        }
+        String objectId = line.substring("have ".length());
+        if (!isObjectId(objectId)) {
+            throw invalidLegacyUploadRequest(
+                    GitWireError.Kind.INVALID_LEGACY_UPLOAD_HAVE_OBJECT_ID);
+        }
+        haves.add(GitObjectId.of(objectId));
+        return null;
+    }
+
+    private void serveLegacyUploadResponse(
+            LegacyUploadNegotiation negotiation) throws IOException {
+        if (negotiation.negotiated(GitCapability.SIDE_BAND_64K)) {
+            GitNativeClientOutput.LegacySideBandResponse response = null;
+            try {
+                response = clientOutput.beginLegacySideBand64k(
+                        legacyUploadProducer(negotiation),
+                        GitNativeClientOutput.SideBandChannel.DATA);
+                response.advance();
+            } finally {
+                if (response != null) {
+                    response.close();
+                }
+            }
+            return;
+        }
+        GitNativeClientOutput.LegacyPackResponse response = null;
+        try {
+            response = clientOutput.beginLegacyPack(
+                    legacyUploadProducer(negotiation));
+            response.advance();
+        } finally {
+            if (response != null) {
+                response.close();
+            }
+        }
+    }
+
+    private pro.deta.orion.git.nativestorage.pack.NativePackProducer
+            legacyUploadProducer(LegacyUploadNegotiation negotiation) {
+        return repositoryService.legacyUploadPack(
+                negotiation.request().initialRequest(),
+                negotiation.nativeFetchRequest());
+    }
+
+    private static boolean isObjectId(String value) {
+        if (value.length() != 40) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); index++) {
+            if (!isHexadecimal(value.charAt(index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isHexadecimal(int value) {
+        return value >= '0' && value <= '9'
+                || value >= 'a' && value <= 'f'
+                || value >= 'A' && value <= 'F';
     }
 
     private static final class FetchAccumulator {
@@ -486,12 +680,6 @@ public final class GitBlockingWireSession {
                 }
             }
             return GitObjectId.of(objectId);
-        }
-
-        private static boolean isHexadecimal(int value) {
-            return value >= '0' && value <= '9'
-                    || value >= 'a' && value <= 'f'
-                    || value >= 'A' && value <= 'F';
         }
 
         private static boolean isValidProtocol(String protocol) {

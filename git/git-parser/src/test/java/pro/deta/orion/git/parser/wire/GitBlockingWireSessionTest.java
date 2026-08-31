@@ -167,6 +167,50 @@ class GitBlockingWireSessionTest {
         }
     }
 
+    @Test
+    void smartHttpPostWritesLegacyUploadPackResponseOneByteAtATime()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        GitObjectId blob = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.US_ASCII));
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            byte[] request = legacyUploadRequest(
+                    "want " + blob.value() + " thin-pack ofs-delta\n",
+                    "done\n");
+            for (byte value : request) {
+                input.feed(new byte[] {value});
+            }
+
+            session(input, output, provider).serveSmartHttpPost(uploadV1Request());
+
+            assertThat(output.ascii()).contains("PACK");
+        }
+    }
+
+    @Test
+    void smartHttpPostRejectsLegacyUploadInvalidObjectId()
+            throws Exception {
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRequest("want invalid\n", "done\n"));
+
+            assertThatThrownBy(() -> session(input, output, providerWithMainRef())
+                    .serveSmartHttpPost(uploadV1Request()))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining(
+                            "Legacy upload want must contain a 40-digit");
+        }
+    }
+
     private static GitBlockingWireSession session(
             QueueBufferedByteInput input,
             RecordingBufferedByteOutput output,
@@ -197,6 +241,14 @@ class GitBlockingWireSessionTest {
                 Map.of("version", "2"));
     }
 
+    private static InitialRequestData uploadV1Request() {
+        return new InitialRequestData(
+                InitialRequestService.UPLOAD_PACK,
+                "project",
+                "git.example",
+                Map.of());
+    }
+
     private static byte[] lsRefsRequest() {
         ByteArrayBuilder output = new ByteArrayBuilder();
         output.write(command("ls-refs"));
@@ -214,6 +266,16 @@ class GitBlockingWireSessionTest {
             output.writePacket(argument);
         }
         output.writeAscii("0000");
+        return output.bytes();
+    }
+
+    private static byte[] legacyUploadRequest(String... lines) {
+        ByteArrayBuilder output = new ByteArrayBuilder();
+        output.writePacket(lines[0]);
+        output.writeAscii("0000");
+        for (int index = 1; index < lines.length; index++) {
+            output.writePacket(lines[index]);
+        }
         return output.bytes();
     }
 
