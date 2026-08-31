@@ -2,6 +2,7 @@ package pro.deta.orion.git.parser.wire;
 
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -55,6 +56,7 @@ class GitBlockingWireSessionTest {
                 for (byte value : lsRefsRequest()) {
                     input.feed(new byte[] {value});
                 }
+                input.end();
 
                 result.get(2, TimeUnit.SECONDS);
                 assertThat(output.ascii())
@@ -100,6 +102,7 @@ class GitBlockingWireSessionTest {
                     "want " + WANT + "\n",
                     "have " + have.value() + "\n",
                     "wait-for-done\n"));
+            input.end();
 
             session(input, output, provider).serveSmartHttpPost(uploadV2Request());
 
@@ -128,11 +131,85 @@ class GitBlockingWireSessionTest {
                     "want " + blob.value() + "\n",
                     "thin-pack\n",
                     "done\n"));
+            input.end();
 
             session(input, output, provider).serveSmartHttpPost(uploadV2Request());
 
             assertThat(output.ascii())
                     .startsWith("000dpackfile\n")
+                    .contains("PACK");
+        }
+    }
+
+    @Test
+    void sshCommandServesLsRefsThenFetchOnSameProtocolV2Connection()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        repository.saveFiles(
+                "main",
+                Map.of("README.md", "payload".getBytes(StandardCharsets.US_ASCII)),
+                "initial",
+                GitCommitAuthor.EMPTY);
+        String mainId = repository.refs().get("refs/heads/main");
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            ByteArrayBuilder request = new ByteArrayBuilder();
+            request.write(lsRefsRequest());
+            request.write(fetchRequest(
+                    "sideband-all\n",
+                    "want-ref HEAD\n",
+                    "want-ref refs/heads/main\n",
+                    "done\n"));
+            request.writeAscii("0000");
+            input.feed(request.bytes());
+
+            session(input, output, provider).serveCommand(uploadV2Request());
+
+            assertThat(output.ascii())
+                    .contains(mainId + " HEAD symref-target:refs/heads/main")
+                    .contains(mainId + " refs/heads/main")
+                    .contains("\u0001wanted-refs\n")
+                    .contains(mainId + " HEAD\n")
+                    .contains(mainId + " refs/heads/main\n")
+                    .contains("\u0001packfile\n")
+                    .contains("PACK");
+        }
+    }
+
+    @Test
+    void smartHttpPostWritesSidebandFetchPackfileResponseForWantedRefs()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        GitObjectId blob = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef("refs/heads/main", NULL_ID, blob.value());
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(fetchRequest(
+                    "sideband-all\n",
+                    "want-ref HEAD\n",
+                    "want-ref refs/heads/main\n",
+                    "done\n"));
+            input.end();
+
+            session(input, output, provider).serveSmartHttpPost(uploadV2Request());
+
+            assertThat(output.ascii())
+                    .contains("\u0001wanted-refs\n")
+                    .contains(blob.value() + " HEAD\n")
+                    .contains(blob.value() + " refs/heads/main\n")
+                    .contains("\u0001packfile\n")
                     .contains("PACK");
         }
     }
@@ -154,6 +231,7 @@ class GitBlockingWireSessionTest {
                     List.of("server-option=trace\n"),
                     "want " + blob.value() + "\n",
                     "done\n"));
+            input.end();
 
             session(input, output, provider).serveSmartHttpPost(uploadV2Request());
 

@@ -89,8 +89,6 @@ check-jetty-git:
 	printf '%s\n' "$$response"; \
 	printf '%s\n' "$$response" | grep -qi '^content-type: application/x-git-upload-pack-advertisement' || \
 		{ echo "Missing git-upload-pack advertisement content type" >&2; exit 1; }; \
-	printf '%s\n' "$$response" | grep -a '# service=git-upload-pack' >/dev/null || \
-		{ echo "Missing git-upload-pack service announcement" >&2; exit 1; }; \
 	printf '%s\n' "$$response" | grep -a 'version 2' >/dev/null || \
 		{ echo "Missing Git protocol v2 advertisement" >&2; exit 1; }; \
 	printf '%s\n' "$$response" | grep -a 'fetch=' >/dev/null || \

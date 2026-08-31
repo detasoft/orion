@@ -81,7 +81,9 @@ class OrionGitRouteNativeTest {
                 .doesNotContain("# service=git-upload-pack")
                 .startsWith("000eversion 2\n")
                 .contains("version 2\n")
-                .contains("fetch=");
+                .contains("fetch=")
+                .contains("ref-in-want")
+                .contains("sideband-all");
     }
 
     @Test

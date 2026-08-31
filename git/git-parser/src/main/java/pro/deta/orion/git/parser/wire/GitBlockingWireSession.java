@@ -118,7 +118,15 @@ public final class GitBlockingWireSession {
             throws IOException {
         V2Command command = null;
         while (true) {
-            ControlState control = wire.readControlState();
+            ControlState control;
+            try {
+                control = wire.readControlState();
+            } catch (EOFException error) {
+                if (command == null) {
+                    return;
+                }
+                throw error;
+            }
             switch (control.type()) {
                 case DATA -> {
                     String payload = readAsciiPayload(wire, control);
@@ -133,7 +141,7 @@ public final class GitBlockingWireSession {
                         throw invalidV2Request();
                     }
                     serveV2Command(data, command, wire);
-                    return;
+                    command = null;
                 }
                 case FLUSH -> {
                     return;
