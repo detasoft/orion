@@ -27,6 +27,7 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
@@ -57,6 +58,8 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 public class SshCommandFactory implements CommandFactory {
     public static final String SET_KEY = "set-key";
     public static final String SHUTDOWN = "shutdown";
+    private static final GitPktLineWriter PKT_LINE_WRITER =
+            new GitPktLineWriter();
     public static final String ISSUE_TOKEN = "issue-token";
     public static final String TOKEN = "token";
     public static final String STATE = "state";
@@ -356,10 +359,7 @@ public class SshCommandFactory implements CommandFactory {
         Objects.requireNonNull(outputStream, "outputStream");
         Objects.requireNonNull(error, "error");
         if (isReceivePack(commandLine)) {
-            GitBlockingWireTransport transport = new GitBlockingWireTransport(
-                    new OutputStreamBufferedByteOutput(outputStream));
-            transport.writeSideBandError(stackTrace(error));
-            transport.flush();
+            writeSidebandError(outputStream, stackTrace(error));
             return;
         }
         writeGitProtocolError(outputStream, error.getMessage());
@@ -368,10 +368,31 @@ public class SshCommandFactory implements CommandFactory {
     private static void writeGitProtocolError(
             OutputStream outputStream,
             String message) throws IOException {
-        GitBlockingWireTransport transport = new GitBlockingWireTransport(
-                new OutputStreamBufferedByteOutput(outputStream));
-        transport.writeTextLine("ERR " + message);
-        transport.flush();
+        OutputStreamBufferedByteOutput output =
+                new OutputStreamBufferedByteOutput(outputStream);
+        writePktLine(
+                output,
+                ("ERR " + message + "\n").getBytes(StandardCharsets.UTF_8));
+        output.flush();
+    }
+
+    private static void writeSidebandError(
+            OutputStream outputStream,
+            String message) throws IOException {
+        byte[] payload = message.getBytes(StandardCharsets.UTF_8);
+        OutputStreamBufferedByteOutput output =
+                new OutputStreamBufferedByteOutput(outputStream);
+        for (byte[] packet : PKT_LINE_WRITER.writeSidebandPackets(3, payload)) {
+            output.write(packet);
+        }
+        output.flush();
+    }
+
+    private static void writePktLine(
+            OutputStreamBufferedByteOutput output,
+            byte[] payload) throws IOException {
+        output.write(PKT_LINE_WRITER.writeDataHeader(payload.length));
+        output.write(payload);
     }
 
     private static boolean isReceivePack(String commandLine) {

@@ -665,8 +665,9 @@ public final class GitBlockingWireTransport {
             int chunkLength = Math.min(
                     remaining,
                     SideBandOutput.MAXIMUM_PAYLOAD);
-            int packetLength = PKT_LINE_HEADER_SIZE + 1 + chunkLength;
-            outputSink.write(sideBandHeader(packetLength, channel));
+            outputSink.write(pktLineWriter.writeSidebandHeader(
+                    channel.wireValue(),
+                    chunkLength));
             outputSink.write(payload.slice(payloadOffset, chunkLength));
             payloadOffset += chunkLength;
             remaining -= chunkLength;
@@ -689,24 +690,13 @@ public final class GitBlockingWireTransport {
             int chunkLength = Math.min(
                     remaining,
                     SideBandOutput.MAXIMUM_PAYLOAD);
-            int packetLength = PKT_LINE_HEADER_SIZE + 1 + chunkLength;
-            outputSink.write(sideBandHeader(packetLength, channel));
+            outputSink.write(pktLineWriter.writeSidebandHeader(
+                    channel.wireValue(),
+                    chunkLength));
             outputSink.write(payload, payloadOffset, chunkLength);
             payloadOffset += chunkLength;
             remaining -= chunkLength;
         } while (remaining > 0);
-    }
-
-    private static byte[] sideBandHeader(
-            int packetLength,
-            SideBandChannel channel) {
-        return new byte[] {
-                hexDigit((packetLength >>> 12) & 0x0f),
-                hexDigit((packetLength >>> 8) & 0x0f),
-                hexDigit((packetLength >>> 4) & 0x0f),
-                hexDigit(packetLength & 0x0f),
-                channel.wireValue()
-        };
     }
 
     private static byte[] utf8(String payload) {
