@@ -173,5 +173,80 @@
                 </plugins>
             </build>
         </profile>
+        <profile>
+            <id>dist</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>create-jlink-distribution</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <delete dir="${project.build.directory}/orion-dist"/>
+                                        <mkdir dir="${project.build.directory}/orion-dist/bin"/>
+                                        <mkdir dir="${project.build.directory}/orion-dist/lib"/>
+                                        <copy file="src/main/dist/bin/orion"
+                                              tofile="${project.build.directory}/orion-dist/bin/orion"/>
+                                        <chmod file="${project.build.directory}/orion-dist/bin/orion"
+                                               perm="755"/>
+                                        <copy file="${project.build.directory}/${project.build.finalName}-all.jar"
+                                              tofile="${project.build.directory}/orion-dist/lib/orion.jar"/>
+                                        <exec executable="${java.home}/bin/jlink" failonerror="true">
+                                            <arg value="--add-modules"/>
+                                            <arg value="java.base,java.compiler,java.desktop,java.management,java.naming"/>
+                                            <arg value="--add-modules"/>
+                                            <arg value="java.net.http,java.rmi,java.security.jgss,java.sql"/>
+                                            <arg value="--add-modules"/>
+                                            <arg value="jdk.charsets,jdk.crypto.ec,jdk.unsupported,jdk.zipfs"/>
+                                            <arg value="--strip-debug"/>
+                                            <arg value="--no-header-files"/>
+                                            <arg value="--no-man-pages"/>
+                                            <arg value="--compress=zip-6"/>
+                                            <arg value="--output"/>
+                                            <arg value="${project.build.directory}/orion-dist/runtime"/>
+                                        </exec>
+                                        <tar destfile="${project.build.directory}/orion-dist.tar.gz"
+                                             compression="gzip"
+                                             longfile="gnu">
+                                            <tarfileset dir="${project.build.directory}/orion-dist"
+                                                        prefix="orion"/>
+                                        </tar>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>attach-jlink-distribution</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>attach-artifact</goal>
+                                </goals>
+                                <configuration>
+                                    <artifacts>
+                                        <artifact>
+                                            <file>${project.build.directory}/orion-dist.tar.gz</file>
+                                            <type>tar.gz</type>
+                                            <classifier>dist</classifier>
+                                        </artifact>
+                                    </artifacts>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 </project>

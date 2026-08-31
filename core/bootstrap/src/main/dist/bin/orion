@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -u
+
+JAVA_OPTS=${JAVA_OPTS:-}
+
+PRG=$0
+while [ -h "$PRG" ]; do
+  ls_output=$(ls -ld "$PRG")
+  link=$(expr "$ls_output" : '.*-> \(.*\)$')
+  case "$link" in
+    /*) PRG=$link ;;
+    *) PRG=$(dirname "$PRG")/$link ;;
+  esac
+done
+
+SCRIPT_DIR=$(cd "$(dirname "$PRG")" >/dev/null 2>&1 && pwd -P)
+APP_HOME=$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P)
+BUNDLED_JAVA=$APP_HOME/runtime/bin/java
+
+java=${JAVA_CMD:-$BUNDLED_JAVA}
+
+exec "$java" $JAVA_OPTS -jar "$APP_HOME/lib/orion.jar" "$@"

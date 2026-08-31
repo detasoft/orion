@@ -81,6 +81,19 @@ The executable jar also gets a convenience checksum:
 
 - `core/bootstrap/target/bootstrap-1.0-SNAPSHOT-executable.jar.sha256`
 
+Build the self-contained `jlink` distribution with the optional `dist` profile:
+
+```sh
+mvn package -Pdev,dist -pl core/bootstrap -am
+```
+
+The distribution build writes an unpacked image and an archive:
+
+- `core/bootstrap/target/orion-dist/` - an unpacked Orion installation with
+  `bin/orion`, `lib/orion.jar`, and a bundled Java runtime under `runtime/`.
+- `core/bootstrap/target/orion-dist.tar.gz` - the same installation packaged as
+  a tar archive.
+
 Run the regular artifact directly:
 
 ```sh
