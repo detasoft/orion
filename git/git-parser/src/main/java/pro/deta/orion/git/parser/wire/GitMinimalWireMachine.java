@@ -17,7 +17,6 @@ import java.util.Optional;
  * supplied {@link ByteBuf} remains caller-owned.
  */
 public final class GitMinimalWireMachine {
-    private final Context context;
     private final ContinuationRuntime<ByteBuf> runtime;
 
     public GitMinimalWireMachine(
@@ -50,7 +49,7 @@ public final class GitMinimalWireMachine {
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration,
             NativePackfileUriSourceFactory packfileUriSourceFactory) {
-        this.context = new Context(
+        Context context = new Context(
                 Objects.requireNonNull(clientOutput, "clientOutput"),
                 new GitNativeRepositoryService(
                         Objects.requireNonNull(
@@ -73,7 +72,7 @@ public final class GitMinimalWireMachine {
     GitMinimalWireMachine(
             Context context,
             Continuation<ByteBuf> initial) {
-        this.context = Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(context, "context");
         this.runtime = new ContinuationRuntime<>(
                 Objects.requireNonNull(initial, "initial"));
     }
