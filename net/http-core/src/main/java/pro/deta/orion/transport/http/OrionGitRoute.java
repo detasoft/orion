@@ -143,7 +143,11 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
         JettyBufferedByteOutput output =
                 new JettyBufferedByteOutput(resp.getOutputStream());
-        writeServiceAnnouncement(output, request.service());
+        if (request.data().getProtocolVersion()
+                .filter(InitialRequestData.ProtocolVersion.V2::equals)
+                .isEmpty()) {
+            writeServiceAnnouncement(output, request.service());
+        }
         session(req, null, output).advertise(request.data());
     }
 

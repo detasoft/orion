@@ -12,6 +12,7 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -137,6 +138,48 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void smartHttpPostAcceptsAdvertisedFetchServerOption() throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        GitObjectId blob = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.US_ASCII));
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(fetchRequestWithCapabilities(
+                    List.of("server-option=trace\n"),
+                    "want " + blob.value() + "\n",
+                    "done\n"));
+
+            session(input, output, provider).serveSmartHttpPost(uploadV2Request());
+
+            assertThat(output.ascii()).startsWith("000dpackfile\n");
+        }
+    }
+
+    @Test
+    void smartHttpPostRejectsDuplicateFetchWantRef() throws Exception {
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(fetchRequest(
+                    "want-ref refs/heads/main\n",
+                    "want-ref refs/heads/main\n",
+                    "done\n"));
+
+            assertThatThrownBy(() -> session(input, output, providerWithMainRef())
+                    .serveSmartHttpPost(uploadV2Request()))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("Protocol v2 fetch request is invalid");
+        }
+    }
+
+    @Test
     void smartHttpPostRejectsFetchWithoutWantsOrWantRefs()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
@@ -241,6 +284,31 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void smartHttpPostAcceptsNonAsciiLegacyReceiveRefName() throws Exception {
+        String refName = "refs/heads/feature-фи";
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        provider.find("project").valueOrFailure("repository")
+                .updateRef(refName, NULL_ID, MAIN_ID);
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                UnpooledByteBufAllocator.DEFAULT,
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    MAIN_ID + " " + NULL_ID + " " + refName
+                            + "\0report-status\n"));
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(new String(output.bytes(), StandardCharsets.UTF_8))
+                    .contains("ok " + refName + "\n");
+            assertThat(provider.find("project")
+                    .valueOrFailure("repository")
+                    .refs())
+                    .doesNotContainKey(refName);
+        }
+    }
+
+    @Test
     void smartHttpPostRejectsLegacyReceiveInvalidObjectId()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
@@ -337,8 +405,18 @@ class GitBlockingWireSessionTest {
     }
 
     private static byte[] fetchRequest(String... arguments) {
+        return fetchRequestWithCapabilities(List.of(), arguments);
+    }
+
+    private static byte[] fetchRequestWithCapabilities(
+            List<String> capabilities,
+            String... arguments) {
         ByteArrayBuilder output = new ByteArrayBuilder();
-        output.write(command("fetch"));
+        output.writePacket("command=fetch\n");
+        for (String capability : capabilities) {
+            output.writePacket(capability);
+        }
+        output.writeAscii("0001");
         for (String argument : arguments) {
             output.writePacket(argument);
         }
@@ -377,7 +455,7 @@ class GitBlockingWireSessionTest {
         private int size;
 
         void writePacket(String payload) {
-            byte[] payloadBytes = payload.getBytes(StandardCharsets.US_ASCII);
+            byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
             writeAscii("%04x".formatted(payloadBytes.length + 4));
             write(payloadBytes);
         }

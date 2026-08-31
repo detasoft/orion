@@ -52,7 +52,7 @@ class OrionGitRouteNativeTest {
     private Path tempDir;
 
     @Test
-    void discoveryUsesNativeByteBufAdapter() throws Exception {
+    void protocolV2DiscoveryOmitsServiceAnnouncement() throws Exception {
         FileNativeGitRepositoryProvider provider = provider();
         publishObject(provider);
         OrionGitRoute route = new OrionGitRoute(provider, autoPackfileUriConfig());
@@ -78,7 +78,8 @@ class OrionGitRouteNativeTest {
                 .isEqualTo("application/x-git-upload-pack-advertisement");
         assertThat(response.headers).containsEntry("Cache-Control", "no-cache");
         assertThat(body)
-                .contains("# service=git-upload-pack\n0000")
+                .doesNotContain("# service=git-upload-pack")
+                .startsWith("000eversion 2\n")
                 .contains("version 2\n")
                 .contains("fetch=");
     }

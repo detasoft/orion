@@ -37,9 +37,9 @@ public record LegacyReceiveCommand(
         }
         for (int index = 0; index < checkedRefName.length(); index++) {
             char character = checkedRefName.charAt(index);
-            if (character <= 32 || character >= 127) {
+            if (character <= 32 || character == 127) {
                 throw new IllegalArgumentException(
-                        "Receive command ref name must contain printable non-space ASCII");
+                        "Receive command ref name must not contain control characters or spaces");
             }
         }
         if (type != typeOf(oldObjectId, newObjectId)) {

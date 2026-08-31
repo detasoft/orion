@@ -177,8 +177,9 @@ public final class GitNativeClientOutput {
         validateAsciiPacket(payload);
         sendSerialization(
                 new PktLineSerialization(
-                        payload,
-                        payload.length() + PKT_LINE_HEADER_SIZE));
+                        payload.getBytes(StandardCharsets.UTF_8),
+                        payload.getBytes(StandardCharsets.UTF_8).length
+                                + PKT_LINE_HEADER_SIZE));
     }
 
     public void sendProtocolV2FetchAcknowledgments(
@@ -390,15 +391,8 @@ public final class GitNativeClientOutput {
             List<String> payloadParts,
             String failureMessage) throws IOException {
         String payload = String.join("", payloadParts);
-        for (int index = 0; index < payload.length(); index++) {
-            if (payload.charAt(index) > 0x7f) {
-                throw new IllegalArgumentException(
-                        failureMessage,
-                        new IllegalArgumentException(
-                                "Git pkt-line response must be ASCII"));
-            }
-        }
-        int packetLength = payload.length() + PKT_LINE_HEADER_SIZE;
+        byte[] payloadBytes = payload.getBytes(StandardCharsets.UTF_8);
+        int packetLength = payloadBytes.length + PKT_LINE_HEADER_SIZE;
         if (packetLength > MAX_PKT_LINE_LENGTH) {
             throw new IllegalArgumentException(
                     failureMessage,
@@ -406,7 +400,7 @@ public final class GitNativeClientOutput {
                             "Git pkt-line exceeds maximum length"));
         }
         sendSerialization(
-                new PktLineSerialization(payload, packetLength));
+                new PktLineSerialization(payloadBytes, packetLength));
     }
 
     private static void validateObjectId(String objectId) {
@@ -484,7 +478,9 @@ public final class GitNativeClientOutput {
         if (messageFailure.isPresent()) {
             return messageFailure;
         }
-        int payloadLength = receiveCommandStatusPayload(status).length();
+        int payloadLength = receiveCommandStatusPayload(status)
+                .getBytes(StandardCharsets.UTF_8)
+                .length;
         if (payloadLength + PKT_LINE_HEADER_SIZE
                 > MAX_PKT_LINE_LENGTH) {
             return Optional.of(
@@ -504,10 +500,10 @@ public final class GitNativeClientOutput {
         }
         for (int index = 0; index < token.length(); index++) {
             char value = token.charAt(index);
-            if (value <= 0x20 || value >= 0x7f) {
+            if (value <= 0x20 || value == 0x7f) {
                 return Optional.of(
                         fieldName
-                                + " must be a protocol-safe ASCII token");
+                                + " must not contain control characters or spaces");
             }
         }
         return Optional.empty();
@@ -1524,14 +1520,14 @@ public final class GitNativeClientOutput {
 
     private static final class PktLineSerialization
             implements OutputSerialization {
-        private final String payload;
+        private final byte[] payload;
         private final int packetLength;
         private int packetOffset;
 
         private PktLineSerialization(
-                String payload,
+                byte[] payload,
                 int packetLength) {
-            this.payload = payload;
+            this.payload = payload.clone();
             this.packetLength = packetLength;
         }
 
@@ -1553,8 +1549,7 @@ public final class GitNativeClientOutput {
                 int shift = (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
                 return hexDigit((packetLength >>> shift) & 0x0f);
             }
-            return (byte) payload.charAt(
-                    offset - PKT_LINE_HEADER_SIZE);
+            return payload[offset - PKT_LINE_HEADER_SIZE];
         }
     }
 
@@ -1652,20 +1647,21 @@ public final class GitNativeClientOutput {
         }
 
         private int innerPacketLength() {
-            String payload = innerPayload();
+            byte[] payload = innerPayload();
             return payload == null
                     ? 0
-                    : payload.length() + PKT_LINE_HEADER_SIZE;
+                    : payload.length + PKT_LINE_HEADER_SIZE;
         }
 
-        private String innerPayload() {
+        private byte[] innerPayload() {
             if (packetIndex == 0) {
-                return UNPACK_OK;
+                return UNPACK_OK.getBytes(StandardCharsets.UTF_8);
             }
             int statusIndex = packetIndex - 1;
             if (statusIndex < statuses.size()) {
                 return receiveCommandStatusPayload(
-                        statuses.get(statusIndex));
+                        statuses.get(statusIndex))
+                        .getBytes(StandardCharsets.UTF_8);
             }
             return null;
         }
@@ -1694,8 +1690,7 @@ public final class GitNativeClientOutput {
             if (offset < PKT_LINE_HEADER_SIZE) {
                 return headerByte(innerPacketLength, offset);
             }
-            return (byte) innerPayload().charAt(
-                    offset - PKT_LINE_HEADER_SIZE);
+            return innerPayload()[offset - PKT_LINE_HEADER_SIZE];
         }
 
         private static byte headerByte(

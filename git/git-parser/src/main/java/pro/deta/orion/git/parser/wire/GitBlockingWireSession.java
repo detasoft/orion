@@ -132,10 +132,12 @@ public final class GitBlockingWireSession {
             ControlState control = pkt.readControlState();
             switch (control.type()) {
                 case DATA -> {
-                    if (command != null) {
+                    String payload = readAsciiPayload(pkt, control);
+                    if (command == null) {
+                        command = readV2CommandPayload(payload);
+                    } else if (!isSupportedV2CommandCapability(payload)) {
                         throw invalidV2Request();
                     }
-                    command = readV2CommandPayload(pkt, control);
                 }
                 case DELIMITER -> {
                     if (command == null) {
@@ -152,23 +154,22 @@ public final class GitBlockingWireSession {
         }
     }
 
-    private V2Command readV2CommandPayload(
-            GitBufferedByteTransportAdapter pkt,
-            ControlState control) throws IOException {
-        if (control.payloadLength() == 0) {
+    private V2Command readV2CommandPayload(String payload) throws IOException {
+        if (payload.isEmpty()) {
             throw invalidV2Request();
         }
-        String payload = readAsciiPayload(pkt, control);
         if ("command=ls-refs".equals(payload)) {
             return V2Command.LS_REFS;
         }
         if ("command=fetch".equals(payload)) {
             return V2Command.FETCH;
         }
-        if (payload.startsWith("server-option=")) {
-            throw invalidV2Request();
-        }
         throw invalidV2Request();
+    }
+
+    private boolean isSupportedV2CommandCapability(String payload) {
+        return configuration.protocolV2().serverOption()
+                && payload.startsWith("server-option=");
     }
 
     private void serveV2Command(
@@ -571,37 +572,61 @@ public final class GitBlockingWireSession {
         }
 
         int commandLength = separator >= 0 ? separator : length;
-        String commandLine = new String(
+        String legacyCommand = new String(
                 rawPayload,
                 0,
                 commandLength,
                 StandardCharsets.US_ASCII);
-        String[] tokens = commandLine.split(" ", -1);
-        if (tokens.length != 3 || tokens[2].isEmpty()) {
-            throw invalidLegacyReceiveRequest(
-                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
-        }
-        if (!isObjectId(tokens[0]) || !isObjectId(tokens[1])) {
+        String[] legacyTokens = legacyCommand.split(" ", -1);
+        if (legacyTokens.length == 3
+                && (!isObjectId(legacyTokens[0])
+                        || !isObjectId(legacyTokens[1]))) {
             throw invalidLegacyReceiveRequest(
                     GitWireError.Kind.INVALID_LEGACY_RECEIVE_OBJECT_ID);
         }
-        if (NULL_ID.equalsIgnoreCase(tokens[0])
-                && NULL_ID.equalsIgnoreCase(tokens[1])) {
+        if (commandLength <= 82
+                || rawPayload[40] != ' '
+                || rawPayload[81] != ' ') {
             throw invalidLegacyReceiveRequest(
                     GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
         }
-        if (!refNames.add(tokens[2])) {
+        String oldObjectId = new String(
+                rawPayload, 0, 40, StandardCharsets.US_ASCII);
+        String newObjectId = new String(
+                rawPayload, 41, 40, StandardCharsets.US_ASCII);
+        if (!isObjectId(oldObjectId) || !isObjectId(newObjectId)) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_OBJECT_ID);
+        }
+        if (NULL_ID.equalsIgnoreCase(oldObjectId)
+                && NULL_ID.equalsIgnoreCase(newObjectId)) {
+            throw invalidLegacyReceiveRequest(
+                    GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
+        }
+        for (int index = 82; index < commandLength; index++) {
+            int value = rawPayload[index] & 0xff;
+            if (value <= 32 || value == 127) {
+                throw invalidLegacyReceiveRequest(
+                        GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
+            }
+        }
+        String refName = new String(
+                rawPayload,
+                82,
+                commandLength - 82,
+                StandardCharsets.UTF_8);
+        if (!refNames.add(refName)) {
             throw invalidLegacyReceiveRequest(
                     GitWireError.Kind.DUPLICATE_LEGACY_RECEIVE_REF);
         }
 
         try {
             commands.add(new LegacyReceiveCommand(
-                    GitObjectId.of(tokens[0].toLowerCase()),
-                    GitObjectId.of(tokens[1].toLowerCase()),
-                    tokens[2]));
+                    GitObjectId.of(oldObjectId.toLowerCase()),
+                    GitObjectId.of(newObjectId.toLowerCase()),
+                    refName));
         } catch (IllegalArgumentException error) {
-            refNames.remove(tokens[2]);
+            refNames.remove(refName);
             throw invalidLegacyReceiveRequest(
                     GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
         }
@@ -627,7 +652,7 @@ public final class GitBlockingWireSession {
                                     .INVALID_LEGACY_RECEIVE_COMMAND);
                 }
                 separator = index;
-            } else if (value < 32 || value >= 127) {
+            } else if (value < 32 || value == 127) {
                 throw invalidLegacyReceiveRequest(
                         GitWireError.Kind.INVALID_LEGACY_RECEIVE_COMMAND);
             }
@@ -904,7 +929,9 @@ public final class GitBlockingWireSession {
             if (!isValidWantedRefName(refName)) {
                 throw invalidV2FetchRequest();
             }
-            wantRefs.add(refName);
+            if (!wantRefs.add(refName)) {
+                throw invalidV2FetchRequest();
+            }
         }
 
         private void acceptPackfileUriProtocols(String value)
