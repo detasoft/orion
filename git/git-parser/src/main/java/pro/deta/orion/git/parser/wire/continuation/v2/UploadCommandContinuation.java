@@ -39,7 +39,9 @@ final class UploadCommandContinuation implements Continuation<ByteBuf> {
                             this,
                             control.payloadLength());
             case DELIMITER -> completeCommand();
-            case FLUSH -> failed();
+            case FLUSH -> command == null
+                    ? Continuation.completedSuccess(this)
+                    : failed();
             case RESPONSE_END -> failed();
         };
     }

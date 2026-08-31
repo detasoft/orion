@@ -131,7 +131,7 @@ final class ReceiveCommandContinuation implements Continuation<ByteBuf> {
                     rawPayload,
                     separator + 1,
                     length - separator - 1,
-                    StandardCharsets.US_ASCII);
+                    StandardCharsets.US_ASCII).trim();
             if (capabilityLine.isEmpty()) {
                 return EMPTY_LEGACY_RECEIVE_CAPABILITY;
             }

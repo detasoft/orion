@@ -45,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -264,7 +265,6 @@ public class SshCommandFactory implements CommandFactory {
                         returnCode = 10;
                     } catch (Exception e) {
                         log.error("Exception: ", e);
-                        writeProtocolError(e.getMessage());
                         returnCode = -1;
                     } finally {
                         exitCallback.onExit(returnCode);
@@ -299,28 +299,31 @@ public class SshCommandFactory implements CommandFactory {
                                 UnpooledByteBufAllocator.DEFAULT,
                                 GitByteBufTransportAdapter
                                         .DEFAULT_INPUT_BUFFER_SIZE)) {
-                    adapter.serveCommand(
-                            initialRequestData(commandLine, environment),
-                            input,
-                            new OutputStreamBufferedByteOutput(
-                                    streams.getOutputStream()));
+                    try {
+                        adapter.serveCommand(
+                                initialRequestData(commandLine, environment),
+                                input,
+                                new OutputStreamBufferedByteOutput(
+                                        streams.getOutputStream()));
+                    } catch (Exception error) {
+                        writeGitProtocolException(
+                                streams.getOutputStream(),
+                                commandLine,
+                                error);
+                        throw error;
+                    }
                 }
             }
         }
 
         private void writeProtocolError(String message) {
             try {
-                GitBufferedByteTransportAdapter adapter =
-                        new GitBufferedByteTransportAdapter(
-                                null,
-                                new OutputStreamBufferedByteOutput(outputStream),
-                                UnpooledByteBufAllocator.DEFAULT);
-                adapter.writeTextLine("ERR " + message);
-                adapter.flush();
+                writeGitProtocolError(outputStream, message);
             } catch (IOException error) {
                 log.warn("Failed to write SSH Git protocol error", error);
             }
         }
+
     }
 
     String readKey(InputStream inputStream) throws IOException {
@@ -340,6 +343,49 @@ public class SshCommandFactory implements CommandFactory {
             Thread.interrupted();
         }
         return builder.toString();
+    }
+
+    static void writeGitProtocolException(
+            OutputStream outputStream,
+            String commandLine,
+            Throwable error) throws IOException {
+        Objects.requireNonNull(outputStream, "outputStream");
+        Objects.requireNonNull(error, "error");
+        if (isReceivePack(commandLine)) {
+            GitBufferedByteTransportAdapter adapter =
+                    new GitBufferedByteTransportAdapter(
+                            null,
+                            new OutputStreamBufferedByteOutput(outputStream),
+                            UnpooledByteBufAllocator.DEFAULT);
+            adapter.writeSidebandError(stackTrace(error));
+            adapter.flush();
+            return;
+        }
+        writeGitProtocolError(outputStream, error.getMessage());
+    }
+
+    private static void writeGitProtocolError(
+            OutputStream outputStream,
+            String message) throws IOException {
+        GitBufferedByteTransportAdapter adapter =
+                new GitBufferedByteTransportAdapter(
+                        null,
+                        new OutputStreamBufferedByteOutput(outputStream),
+                        UnpooledByteBufAllocator.DEFAULT);
+        adapter.writeTextLine("ERR " + message);
+        adapter.flush();
+    }
+
+    private static boolean isReceivePack(String commandLine) {
+        return commandLine != null
+                && commandLine.trim().startsWith(
+                        InitialRequestService.RECEIVE_PACK.wireName());
+    }
+
+    private static String stackTrace(Throwable error) {
+        StringWriter writer = new StringWriter();
+        error.printStackTrace(new PrintWriter(writer));
+        return writer.toString();
     }
 
     private SecurityContext securityContextFor(ChannelSession channelSession) {

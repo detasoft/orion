@@ -296,6 +296,25 @@ class LsRefsContinuationTest {
     }
 
     @Test
+    void trailingFlushAfterCompletedRequestEndsSession() {
+        ByteBuf outbound = outputBuffer();
+        Driver driver = new Driver(
+                context(
+                        new InMemoryNativeGitRepositoryProvider(),
+                        outbound),
+                initialRequest());
+        try {
+            drive(driver, request("ref-prefix refs/missing/\n"));
+            drive(driver, control("0000"));
+
+            assertThat(driver.current)
+                    .isInstanceOf(Continuation.CompletedSuccess.class);
+        } finally {
+            outbound.release();
+        }
+    }
+
+    @Test
     void yieldsWhenOutputBufferIsInitiallyFull() {
         ByteBuf outbound = outputBuffer();
         outbound.writerIndex(outbound.capacity());
@@ -655,7 +674,7 @@ class LsRefsContinuationTest {
                     current = transition.next();
                     if (current instanceof UploadCommandContinuation
                             || current instanceof
-                            Continuation.CompletedError<?>) {
+                            Continuation.TerminalContinuation<?>) {
                         return;
                     }
                     continue;

@@ -83,6 +83,39 @@ class ReceivePackContinuationTest {
     }
 
     @Test
+    void parsesFirstCommandCapabilitiesWithLeadingWhitespace() {
+        ByteBuf outbound = outputBuffer();
+        ByteBuf input = Unpooled.buffer();
+        try {
+            ReceiveCommandContinuation commands =
+                    advertisedCommands(outbound);
+            writeData(
+                    input,
+                    NULL_ID
+                            + " "
+                            + FIRST_ID
+                            + " refs/heads/main\0 report-status side-band-64k\n");
+            input.writeCharSequence("0000", StandardCharsets.US_ASCII);
+
+            Continuation<ByteBuf> current =
+                    driveUntilAwaitOrBoundary(commands, input);
+
+            assertThat(current)
+                    .isInstanceOf(ReceivePackBoundaryContinuation.class);
+            LegacyReceiveCommandSection section =
+                    ((ReceivePackBoundaryContinuation) current)
+                            .commandSection();
+            assertThat(section.capabilities())
+                    .containsExactly(
+                            "report-status",
+                            "side-band-64k");
+        } finally {
+            input.release();
+            outbound.release();
+        }
+    }
+
+    @Test
     void parsesMultipleCommandsAndLeavesPackPrefixUnread() {
         ByteBuf outbound = outputBuffer();
         ByteBuf input = Unpooled.buffer();

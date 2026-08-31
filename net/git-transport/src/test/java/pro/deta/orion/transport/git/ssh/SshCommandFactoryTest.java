@@ -10,6 +10,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Proxy;
@@ -120,6 +121,31 @@ class SshCommandFactoryTest {
                 () -> SshCommandFactory.initialRequestData(
                         "git-upload-pack '/../outside.git'",
                         environment(Map.of())));
+    }
+
+    @Test
+    void receivePackProtocolErrorWritesStackTraceToSidebandErrorChannel()
+            throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        RuntimeException error = new RuntimeException("boom");
+        error.setStackTrace(new StackTraceElement[]{
+                new StackTraceElement("Example", "method", "Example.java", 12)
+        });
+
+        SshCommandFactory.writeGitProtocolException(
+                output,
+                "git-receive-pack '/demo.git'",
+                error);
+
+        byte[] packet = output.toByteArray();
+        assertEquals(3, packet[4]);
+        String payload = new String(
+                packet,
+                5,
+                packet.length - 5,
+                StandardCharsets.UTF_8);
+        assertTrue(payload.contains("java.lang.RuntimeException: boom"));
+        assertTrue(payload.contains("at Example.method(Example.java:12)"));
     }
 
     private static Environment environment(Map<String, String> values) {

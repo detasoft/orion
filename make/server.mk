@@ -13,13 +13,20 @@ ORION_GIT_KEY ?= $(ORION_SSH_KEY)
 ORION_REPOSITORY ?= project.git
 ORION_REPOSITORY_NAME ?= $(patsubst %.git,%,$(ORION_REPOSITORY))
 ORION_CLONE_DIR ?= $(CURDIR)/target/orion-clone
+ORION_CHECK_RUN_ID := $(shell date -u +%Y%m%dT%H%M%SZ)
+ORION_CHECK_REPOSITORY ?= orion-check-$(ORION_CHECK_RUN_ID).git
+ORION_CHECK_PUSH_DIR ?= $(CURDIR)/target/orion-check-ssh-push
+ORION_CHECK_SSH_CLONE_DIR ?= $(CURDIR)/target/orion-check-ssh-clone
+ORION_CHECK_REPOSITORY_NAME ?= $(patsubst %.git,%,$(ORION_CHECK_REPOSITORY))
 ORION_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_REPOSITORY)
 ORION_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_REPOSITORY)
+ORION_CHECK_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_CHECK_REPOSITORY)
+ORION_CHECK_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_CHECK_REPOSITORY)
 ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -i $(ORION_SERVER_IDENTITY_KEY) -p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
 .PHONY: run-server issue-token issue-token-raw
 .PHONY: ssh-state ssh-status clone-repository clone-repo admin-acl admin-acl-with-token
-.PHONY: check-jetty-git check-ssh-git
+.PHONY: check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
 
 run-server:
 	$(MAVEN) -pl core/bootstrap -am -Prun-server process-classes
@@ -61,16 +68,20 @@ admin-acl-with-token:
 	@ORION_TOKEN="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	curl -v http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/api/admin/acl -H "Authorization: Bearer $$ORION_TOKEN"
 
+# Check HTTP Git discovery and SSH Git operations exposed by make run-server.
+#   make check-git-all
+check-git-all: check-ssh-git-push-create check-jetty-git check-ssh-git check-ssh-git-clone
+
 # Check the Jetty HTTP Git smart discovery endpoint exposed by make run-server.
 #   make check-jetty-git
 check-jetty-git:
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	printf 'ORION_TOKEN=%s\n' "$$token"; \
-	printf 'Checking Jetty HTTP Git discovery: %s/info/refs?service=git-upload-pack\n' "$(ORION_HTTP_GIT_URL)"; \
+	printf 'Checking Jetty HTTP Git discovery: %s/info/refs?service=git-upload-pack\n' "$(ORION_CHECK_HTTP_GIT_URL)"; \
 	response="$$(curl -fsSi \
 		-H "Authorization: Bearer $$token" \
 		-H "Git-Protocol: version=2" \
-		"$(ORION_HTTP_GIT_URL)/info/refs?service=git-upload-pack" 2>&1)" || { \
+		"$(ORION_CHECK_HTTP_GIT_URL)/info/refs?service=git-upload-pack" 2>&1)" || { \
 			printf '%s\n' "$$response"; \
 			echo "HTTP Git discovery failed. Make sure the native repository exists." >&2; \
 			exit 1; \
@@ -84,16 +95,16 @@ check-jetty-git:
 		{ echo "Missing Git protocol v2 advertisement" >&2; exit 1; }; \
 	printf '%s\n' "$$response" | grep -a 'fetch=' >/dev/null || \
 		{ echo "Missing fetch capability advertisement" >&2; exit 1; }; \
-	printf 'Jetty HTTP Git discovery OK: %s/info/refs?service=git-upload-pack\n' "$(ORION_HTTP_GIT_URL)"
+	printf 'Jetty HTTP Git discovery OK: %s/info/refs?service=git-upload-pack\n' "$(ORION_CHECK_HTTP_GIT_URL)"
 
 # Check Git upload-pack over Orion SSH exposed by make run-server.
 #   make check-ssh-git
 check-ssh-git:
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	printf 'ORION_TOKEN=%s\n' "$$token"; \
-	printf 'Checking SSH Git upload-pack: %s\n' "$(ORION_GIT_URL)"; \
+	printf 'Checking SSH Git upload-pack: %s\n' "$(ORION_CHECK_GIT_URL)"; \
 	response="$$(GIT_TRACE_PACKET=1 GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' \
-		git -c protocol.version=2 ls-remote "$(ORION_GIT_URL)" 2>&1)" || { \
+		git -c protocol.version=2 ls-remote "$(ORION_CHECK_GIT_URL)" 2>&1)" || { \
 			printf '%s\n' "$$response"; \
 			echo "SSH Git upload-pack failed. Make sure the native repository exists." >&2; \
 			exit 1; \
@@ -105,4 +116,32 @@ check-ssh-git:
 		{ echo "Missing ls-refs capability advertisement" >&2; exit 1; }; \
 	printf '%s\n' "$$response" | grep -a 'fetch=' >/dev/null || \
 		{ echo "Missing fetch capability advertisement" >&2; exit 1; }; \
-	printf 'SSH Git upload-pack OK: %s\n' "$(ORION_GIT_URL)"
+	printf 'SSH Git upload-pack OK: %s\n' "$(ORION_CHECK_GIT_URL)"
+
+# Check that SSH push creates a missing native Git repository when authorized.
+#   make check-ssh-git-push-create
+check-ssh-git-push-create:
+	rm -rf $(ORION_CHECK_PUSH_DIR)
+	printf 'Checking SSH Git push auto-create: %s\n' "$(ORION_CHECK_GIT_URL)"
+	git init $(ORION_CHECK_PUSH_DIR)
+	printf 'orion git check\n' > $(ORION_CHECK_PUSH_DIR)/README.md
+	git -C $(ORION_CHECK_PUSH_DIR) add README.md
+	git -C $(ORION_CHECK_PUSH_DIR) \
+		-c user.name='Orion Check' \
+		-c user.email='orion-check@example.test' \
+		commit -m 'orion check'
+	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' \
+		git -C $(ORION_CHECK_PUSH_DIR) \
+		-c protocol.version=2 \
+		push $(ORION_CHECK_GIT_URL) HEAD:refs/heads/main
+	printf 'SSH Git push auto-create OK: %s\n' "$(ORION_CHECK_GIT_URL)"
+
+# Check full Git clone over Orion SSH exposed by make run-server.
+#   make check-ssh-git-clone
+check-ssh-git-clone:
+	rm -rf $(ORION_CHECK_SSH_CLONE_DIR)
+	printf 'Checking SSH Git clone: %s\n' "$(ORION_CHECK_GIT_URL)"
+	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' \
+		git -c protocol.version=2 clone $(ORION_CHECK_GIT_URL) $(ORION_CHECK_SSH_CLONE_DIR)
+	test -d $(ORION_CHECK_SSH_CLONE_DIR)/.git
+	printf 'SSH Git clone OK: %s\n' "$(ORION_CHECK_GIT_URL)"
