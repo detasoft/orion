@@ -7,24 +7,24 @@ protocol execution model. The target model is a blocking, linear parser that can
 run on virtual threads. Backpressure should block the session thread instead of
 being represented as continuation yield/resume flow.
 
-The existing `GitByteBufTransportAdapter` already exposes blocking public
-methods for SSH and HTTP callers:
+The existing `GitByteBufTransportAdapter` exposes blocking-looking public
+methods for SSH and HTTP callers, but it is still a compatibility adapter over
+the continuation runtime. It should not be preserved as the production facade.
 
-- `advertise(...)`
-- `serveCommand(...)`
-- `serveSmartHttpPost(...)`
-
-The remaining continuation dependency is mostly inside the parser state graph:
-pkt-line header continuations, payload continuations, command dispatch
-continuations, and response continuations.
+The continuation dependency is mostly inside the parser state graph: pkt-line
+header continuations, payload continuations, command dispatch continuations,
+and response continuations.
 
 ## Decision
 
 Replace the production Git parser path with direct blocking byte I/O. Do not add
-a compatibility layer that wraps continuations. The parser should read from
-`BufferedByteInput`, write through `BufferedByteOutput` via
-`GitNativeClientOutput`, and use ordinary method calls and loops for protocol
-state.
+a compatibility layer that wraps continuations, and do not keep
+`GitByteBufTransportAdapter` as a facade. SSH and HTTP callers should move to
+the new blocking parser entrypoint directly.
+
+The parser should read from `BufferedByteInput`, write through
+`BufferedByteOutput` via `GitNativeClientOutput`, and use ordinary method calls
+and loops for protocol state.
 
 Timeouts are byte I/O properties:
 
@@ -51,10 +51,8 @@ owner decides how to log, close, or report that failure.
 
 ## Parser Shape
 
-Keep the current public transport adapter entry points initially, but replace
-their internals with a blocking Git session runner.
-
-The runner owns:
+Introduce a direct blocking Git session entrypoint in `git-parser`, for example
+`GitBlockingWireSession`. The entrypoint owns:
 
 - initial request advertisement flow;
 - smart HTTP POST flow after advertisement has already happened;
@@ -116,22 +114,25 @@ details.
    timeout behavior.
 2. Document blocking timeout contracts on `BufferedByteInput` and
    `BufferedByteOutput`.
-3. Introduce the blocking Git session runner behind the existing
-   `GitByteBufTransportAdapter` public API.
+3. Introduce the blocking Git session entrypoint and test it directly.
 4. Move initial request, advertisement, and protocol v2 `ls-refs` onto the
-   blocking runner.
+   blocking session.
 5. Move protocol v2 `fetch`.
 6. Move legacy upload-pack.
 7. Move legacy receive-pack and pack ingestion.
-8. Remove production dependencies on Git wire continuations after all callers use
-   the blocking runner.
+8. Cut SSH/HTTP callers over to the blocking session, then remove
+   `GitByteBufTransportAdapter` and production dependencies on Git wire
+   continuations.
 
 ## Non-Goals
 
 Do not remove the shared `core/common-runtime` continuation framework as part of
 this parser migration.
 
-Do not change SSH or HTTP public routing behavior in the first parser slice.
+Do not keep `GitByteBufTransportAdapter` as a compatibility layer.
+
+Do not change externally visible SSH or HTTP Git protocol behavior while moving
+their internals to the blocking session.
 
 Do not introduce no-copy shared input slices for worker payloads. Worker-owned
 payloads should stay copied until profiling proves that a page/lease model is

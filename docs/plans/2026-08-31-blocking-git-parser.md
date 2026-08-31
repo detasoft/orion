@@ -4,7 +4,7 @@
 
 **Goal:** Replace the production Git parser continuation graph with a direct blocking parser path backed by timeout-aware `BufferedByteInput` and `BufferedByteOutput`.
 
-**Architecture:** Keep `GitByteBufTransportAdapter` as the public SSH/HTTP-facing facade while replacing its internals with a blocking Git wire session. The blocking session reads pkt-lines from `BufferedByteInput`, writes responses through `GitNativeClientOutput`, and uses ordinary loops/method calls for v0/v1 and v2 protocol state.
+**Architecture:** Introduce a direct blocking Git wire session API, cover every Git server flow with direct session tests, then move SSH/HTTP callers to it in one cutover that removes `GitByteBufTransportAdapter`. The blocking session reads pkt-lines from `BufferedByteInput`, writes responses through `GitNativeClientOutput`, and uses ordinary loops/method calls for v0/v1 and v2 protocol state.
 
 **Tech Stack:** Java 21, Maven, JUnit 5, AssertJ, Netty `ByteBuf`, Orion `BufferedByteInput`/`BufferedByteOutput`.
 
@@ -189,17 +189,16 @@ git commit -m "Document blocking byte IO timeout contracts"
 
 ---
 
-### Task 3: Blocking Session Skeleton For Advertisement And V2 Ls-Refs
+### Task 3: Blocking Session Entry Point For Advertisement And V2 Ls-Refs
 
 **Files:**
 - Create: `git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java`
-- Modify: `git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapter.java`
-- Test: `git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapterTest.java`
 - Test: create `git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java`
 
 **Step 1: Write failing blocking fragmentation test**
 
-Add a test that starts `serveSmartHttpPost` on a parser thread and feeds the v2
+Add a test that starts `GitBlockingWireSession.serveSmartHttpPost` on a parser
+thread and feeds the v2
 `ls-refs` request one byte at a time through `QueueBufferedByteInput`.
 
 Expected assertion:
@@ -225,18 +224,36 @@ Expected: compile failure because `GitBlockingWireSession` does not exist.
 
 **Step 3: Implement skeleton**
 
-Create `GitBlockingWireSession` with:
+Create `GitBlockingWireSession` as the public blocking parser entrypoint with:
 
 ```java
-final class GitBlockingWireSession {
+public final class GitBlockingWireSession {
     private final GitMinimalWireMachine.Context context;
     private final BufferedByteInput input;
+    private final BufferedByteOutput output;
 
     void advertise(InitialRequestData data) throws IOException { ... }
     void serveCommand(InitialRequestData data) throws IOException { ... }
     void serveSmartHttpPost(InitialRequestData data) throws IOException { ... }
 }
 ```
+
+Give it a constructor that accepts the Git parser dependencies plus the concrete
+input/output for the session:
+
+```java
+public GitBlockingWireSession(
+        ByteBufAllocator allocator,
+        NativeGitRepositoryProvider repositoryProvider,
+        GitNativeRepositoryAccessHook accessHook,
+        GitWireConfiguration configuration,
+        NativePackfileUriSourceFactory packfileUriSourceFactory,
+        BufferedByteInput input,
+        BufferedByteOutput output) { ... }
+```
+
+For advertisement-only discovery, allow `input` to be `null` and fail only if a
+method that needs request-body input is called.
 
 For this task, support:
 
@@ -259,19 +276,19 @@ try {
 }
 ```
 
-**Step 4: Route adapter through blocking session**
+**Step 4: Keep production callers unchanged in this slice**
 
-In `GitByteBufTransportAdapter`, replace `GitMinimalWireMachine` construction
-and `drive/pump` use for the implemented flows with `GitBlockingWireSession`.
-Keep helper creation of `GitNativeClientOutput`, `GitNativeRepositoryService`,
-and `initialRequestPayload(...)` as needed.
+Do not route SSH or HTTP through `GitBlockingWireSession` until v2 fetch, legacy
+upload-pack, and legacy receive-pack are implemented. This avoids a partial
+production cutover while still avoiding a compatibility wrapper around
+continuations.
 
 **Step 5: Run focused tests**
 
 Run:
 
 ```bash
-mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitByteBufTransportAdapterTest,GitBlockingWireSessionTest
+mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitBlockingWireSessionTest
 ```
 
 Expected: pass.
@@ -280,9 +297,7 @@ Expected: pass.
 
 ```bash
 git add git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java \
-    git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapter.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapterTest.java
+    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java
 git commit -m "Serve Git v2 ls-refs with blocking parser"
 ```
 
@@ -377,7 +392,7 @@ Keep output through:
 Run:
 
 ```bash
-mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitBlockingWireSessionTest,GitByteBufTransportAdapterTest
+mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitBlockingWireSessionTest
 ```
 
 Expected: pass.
@@ -457,12 +472,17 @@ git commit -m "Serve legacy receive-pack with blocking parser"
 
 ---
 
-### Task 7: Remove Production Git Continuation Path
+### Task 7: Cut Over Production Git Path And Remove Continuations
 
 **Files:**
+- Delete: `git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapter.java`
+- Delete or rewrite: `git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapterTest.java`
 - Delete or deprecate unused files under `git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/continuation/`
 - Modify: `git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitMinimalWireMachine.java`
-- Modify: `git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapter.java`
+- Modify: `net/http-core/src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java`
+- Modify: `net/http-core/src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java`
+- Modify: `net/git-transport/src/main/java/pro/deta/orion/transport/git/ssh/SshCommandFactory.java`
+- Modify: `net/git-transport/src/test/java/pro/deta/orion/transport/git/ssh/SshCommandFactoryTest.java`
 - Test: remove or rewrite continuation-specific tests under `git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/continuation/`
 
 **Step 1: Identify unused production classes**
@@ -473,8 +493,10 @@ Run:
 rg -n "wire\\.continuation|GitMinimalWireMachine|Continuation<ByteBuf>|ContinuationFlow<ByteBuf>" git/git-parser/src/main/java net/http-core/src/main/java net/git-transport/src/main/java
 ```
 
-Expected: only exchange data records should remain useful. Move exchange records
-out of the `continuation` package before deleting the continuation classes.
+Expected before cutover: `GitByteBufTransportAdapter`, `GitMinimalWireMachine`,
+and exchange data records are still referenced. After cutover, only exchange
+data records should remain useful. Move exchange records out of the
+`continuation` package before deleting the continuation classes.
 
 **Step 2: Move exchange records**
 
@@ -496,7 +518,18 @@ Update imports in parser, HTTP, SSH, and tests.
 Remove tests whose only purpose is asserting continuation transitions. Preserve
 behavior coverage in `GitBlockingWireSessionTest`.
 
-**Step 4: Run focused tests**
+**Step 4: Route SSH and HTTP directly through blocking session**
+
+In `OrionGitRoute`, replace `GitByteBufTransportAdapter` construction with
+direct `GitBlockingWireSession` construction for discovery and POST handling.
+
+In `SshCommandFactory`, replace `GitByteBufTransportAdapter` construction with
+direct `GitBlockingWireSession` construction for SSH command handling.
+
+Delete `GitByteBufTransportAdapter` after no production or test callers import
+it.
+
+**Step 5: Run focused tests**
 
 Run:
 
@@ -506,7 +539,7 @@ mvn test -Pdev -T 4 -q -pl git/git-parser,net/http-core,net/git-transport
 
 Expected: pass.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add git/git-parser net/http-core net/git-transport
