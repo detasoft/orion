@@ -5,6 +5,13 @@ import io.netty.buffer.Unpooled;
 
 import java.io.IOException;
 
+/**
+ * Blocking buffered byte output.
+ *
+ * <p>Implementations may block until bytes are accepted by the transport or a
+ * flush completes. Configured write or flush timeouts are reported as
+ * {@link IOException}.
+ */
 public interface BufferedByteOutput {
     int DEFAULT_BUFFER_CAPACITY = 64 * 1024;
 

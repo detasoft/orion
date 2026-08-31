@@ -4,6 +4,15 @@ import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;
 
+/**
+ * Blocking buffered byte input.
+ *
+ * <p>Implementations may block while waiting for transport bytes. If
+ * configured timeouts expire, read methods report that as {@link IOException}.
+ * EOF before any byte is available may be reported as zero from
+ * {@link #readInto(ByteBuf, int)}; EOF while satisfying exact reads must be
+ * reported as {@link java.io.EOFException}.
+ */
 public interface BufferedByteInput {
     int available();
 
