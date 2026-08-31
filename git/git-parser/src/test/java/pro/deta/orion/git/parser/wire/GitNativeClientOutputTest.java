@@ -9,6 +9,7 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
+import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
@@ -34,7 +35,7 @@ class GitNativeClientOutputTest {
     @Test
     void sendsProtocolV2UploadPackAdvertisement() throws Exception {
         RecordingBufferedByteOutput sink = new RecordingBufferedByteOutput();
-        GitNativeClientOutput output = new GitNativeClientOutput(sink);
+        GitNativeClientOutput output = output(sink);
 
         output.sendV2UploadPackAdvertisement(
                 GitWireConfiguration.allSupported().protocolV2());
@@ -53,7 +54,7 @@ class GitNativeClientOutputTest {
     void writesLargeResponseSynchronouslyToBufferedByteOutput()
             throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitNativeClientOutput output = new GitNativeClientOutput(
+        GitNativeClientOutput output = output(
                 new OutputStreamBufferedByteOutput(bytes));
         List<GitLsRefsResponse.Ref> refs = new ArrayList<>();
         for (int index = 0; index < 2_000; index++) {
@@ -80,7 +81,7 @@ class GitNativeClientOutputTest {
     @Test
     void sendsLegacyAdvertisement() throws Exception {
         RecordingBufferedByteOutput sink = new RecordingBufferedByteOutput();
-        GitNativeClientOutput output = new GitNativeClientOutput(sink);
+        GitNativeClientOutput output = output(sink);
         GitV1Advertisement advertisement = new GitV1Advertisement(
                 List.of(GitCapability.MULTI_ACK),
                 List.of(
@@ -108,8 +109,7 @@ class GitNativeClientOutputTest {
 
     @Test
     void rejectsInvalidLsRefsObjectId() {
-        GitNativeClientOutput output = new GitNativeClientOutput(
-                new RecordingBufferedByteOutput());
+        GitNativeClientOutput output = output(new RecordingBufferedByteOutput());
 
         assertThatThrownBy(() -> output.sendLsRefs(
                 new GitLsRefsResponse(List.of(
@@ -125,8 +125,7 @@ class GitNativeClientOutputTest {
 
     @Test
     void rejectsBlankGitErrorMessage() {
-        GitNativeClientOutput output = new GitNativeClientOutput(
-                new RecordingBufferedByteOutput());
+        GitNativeClientOutput output = output(new RecordingBufferedByteOutput());
 
         assertThatThrownBy(() -> output.sendError(" "))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -136,7 +135,7 @@ class GitNativeClientOutputTest {
     @Test
     void writesSimpleSerializationToByteArrayOutput() throws Exception {
         ByteArrayRecordingOutput sink = new ByteArrayRecordingOutput();
-        GitNativeClientOutput output = new GitNativeClientOutput(sink);
+        GitNativeClientOutput output = output(sink);
 
         output.sendNak();
 
@@ -146,7 +145,7 @@ class GitNativeClientOutputTest {
     @Test
     void writesLegacySideBandResponse() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitNativeClientOutput output = new GitNativeClientOutput(
+        GitNativeClientOutput output = output(
                 new OutputStreamBufferedByteOutput(bytes));
         GitNativeClientOutput.LegacySideBandResponse response =
                 output.beginLegacySideBand64k(
@@ -174,8 +173,7 @@ class GitNativeClientOutputTest {
 
     @Test
     void closesProducerWhenConcurrentPackResponseIsRejected() {
-        GitNativeClientOutput output = new GitNativeClientOutput(
-                new RecordingBufferedByteOutput());
+        GitNativeClientOutput output = output(new RecordingBufferedByteOutput());
         TrackingProducer rejected = new TrackingProducer("PACK");
         GitNativeClientOutput.LegacyPackResponse active =
                 output.beginLegacyPack(producer("active"));
@@ -193,7 +191,7 @@ class GitNativeClientOutputTest {
     @Test
     void rejectsProducerThatMakesNoProgress() {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitNativeClientOutput output = new GitNativeClientOutput(
+        GitNativeClientOutput output = output(
                 new OutputStreamBufferedByteOutput(bytes));
         GitNativeClientOutput.LegacyPackResponse response =
                 output.beginLegacyPack(new NativePackProducer() {
@@ -219,7 +217,7 @@ class GitNativeClientOutputTest {
     @Test
     void allowsOutputAfterCompletedPackResponse() throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        GitNativeClientOutput output = new GitNativeClientOutput(
+        GitNativeClientOutput output = output(
                 new OutputStreamBufferedByteOutput(bytes));
         GitNativeClientOutput.LegacyPackResponse response =
                 output.beginLegacyPack(producer("PACK"));
@@ -233,6 +231,11 @@ class GitNativeClientOutputTest {
 
     private static NativePackProducer producer(String value) {
         return new TrackingProducer(value);
+    }
+
+    private static GitNativeClientOutput output(BufferedByteOutput sink) {
+        return new GitNativeClientOutput(
+                new GitBufferedByteTransportAdapter(null, sink));
     }
 
     private static final class ByteArrayRecordingOutput

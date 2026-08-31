@@ -26,8 +26,6 @@ import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.error.GitGeneralException;
 import pro.deta.orion.git.parser.wire.error.GitWireError;
 import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
-import pro.deta.orion.net.io.BufferedByteInput;
-import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -47,7 +45,7 @@ public final class GitBlockingWireSession {
     private static final String NULL_ID = "0".repeat(40);
 
     private final ByteBufAllocator allocator;
-    private final BufferedByteInput input;
+    private final GitBufferedByteTransportAdapter pkt;
     private final GitNativeClientOutput clientOutput;
     private final GitNativeRepositoryService repositoryService;
     private final GitWireConfiguration configuration;
@@ -58,15 +56,13 @@ public final class GitBlockingWireSession {
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration,
             NativePackfileUriSourceFactory packfileUriSourceFactory,
-            BufferedByteInput input,
-            BufferedByteOutput output) {
+            GitBufferedByteTransportAdapter pkt) {
         this.allocator = Objects.requireNonNull(allocator, "allocator");
-        this.input = input;
+        this.pkt = Objects.requireNonNull(pkt, "pkt");
         this.configuration = Objects.requireNonNull(
                 configuration,
                 "configuration");
-        clientOutput = new GitNativeClientOutput(
-                Objects.requireNonNull(output, "output"));
+        clientOutput = new GitNativeClientOutput(pkt);
         repositoryService = new GitNativeRepositoryService(
                 Objects.requireNonNull(
                         repositoryProvider,
@@ -233,10 +229,7 @@ public final class GitBlockingWireSession {
     }
 
     private GitBufferedByteTransportAdapter pkt() {
-        if (input == null) {
-            throw new IllegalStateException("input is not configured");
-        }
-        return new GitBufferedByteTransportAdapter(input, null);
+        return pkt;
     }
 
     private static IOException invalidV2Request() {
@@ -709,7 +702,7 @@ public final class GitBlockingWireSession {
             while (true) {
                 ByteBuf buffer = allocator.buffer(DEFAULT_INPUT_BUFFER_SIZE);
                 try {
-                    int read = input.readInto(
+                    int read = pkt.readRawInto(
                             buffer,
                             DEFAULT_INPUT_BUFFER_SIZE);
                     PackIngestionResult result = read == 0

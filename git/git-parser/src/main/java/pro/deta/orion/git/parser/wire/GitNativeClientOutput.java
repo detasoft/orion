@@ -8,7 +8,7 @@ import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.net.io.BufferedByteOutput;
+import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -30,14 +30,14 @@ import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
 public final class GitNativeClientOutput {
     public static final int BUFFER_CAPACITY = 64 * 1024;
 
-    private final BufferedByteOutput outputSink;
+    private final GitBufferedByteTransportAdapter pkt;
     private ByteBuf output;
     private LegacySideBandResponse sideBandResponse;
     private LegacyPackResponse legacyPackResponse;
     private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
-    public GitNativeClientOutput(BufferedByteOutput outputSink) {
-        this.outputSink = Objects.requireNonNull(outputSink, "outputSink");
+    public GitNativeClientOutput(GitBufferedByteTransportAdapter pkt) {
+        this.pkt = Objects.requireNonNull(pkt, "pkt");
     }
 
     private static void requireFixedCapacity(ByteBuf output) {
@@ -530,13 +530,12 @@ public final class GitNativeClientOutput {
     private void sendSerialization(
             OutputSerialization operation) throws IOException {
         ensureNoActiveResponse();
-        operation.writeTo(outputSink, this::output);
+        operation.writeTo(pkt, this::output);
     }
 
     private ByteBuf output() {
         if (output == null) {
-            output = Objects.requireNonNull(outputSink, "outputSink")
-                    .getByteBuf();
+            output = pkt.outputBuffer();
             requireFixedCapacity(output);
         }
         return output;
@@ -552,22 +551,22 @@ public final class GitNativeClientOutput {
     }
 
     private static void flushOutput(
-            BufferedByteOutput outputSink,
+            GitBufferedByteTransportAdapter pkt,
             ByteBuf output) throws IOException {
         if (!output.isReadable()) {
             return;
         }
-        outputSink.write(output);
+        pkt.writeRaw(output);
         output.clear();
     }
 
     private void flushOutput() throws IOException {
-        flushOutput(outputSink, output());
+        flushOutput(pkt, output());
     }
 
     private void finishOutput() throws IOException {
         flushOutput();
-        outputSink.flush();
+        pkt.flush();
     }
 
     private static List<byte[]> encodePackets(
@@ -1466,14 +1465,14 @@ public final class GitNativeClientOutput {
 
     private interface OutputSerialization {
         void writeTo(
-                BufferedByteOutput outputSink,
+                GitBufferedByteTransportAdapter pkt,
                 Supplier<ByteBuf> output) throws IOException;
 
         static void writeBytes(
-                BufferedByteOutput outputSink,
+                GitBufferedByteTransportAdapter pkt,
                 Supplier<ByteBuf> output,
                 byte[] bytes) throws IOException {
-            outputSink.write(bytes);
+            pkt.writeRaw(bytes);
         }
     }
 
@@ -1489,13 +1488,13 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                BufferedByteOutput outputSink,
+                GitBufferedByteTransportAdapter pkt,
                 Supplier<ByteBuf> output) throws IOException {
             while (packetIndex < packets.size()) {
                 byte[] packet = packets.get(packetIndex);
                 if (packetOffset == 0) {
                     OutputSerialization.writeBytes(
-                            outputSink,
+                            pkt,
                             output,
                             packet);
                 } else {
@@ -1507,14 +1506,14 @@ public final class GitNativeClientOutput {
                             0,
                             remaining.length);
                     OutputSerialization.writeBytes(
-                            outputSink,
+                            pkt,
                             output,
                             remaining);
                 }
                 packetIndex++;
                 packetOffset = 0;
             }
-            outputSink.flush();
+            pkt.flush();
         }
     }
 
@@ -1533,15 +1532,15 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                BufferedByteOutput outputSink,
+                GitBufferedByteTransportAdapter pkt,
                 Supplier<ByteBuf> output) throws IOException {
             byte[] packet = new byte[packetLength - packetOffset];
             for (int index = 0; index < packet.length; index++) {
                 packet[index] = byteAt(packetOffset + index);
             }
             packetOffset = packetLength;
-            OutputSerialization.writeBytes(outputSink, output, packet);
-            outputSink.flush();
+            OutputSerialization.writeBytes(pkt, output, packet);
+            pkt.flush();
         }
 
         private byte byteAt(int offset) {
@@ -1566,12 +1565,12 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                BufferedByteOutput outputSink,
+                GitBufferedByteTransportAdapter pkt,
                 Supplier<ByteBuf> output) throws IOException {
             PacketListSerialization packets =
                     new PacketListSerialization(
                             encodeAsciiPackets(payloads, false));
-            packets.writeTo(outputSink, output);
+            packets.writeTo(pkt, output);
             packetIndex = payloads.size() + 1;
             packetOffset = 0;
         }
@@ -1595,7 +1594,7 @@ public final class GitNativeClientOutput {
 
         @Override
         public void writeTo(
-                BufferedByteOutput outputSink,
+                GitBufferedByteTransportAdapter pkt,
                 Supplier<ByteBuf> output) throws IOException {
             while (packetIndex < packetCount()) {
                 int packetSize = packetSize();
@@ -1603,11 +1602,11 @@ public final class GitNativeClientOutput {
                 for (int index = 0; index < packet.length; index++) {
                     packet[index] = byteAt(packetOffset + index);
                 }
-                OutputSerialization.writeBytes(outputSink, output, packet);
+                OutputSerialization.writeBytes(pkt, output, packet);
                 packetIndex++;
                 packetOffset = 0;
             }
-            outputSink.flush();
+            pkt.flush();
         }
 
         private int packetCount() {

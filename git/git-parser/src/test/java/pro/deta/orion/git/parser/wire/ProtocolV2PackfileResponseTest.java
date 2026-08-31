@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
+import pro.deta.orion.git.parser.wire.pkt.GitBufferedByteTransportAdapter;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -244,7 +245,7 @@ class ProtocolV2PackfileResponseTest {
     void reportsDeliveryFailureAndClosesProducer() {
         ByteBuf outbound = outputBuffer();
         AtomicBoolean closed = new AtomicBoolean();
-        GitNativeClientOutput output = new GitNativeClientOutput(
+        GitNativeClientOutput output = output(
                 new SubmittedByteBufOutput(outbound, ignored -> {
                     throw new IllegalStateException("delivery failed");
                 }));
@@ -275,13 +276,18 @@ class ProtocolV2PackfileResponseTest {
     private static GitNativeClientOutput collectingOutput(
             ByteBuf outbound,
             List<byte[]> sent) {
-        return new GitNativeClientOutput(
+        return output(
                 new SubmittedByteBufOutput(outbound, buffer -> {
                     byte[] bytes = new byte[buffer.readableBytes()];
                     buffer.readBytes(bytes);
                     sent.add(bytes);
                     buffer.release();
                 }));
+    }
+
+    private static GitNativeClientOutput output(SubmittedByteBufOutput sink) {
+        return new GitNativeClientOutput(
+                new GitBufferedByteTransportAdapter(null, sink));
     }
 
     private static NativePackProducer producer(byte[] bytes) {

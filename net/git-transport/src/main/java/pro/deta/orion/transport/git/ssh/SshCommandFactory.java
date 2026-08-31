@@ -291,6 +291,11 @@ public class SshCommandFactory implements CommandFactory {
                                 UnpooledByteBufAllocator.DEFAULT,
                                 GitBlockingWireSession
                                         .DEFAULT_INPUT_BUFFER_SIZE)) {
+                    OutputStreamBufferedByteOutput output =
+                            new OutputStreamBufferedByteOutput(
+                                    streams.getOutputStream());
+                    GitBufferedByteTransportAdapter pkt =
+                            new GitBufferedByteTransportAdapter(input, output);
                     try {
                         new GitBlockingWireSession(
                                 UnpooledByteBufAllocator.DEFAULT,
@@ -299,9 +304,7 @@ public class SshCommandFactory implements CommandFactory {
                                         securityContext),
                                 GitWireConfiguration.allSupported(),
                                 packfileUriSourceFactory(),
-                                input,
-                                new OutputStreamBufferedByteOutput(
-                                        streams.getOutputStream()))
+                                pkt)
                                 .serveCommand(
                                         initialRequestData(
                                                 commandLine,
