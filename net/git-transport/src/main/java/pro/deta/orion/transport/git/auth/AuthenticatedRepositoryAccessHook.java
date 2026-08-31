@@ -11,15 +11,23 @@ import java.util.Objects;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
-public final class AuthenticatedNativeRepositoryAccessHook
+public final class AuthenticatedRepositoryAccessHook
         implements GitNativeRepositoryAccessHook {
     private final SecurityContext securityContext;
+    private final boolean strictRepositoryName;
 
-    public AuthenticatedNativeRepositoryAccessHook(
+    public AuthenticatedRepositoryAccessHook(
             SecurityContext securityContext) {
+        this(securityContext, false);
+    }
+
+    public AuthenticatedRepositoryAccessHook(
+            SecurityContext securityContext,
+            boolean strictRepositoryName) {
         this.securityContext = Objects.requireNonNull(
                 securityContext,
                 "securityContext");
+        this.strictRepositoryName = strictRepositoryName;
     }
 
     @Override
@@ -32,7 +40,9 @@ public final class AuthenticatedNativeRepositoryAccessHook
     @Override
     public void beforeRead(String repositoryName) {
         RepositoryResource repositoryResource =
-                repositoryResource(repositoryName);
+                repositoryResource(
+                        repositoryName,
+                        strictRepositoryName);
         require(() -> accessEnforcer().require(
                 securityContext,
                 SubjectAccessRules.authenticated()));
@@ -45,7 +55,9 @@ public final class AuthenticatedNativeRepositoryAccessHook
     @Override
     public void beforeCreate(String repositoryName) {
         RepositoryResource repositoryResource =
-                repositoryResource(repositoryName);
+                repositoryResource(
+                        repositoryName,
+                        strictRepositoryName);
         require(() -> accessEnforcer().require(
                 securityContext,
                 repositoryResource,
@@ -55,7 +67,9 @@ public final class AuthenticatedNativeRepositoryAccessHook
     @Override
     public void beforeWrite(String repositoryName) {
         RepositoryResource repositoryResource =
-                repositoryResource(repositoryName);
+                repositoryResource(
+                        repositoryName,
+                        strictRepositoryName);
         require(() -> accessEnforcer().require(
                 securityContext,
                 repositoryResource,
@@ -71,21 +85,39 @@ public final class AuthenticatedNativeRepositoryAccessHook
     }
 
     private static RepositoryResource repositoryResource(
-            String repositoryName) {
-        return RepositoryResource.of(normalizeRepositoryName(repositoryName));
+            String repositoryName,
+            boolean strictRepositoryName) {
+        return RepositoryResource.of(normalizeRepositoryName(
+                repositoryName,
+                strictRepositoryName));
     }
 
-    private static String normalizeRepositoryName(String repositoryName) {
-        String normalized = Objects.requireNonNull(
-                repositoryName,
-                "repositoryName");
+    private static String normalizeRepositoryName(
+            String repositoryName,
+            boolean strictRepositoryName) {
+        String normalized;
+        if (strictRepositoryName) {
+            normalized = repositoryName == null ? "" : repositoryName;
+        } else {
+            normalized = Objects.requireNonNull(
+                    repositoryName,
+                    "repositoryName");
+        }
         while (normalized.startsWith("/")) {
             normalized = normalized.substring(1);
         }
         normalized = normalized.replaceFirst("\\.git$", "");
-        if (normalized.isBlank()) {
+        if (strictRepositoryName
+                && (normalized.contains("\0")
+                || normalized.contains("\\")
+                || normalized.contains(".."))) {
             throw new IllegalArgumentException(
-                    "repositoryName must not be blank");
+                    "Invalid Git repository path");
+        }
+        if (normalized.isBlank()) {
+            throw new IllegalArgumentException(strictRepositoryName
+                    ? "Invalid Git repository path"
+                    : "repositoryName must not be blank");
         }
         return normalized;
     }

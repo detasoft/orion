@@ -38,6 +38,10 @@
             <artifactId>git-parser</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.net</groupId>
+            <artifactId>git-transport</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>

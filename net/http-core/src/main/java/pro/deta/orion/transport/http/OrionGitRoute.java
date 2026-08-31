@@ -5,10 +5,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.auth.check.OrionSecurityException;
-import pro.deta.orion.auth.check.resource.RepositoryResource;
-import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
-import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -22,6 +18,7 @@ import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -36,7 +33,6 @@ import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
 import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
-import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 public class OrionGitRoute implements OrionHttpRoute {
     public static final String URL_PATTERN = "/r/*";
@@ -185,7 +181,9 @@ public class OrionGitRoute implements OrionHttpRoute {
             GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
                 nativeRepositoryProvider,
-                new NativeHttpRepositoryAccessHook(securityContextFrom(request)),
+                new AuthenticatedRepositoryAccessHook(
+                        securityContextFrom(request),
+                        true),
                 GitWireConfiguration.allSupported(),
                 packfileUriSourceFactory(request),
                 wire);
@@ -393,79 +391,6 @@ public class OrionGitRoute implements OrionHttpRoute {
                 InitialRequestData data) {
             return new NativeHttpRequest(false, data);
         }
-    }
-
-    private static final class NativeHttpRepositoryAccessHook
-            implements GitNativeRepositoryAccessHook {
-        private final SecurityContext securityContext;
-
-        private NativeHttpRepositoryAccessHook(
-                SecurityContext securityContext) {
-            this.securityContext = Objects.requireNonNull(
-                    securityContext,
-                    "securityContext");
-        }
-
-        @Override
-        public void beforeReceive(String repositoryName) {
-            require(() -> accessEnforcer().require(
-                    securityContext,
-                    SubjectAccessRules.authenticated()));
-        }
-
-        @Override
-        public void beforeRead(String repositoryName) {
-            RepositoryResource repositoryResource =
-                    repositoryResource(repositoryName);
-            require(() -> accessEnforcer().require(
-                    securityContext,
-                    SubjectAccessRules.authenticated()));
-            require(() -> accessEnforcer().require(
-                    securityContext,
-                    repositoryResource,
-                    RepositoryAccessRules.read()));
-        }
-
-        @Override
-        public void beforeCreate(String repositoryName) {
-            RepositoryResource repositoryResource =
-                    repositoryResource(repositoryName);
-            require(() -> accessEnforcer().require(
-                    securityContext,
-                    repositoryResource,
-                    RepositoryAccessRules.create()));
-        }
-
-        @Override
-        public void beforeWrite(String repositoryName) {
-            RepositoryResource repositoryResource =
-                    repositoryResource(repositoryName);
-            require(() -> accessEnforcer().require(
-                    securityContext,
-                    repositoryResource,
-                    RepositoryAccessRules.write()));
-        }
-
-        private static RepositoryResource repositoryResource(
-                String repositoryName) {
-            return RepositoryResource.of(
-                    normalizeNativeRepositoryName(repositoryName));
-        }
-
-        private static void require(AccessCheck accessCheck) {
-            try {
-                accessCheck.require();
-            } catch (OrionSecurityException error) {
-                throw new GitNativeRepositoryAccessHook
-                        .AccessDeniedException(
-                                error.getMessage(),
-                                error);
-            }
-        }
-    }
-
-    private interface AccessCheck {
-        void require() throws OrionSecurityException;
     }
 
     private static SecurityContext securityContextFrom(HttpServletRequest req) {

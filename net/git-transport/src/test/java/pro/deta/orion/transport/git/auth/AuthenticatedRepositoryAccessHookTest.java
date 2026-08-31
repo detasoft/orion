@@ -13,11 +13,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class AuthenticatedNativeRepositoryAccessHookTest {
+class AuthenticatedRepositoryAccessHookTest {
     @Test
     void receiveRejectsAnonymousUser() {
-        AuthenticatedNativeRepositoryAccessHook hook =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
                         SecurityContext.createContext());
 
         assertThatThrownBy(() -> hook.beforeReceive("project"))
@@ -28,8 +28,8 @@ class AuthenticatedNativeRepositoryAccessHookTest {
 
     @Test
     void receiveAllowsAuthenticatedUserWithoutRepositoryGrants() {
-        AuthenticatedNativeRepositoryAccessHook hook =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
                         authenticatedWithoutGrants());
 
         assertThatCode(() -> hook.beforeReceive("project"))
@@ -38,11 +38,11 @@ class AuthenticatedNativeRepositoryAccessHookTest {
 
     @Test
     void readRequiresRepositoryGrant() {
-        AuthenticatedNativeRepositoryAccessHook denied =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook denied =
+                new AuthenticatedRepositoryAccessHook(
                         authenticatedWithoutGrants());
-        AuthenticatedNativeRepositoryAccessHook allowed =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook allowed =
+                new AuthenticatedRepositoryAccessHook(
                         repositorySecurityContext(
                                 "project",
                                 false,
@@ -58,14 +58,14 @@ class AuthenticatedNativeRepositoryAccessHookTest {
 
     @Test
     void writeRequiresRepositoryWriteGrant() {
-        AuthenticatedNativeRepositoryAccessHook denied =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook denied =
+                new AuthenticatedRepositoryAccessHook(
                         repositorySecurityContext(
                                 "project",
                                 false,
                                 true));
-        AuthenticatedNativeRepositoryAccessHook allowed =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook allowed =
+                new AuthenticatedRepositoryAccessHook(
                         repositorySecurityContext(
                                 "project",
                                 true,
@@ -81,14 +81,14 @@ class AuthenticatedNativeRepositoryAccessHookTest {
 
     @Test
     void createRequiresRepositoryCreateGrant() {
-        AuthenticatedNativeRepositoryAccessHook denied =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook denied =
+                new AuthenticatedRepositoryAccessHook(
                         repositorySecurityContext(
                                 "project",
                                 true,
                                 false));
-        AuthenticatedNativeRepositoryAccessHook allowed =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook allowed =
+                new AuthenticatedRepositoryAccessHook(
                         repositorySecurityContext(
                                 "project",
                                 false,
@@ -104,8 +104,8 @@ class AuthenticatedNativeRepositoryAccessHookTest {
 
     @Test
     void repositoryResourceIgnoresGitSuffix() {
-        AuthenticatedNativeRepositoryAccessHook hook =
-                new AuthenticatedNativeRepositoryAccessHook(
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
                         repositorySecurityContext(
                                 "team/project",
                                 false,
@@ -115,6 +115,27 @@ class AuthenticatedNativeRepositoryAccessHookTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> hook.beforeCreate("/team/project.git"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void strictRepositoryNamesRejectHttpUnsafePaths() {
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
+                        repositorySecurityContext(
+                                "team/project",
+                                false,
+                                true),
+                        true);
+
+        assertThatThrownBy(() -> hook.beforeRead("team/../project.git"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid Git repository path");
+        assertThatThrownBy(() -> hook.beforeRead("team\\project.git"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid Git repository path");
+        assertThatThrownBy(() -> hook.beforeRead("team/project.git\0"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid Git repository path");
     }
 
     private static SecurityContext authenticatedWithoutGrants() {
