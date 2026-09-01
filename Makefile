@@ -35,3 +35,4 @@ test-jfr-report:
 		-Dexec.args="$(TEST_ANALYTICS_REPORT_ARGS)"
 
 include make/server.mk
+include make/session-host.mk

@@ -12,6 +12,10 @@ terminal, child process, journal, sandbox policy, control endpoint, and session
 lifecycle. `agentd` discovers hosts and session directories, reads journals,
 and sends commands, but never owns a hosted child process.
 
+The Maven bootstrap executable JAR carries native session-host resources under
+`META-INF/orion/native/session-host/<target>/`. The release matrix contributes
+Linux, macOS, and Windows builds for x86_64 and aarch64 to that resource tree.
+
 ## System Boundary
 
 ```text
@@ -158,8 +162,9 @@ agent, accept input and resize commands, preserve ordered raw terminal history,
 survive `agentd` loss, allow `agentd` to discover and resume the session, expose
 retention gaps, and enforce an inherited Landlock policy when requested.
 
-Windows parity and the complete release matrix follow without changing the v1
-logical protocols.
+Windows parity and the complete six-target release matrix follow without
+changing the v1 logical protocols. Required artifacts are Linux, macOS, and
+Windows for both x86_64 and aarch64.
 
 ## Acceptance Scenarios
 

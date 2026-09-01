@@ -1,0 +1,21 @@
+[package]
+name = "orion-session-host"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "BUSL-1.1"
+description = "Native persistent process and terminal host for Orion agent sessions"
+
+[lib]
+name = "orion_session_host"
+path = "src/lib.rs"
+
+[[bin]]
+name = "session-host"
+path = "src/main.rs"
+
+[[bin]]
+name = "generate-protocol-fixtures"
+path = "src/bin/generate_protocol_fixtures.rs"
+
+[dependencies]

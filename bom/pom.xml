@@ -32,6 +32,11 @@
             </dependency>
 
             <dependency>
+                <groupId>pro.deta.orion</groupId>
+                <artifactId>session-host-native</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>pro.deta.orion.core</groupId>
                 <artifactId>schema</artifactId>
                 <version>${project.version}</version>

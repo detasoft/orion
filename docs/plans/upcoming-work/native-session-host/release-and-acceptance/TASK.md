@@ -9,11 +9,9 @@ the complete agent-harness scenario.
 
 ## Scope
 
-- Build Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows x86_64
-  standalone artifacts from the pinned toolchain; prefer self-contained Linux
-  binaries where PTY and Landlock dependencies permit it.
-- Keep Windows aarch64 as an explicit follow-up target if it is not yet
-  supported by the release toolchain.
+- Build Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows
+  x86_64/aarch64 standalone artifacts from the pinned toolchain; prefer
+  self-contained Linux binaries where PTY and Landlock dependencies permit it.
 - Package the correct host artifact through Maven and record provenance and
   protocol version information.
 - Exercise shell input, raw output, resize ordering, input deduplication,

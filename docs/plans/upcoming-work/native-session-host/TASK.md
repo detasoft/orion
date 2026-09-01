@@ -20,7 +20,6 @@ commands, and survives independently of `agentd`.
 
 ## Child Tasks
 
-- [ ] [Freeze protocols and bootstrap the Rust build](contracts-and-build/TASK.md)
 - [ ] [Implement the journal core and metadata](journal-core/TASK.md)
 - [ ] [Implement the Unix PTY process host](unix-process-host/TASK.md)
 - [ ] [Add journal segmentation, compression, and retention](journal-retention/TASK.md)

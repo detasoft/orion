@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>pro.deta.orion</groupId>
+        <artifactId>orion</artifactId>
+        <version>${revision}</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>session-host-native</artifactId>
+    <packaging>jar</packaging>
+
+    <properties>
+        <rust.version>1.97.0</rust.version>
+        <session-host.toolchain.cache>${maven.multiModuleProjectDirectory}/target/rust-toolchains</session-host.toolchain.cache>
+        <session-host.cargo.target>${project.build.directory}/cargo</session-host.cargo.target>
+        <session-host.native.resources>${project.build.directory}/native-resources</session-host.native.resources>
+        <session-host.binary.name>session-host</session-host.binary.name>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-native-session-host-resource</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <copy todir="${project.build.outputDirectory}">
+                                    <fileset dir="${session-host.native.resources}"/>
+                                </copy>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>make-build-session-host</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>make</executable>
+                            <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
+                            <arguments>
+                                <argument>SESSION_HOST_TOOLCHAIN_CACHE=${session-host.toolchain.cache}</argument>
+                                <argument>SESSION_HOST_CARGO_TARGET=${session-host.cargo.target}</argument>
+                                <argument>SESSION_HOST_NATIVE_RESOURCES=${session-host.native.resources}</argument>
+                                <argument>session-host-build</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>make-test-session-host</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>make</executable>
+                            <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
+                            <arguments>
+                                <argument>SESSION_HOST_TOOLCHAIN_CACHE=${session-host.toolchain.cache}</argument>
+                                <argument>SESSION_HOST_CARGO_TARGET=${session-host.cargo.target}</argument>
+                                <argument>session-host-test</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
