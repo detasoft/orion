@@ -272,6 +272,14 @@ class GitBlockingWireSessionShallowHistoryTest {
         }
 
         @Override
+        public NativeFetchResponse legacyUploadFetch(
+                InitialRequestData data,
+                NativeFetchRequest request,
+                GitNativeRepositoryAccessHook accessHook) {
+            return repository(data).fetchResponse(request);
+        }
+
+        @Override
         public NativeFetchResponse protocolV2Fetch(
                 InitialRequestData data,
                 NativeFetchRequest request,

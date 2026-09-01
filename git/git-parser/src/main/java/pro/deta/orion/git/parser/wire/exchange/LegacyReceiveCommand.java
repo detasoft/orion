@@ -35,6 +35,21 @@ public record LegacyReceiveCommand(
             throw new IllegalArgumentException(
                     "Receive command ref name must not be blank");
         }
+        if (!checkedRefName.startsWith("refs/")
+                || checkedRefName.endsWith("/")
+                || checkedRefName.endsWith(".")
+                || checkedRefName.contains("//")
+                || checkedRefName.contains("..")
+                || checkedRefName.contains("@{")) {
+            throw new IllegalArgumentException(
+                    "Receive command ref name is not a valid full Git ref name");
+        }
+        for (String component : checkedRefName.split("/")) {
+            if (component.startsWith(".") || component.endsWith(".lock")) {
+                throw new IllegalArgumentException(
+                        "Receive command ref name is not a valid full Git ref name");
+            }
+        }
         for (int index = 0; index < checkedRefName.length(); index++) {
             char character = checkedRefName.charAt(index);
             if (isForbiddenRefNameCharacter(character)) {

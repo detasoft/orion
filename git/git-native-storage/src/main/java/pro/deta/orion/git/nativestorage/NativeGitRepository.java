@@ -14,16 +14,19 @@ import pro.deta.orion.git.nativestorage.pack.PublishedPackContent;
 import pro.deta.orion.git.nativestorage.pack.PublishedPackManifest;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchPackBuilder;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSource;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 public class NativeGitRepository implements AutoCloseable {
     private final String name;
@@ -172,11 +175,47 @@ public class NativeGitRepository implements AutoCloseable {
     public List<RefUpdateResult> publishObjectsAndRefs(
             LooseObjectStore quarantinedObjects,
             List<LooseRefStore.Update> updates) {
+        return publishObjectsAndRefs(quarantinedObjects, updates, true);
+    }
+
+    public List<RefUpdateResult> publishObjectsAndRefs(
+            LooseObjectStore quarantinedObjects,
+            List<LooseRefStore.Update> updates,
+            boolean atomic) {
         Objects.requireNonNull(quarantinedObjects, "quarantinedObjects");
         Objects.requireNonNull(updates, "updates");
+        if (!atomic) {
+            looseObjectStore.putAll(quarantinedObjects);
+            List<RefUpdateResult> results = new ArrayList<>();
+            for (LooseRefStore.Update update : updates) {
+                results.add(looseRefStore.update(
+                        update.refName(),
+                        update.expectedOldId(),
+                        update.newId()));
+            }
+            return List.copyOf(results);
+        }
         return looseRefStore.updateAll(
                 updates,
                 () -> looseObjectStore.putAll(quarantinedObjects));
+    }
+
+    public boolean hasCompleteObjectClosure(
+            GitObjectId root,
+            LooseObjectStore quarantinedObjects) {
+        Objects.requireNonNull(root, "root");
+        Objects.requireNonNull(quarantinedObjects, "quarantinedObjects");
+        NativeObjectClosure closure = new NativeObjectClosure(id ->
+                quarantinedObjects.read(id).or(() -> readObject(id)));
+        try {
+            closure.objectIdsFor(Set.of(root), Set.of());
+            return true;
+        } catch (GitUploadPackException error) {
+            if (error.kind() == GitUploadPackException.Kind.MISSING_OBJECT) {
+                return false;
+            }
+            throw error;
+        }
     }
 
     public NativePackProducer fetch(NativeFetchRequest request) {

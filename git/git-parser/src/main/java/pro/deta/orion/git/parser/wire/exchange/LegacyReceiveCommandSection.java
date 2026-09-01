@@ -1,6 +1,8 @@
 package pro.deta.orion.git.parser.wire.exchange;
 
+import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
+import pro.deta.orion.git.parser.wire.capability.GitCapability;
 
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -11,15 +13,19 @@ import java.util.Set;
 public record LegacyReceiveCommandSection(
         InitialRequestData initialRequest,
         List<LegacyReceiveCommand> commands,
+        Set<GitObjectId> shallowObjectIds,
         Set<String> capabilities,
         GitV1Advertisement serverAdvertisement) {
 
     public LegacyReceiveCommandSection {
         Objects.requireNonNull(initialRequest, "initialRequest");
         Objects.requireNonNull(commands, "commands");
+        Objects.requireNonNull(shallowObjectIds, "shallowObjectIds");
         Objects.requireNonNull(capabilities, "capabilities");
         Objects.requireNonNull(serverAdvertisement, "serverAdvertisement");
         commands = List.copyOf(commands);
+        shallowObjectIds = Collections.unmodifiableSet(
+                new LinkedHashSet<>(shallowObjectIds));
         capabilities = Collections.unmodifiableSet(
                 new LinkedHashSet<>(capabilities));
         if (commands.isEmpty()) {
@@ -34,6 +40,9 @@ public record LegacyReceiveCommandSection(
                         "Receive command section must not contain duplicate refs");
             }
         }
+        for (GitObjectId shallowObjectId : shallowObjectIds) {
+            Objects.requireNonNull(shallowObjectId, "shallowObjectId");
+        }
         for (String capability : capabilities) {
             if (Objects.requireNonNull(
                     capability,
@@ -44,9 +53,35 @@ public record LegacyReceiveCommandSection(
         }
     }
 
+    public LegacyReceiveCommandSection(
+            InitialRequestData initialRequest,
+            List<LegacyReceiveCommand> commands,
+            Set<String> capabilities,
+            GitV1Advertisement serverAdvertisement) {
+        this(
+                initialRequest,
+                commands,
+                Set.of(),
+                capabilities,
+                serverAdvertisement);
+    }
+
     public boolean requiresPack() {
         for (LegacyReceiveCommand command : commands) {
             if (command.type() != LegacyReceiveCommand.Type.DELETE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean negotiated(GitCapability capability) {
+        Objects.requireNonNull(capability, "capability");
+        if (!capabilities.contains(capability.name())) {
+            return false;
+        }
+        for (GitCapability advertised : serverAdvertisement.capabilities()) {
+            if (advertised.name().equals(capability.name())) {
                 return true;
             }
         }

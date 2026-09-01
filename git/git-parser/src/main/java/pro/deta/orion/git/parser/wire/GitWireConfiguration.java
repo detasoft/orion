@@ -18,7 +18,7 @@ public record GitWireConfiguration(
                 new LegacyUploadPack(
                         true, true, true, true, true, true),
                 new LegacyReceivePack(
-                        true, true, true, true, true),
+                        true, true, true, true, true, true),
                 new ProtocolV2(
                         true,
                         true,
@@ -46,7 +46,23 @@ public record GitWireConfiguration(
             boolean sideBand64k,
             boolean ofsDelta,
             boolean objectFormat,
-            boolean agent) {
+            boolean agent,
+            boolean atomic) {
+
+        public LegacyReceivePack(
+                boolean reportStatus,
+                boolean sideBand64k,
+                boolean ofsDelta,
+                boolean objectFormat,
+                boolean agent) {
+            this(
+                    reportStatus,
+                    sideBand64k,
+                    ofsDelta,
+                    objectFormat,
+                    agent,
+                    true);
+        }
     }
 
     public record ProtocolV2(

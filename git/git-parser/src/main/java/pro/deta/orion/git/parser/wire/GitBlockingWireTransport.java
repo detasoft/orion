@@ -250,6 +250,23 @@ public final class GitBlockingWireTransport {
         sendPktLine(List.of("NAK\n"), "Failed to serialize legacy upload-pack NAK");
     }
 
+    public void sendLegacyShallowInfo(
+            Set<GitObjectId> shallowBoundaries,
+            Set<GitObjectId> unshallowBoundaries) throws IOException {
+        Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
+        Objects.requireNonNull(unshallowBoundaries, "unshallowBoundaries");
+        List<String> payloads = new ArrayList<>();
+        for (GitObjectId shallowBoundary : shallowBoundaries) {
+            validateObjectId(shallowBoundary.value());
+            payloads.add("shallow " + shallowBoundary.value() + "\n");
+        }
+        for (GitObjectId unshallowBoundary : unshallowBoundaries) {
+            validateObjectId(unshallowBoundary.value());
+            payloads.add("unshallow " + unshallowBoundary.value() + "\n");
+        }
+        sendSerialization(new AsciiPacketSequenceSerialization(payloads));
+    }
+
     public void sendAck(GitObjectId objectId, AckStatus status) throws IOException {
         Objects.requireNonNull(objectId, "objectId");
         Objects.requireNonNull(status, "status");
@@ -257,6 +274,19 @@ public final class GitBlockingWireTransport {
     }
 
     public void sendLegacyReceivePackStatus(List<ReceiveCommandStatus> statuses, boolean sideBand64k) throws IOException {
+        sendLegacyReceivePackStatus("ok", statuses, sideBand64k);
+    }
+
+    public void sendLegacyReceivePackStatus(
+            String unpackStatus,
+            List<ReceiveCommandStatus> statuses,
+            boolean sideBand64k) throws IOException {
+        Optional<String> unpackStatusFailure =
+                statusMessageValidationFailure(unpackStatus);
+        if (unpackStatusFailure.isPresent()) {
+            throw new IllegalArgumentException(
+                    "unpackStatus " + unpackStatusFailure.get());
+        }
         if (statuses == null) {
             throw new IllegalArgumentException("statuses must not be null");
         }
@@ -266,7 +296,10 @@ public final class GitBlockingWireTransport {
                 throw new IllegalArgumentException(validationFailure.get());
             }
         }
-        sendSerialization(new ReceivePackStatusSerialization(List.copyOf(statuses), sideBand64k));
+        sendSerialization(new ReceivePackStatusSerialization(
+                unpackStatus,
+                List.copyOf(statuses),
+                sideBand64k));
     }
 
     public LegacySideBandResponse beginLegacySideBand64k(NativePackProducer producer, boolean sendNakBeforePack) {
@@ -938,14 +971,17 @@ public final class GitBlockingWireTransport {
 
 
     private static final class ReceivePackStatusSerialization implements OutputSerialization {
-        private static final String UNPACK_OK = "unpack ok\n";
-
+        private final String unpackStatus;
         private final List<ReceiveCommandStatus> statuses;
         private final boolean sideBand64k;
         private int packetIndex;
         private int packetOffset;
 
-        private ReceivePackStatusSerialization(List<ReceiveCommandStatus> statuses, boolean sideBand64k) {
+        private ReceivePackStatusSerialization(
+                String unpackStatus,
+                List<ReceiveCommandStatus> statuses,
+                boolean sideBand64k) {
+            this.unpackStatus = unpackStatus;
             this.statuses = statuses;
             this.sideBand64k = sideBand64k;
         }
@@ -999,7 +1035,8 @@ public final class GitBlockingWireTransport {
 
         private byte[] innerPayload() {
             if (packetIndex == 0) {
-                return UNPACK_OK.getBytes(StandardCharsets.UTF_8);
+                return ("unpack " + unpackStatus + "\n")
+                        .getBytes(StandardCharsets.UTF_8);
             }
             int statusIndex = packetIndex - 1;
             if (statusIndex < statuses.size()) {

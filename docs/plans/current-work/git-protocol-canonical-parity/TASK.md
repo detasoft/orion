@@ -1,6 +1,6 @@
 # Git Protocol Canonical Parity
 
-Status: active
+Status: complete
 Source: follow-up from Git protocol parity audit against canonical `git/git`.
 
 Track and close behavior differences between Orion's native Git protocol paths
@@ -34,9 +34,9 @@ closed fix.
 - [x] [Align protocol version negotiation](protocol-version-negotiation/TASK.md)
 - [x] [Align native daemon bootstrap parsing](native-daemon-bootstrap/TASK.md)
 - [x] [Complete legacy upload-pack negotiation rounds](legacy-upload-pack-negotiation-rounds/TASK.md)
-- [ ] [Complete the legacy upload-pack request surface](legacy-upload-pack-request-surface/TASK.md)
-- [ ] [Complete receive-pack command and status handling](receive-pack-command-status/TASK.md)
-- [ ] [Align receive-pack ref update semantics](receive-pack-update-semantics/TASK.md)
+- [x] [Complete the legacy upload-pack request surface](legacy-upload-pack-request-surface/TASK.md)
+- [x] [Complete receive-pack command and status handling](receive-pack-command-status/TASK.md)
+- [x] [Align receive-pack ref update semantics](receive-pack-update-semantics/TASK.md)
 - [x] [Align Smart HTTP request semantics](smart-http-request-semantics/TASK.md)
 
 ## Recently Closed Gaps

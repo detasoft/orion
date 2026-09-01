@@ -108,6 +108,47 @@ class NativeGitRepositoryTest {
     }
 
     @Test
+    void validatesObjectClosureAcrossQuarantineAndPublishedObjects() {
+        LooseObjectStore publishedObjects = new LooseObjectStore();
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId tree = publishedObjects.write(
+                ObjectType.TREE,
+                new byte[0]);
+        GitObjectId commit = writeCommit(
+                quarantine,
+                tree,
+                null,
+                "quarantined commit");
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                publishedObjects,
+                "refs/heads/main");
+
+        assertThat(repository.hasCompleteObjectClosure(commit, quarantine))
+                .isTrue();
+    }
+
+    @Test
+    void rejectsObjectClosureWithMissingReferencedObject() {
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId missingTree = GitObjectId.of("f".repeat(40));
+        GitObjectId commit = writeCommit(
+                quarantine,
+                missingTree,
+                null,
+                "incomplete commit");
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+
+        assertThat(repository.hasCompleteObjectClosure(commit, quarantine))
+                .isFalse();
+    }
+
+    @Test
     void buildsPackWithoutObjectsReachableFromHaves() {
         LooseObjectStore objects = new LooseObjectStore();
         GitObjectId wanted = objects.write(

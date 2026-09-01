@@ -79,7 +79,7 @@ class OrionGitRouteNativeTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType)
                 .isEqualTo("application/x-git-upload-pack-advertisement");
-        assertThat(response.headers).containsEntry("Cache-Control", "no-cache");
+        assertNoCacheHeaders(response);
         assertThat(body)
                 .doesNotContain("# service=git-upload-pack")
                 .startsWith("000eversion 2\n")
@@ -116,7 +116,7 @@ class OrionGitRouteNativeTest {
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType)
                 .isEqualTo("application/x-git-upload-pack-result");
-        assertThat(response.headers).containsEntry("Cache-Control", "no-cache");
+        assertNoCacheHeaders(response);
         assertThat(body)
                 .contains("packfile-uris\n")
                 .contains(fixture.publishedPack().packChecksum()
@@ -150,7 +150,118 @@ class OrionGitRouteNativeTest {
                 null);
 
         assertThat(response.status)
-                .isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+                .isEqualTo(HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE);
+        assertNoCacheHeaders(response);
+    }
+
+    @Test
+    void postRequiresCanonicalExactContentType() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        provider.create(REPOSITORY_NAME).valueOrFailure("repository");
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig());
+
+        for (String contentType : List.of(
+                "application/x-git-upload-pack-request; charset=UTF-8",
+                "Application/X-Git-Upload-Pack-Request")) {
+            ResponseRecorder response = new ResponseRecorder();
+
+            route.handle(
+                    request(
+                            "POST",
+                            "/r/team/project.git/git-upload-pack",
+                            contentType,
+                            null,
+                            Map.of("Host", "git.example"),
+                            new byte[0],
+                            repositorySecurityContext()),
+                    response.proxy(),
+                    null);
+
+            assertThat(response.status)
+                    .isEqualTo(HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE);
+            assertNoCacheHeaders(response);
+        }
+    }
+
+    @Test
+    void headUsesSmartDiscoveryGetSemantics() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig());
+        ResponseRecorder response = new ResponseRecorder();
+
+        route.handle(
+                request(
+                        "HEAD",
+                        "/r/team/project.git/info/refs",
+                        null,
+                        "git-upload-pack",
+                        Map.of("Host", "git.example"),
+                        new byte[0],
+                        repositorySecurityContext()),
+                response.proxy(),
+                null);
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType)
+                .isEqualTo("application/x-git-upload-pack-advertisement");
+        assertNoCacheHeaders(response);
+    }
+
+    @Test
+    void rejectsEndpointSpecificWrongMethodsWithAccurateAllowHeader()
+            throws Exception {
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider()),
+                autoPackfileUriConfig());
+        ResponseRecorder getRpcResponse = new ResponseRecorder();
+        ResponseRecorder postDiscoveryResponse = new ResponseRecorder();
+
+        route.handle(
+                request(
+                        "GET",
+                        "/r/team/project.git/git-upload-pack",
+                        null,
+                        null,
+                        Map.of(),
+                        new byte[0],
+                        repositorySecurityContext()),
+                getRpcResponse.proxy(),
+                null);
+        route.handle(
+                request(
+                        "POST",
+                        "/r/team/project.git/info/refs",
+                        null,
+                        "git-upload-pack",
+                        Map.of(),
+                        new byte[0],
+                        repositorySecurityContext()),
+                postDiscoveryResponse.proxy(),
+                null);
+
+        assertThat(getRpcResponse.status)
+                .isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+        assertThat(getRpcResponse.headers).containsEntry("Allow", "POST");
+        assertNoCacheHeaders(getRpcResponse);
+        assertThat(postDiscoveryResponse.status)
+                .isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+        assertThat(postDiscoveryResponse.headers)
+                .containsEntry("Allow", "GET, HEAD");
+        assertNoCacheHeaders(postDiscoveryResponse);
+    }
+
+    private static void assertNoCacheHeaders(ResponseRecorder response) {
+        assertThat(response.headers)
+                .containsEntry("Expires", "Fri, 01 Jan 1980 00:00:00 GMT")
+                .containsEntry("Pragma", "no-cache")
+                .containsEntry(
+                        "Cache-Control",
+                        "no-cache, max-age=0, must-revalidate");
     }
 
     private FileNativeGitRepositoryProvider provider() {

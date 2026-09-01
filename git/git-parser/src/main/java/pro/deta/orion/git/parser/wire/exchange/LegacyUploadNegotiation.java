@@ -3,6 +3,7 @@ package pro.deta.orion.git.parser.wire.exchange;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 
 import java.util.Collections;
@@ -26,10 +27,18 @@ public record LegacyUploadNegotiation(
                 haves,
                 true,
                 Set.of(),
-                NativeFetchOptions.initial(
+                new NativeFetchOptions(
                         negotiated(GitCapability.THIN_PACK),
                         negotiated(GitCapability.OFS_DELTA),
-                        negotiated(GitCapability.INCLUDE_TAG)));
+                        negotiated(GitCapability.INCLUDE_TAG),
+                        false,
+                        request.depth(),
+                        NativeObjectFilter.NONE,
+                        Set.of(),
+                        request.clientShallowCommits(),
+                        request.deepenRelative(),
+                        request.deepenSince(),
+                        request.deepenNotRefs()));
     }
 
     public boolean negotiated(GitCapability capability) {

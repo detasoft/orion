@@ -12,21 +12,53 @@ import java.util.Set;
 public record LegacyUploadRequest(
         InitialRequestData initialRequest,
         Set<GitObjectId> wants,
+        Set<GitObjectId> clientShallowCommits,
+        int depth,
+        boolean deepenRelative,
+        long deepenSince,
+        Set<String> deepenNotRefs,
         Set<String> capabilities,
         GitV1Advertisement serverAdvertisement) {
 
     public LegacyUploadRequest {
         Objects.requireNonNull(initialRequest, "initialRequest");
         Objects.requireNonNull(wants, "wants");
+        Objects.requireNonNull(clientShallowCommits, "clientShallowCommits");
+        Objects.requireNonNull(deepenNotRefs, "deepenNotRefs");
         Objects.requireNonNull(capabilities, "capabilities");
         Objects.requireNonNull(serverAdvertisement, "serverAdvertisement");
         wants = Collections.unmodifiableSet(new LinkedHashSet<>(wants));
+        clientShallowCommits = Collections.unmodifiableSet(
+                new LinkedHashSet<>(clientShallowCommits));
+        deepenNotRefs = Collections.unmodifiableSet(
+                new LinkedHashSet<>(deepenNotRefs));
         capabilities = Collections.unmodifiableSet(
                 new LinkedHashSet<>(capabilities));
         if (wants.isEmpty()) {
             throw new IllegalArgumentException(
                     "Legacy upload request must contain a want");
         }
+        if (depth < 0 || deepenSince < -1) {
+            throw new IllegalArgumentException(
+                    "Legacy upload deepening values are invalid");
+        }
+    }
+
+    public LegacyUploadRequest(
+            InitialRequestData initialRequest,
+            Set<GitObjectId> wants,
+            Set<String> capabilities,
+            GitV1Advertisement serverAdvertisement) {
+        this(initialRequest, wants, Set.of(), 0, false, -1, Set.of(),
+                capabilities, serverAdvertisement);
+    }
+
+    public boolean shallow() {
+        return depth > 0
+                || !clientShallowCommits.isEmpty()
+                || deepenRelative
+                || deepenSince >= 0
+                || !deepenNotRefs.isEmpty();
     }
 
     public boolean negotiated(GitCapability capability) {

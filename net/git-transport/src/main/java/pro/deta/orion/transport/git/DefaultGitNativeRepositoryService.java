@@ -141,6 +141,17 @@ public final class DefaultGitNativeRepositoryService
     }
 
     @Override
+    public NativeFetchResponse legacyUploadFetch(
+            InitialRequestData data,
+            NativeFetchRequest request,
+            GitNativeRepositoryAccessHook accessHook) {
+        Objects.requireNonNull(data, "data");
+        Objects.requireNonNull(request, "request");
+        return findOrFail(data.getRepositoryPath(), accessHook)
+                .fetchResponse(request);
+    }
+
+    @Override
     public NativeFetchResponse protocolV2Fetch(
             InitialRequestData data,
             NativeFetchRequest request,
@@ -222,34 +233,69 @@ public final class DefaultGitNativeRepositoryService
             LegacyReceivePack receivePack,
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(receivePack, "receivePack");
-        List<LooseRefStore.Update> updates = new ArrayList<>();
-        for (LegacyReceiveCommand command
-                : receivePack.commandSection().commands()) {
-            updates.add(new LooseRefStore.Update(
-                    command.refName(),
-                    command.oldObjectId().value(),
-                    command.newObjectId().value()));
-        }
+        List<LegacyReceiveCommand> commands =
+                receivePack.commandSection().commands();
         String repositoryPath = receivePack.commandSection()
                 .initialRequest()
                 .getRepositoryPath();
         NativeGitRepository repository = check(
                 repositoryPath,
                 receiveRepository(repositoryPath, accessHook));
+        List<ReceivePackStatus> statuses = new ArrayList<>(commands.size());
+        List<LooseRefStore.Update> validUpdates = new ArrayList<>();
+        List<Integer> validIndexes = new ArrayList<>();
+        boolean missingTarget = false;
+        for (int index = 0; index < commands.size(); index++) {
+            LegacyReceiveCommand command = commands.get(index);
+            if (command.type() != LegacyReceiveCommand.Type.DELETE
+                    && !repository.hasCompleteObjectClosure(
+                            command.newObjectId(),
+                            receivePack.quarantine())) {
+                statuses.add(new ReceivePackStatus(
+                        command.refName(),
+                        false,
+                        "missing-necessary-objects"));
+                missingTarget = true;
+                continue;
+            }
+            statuses.add(null);
+            validIndexes.add(index);
+            validUpdates.add(new LooseRefStore.Update(
+                    command.refName(),
+                    command.oldObjectId().value(),
+                    command.newObjectId().value()));
+        }
+        boolean atomic = receivePack.commandSection()
+                .negotiated(GitCapability.ATOMIC);
+        if (atomic && missingTarget) {
+            for (int index : validIndexes) {
+                statuses.set(index, new ReceivePackStatus(
+                        commands.get(index).refName(),
+                        false,
+                        "atomic-push-failure"));
+            }
+            return List.copyOf(statuses);
+        }
         List<RefUpdateResult> results = repository.publishObjectsAndRefs(
                 receivePack.quarantine(),
-                updates);
-        List<ReceivePackStatus> statuses = new ArrayList<>();
-        for (int index = 0; index < results.size(); index++) {
-            LegacyReceiveCommand command =
-                    receivePack.commandSection().commands().get(index);
-            RefUpdateResult result = results.get(index);
-            statuses.add(new ReceivePackStatus(
+                validUpdates,
+                atomic);
+        boolean atomicRefFailure = atomic
+                && results.contains(RefUpdateResult.STALE);
+        for (int resultIndex = 0;
+                resultIndex < results.size();
+                resultIndex++) {
+            int commandIndex = validIndexes.get(resultIndex);
+            LegacyReceiveCommand command = commands.get(commandIndex);
+            RefUpdateResult result = results.get(resultIndex);
+            statuses.set(commandIndex, new ReceivePackStatus(
                     command.refName(),
-                    result != RefUpdateResult.STALE,
+                    !atomicRefFailure && result != RefUpdateResult.STALE,
                     result == RefUpdateResult.STALE
                             ? "stale"
-                            : ""));
+                            : atomicRefFailure
+                                    ? "atomic-push-failure"
+                                    : ""));
         }
         return List.copyOf(statuses);
     }
@@ -488,6 +534,12 @@ public final class DefaultGitNativeRepositoryService
         if (uploadPack.ofsDelta()) {
             capabilities.add(GitCapability.OFS_DELTA);
         }
+        capabilities.add(GitCapability.SHALLOW);
+        capabilities.add(GitCapability.DEEPEN_SINCE);
+        capabilities.add(GitCapability.DEEPEN_NOT);
+        capabilities.add(GitCapability.DEEPEN_RELATIVE);
+        capabilities.add(GitCapability.NO_PROGRESS);
+        capabilities.add(GitCapability.INCLUDE_TAG);
         if (uploadPack.agent()) {
             capabilities.add(GitCapability.agent("orion-native"));
         }
@@ -501,9 +553,15 @@ public final class DefaultGitNativeRepositoryService
         List<GitCapability> capabilities = new ArrayList<>();
         if (receivePack.reportStatus()) {
             capabilities.add(GitCapability.REPORT_STATUS);
+            capabilities.add(GitCapability.REPORT_STATUS_V2);
         }
+        capabilities.add(GitCapability.DELETE_REFS);
         if (receivePack.sideBand64k()) {
             capabilities.add(GitCapability.SIDE_BAND_64K);
+        }
+        capabilities.add(GitCapability.QUIET);
+        if (receivePack.atomic()) {
+            capabilities.add(GitCapability.ATOMIC);
         }
         if (receivePack.ofsDelta()) {
             capabilities.add(GitCapability.OFS_DELTA);

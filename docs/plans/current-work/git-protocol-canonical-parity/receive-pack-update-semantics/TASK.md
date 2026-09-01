@@ -1,7 +1,6 @@
 # Align Receive-Pack Ref Update Semantics
 
-Status: todo
-Owner: codex, session 863d23b0, started 2026-09-01 19:12 Europe/Amsterdam.
+Status: done
 Source: 2026-09-01 canonical parity audit against `builtin/receive-pack.c`.
 
 Apply multi-ref commands independently by default and atomically only when the
@@ -12,3 +11,7 @@ Use canonical refname validation and verify that every new ref target is
 present and connected after quarantine ingestion before publication. Cover
 mixed successful and stale commands, atomic rollback, invalid ref components,
 missing target objects, and disconnected histories.
+
+Completed 2026-09-01: non-atomic updates proceed independently, negotiated
+atomic pushes roll back, refnames are validated canonically, and new targets
+must have a complete object closure across quarantine and published storage.

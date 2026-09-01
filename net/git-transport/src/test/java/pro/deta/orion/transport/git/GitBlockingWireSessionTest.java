@@ -45,6 +45,30 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void advertiseWritesProtocolV1MarkerForUploadPack() throws Exception {
+        RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+
+        session(null, output, providerWithMainRef())
+                .advertise(explicitUploadV1Request());
+
+        assertThat(output.ascii())
+                .startsWith("000eversion 1\n")
+                .contains(MAIN_ID + " HEAD");
+    }
+
+    @Test
+    void advertiseWritesProtocolV1MarkerForReceivePack() throws Exception {
+        RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+
+        session(null, output, providerWithMainRef())
+                .advertise(explicitReceiveV1Request());
+
+        assertThat(output.ascii())
+                .startsWith("000eversion 1\n")
+                .contains(MAIN_ID + " HEAD");
+    }
+
+    @Test
     void smartHttpPostReadsLsRefsRequestOneByteAtATime() throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
                 Duration.ofSeconds(1))) {
@@ -294,6 +318,8 @@ class GitBlockingWireSessionTest {
         GitObjectId blob = repository.writeObject(
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef(
+                "refs/heads/main", NULL_ID, blob.value());
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
@@ -323,6 +349,8 @@ class GitBlockingWireSessionTest {
         GitObjectId have = repository.writeObject(
                 ObjectType.BLOB,
                 "base".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef(
+                "refs/heads/main", NULL_ID, want.value());
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
@@ -389,6 +417,10 @@ class GitBlockingWireSessionTest {
         GitObjectId secondWant = repository.writeObject(
                 ObjectType.BLOB,
                 "second".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef(
+                "refs/heads/main", NULL_ID, firstWant.value());
+        repository.updateRef(
+                "refs/heads/second", NULL_ID, secondWant.value());
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
@@ -459,6 +491,8 @@ class GitBlockingWireSessionTest {
         GitObjectId want = repository.writeObject(
                 ObjectType.BLOB,
                 "payload".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef(
+                "refs/heads/main", NULL_ID, want.value());
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
@@ -488,6 +522,8 @@ class GitBlockingWireSessionTest {
         GitObjectId have = repository.writeObject(
                 ObjectType.BLOB,
                 "base".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef(
+                "refs/heads/main", NULL_ID, want.value());
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
@@ -523,6 +559,95 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void smartHttpPostRejectsUnadvertisedLegacyUploadWant()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        NativeGitRepository repository =
+                provider.find("project").valueOrFailure("repository");
+        GitObjectId hidden = repository.writeObject(
+                ObjectType.BLOB,
+                "hidden".getBytes(StandardCharsets.US_ASCII));
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRequest(
+                    "want " + hidden.value() + "\n",
+                    "done\n"));
+
+            assertThatThrownBy(() -> session(input, output, provider)
+                    .serveSmartHttpPost(uploadV1Request()))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining(
+                            "want must name an advertised object ID");
+        }
+    }
+
+    @Test
+    void smartHttpPostWritesLegacyShallowBoundaryBeforeNegotiation()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        repository.saveFiles(
+                "main",
+                Map.of("README.md", "root".getBytes(StandardCharsets.US_ASCII)),
+                "root",
+                GitCommitAuthor.EMPTY);
+        repository.saveFiles(
+                "main",
+                Map.of("README.md", "tip".getBytes(StandardCharsets.US_ASCII)),
+                "tip",
+                GitCommitAuthor.EMPTY);
+        String tip = repository.refs().get("refs/heads/main");
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRound(
+                    List.of(
+                            "want " + tip + " shallow\n",
+                            "deepen 1\n"),
+                    "done\n"));
+
+            session(input, output, provider).serveSmartHttpPost(uploadV1Request());
+
+            assertThat(output.ascii())
+                    .startsWith("0035shallow " + tip + "\n0000")
+                    .contains("NAK\n")
+                    .contains("PACK");
+        }
+    }
+
+    @Test
+    void smartHttpPostRejectsContradictoryLegacyDeepeningForms()
+            throws Exception {
+        for (List<String> requestLines : List.of(
+                List.of(
+                        "want " + MAIN_ID + " shallow\n",
+                        "deepen 1\n",
+                        "deepen-since 1\n"),
+                List.of(
+                        "want " + MAIN_ID + " shallow\n",
+                        "deepen-relative\n"))) {
+            try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                    Duration.ofSeconds(1))) {
+                RecordingBufferedByteOutput output =
+                        new RecordingBufferedByteOutput();
+                input.feed(legacyUploadRound(requestLines, "done\n"));
+
+                assertThatThrownBy(() -> session(
+                        input,
+                        output,
+                        providerWithMainRef())
+                        .serveSmartHttpPost(uploadV1Request()))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining(
+                                "Legacy upload shallow request is invalid");
+            }
+        }
+    }
+
+    @Test
     void smartHttpPostWritesLegacyReceivePackStatusForDelete()
             throws Exception {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
@@ -546,6 +671,194 @@ class GitBlockingWireSessionTest {
                     .valueOrFailure("repository")
                     .refs())
                     .doesNotContainKey("refs/heads/main");
+        }
+    }
+
+    @Test
+    void smartHttpPostAcceptsReceiveShallowPrefixesBeforeCommands()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    "shallow " + "a".repeat(40) + "\n",
+                    MAIN_ID
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/main\0report-status\n"));
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(output.ascii())
+                    .contains("unpack ok\n")
+                    .contains("ok refs/heads/main\n");
+            assertThat(provider.find("project")
+                    .valueOrFailure("repository")
+                    .refs())
+                    .doesNotContainKey("refs/heads/main");
+        }
+    }
+
+    @Test
+    void smartHttpPostRejectsReceiveShallowPrefixAfterCommand()
+            throws Exception {
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    MAIN_ID
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/main\0report-status\n",
+                    "shallow " + "a".repeat(40) + "\n"));
+
+            assertThatThrownBy(() -> session(
+                    input,
+                    output,
+                    providerWithMainRef()).serveSmartHttpPost(receiveV1Request()))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining(
+                            "shallow line must contain a 40-digit");
+        }
+    }
+
+    @Test
+    void receivePackAppliesValidCommandsAfterNonAtomicStaleCommand()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        provider.find("project").valueOrFailure("repository")
+                .updateRef("refs/heads/feature", NULL_ID, MAIN_ID);
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    "3".repeat(40)
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/main\0report-status\n",
+                    MAIN_ID
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/feature\n"));
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(output.ascii())
+                    .contains("ng refs/heads/main stale\n")
+                    .contains("ok refs/heads/feature\n");
+            assertThat(provider.find("project")
+                    .valueOrFailure("repository")
+                    .refs())
+                    .containsEntry("refs/heads/main", MAIN_ID)
+                    .doesNotContainKey("refs/heads/feature");
+        }
+    }
+
+    @Test
+    void receivePackRollsBackValidCommandsWhenAtomicCommandIsStale()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        provider.find("project").valueOrFailure("repository")
+                .updateRef("refs/heads/feature", NULL_ID, MAIN_ID);
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    "3".repeat(40)
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/main\0report-status atomic\n",
+                    MAIN_ID
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/feature\n"));
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(output.ascii())
+                    .contains("ng refs/heads/main stale\n")
+                    .contains(
+                            "ng refs/heads/feature atomic-push-failure\n");
+            assertThat(provider.find("project")
+                    .valueOrFailure("repository")
+                    .refs())
+                    .containsEntry("refs/heads/main", MAIN_ID)
+                    .containsEntry("refs/heads/feature", MAIN_ID);
+        }
+    }
+
+    @Test
+    void smartHttpReceivePackV2OfferFallsBackToLegacyProtocol()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(
+                    MAIN_ID
+                            + " "
+                            + NULL_ID
+                            + " refs/heads/main\0report-status\n"));
+
+            session(input, output, provider).serveSmartHttpPost(receiveV2Request());
+
+            assertThat(output.ascii())
+                    .isEqualTo(
+                            "000eunpack ok\n"
+                                    + "0017ok refs/heads/main\n"
+                                    + "0000");
+            assertThat(provider.find("project")
+                    .valueOrFailure("repository")
+                    .refs())
+                    .doesNotContainKey("refs/heads/main");
+        }
+    }
+
+    @Test
+    void smartHttpPostReportsMalformedReceivePackThroughStatusV2()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        provider.create("project").valueOrFailure("repository");
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            ByteArrayBuilder request = new ByteArrayBuilder();
+            request.writePacket(
+                    NULL_ID
+                            + " "
+                            + WANT
+                            + " refs/heads/main\0report-status-v2\n");
+            request.writeAscii("0000BAD");
+            input.feed(request.bytes());
+            input.end();
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(output.ascii())
+                    .contains("unpack error\n")
+                    .contains("ng refs/heads/main unpacker-error\n");
+            assertThat(provider.find("project")
+                    .valueOrFailure("repository")
+                    .refs())
+                    .doesNotContainKey("refs/heads/main");
+        }
+    }
+
+    @Test
+    void smartHttpPostAcceptsEmptyReceiveCommandSection() throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        provider.create("project").valueOrFailure("repository");
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed("0000");
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(output.ascii()).isEmpty();
         }
     }
 
@@ -672,12 +985,36 @@ class GitBlockingWireSessionTest {
                 Map.of());
     }
 
+    private static InitialRequestData explicitUploadV1Request() {
+        return new InitialRequestData(
+                InitialRequestService.UPLOAD_PACK,
+                "project",
+                "git.example",
+                Map.of("version", "1"));
+    }
+
     private static InitialRequestData receiveV1Request() {
         return new InitialRequestData(
                 InitialRequestService.RECEIVE_PACK,
                 "project",
                 "git.example",
                 Map.of());
+    }
+
+    private static InitialRequestData explicitReceiveV1Request() {
+        return new InitialRequestData(
+                InitialRequestService.RECEIVE_PACK,
+                "project",
+                "git.example",
+                Map.of("version", "1"));
+    }
+
+    private static InitialRequestData receiveV2Request() {
+        return new InitialRequestData(
+                InitialRequestService.RECEIVE_PACK,
+                "project",
+                "git.example",
+                Map.of("version", "2"));
     }
 
     private static byte[] lsRefsRequest() {

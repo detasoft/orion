@@ -30,6 +30,11 @@ public interface GitNativeRepositoryService {
             NativeFetchRequest request,
             GitNativeRepositoryAccessHook accessHook);
 
+    NativeFetchResponse legacyUploadFetch(
+            InitialRequestData data,
+            NativeFetchRequest request,
+            GitNativeRepositoryAccessHook accessHook);
+
     NativeFetchResponse protocolV2Fetch(
             InitialRequestData data,
             NativeFetchRequest request,

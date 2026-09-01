@@ -42,6 +42,10 @@ public record GitWireError(
                 "Legacy upload request contains an unsupported command"),
         INVALID_LEGACY_UPLOAD_OBJECT_ID(
                 "Legacy upload want must contain a 40-digit hexadecimal object ID"),
+        UNADVERTISED_LEGACY_UPLOAD_WANT(
+                "Legacy upload want must name an advertised object ID"),
+        INVALID_LEGACY_UPLOAD_SHALLOW_REQUEST(
+                "Legacy upload shallow request is invalid"),
         LATE_LEGACY_UPLOAD_CAPABILITIES(
                 "Legacy upload capabilities are allowed only on the first want"),
         EMPTY_LEGACY_UPLOAD_CAPABILITY(
@@ -68,6 +72,8 @@ public record GitWireError(
                 "Legacy receive-pack request contains an invalid command"),
         INVALID_LEGACY_RECEIVE_OBJECT_ID(
                 "Legacy receive-pack command must contain 40-digit hexadecimal object IDs"),
+        INVALID_LEGACY_RECEIVE_SHALLOW(
+                "Legacy receive-pack shallow line must contain a 40-digit hexadecimal object ID"),
         LATE_LEGACY_RECEIVE_CAPABILITIES(
                 "Legacy receive-pack capabilities are allowed only on the first command"),
         EMPTY_LEGACY_RECEIVE_CAPABILITY(

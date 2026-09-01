@@ -1,7 +1,6 @@
 # Complete Receive-Pack Command And Status Handling
 
-Status: todo
-Owner: codex, session 863d23b0, paused 2026-09-01 19:12 Europe/Amsterdam; next: carry and validate receive-pack shallow prefixes before publication.
+Status: done
 Source: 2026-09-01 canonical parity audit against `builtin/receive-pack.c` and
 the pack protocol.
 
@@ -18,3 +17,6 @@ side-band status framing, and both report-status versions.
 Progress 2026-09-01: added `report-status-v2`, delete and quiet capabilities,
 malformed-pack status reporting, and empty command-section handling while
 preserving transport timeouts as I/O failures.
+
+Completed 2026-09-01: receive shallow prefixes are validated and carried in
+the command section, including ordering and malformed-ID coverage.

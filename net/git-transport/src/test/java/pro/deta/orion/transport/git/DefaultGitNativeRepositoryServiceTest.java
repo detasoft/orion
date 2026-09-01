@@ -86,6 +86,12 @@ class DefaultGitNativeRepositoryServiceTest {
                         "thin-pack",
                         "side-band-64k",
                         "ofs-delta",
+                        "shallow",
+                        "deepen-since",
+                        "deepen-not",
+                        "deepen-relative",
+                        "no-progress",
+                        "include-tag",
                         "agent=orion-native",
                         "symref=HEAD:refs/heads/main");
     }
@@ -116,6 +122,12 @@ class DefaultGitNativeRepositoryServiceTest {
                                 "thin-pack",
                                 "side-band-64k",
                                 "ofs-delta",
+                                "shallow",
+                                "deepen-since",
+                                "deepen-not",
+                                "deepen-relative",
+                                "no-progress",
+                                "include-tag",
                                 "agent=orion-native",
                                 "symref=HEAD:refs/heads/main")),
                 new UploadCapabilityCase(
@@ -125,6 +137,12 @@ class DefaultGitNativeRepositoryServiceTest {
                                 "multi_ack",
                                 "side-band-64k",
                                 "ofs-delta",
+                                "shallow",
+                                "deepen-since",
+                                "deepen-not",
+                                "deepen-relative",
+                                "no-progress",
+                                "include-tag",
                                 "agent=orion-native",
                                 "symref=HEAD:refs/heads/main")),
                 new UploadCapabilityCase(
@@ -134,6 +152,12 @@ class DefaultGitNativeRepositoryServiceTest {
                                 "multi_ack",
                                 "thin-pack",
                                 "ofs-delta",
+                                "shallow",
+                                "deepen-since",
+                                "deepen-not",
+                                "deepen-relative",
+                                "no-progress",
+                                "include-tag",
                                 "agent=orion-native",
                                 "symref=HEAD:refs/heads/main")),
                 new UploadCapabilityCase(
@@ -143,6 +167,12 @@ class DefaultGitNativeRepositoryServiceTest {
                                 "multi_ack",
                                 "thin-pack",
                                 "side-band-64k",
+                                "shallow",
+                                "deepen-since",
+                                "deepen-not",
+                                "deepen-relative",
+                                "no-progress",
+                                "include-tag",
                                 "agent=orion-native",
                                 "symref=HEAD:refs/heads/main")),
                 new UploadCapabilityCase(
@@ -153,6 +183,12 @@ class DefaultGitNativeRepositoryServiceTest {
                                 "thin-pack",
                                 "side-band-64k",
                                 "ofs-delta",
+                                "shallow",
+                                "deepen-since",
+                                "deepen-not",
+                                "deepen-relative",
+                                "no-progress",
+                                "include-tag",
                                 "agent=orion-native")),
                 new UploadCapabilityCase(
                         uploadConfiguration(true, true, true, true, true, false),
@@ -162,6 +198,12 @@ class DefaultGitNativeRepositoryServiceTest {
                                 "thin-pack",
                                 "side-band-64k",
                                 "ofs-delta",
+                                "shallow",
+                                "deepen-since",
+                                "deepen-not",
+                                "deepen-relative",
+                                "no-progress",
+                                "include-tag",
                                 "symref=HEAD:refs/heads/main")));
 
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -186,13 +228,78 @@ class DefaultGitNativeRepositoryServiceTest {
         GitV1Advertisement advertisement = legacyReceivePackAdvertisement(service, receiveRequest("/demo.git"));
 
         assertThat(advertisement.refs()).containsExactly(GitAdvertisedRef.direct(MAIN_ID, "HEAD"), GitAdvertisedRef.direct(MAIN_ID, "refs/heads/main"));
-        assertThat(advertisement.capabilities()).extracting(capability -> capability.wireToken()).containsExactly("report-status", "side-band-64k", "ofs-delta", "object-format=sha1", "agent=orion-native");
+        assertThat(advertisement.capabilities())
+                .extracting(capability -> capability.wireToken())
+                .containsExactly(
+                        "report-status",
+                        "report-status-v2",
+                        "delete-refs",
+                        "side-band-64k",
+                        "quiet",
+                        "atomic",
+                        "ofs-delta",
+                        "object-format=sha1",
+                        "agent=orion-native");
     }
 
     @Test
     void omitsEachDisabledReceivePackCapabilityWithoutReorderingOthers() {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
-        List<ReceiveCapabilityCase> cases = List.of(new ReceiveCapabilityCase(receiveConfiguration(false, true, true, true, true), List.of("side-band-64k", "ofs-delta", "object-format=sha1", "agent=orion-native")), new ReceiveCapabilityCase(receiveConfiguration(true, false, true, true, true), List.of("report-status", "ofs-delta", "object-format=sha1", "agent=orion-native")), new ReceiveCapabilityCase(receiveConfiguration(true, true, false, true, true), List.of("report-status", "side-band-64k", "object-format=sha1", "agent=orion-native")), new ReceiveCapabilityCase(receiveConfiguration(true, true, true, false, true), List.of("report-status", "side-band-64k", "ofs-delta", "agent=orion-native")), new ReceiveCapabilityCase(receiveConfiguration(true, true, true, true, false), List.of("report-status", "side-band-64k", "ofs-delta", "object-format=sha1")));
+        List<ReceiveCapabilityCase> cases = List.of(
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(false, true, true, true, true),
+                        List.of(
+                                "delete-refs",
+                                "side-band-64k",
+                                "quiet",
+                                "atomic",
+                                "ofs-delta",
+                                "object-format=sha1",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, false, true, true, true),
+                        List.of(
+                                "report-status",
+                                "report-status-v2",
+                                "delete-refs",
+                                "quiet",
+                                "atomic",
+                                "ofs-delta",
+                                "object-format=sha1",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, true, false, true, true),
+                        List.of(
+                                "report-status",
+                                "report-status-v2",
+                                "delete-refs",
+                                "side-band-64k",
+                                "quiet",
+                                "atomic",
+                                "object-format=sha1",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, true, true, false, true),
+                        List.of(
+                                "report-status",
+                                "report-status-v2",
+                                "delete-refs",
+                                "side-band-64k",
+                                "quiet",
+                                "atomic",
+                                "ofs-delta",
+                                "agent=orion-native")),
+                new ReceiveCapabilityCase(
+                        receiveConfiguration(true, true, true, true, false),
+                        List.of(
+                                "report-status",
+                                "report-status-v2",
+                                "delete-refs",
+                                "side-band-64k",
+                                "quiet",
+                                "atomic",
+                                "ofs-delta",
+                                "object-format=sha1")));
 
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
         for (ReceiveCapabilityCase capabilityCase : cases) {
