@@ -14,8 +14,8 @@ description: >-
 
 Use this skill to choose Orion work from the filesystem task tree rooted at
 `docs/plans/TASK.md`, mark it as owned before substantial edits, execute it
-under the repository rules, and keep task tracking current without turning it
-into a detailed plan.
+under the repository rules, commit the task claim immediately, and keep task
+tracking current without turning it into a detailed plan.
 
 ## Startup
 
@@ -89,6 +89,18 @@ session id once and reuse it for all owner lines written by this session. An
 existing owner line means the task is claimed; do not update it without an
 explicit user-requested takeover. Keep the file high-level; put detailed design
 or implementation notes in `docs/plans/`.
+
+## Claim Commit
+
+Immediately after claiming the task, create a documentation-only commit before
+starting implementation. Include only the `TASK.md` and other `docs/` changes
+made to start that task, such as moving its task node under current work. Do not
+stage unrelated or pre-existing changes, including other edits in `docs/`.
+
+Use a concise, single-line commit message that describes starting or claiming
+the selected task. Do not run tests for this documentation-only commit. If the
+claim changes cannot be isolated safely from existing edits, stop and ask the
+user how to proceed instead of committing mixed changes.
 
 ## Execution Rules
 
