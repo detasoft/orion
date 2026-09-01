@@ -2,6 +2,7 @@ package pro.deta.orion.net.io;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -41,5 +42,24 @@ class OutputStreamBufferedByteOutputTest {
 
         assertThat(bytes.toString(StandardCharsets.US_ASCII))
                 .isEqualTo("hello");
+    }
+
+    @Test
+    void writesDirectByteBufToOutputStream() throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        OutputStreamBufferedByteOutput output =
+                new OutputStreamBufferedByteOutput(bytes);
+        ByteBuf buffer = UnpooledByteBufAllocator.DEFAULT.directBuffer(5, 5);
+        try {
+            buffer.writeCharSequence("hello", StandardCharsets.US_ASCII);
+
+            output.write(buffer);
+            output.flush();
+
+            assertThat(bytes.toString(StandardCharsets.US_ASCII))
+                    .isEqualTo("hello");
+        } finally {
+            buffer.release();
+        }
     }
 }

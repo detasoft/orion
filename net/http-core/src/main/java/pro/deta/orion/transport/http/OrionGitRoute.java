@@ -18,6 +18,7 @@ import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 
 import java.io.IOException;
@@ -137,8 +138,8 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setStatus(SC_OK);
         resp.setContentType(advertisementContentType(request.service()));
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
-        JettyBufferedByteOutput output =
-                new JettyBufferedByteOutput(resp.getOutputStream());
+        OutputStreamBufferedByteOutput output =
+                new OutputStreamBufferedByteOutput(resp.getOutputStream());
         GitBlockingWireTransport wire =
                 new GitBlockingWireTransport(output);
         NativePackfileUriSourceFactory packfileUriSourceFactory =
@@ -171,8 +172,8 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
         try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
                 req.getInputStream())) {
-            JettyBufferedByteOutput output =
-                    new JettyBufferedByteOutput(resp.getOutputStream());
+            OutputStreamBufferedByteOutput output =
+                    new OutputStreamBufferedByteOutput(resp.getOutputStream());
             GitBlockingWireTransport wire =
                     new GitBlockingWireTransport(input, output);
             NativePackfileUriSourceFactory packfileUriSourceFactory =
