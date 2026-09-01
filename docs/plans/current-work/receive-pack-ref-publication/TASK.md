@@ -1,6 +1,7 @@
 # Verify Receive-Pack Ref Publication Ordering
 
-Status: todo
+Status: in progress
+Owner: codex, session codex-receive-pack-59e18a, started 2026-09-02 01:39 Europe/Amsterdam.
 Source: narrowed from the former atomic publication boundaries task.
 
 Ensure receive-pack makes new refs visible only after the incoming pack has
