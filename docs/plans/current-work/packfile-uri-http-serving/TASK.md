@@ -1,7 +1,6 @@
 # Serve Packfile URI Packs Over HTTP
 
-Status: active
-Owner: codex, session codex-packfile-uri-http-20260806, started 2026-08-06 23:59 Europe/Amsterdam.
+Status: done
 Source: follow-up from protocol v2 packfile URI response support.
 
 Add configuration for a public packfile base URI and a dedicated HTTP endpoint

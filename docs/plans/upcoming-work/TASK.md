@@ -18,7 +18,6 @@ tasks may be ready at the same time.
 - [ ] [Add blocking native Git clients on virtual threads](native-git-client-sessions/TASK.md)
 - [ ] [Add blocking native Git client transports](native-git-client-transport-compatibility/TASK.md)
 - [x] [Extend protocol v2 server fetch](protocol-v2-server-fetch-extensions/TASK.md)
-- [ ] [Serve packfile URI packs over HTTP](packfile-uri-http-serving/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)
 - [ ] [Implement external Git repository synchronization](external-git-repository-sync/TASK.md)
 - [ ] [Externalize repository storage](externalized-repository-storage/TASK.md)

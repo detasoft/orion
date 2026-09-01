@@ -16,3 +16,4 @@ completed current tasks.
 - [ ] [Implement production native repository backends](production-native-git-repository-backends/TASK.md)
 - [x] [Fix legacy upload-pack `multi_ack_detailed`](multi-ack-detailed/TASK.md)
 - [x] [Complete shallow history support](complete-shallow-history/TASK.md)
+- [x] [Serve packfile URI packs over HTTP](packfile-uri-http-serving/TASK.md)
