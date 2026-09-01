@@ -15,4 +15,4 @@ completed current tasks.
 - [ ] [Track Git protocol canonical parity gaps](git-protocol-canonical-parity/TASK.md)
 - [ ] [Implement production native repository backends](production-native-git-repository-backends/TASK.md)
 - [x] [Fix legacy upload-pack `multi_ack_detailed`](multi-ack-detailed/TASK.md)
-- [ ] [Complete shallow history support](complete-shallow-history/TASK.md)
+- [x] [Complete shallow history support](complete-shallow-history/TASK.md)

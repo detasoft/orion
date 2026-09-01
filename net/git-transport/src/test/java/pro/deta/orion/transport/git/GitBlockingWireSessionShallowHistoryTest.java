@@ -5,18 +5,30 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryService.ReceivePackStatus;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
+import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
+import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
+import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HexFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -63,30 +75,51 @@ class GitBlockingWireSessionShallowHistoryTest {
     }
 
     @Test
-    void smartHttpPostParsesUnsupportedDeepenSinceBeforeRepositoryRejection()
+    void smartHttpPostSerializesShallowInfoForDeepenSince()
             throws Exception {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository =
                 provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
+        GitObjectId rootBlob = repository.writeObject(
                 ObjectType.BLOB,
-                "payload".getBytes(StandardCharsets.US_ASCII));
+                "root".getBytes(StandardCharsets.US_ASCII));
+        GitObjectId rootTree = repository.writeObject(
+                ObjectType.TREE,
+                treeEntry("100644", "root.txt", rootBlob));
+        GitObjectId rootCommit = writeCommit(
+                repository,
+                rootTree,
+                null,
+                "root",
+                100);
+        GitObjectId tipBlob = repository.writeObject(
+                ObjectType.BLOB,
+                "tip".getBytes(StandardCharsets.US_ASCII));
+        GitObjectId tipTree = repository.writeObject(
+                ObjectType.TREE,
+                treeEntry("100644", "tip.txt", tipBlob));
+        GitObjectId tipCommit = writeCommit(
+                repository,
+                tipTree,
+                rootCommit,
+                "tip",
+                300);
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(
                 Duration.ofSeconds(1))) {
             RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
             input.feed(fetchRequest(
-                    "want " + blob.value() + "\n",
-                    "deepen-since 1700000000\n",
+                    "want " + tipCommit.value() + "\n",
+                    "deepen-since 200\n",
                     "done\n"));
+            input.end();
 
-            assertThatThrownBy(() -> session(input, output, provider)
-                    .serveSmartHttpPost(uploadV2Request()))
-                    .isInstanceOf(GitUploadPackException.class)
-                    .satisfies(error -> assertThat(
-                            ((GitUploadPackException) error).kind())
-                            .isEqualTo(GitUploadPackException.Kind
-                                    .UNSUPPORTED_FEATURE));
+            session(input, output, provider).serveSmartHttpPost(uploadV2Request());
+
+            assertThat(output.ascii())
+                    .startsWith("0011shallow-info\n")
+                    .contains("shallow " + tipCommit.value() + "\n")
+                    .contains("packfile\n");
         }
     }
 
@@ -129,7 +162,7 @@ class GitBlockingWireSessionShallowHistoryTest {
         GitBlockingWireTransport wire =
                 new GitBlockingWireTransport(input, output);
         return new GitBlockingWireSession(
-                new DefaultGitNativeRepositoryService(provider),
+                new RecordingGitNativeRepositoryService(provider),
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
                 GitWireConfiguration.allSupported(),
                 NativePackfileUriSourceFactory.NONE,
@@ -168,6 +201,127 @@ class GitBlockingWireSessionShallowHistoryTest {
         output.writePacket("command=" + command + "\n");
         output.writeAscii("0001");
         return output.bytes();
+    }
+
+    private static GitObjectId writeCommit(
+            NativeGitRepository repository,
+            GitObjectId tree,
+            GitObjectId parent,
+            String message,
+            long committerTimestamp) {
+        StringBuilder data = new StringBuilder("tree ")
+                .append(tree)
+                .append('\n');
+        if (parent != null) {
+            data.append("parent ").append(parent).append('\n');
+        }
+        data.append("author Test <test@example.com> 0 +0000\n")
+                .append("committer Test <test@example.com> ")
+                .append(committerTimestamp)
+                .append(" +0000\n")
+                .append('\n')
+                .append(message)
+                .append('\n');
+        return repository.writeObject(
+                ObjectType.COMMIT,
+                data.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static byte[] treeEntry(
+            String mode,
+            String name,
+            GitObjectId objectId) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.writeBytes((mode + " " + name + "\0")
+                .getBytes(StandardCharsets.UTF_8));
+        output.writeBytes(HexFormat.of().parseHex(objectId.value()));
+        return output.toByteArray();
+    }
+
+    private static final class RecordingGitNativeRepositoryService
+            implements GitNativeRepositoryService {
+        private final InMemoryNativeGitRepositoryProvider provider;
+
+        private RecordingGitNativeRepositoryService(
+                InMemoryNativeGitRepositoryProvider provider) {
+            this.provider = provider;
+        }
+
+        @Override
+        public GitV1Advertisement legacyUploadPackAdvertisement(
+                InitialRequestData data,
+                GitNativeRepositoryAccessHook accessHook,
+                GitWireConfiguration configuration) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public GitV1Advertisement legacyReceivePackAdvertisement(
+                InitialRequestData data,
+                GitNativeRepositoryAccessHook accessHook,
+                GitWireConfiguration configuration) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public NativePackProducer legacyUploadPack(
+                InitialRequestData data,
+                NativeFetchRequest request,
+                GitNativeRepositoryAccessHook accessHook) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public NativeFetchResponse protocolV2Fetch(
+                InitialRequestData data,
+                NativeFetchRequest request,
+                GitNativeRepositoryAccessHook accessHook,
+                NativePackfileUriSourceFactory packfileUriSourceFactory) {
+            return repository(data).fetchResponse(request);
+        }
+
+        @Override
+        public List<GitObjectId> protocolV2FetchAcknowledgments(
+                InitialRequestData data,
+                NativeFetchRequest request,
+                GitNativeRepositoryAccessHook accessHook) {
+            return new ArrayList<>(request.haves());
+        }
+
+        @Override
+        public List<GitObjectId> commonHaves(
+                InitialRequestData data,
+                Iterable<GitObjectId> haves,
+                GitNativeRepositoryAccessHook accessHook) {
+            return List.of();
+        }
+
+        @Override
+        public PackIngestionSession beginLegacyReceivePack(
+                InitialRequestData data,
+                GitNativeRepositoryAccessHook accessHook) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<ReceivePackStatus> completeLegacyReceivePack(
+                LegacyReceivePack receivePack,
+                GitNativeRepositoryAccessHook accessHook) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public GitLsRefsResponse lsRefs(
+                InitialRequestData data,
+                LsRefsRequest request,
+                GitNativeRepositoryAccessHook accessHook) {
+            throw new UnsupportedOperationException();
+        }
+
+        private NativeGitRepository repository(InitialRequestData data) {
+            return provider.find(data.getRepositoryPath())
+                    .valueOrFailure("repository");
+        }
     }
 
     private static final class ByteArrayBuilder {

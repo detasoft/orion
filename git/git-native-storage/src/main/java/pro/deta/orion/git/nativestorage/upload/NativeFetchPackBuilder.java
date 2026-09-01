@@ -104,9 +104,13 @@ public final class NativeFetchPackBuilder {
 
     public NativeFetchResponse build(NativeFetchRequest request) {
         Objects.requireNonNull(request, "request");
-        rejectUnsupportedDeepening(request);
+        validateDeepening(request);
+        Map<String, String> refSnapshot = refs.snapshot();
         Map<String, GitObjectId> wantedRefs =
-                resolveWantedRefs(request.wantRefs());
+                resolveWantedRefs(request.wantRefs(), refSnapshot);
+        Set<GitObjectId> deepenNotRoots = resolveDeepenNotRefs(
+                request.deepenNotRefs(),
+                refSnapshot);
         Set<GitObjectId> wants = new LinkedHashSet<>(request.wants());
         wants.addAll(wantedRefs.values());
         NativeObjectClosure closure = new NativeObjectClosure(objects);
@@ -115,6 +119,10 @@ public final class NativeFetchPackBuilder {
                         wants,
                         request.haves(),
                         request.depth(),
+                        request.clientShallowCommits(),
+                        request.deepenRelative(),
+                        request.deepenSince(),
+                        deepenNotRoots,
                         request.objectFilter());
         Set<GitObjectId> objectIds = new LinkedHashSet<>(
                 selection.objectIds());
@@ -133,17 +141,24 @@ public final class NativeFetchPackBuilder {
         return new NativeFetchResponse(
                 producer,
                 selection.shallowBoundaries(),
+                selection.unshallowBoundaries(),
                 wantedRefs,
                 packfileUriSelection.packfileUris());
     }
 
-    private static void rejectUnsupportedDeepening(
+    private static void validateDeepening(
             NativeFetchRequest request) {
-        if (request.deepenSince() >= 0
-                || !request.deepenNotRefs().isEmpty()) {
+        if (request.depth() > 0
+                && (request.deepenSince() >= 0
+                || !request.deepenNotRefs().isEmpty())) {
             throw new GitUploadPackException(
-                    GitUploadPackException.Kind.UNSUPPORTED_FEATURE,
-                    "Time and ref based shallow deepening is unsupported");
+                    GitUploadPackException.Kind.INVALID_REQUEST,
+                    "Depth cannot be combined with time or ref deepening");
+        }
+        if (request.deepenRelative() && request.depth() == 0) {
+            throw new GitUploadPackException(
+                    GitUploadPackException.Kind.INVALID_REQUEST,
+                    "Relative deepening requires a depth");
         }
     }
 
@@ -159,8 +174,8 @@ public final class NativeFetchPackBuilder {
     }
 
     private Map<String, GitObjectId> resolveWantedRefs(
-            Set<String> wantRefs) {
-        Map<String, String> snapshot = refs.snapshot();
+            Set<String> wantRefs,
+            Map<String, String> snapshot) {
         Map<String, GitObjectId> resolved = new LinkedHashMap<>();
         for (String wantRef : wantRefs) {
             String refName = "HEAD".equals(wantRef)
@@ -173,6 +188,31 @@ public final class NativeFetchPackBuilder {
                         "Requested Git ref is unavailable: " + wantRef);
             }
             resolved.put(wantRef, GitObjectId.of(objectId));
+        }
+        return resolved;
+    }
+
+    private Set<GitObjectId> resolveDeepenNotRefs(
+            Set<String> deepenNotRefs,
+            Map<String, String> snapshot) {
+        Set<GitObjectId> resolved = new LinkedHashSet<>();
+        for (String deepenNotRef : deepenNotRefs) {
+            String refName = "HEAD".equals(deepenNotRef)
+                    ? effectiveHeadTarget(snapshot)
+                    : deepenNotRef;
+            if (!"HEAD".equals(deepenNotRef)
+                    && !deepenNotRef.startsWith("refs/")) {
+                throw new GitUploadPackException(
+                        GitUploadPackException.Kind.INVALID_REQUEST,
+                        "Unsupported deepen-not revision: " + deepenNotRef);
+            }
+            String objectId = snapshot.get(refName);
+            if (objectId == null) {
+                throw new GitUploadPackException(
+                        GitUploadPackException.Kind.MISSING_REF,
+                        "Requested Git ref is unavailable: " + deepenNotRef);
+            }
+            resolved.add(GitObjectId.of(objectId));
         }
         return resolved;
     }

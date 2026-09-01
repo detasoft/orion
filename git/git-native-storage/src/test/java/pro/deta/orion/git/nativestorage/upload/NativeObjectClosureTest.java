@@ -204,11 +204,138 @@ class NativeObjectClosureTest {
         assertThat(result.shallowBoundaries()).containsExactly(leftCommit);
     }
 
+    @Test
+    void deepenSinceStopsAtOlderCommitTimestamp() {
+        GitObjectId rootTree = writeBlobTree("root.txt", "root");
+        GitObjectId rootCommit = writeCommit(rootTree, null, "root", 100);
+        GitObjectId middleTree = writeBlobTree("middle.txt", "middle");
+        GitObjectId middleCommit = writeCommit(middleTree, rootCommit, "middle", 201);
+        GitObjectId tipTree = writeBlobTree("tip.txt", "tip");
+        GitObjectId tipCommit = writeCommit(tipTree, middleCommit, "tip", 300);
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(
+                        Set.of(tipCommit),
+                        Set.of(),
+                        0,
+                        Set.of(),
+                        false,
+                        200,
+                        Set.of(),
+                        NativeObjectFilter.NONE);
+
+        assertThat(result.objectIds()).contains(tipCommit, middleCommit);
+        assertThat(result.objectIds()).doesNotContain(rootCommit);
+        assertThat(result.shallowBoundaries()).containsExactly(middleCommit);
+    }
+
+    @Test
+    void deepenNotExcludesReachableHistoryAndReportsBranchBoundary() {
+        GitObjectId rootTree = writeBlobTree("root.txt", "root");
+        GitObjectId oldRootTree = writeBlobTree("old-root.txt", "old-root");
+        GitObjectId oldRootCommit = writeCommit(oldRootTree, null, "old-root");
+        GitObjectId rootCommit = writeCommit(rootTree, oldRootCommit, "root");
+        GitObjectId leftTree = writeBlobTree("left.txt", "left");
+        GitObjectId leftCommit = writeCommit(leftTree, rootCommit, "left");
+        GitObjectId rightTree = writeBlobTree("right.txt", "right");
+        GitObjectId rightCommit = writeCommit(rightTree, rootCommit, "right");
+        GitObjectId mergeTree = writeBlobTree("merge.txt", "merge");
+        GitObjectId mergeCommit = writeCommitWithParents(
+                mergeTree,
+                List.of(leftCommit, rightCommit),
+                "merge");
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(
+                        Set.of(mergeCommit),
+                        Set.of(),
+                        0,
+                        Set.of(),
+                        false,
+                        -1,
+                        Set.of(leftCommit),
+                        NativeObjectFilter.NONE);
+
+        assertThat(result.objectIds()).contains(mergeCommit, rightCommit);
+        assertThat(result.objectIds())
+                .doesNotContain(leftCommit, rootCommit, oldRootCommit);
+        assertThat(result.shallowBoundaries())
+                .containsExactlyInAnyOrder(mergeCommit, rightCommit);
+    }
+
+    @Test
+    void deepenRelativeExtendsDepthFromClientShallowCommit() {
+        GitObjectId rootTree = writeBlobTree("root.txt", "root");
+        GitObjectId oldRootTree = writeBlobTree("old-root.txt", "old-root");
+        GitObjectId oldRootCommit = writeCommit(oldRootTree, null, "old-root");
+        GitObjectId rootCommit = writeCommit(rootTree, oldRootCommit, "root");
+        GitObjectId baseTree = writeBlobTree("base.txt", "base");
+        GitObjectId baseCommit = writeCommit(baseTree, rootCommit, "base");
+        GitObjectId middleTree = writeBlobTree("middle.txt", "middle");
+        GitObjectId middleCommit = writeCommit(middleTree, baseCommit, "middle");
+        GitObjectId tipTree = writeBlobTree("tip.txt", "tip");
+        GitObjectId tipCommit = writeCommit(tipTree, middleCommit, "tip");
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(
+                        Set.of(tipCommit),
+                        Set.of(),
+                        2,
+                        Set.of(baseCommit),
+                        true,
+                        -1,
+                        Set.of(),
+                        NativeObjectFilter.NONE);
+
+        assertThat(result.objectIds())
+                .contains(tipCommit, middleCommit, baseCommit, rootCommit);
+        assertThat(result.shallowBoundaries()).containsExactly(rootCommit);
+    }
+
+    @Test
+    void reportsClientShallowCommitAsUnshallowWhenParentsBecomeIncluded() {
+        GitObjectId rootTree = writeBlobTree("root.txt", "root");
+        GitObjectId rootCommit = writeCommit(rootTree, null, "root");
+        GitObjectId baseTree = writeBlobTree("base.txt", "base");
+        GitObjectId baseCommit = writeCommit(baseTree, rootCommit, "base");
+        GitObjectId tipTree = writeBlobTree("tip.txt", "tip");
+        GitObjectId tipCommit = writeCommit(tipTree, baseCommit, "tip");
+
+        NativeObjectClosure.FetchSelection result =
+                closure.selectionFor(
+                        Set.of(tipCommit),
+                        Set.of(),
+                        3,
+                        Set.of(baseCommit),
+                        false,
+                        -1,
+                        Set.of(),
+                        NativeObjectFilter.NONE);
+
+        assertThat(result.objectIds())
+                .contains(tipCommit, baseCommit, rootCommit);
+        assertThat(result.shallowBoundaries()).isEmpty();
+        assertThat(result.unshallowBoundaries()).containsExactly(baseCommit);
+    }
+
     private GitObjectId writeCommit(GitObjectId tree, GitObjectId parent, String message) {
         return writeCommitInternal(
                 tree,
                 parent == null ? List.of() : List.of(parent),
-                message);
+                message,
+                0);
+    }
+
+    private GitObjectId writeCommit(
+            GitObjectId tree,
+            GitObjectId parent,
+            String message,
+            long committerTimestamp) {
+        return writeCommitInternal(
+                tree,
+                parent == null ? List.of() : List.of(parent),
+                message,
+                committerTimestamp);
     }
 
     private GitObjectId writeCommitWithParents(
@@ -218,23 +345,36 @@ class NativeObjectClosureTest {
         return writeCommitInternal(
                 tree,
                 parents,
-                message);
+                message,
+                0);
     }
 
     private GitObjectId writeCommitInternal(
             GitObjectId tree,
             List<GitObjectId> parents,
-            String message) {
+            String message,
+            long committerTimestamp) {
         StringBuilder data = new StringBuilder("tree ").append(tree).append('\n');
         for (GitObjectId parent : parents) {
             data.append("parent ").append(parent).append('\n');
         }
         data.append("author Test <test@example.com> 0 +0000\n")
-                .append("committer Test <test@example.com> 0 +0000\n")
+                .append("committer Test <test@example.com> ")
+                .append(committerTimestamp)
+                .append(" +0000\n")
                 .append('\n')
                 .append(message)
                 .append('\n');
         return objects.write(ObjectType.COMMIT, data.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private GitObjectId writeBlobTree(String name, String content) {
+        GitObjectId blob = objects.write(
+                ObjectType.BLOB,
+                (content + "\n").getBytes(StandardCharsets.UTF_8));
+        return objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", name, blob));
     }
 
     private GitObjectId writeTag(GitObjectId target, String name) {

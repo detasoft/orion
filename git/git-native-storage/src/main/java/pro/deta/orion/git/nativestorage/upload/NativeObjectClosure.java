@@ -44,17 +44,58 @@ public final class NativeObjectClosure {
             Set<GitObjectId> haves,
             int depth,
             NativeObjectFilter objectFilter) {
+        return selectionFor(
+                wants,
+                haves,
+                depth,
+                Set.of(),
+                false,
+                -1,
+                Set.of(),
+                objectFilter);
+    }
+
+    public FetchSelection selectionFor(
+            Set<GitObjectId> wants,
+            Set<GitObjectId> haves,
+            int depth,
+            Set<GitObjectId> clientShallowCommits,
+            boolean deepenRelative,
+            long deepenSince,
+            Set<GitObjectId> deepenNotRoots,
+            NativeObjectFilter objectFilter) {
         Objects.requireNonNull(wants, "wants");
         Objects.requireNonNull(haves, "haves");
+        Objects.requireNonNull(clientShallowCommits, "clientShallowCommits");
+        Objects.requireNonNull(deepenNotRoots, "deepenNotRoots");
         Objects.requireNonNull(objectFilter, "objectFilter");
         if (depth < 0) {
             throw new IllegalArgumentException(
                     "Fetch depth must not be negative");
         }
+        if (deepenSince < -1) {
+            throw new IllegalArgumentException(
+                    "deepenSince must be absent or non-negative");
+        }
+        if (deepenRelative && depth == 0) {
+            throw new IllegalArgumentException(
+                    "deepenRelative requires a fetch depth");
+        }
 
-        FetchSelection wantedClosure = depth == 0
-                ? new FetchSelection(traverse(wants, false), Set.of())
-                : shallowSelection(wants, depth);
+        FetchSelection wantedClosure = shallowSelectionRequired(
+                depth,
+                clientShallowCommits,
+                deepenRelative,
+                deepenSince,
+                deepenNotRoots)
+                ? shallowSelection(
+                        wants,
+                        depth,
+                        clientShallowCommits,
+                        deepenRelative,
+                        deepenSince,
+                        deepenNotRoots)
+                : new FetchSelection(traverse(wants, false), Set.of());
         Set<GitObjectId> objectIds =
                 new LinkedHashSet<>(wantedClosure.objectIds());
         objectIds.removeAll(traverse(haves, true));
@@ -64,7 +105,10 @@ public final class NativeObjectClosure {
                 new LinkedHashSet<>(wantedClosure.shallowBoundaries());
         shallowBoundaries.retainAll(objectIds);
 
-        return new FetchSelection(objectIds, shallowBoundaries);
+        return new FetchSelection(
+                objectIds,
+                shallowBoundaries,
+                wantedClosure.unshallowBoundaries());
     }
 
     public Set<GitObjectId> existingObjectIdsReachableFrom(
@@ -124,10 +168,29 @@ public final class NativeObjectClosure {
     private FetchSelection shallowSelection(
             Set<GitObjectId> roots,
             int depth) {
+        return shallowSelection(
+                roots,
+                depth,
+                Set.of(),
+                false,
+                -1,
+                Set.of());
+    }
+
+    private FetchSelection shallowSelection(
+            Set<GitObjectId> roots,
+            int depth,
+            Set<GitObjectId> clientShallowCommits,
+            boolean deepenRelative,
+            long deepenSince,
+            Set<GitObjectId> deepenNotRoots) {
         Set<GitObjectId> objectIds = new LinkedHashSet<>();
         Set<GitObjectId> visitedNonCommits = new LinkedHashSet<>();
         LinkedHashMap<GitObjectId, Integer> commitDepths =
                 new LinkedHashMap<>();
+        Set<GitObjectId> stoppedBoundaries = new LinkedHashSet<>();
+        Set<GitObjectId> deepenNotCommits = commitIdsReachableFrom(
+                deepenNotRoots);
         ArrayDeque<ShallowPendingObject> pending = new ArrayDeque<>();
         for (GitObjectId root : roots) {
             pending.addLast(new ShallowPendingObject(root, depth));
@@ -143,7 +206,13 @@ public final class NativeObjectClosure {
                         object.data(),
                         objectIds,
                         commitDepths,
-                        pending);
+                        stoppedBoundaries,
+                        pending,
+                        depth,
+                        clientShallowCommits,
+                        deepenRelative,
+                        deepenSince,
+                        deepenNotCommits);
                 case TREE -> addShallowNonCommit(
                         current.objectId(),
                         objectIds,
@@ -166,17 +235,43 @@ public final class NativeObjectClosure {
             }
         }
 
+        Set<GitObjectId> shallowBoundaries = shallowBoundaries(
+                stoppedBoundaries,
+                commitDepths.keySet());
         return new FetchSelection(
                 objectIds,
-                shallowBoundaries(commitDepths.keySet()));
+                shallowBoundaries,
+                unshallowBoundaries(
+                        clientShallowCommits,
+                        commitDepths.keySet(),
+                        shallowBoundaries));
     }
 
-    private static void addShallowCommit(
+    private static boolean shallowSelectionRequired(
+            int depth,
+            Set<GitObjectId> clientShallowCommits,
+            boolean deepenRelative,
+            long deepenSince,
+            Set<GitObjectId> deepenNotRoots) {
+        return depth > 0
+                || !clientShallowCommits.isEmpty()
+                || deepenRelative
+                || deepenSince >= 0
+                || !deepenNotRoots.isEmpty();
+    }
+
+    private void addShallowCommit(
             ShallowPendingObject current,
             byte[] data,
             Set<GitObjectId> objectIds,
             LinkedHashMap<GitObjectId, Integer> commitDepths,
-            ArrayDeque<ShallowPendingObject> pending) {
+            Set<GitObjectId> stoppedBoundaries,
+            ArrayDeque<ShallowPendingObject> pending,
+            int requestedDepth,
+            Set<GitObjectId> clientShallowCommits,
+            boolean deepenRelative,
+            long deepenSince,
+            Set<GitObjectId> deepenNotCommits) {
         int remainingDepth = Math.max(1, current.remainingDepth());
         Integer previousDepth = commitDepths.get(current.objectId());
         if (previousDepth != null && previousDepth >= remainingDepth) {
@@ -187,13 +282,46 @@ public final class NativeObjectClosure {
 
         CommitReferences references = commitReferences(data);
         pending.addLast(new ShallowPendingObject(references.tree(), 0));
-        if (remainingDepth <= 1) {
+        if (shouldStopAtClientShallow(
+                current.objectId(),
+                clientShallowCommits,
+                deepenRelative,
+                deepenSince,
+                deepenNotCommits,
+                current.remainingDepth())) {
+            stoppedBoundaries.add(current.objectId());
             return;
         }
+        if (!deepenRelative
+                && current.remainingDepth() > 0
+                && remainingDepth <= 1
+                && !references.parents().isEmpty()) {
+            stoppedBoundaries.add(current.objectId());
+            return;
+        }
+        if (deepenRelative
+                && current.remainingDepth() < requestedDepth
+                && current.remainingDepth() <= 1
+                && !references.parents().isEmpty()) {
+            stoppedBoundaries.add(current.objectId());
+            return;
+        }
+        int nextDepth = nextDepth(
+                current.objectId(),
+                remainingDepth,
+                clientShallowCommits,
+                deepenRelative);
         for (GitObjectId parent : references.parents()) {
+            if (excludedByShallowStop(
+                    parent,
+                    deepenSince,
+                    deepenNotCommits)) {
+                stoppedBoundaries.add(current.objectId());
+                continue;
+            }
             pending.addLast(new ShallowPendingObject(
                     parent,
-                    remainingDepth - 1));
+                    nextDepth));
         }
     }
 
@@ -217,8 +345,9 @@ public final class NativeObjectClosure {
     }
 
     private Set<GitObjectId> shallowBoundaries(
+            Set<GitObjectId> stoppedBoundaries,
             Set<GitObjectId> includedCommits) {
-        Set<GitObjectId> boundaries = new LinkedHashSet<>();
+        Set<GitObjectId> boundaries = new LinkedHashSet<>(stoppedBoundaries);
         for (GitObjectId commitId : includedCommits) {
             LooseObject object = objects.read(commitId)
                     .orElseThrow(NativeObjectClosure::missingObject);
@@ -231,6 +360,85 @@ public final class NativeObjectClosure {
             }
         }
         return boundaries;
+    }
+
+    private Set<GitObjectId> commitIdsReachableFrom(
+            Set<GitObjectId> roots) {
+        Set<GitObjectId> reachable = traverse(roots, true);
+        Set<GitObjectId> commits = new LinkedHashSet<>();
+        for (GitObjectId id : reachable) {
+            LooseObject object = objects.read(id).orElse(null);
+            if (object != null && object.type() == ObjectType.COMMIT) {
+                commits.add(id);
+            }
+        }
+        return commits;
+    }
+
+    private Set<GitObjectId> unshallowBoundaries(
+            Set<GitObjectId> clientShallowCommits,
+            Set<GitObjectId> includedCommits,
+            Set<GitObjectId> shallowBoundaries) {
+        Set<GitObjectId> unshallow = new LinkedHashSet<>();
+        for (GitObjectId commitId : clientShallowCommits) {
+            if (!includedCommits.contains(commitId)
+                    || shallowBoundaries.contains(commitId)) {
+                continue;
+            }
+            LooseObject object = objects.read(commitId).orElse(null);
+            if (object == null || object.type() != ObjectType.COMMIT) {
+                continue;
+            }
+            CommitReferences references = commitReferences(object.data());
+            if (includedCommits.containsAll(references.parents())) {
+                unshallow.add(commitId);
+            }
+        }
+        return unshallow;
+    }
+
+    private boolean excludedByShallowStop(
+            GitObjectId commitId,
+            long deepenSince,
+            Set<GitObjectId> deepenNotCommits) {
+        if (deepenNotCommits.contains(commitId)) {
+            return true;
+        }
+        if (deepenSince < 0) {
+            return false;
+        }
+        LooseObject object = objects.read(commitId)
+                .orElseThrow(NativeObjectClosure::missingObject);
+        if (object.type() != ObjectType.COMMIT) {
+            return false;
+        }
+        return commitReferences(object.data()).committerTimestamp()
+                <= deepenSince;
+    }
+
+    private static boolean shouldStopAtClientShallow(
+            GitObjectId commitId,
+            Set<GitObjectId> clientShallowCommits,
+            boolean deepenRelative,
+            long deepenSince,
+            Set<GitObjectId> deepenNotCommits,
+            int requestedDepth) {
+        return clientShallowCommits.contains(commitId)
+                && !deepenRelative
+                && deepenSince < 0
+                && deepenNotCommits.isEmpty()
+                && requestedDepth == 0;
+    }
+
+    private static int nextDepth(
+            GitObjectId commitId,
+            int remainingDepth,
+            Set<GitObjectId> clientShallowCommits,
+            boolean deepenRelative) {
+        if (deepenRelative && !clientShallowCommits.contains(commitId)) {
+            return remainingDepth;
+        }
+        return Math.max(0, remainingDepth - 1);
     }
 
     private static GitUploadPackException missingObject() {
@@ -252,6 +460,7 @@ public final class NativeObjectClosure {
     private static CommitReferences commitReferences(byte[] data) {
         GitObjectId tree = null;
         List<GitObjectId> parents = new ArrayList<>();
+        long committerTimestamp = -1;
         String commit = new String(data, StandardCharsets.US_ASCII);
         String[] lines = commit.split("\n");
         for (String line : lines) {
@@ -263,13 +472,34 @@ public final class NativeObjectClosure {
             } else if (line.startsWith("parent ")) {
                 parents.add(GitObjectId.of(
                         line.substring("parent ".length())));
+            } else if (line.startsWith("committer ")) {
+                committerTimestamp = parseCommitterTimestamp(line);
             }
         }
-        if (tree == null) {
+        if (tree == null || committerTimestamp < 0) {
             throw new IllegalArgumentException(
                     "Malformed Git commit object");
         }
-        return new CommitReferences(tree, parents);
+        return new CommitReferences(tree, parents, committerTimestamp);
+    }
+
+    private static long parseCommitterTimestamp(String line) {
+        int timezoneSeparator = line.lastIndexOf(' ');
+        if (timezoneSeparator <= 0) {
+            throw new IllegalArgumentException("Malformed Git commit object");
+        }
+        int timestampSeparator = line.lastIndexOf(' ', timezoneSeparator - 1);
+        if (timestampSeparator <= 0) {
+            throw new IllegalArgumentException("Malformed Git commit object");
+        }
+        try {
+            return Long.parseLong(
+                    line.substring(timestampSeparator + 1, timezoneSeparator));
+        } catch (NumberFormatException error) {
+            throw new IllegalArgumentException(
+                    "Malformed Git commit object",
+                    error);
+        }
     }
 
     private static void addTreeReferences(
@@ -322,17 +552,29 @@ public final class NativeObjectClosure {
 
     public record FetchSelection(
             Set<GitObjectId> objectIds,
-            Set<GitObjectId> shallowBoundaries) {
+            Set<GitObjectId> shallowBoundaries,
+            Set<GitObjectId> unshallowBoundaries) {
+
+        public FetchSelection(
+                Set<GitObjectId> objectIds,
+                Set<GitObjectId> shallowBoundaries) {
+            this(objectIds, shallowBoundaries, Set.of());
+        }
 
         public FetchSelection {
             Objects.requireNonNull(objectIds, "objectIds");
             Objects.requireNonNull(
                     shallowBoundaries,
                     "shallowBoundaries");
+            Objects.requireNonNull(
+                    unshallowBoundaries,
+                    "unshallowBoundaries");
             objectIds = Collections.unmodifiableSet(
                     new LinkedHashSet<>(objectIds));
             shallowBoundaries = Collections.unmodifiableSet(
                     new LinkedHashSet<>(shallowBoundaries));
+            unshallowBoundaries = Collections.unmodifiableSet(
+                    new LinkedHashSet<>(unshallowBoundaries));
         }
     }
 
@@ -343,7 +585,8 @@ public final class NativeObjectClosure {
 
     private record CommitReferences(
             GitObjectId tree,
-            List<GitObjectId> parents) {
+            List<GitObjectId> parents,
+            long committerTimestamp) {
 
         private CommitReferences {
             Objects.requireNonNull(tree, "tree");

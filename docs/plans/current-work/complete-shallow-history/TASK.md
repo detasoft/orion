@@ -1,7 +1,6 @@
 # Complete Shallow History Support
 
-Status: active
-Owner: codex, session shallow-history-20260901, paused 2026-09-01 13:15 Europe/Amsterdam; next: implement full Git shallow graph semantics for deepen-since and deepen-not.
+Status: complete
 Source: split out from protocol v2 server fetch follow-up work.
 
 Protocol v2 server fetch currently supports depth-based shallow fetch through
@@ -26,7 +25,11 @@ sideband-all, and packfile URI responses.
 - [x] `deepen-relative` is parsed and carried with depth-based shallow fetch.
 - [x] `unshallow` response lines are supported by response metadata and
   protocol v2 serialization.
-- [ ] Full Git shallow graph semantics for time-based and ref-based deepening.
+- [x] Full Git shallow graph semantics for time-based and ref-based deepening.
+
+Completed 2026-09-01: implemented commit timestamp parsing, `deepen-since`,
+`deepen-not` for `HEAD` and full refs, client shallow/unshallow boundaries, and
+storage-layer shallow conflict validation.
 
 ## Acceptance
 
