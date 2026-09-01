@@ -68,8 +68,8 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             destroyFailedServer();
             throw new IllegalStateException("Cannot start Jetty HTTP server", e);
         }
-        log.warn("HTTP Listening on {}:{}", httpTransportConfig.getAddress(), httpTransportConfig.getPort());
-        log.warn("HTTPS Listening on {}:{}", httpsTransportConfig.getAddress(), httpsTransportConfig.getPort());
+        log.warn("HTTP Listening on http://{}:{}", httpTransportConfig.getAddress(), httpTransportConfig.getPort());
+        log.warn("HTTPS Listening on https://{}:{}", httpsTransportConfig.getAddress(), httpsTransportConfig.getPort());
     }
 
     public boolean isEnabled() {
