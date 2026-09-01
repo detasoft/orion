@@ -15,12 +15,6 @@ import java.io.IOException;
 public interface BufferedByteOutput {
     int DEFAULT_BUFFER_CAPACITY = 64 * 1024;
 
-    default ByteBuf getByteBuf() {
-        return Unpooled.buffer(
-                DEFAULT_BUFFER_CAPACITY,
-                DEFAULT_BUFFER_CAPACITY);
-    }
-
     default void write(byte[] bytes) throws IOException {
         write(bytes, 0, bytes.length);
     }

@@ -11,6 +11,10 @@ import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
+import pro.deta.orion.git.parser.wire.serialization.AsciiPacketSequenceSerialization;
+import pro.deta.orion.git.parser.wire.serialization.OutputSerialization;
+import pro.deta.orion.git.parser.wire.serialization.PacketListSerialization;
+import pro.deta.orion.git.parser.wire.serialization.PktLineSerialization;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
 import pro.deta.orion.util.Result;
@@ -28,6 +32,7 @@ import java.util.Set;
 import static pro.deta.orion.git.parser.wire.control.ControlState.MAX_PKT_LINE_LENGTH;
 import static pro.deta.orion.git.parser.wire.control.ControlState.PKT_LINE_HEADER_SIZE;
 import static pro.deta.orion.git.parser.wire.GitNativeUtils.hexDigit;
+import static pro.deta.orion.git.parser.wire.serialization.AsciiPacketUtils.*;
 
 public final class GitBlockingWireTransport {
     public static final int BUFFER_CAPACITY = 64 * 1024;
@@ -205,7 +210,7 @@ public final class GitBlockingWireTransport {
                 validateToken(unborn.symrefTarget(), "unborn.symrefTarget");
                 payload = "unborn " + unborn.name() + " symref-target:" + unborn.symrefTarget() + "\n";
             }
-            validateAsciiPacket(payload);
+            validateAsciiPacket(payload, 0);
             payloads.add(payload);
         }
         sendSerialization(new AsciiPacketSequenceSerialization(payloads));
@@ -217,12 +222,8 @@ public final class GitBlockingWireTransport {
             throw new IllegalArgumentException("message must not be blank");
         }
         String payload = "ERR " + message + "\n";
-        validateAsciiPacket(payload);
+        validateAsciiPacket(payload, 0);
         sendSerialization(new PktLineSerialization(payload.getBytes(StandardCharsets.UTF_8), payload.getBytes(StandardCharsets.UTF_8).length + PKT_LINE_HEADER_SIZE));
-    }
-
-    public void sendProtocolV2FetchAcknowledgments(List<GitObjectId> acknowledgments) throws IOException {
-        sendProtocolV2FetchAcknowledgments(acknowledgments, false);
     }
 
     public void sendProtocolV2FetchAcknowledgments(List<GitObjectId> acknowledgments, boolean sidebandAll) throws IOException {
@@ -290,10 +291,6 @@ public final class GitBlockingWireTransport {
         return beginProtocolV2Packfile(producer, shallowBoundaries, wantedRefs, List.of(), false);
     }
 
-    public ProtocolV2PackfileResponse beginProtocolV2Packfile(NativePackProducer producer, Set<GitObjectId> shallowBoundaries, Map<String, GitObjectId> wantedRefs, boolean sidebandAll) {
-        return beginProtocolV2Packfile(producer, shallowBoundaries, wantedRefs, List.of(), sidebandAll);
-    }
-
     public ProtocolV2PackfileResponse beginProtocolV2Packfile(NativePackProducer producer, Set<GitObjectId> shallowBoundaries, Map<String, GitObjectId> wantedRefs, List<NativePackfileUri> packfileUris) {
         return beginProtocolV2Packfile(producer, shallowBoundaries, wantedRefs, packfileUris, false);
     }
@@ -340,21 +337,6 @@ public final class GitBlockingWireTransport {
             if (value <= 0x20 || value >= 0x7f) {
                 throw new IllegalArgumentException(fieldName + " must be a protocol-safe ASCII token");
             }
-        }
-    }
-
-    private static void validateAsciiPacket(String payload) {
-        validateAsciiPacket(payload, 0);
-    }
-
-    private static void validateAsciiPacket(String payload, int extraPayloadBytes) {
-        for (int index = 0; index < payload.length(); index++) {
-            if (payload.charAt(index) > 0x7f) {
-                throw new IllegalArgumentException("Git wire-line response must be ASCII");
-            }
-        }
-        if (payload.length() + extraPayloadBytes + PKT_LINE_HEADER_SIZE > MAX_PKT_LINE_LENGTH) {
-            throw new IllegalArgumentException("Git wire-line exceeds maximum length");
         }
     }
 
@@ -420,12 +402,8 @@ public final class GitBlockingWireTransport {
         return input;
     }
 
-    private void writeRaw(byte[] bytes) throws IOException {
+    public void writeRaw(byte[] bytes) throws IOException {
         outputSink.write(bytes);
-    }
-
-    private void writeRaw(ByteBuf buffer) throws IOException {
-        outputSink.write(buffer);
     }
 
     public void writeData(byte[] payload) throws IOException {
@@ -577,34 +555,6 @@ public final class GitBlockingWireTransport {
         return List.copyOf(packets);
     }
 
-    private static List<byte[]> encodeAsciiPackets(List<String> payloads, boolean sidebandAll) {
-        List<byte[]> packets = new ArrayList<>();
-        for (String payload : payloads) {
-            packets.add(encodeAsciiPacket(payload, sidebandAll));
-        }
-        packets.add(new byte[]{'0', '0', '0', '0'});
-        return List.copyOf(packets);
-    }
-
-    private static byte[] encodeAsciiPacket(String payload) {
-        return encodeAsciiPacket(payload, false);
-    }
-
-    private static byte[] encodeAsciiPacket(String payload, boolean sidebandAll) {
-        int sidebandLength = sidebandAll ? 1 : 0;
-        validateAsciiPacket(payload, sidebandLength);
-        int packetLength = payload.length() + PKT_LINE_HEADER_SIZE + sidebandLength;
-        byte[] packet = new byte[packetLength];
-        writeHeader(packet, packetLength);
-        byte[] payloadBytes = payload.getBytes(StandardCharsets.US_ASCII);
-        int payloadOffset = PKT_LINE_HEADER_SIZE;
-        if (sidebandAll) {
-            packet[payloadOffset] = SideBandChannel.DATA.wireValue;
-            payloadOffset++;
-        }
-        System.arraycopy(payloadBytes, 0, packet, payloadOffset, payloadBytes.length);
-        return packet;
-    }
 
     private static List<byte[]> encodeLines(GitV1Advertisement advertisement) {
         List<byte[]> lines = new ArrayList<>();
@@ -632,12 +582,6 @@ public final class GitBlockingWireTransport {
         return (value + "\n").getBytes(StandardCharsets.UTF_8);
     }
 
-    private static void writeHeader(byte[] output, int packetLength) {
-        output[0] = hexDigit((packetLength >>> 12) & 0x0f);
-        output[1] = hexDigit((packetLength >>> 8) & 0x0f);
-        output[2] = hexDigit((packetLength >>> 4) & 0x0f);
-        output[3] = hexDigit(packetLength & 0x0f);
-    }
 
     public enum AckStatus {
         FINAL(""), CONTINUE(" continue"), COMMON(" common"), READY(" ready");
@@ -908,88 +852,8 @@ public final class GitBlockingWireTransport {
         }
     }
 
-    private interface OutputSerialization {
-        void writeTo(GitBlockingWireTransport wire) throws IOException;
 
-        static void writeBytes(GitBlockingWireTransport wire, byte[] bytes) throws IOException {
-            wire.writeRaw(bytes);
-        }
-    }
 
-    private static final class PacketListSerialization implements OutputSerialization {
-        private final List<byte[]> packets;
-        private int packetIndex;
-        private int packetOffset;
-
-        private PacketListSerialization(List<byte[]> packets) {
-            this.packets = packets;
-        }
-
-        @Override
-        public void writeTo(GitBlockingWireTransport wire) throws IOException {
-            while (packetIndex < packets.size()) {
-                byte[] packet = packets.get(packetIndex);
-                if (packetOffset == 0) {
-                    OutputSerialization.writeBytes(wire, packet);
-                } else {
-                    byte[] remaining = new byte[packet.length - packetOffset];
-                    System.arraycopy(packet, packetOffset, remaining, 0, remaining.length);
-                    OutputSerialization.writeBytes(wire, remaining);
-                }
-                packetIndex++;
-                packetOffset = 0;
-            }
-            wire.flush();
-        }
-    }
-
-    private static final class PktLineSerialization implements OutputSerialization {
-        private final byte[] payload;
-        private final int packetLength;
-        private int packetOffset;
-
-        private PktLineSerialization(byte[] payload, int packetLength) {
-            this.payload = payload.clone();
-            this.packetLength = packetLength;
-        }
-
-        @Override
-        public void writeTo(GitBlockingWireTransport wire) throws IOException {
-            byte[] packet = new byte[packetLength - packetOffset];
-            for (int index = 0; index < packet.length; index++) {
-                packet[index] = byteAt(packetOffset + index);
-            }
-            packetOffset = packetLength;
-            OutputSerialization.writeBytes(wire, packet);
-            wire.flush();
-        }
-
-        private byte byteAt(int offset) {
-            if (offset < PKT_LINE_HEADER_SIZE) {
-                int shift = (PKT_LINE_HEADER_SIZE - 1 - offset) * 4;
-                return hexDigit((packetLength >>> shift) & 0x0f);
-            }
-            return payload[offset - PKT_LINE_HEADER_SIZE];
-        }
-    }
-
-    private static final class AsciiPacketSequenceSerialization implements OutputSerialization {
-        private final List<String> payloads;
-        private int packetIndex;
-        private int packetOffset;
-
-        private AsciiPacketSequenceSerialization(List<String> payloads) {
-            this.payloads = List.copyOf(payloads);
-        }
-
-        @Override
-        public void writeTo(GitBlockingWireTransport wire) throws IOException {
-            PacketListSerialization packets = new PacketListSerialization(encodeAsciiPackets(payloads, false));
-            packets.writeTo(wire);
-            packetIndex = payloads.size() + 1;
-            packetOffset = 0;
-        }
-    }
 
     private static final class ReceivePackStatusSerialization implements OutputSerialization {
         private static final String UNPACK_OK = "unpack ok\n";

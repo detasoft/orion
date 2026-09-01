@@ -39,11 +39,6 @@ public final class RecordingBufferedByteOutput implements BufferedByteOutput {
     }
 
     @Override
-    public ByteBuf getByteBuf() {
-        return Unpooled.buffer(scratchCapacity, scratchCapacity);
-    }
-
-    @Override
     public void write(byte[] source, int offset, int length) {
         Objects.requireNonNull(source, "source");
         if (target == null) {

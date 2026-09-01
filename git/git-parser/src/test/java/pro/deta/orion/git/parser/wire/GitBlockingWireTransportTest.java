@@ -435,12 +435,6 @@ class GitBlockingWireTransportTest {
                 new ByteArrayOutputStream();
 
         @Override
-        public ByteBuf getByteBuf() {
-            throw new AssertionError(
-                    "Simple serialization should not borrow a ByteBuf");
-        }
-
-        @Override
         public void write(byte[] source, int offset, int length) {
             bytes.write(source, offset, length);
         }

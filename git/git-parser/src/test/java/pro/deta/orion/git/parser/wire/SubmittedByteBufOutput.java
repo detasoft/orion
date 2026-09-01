@@ -19,11 +19,6 @@ public final class SubmittedByteBufOutput implements BufferedByteOutput {
     }
 
     @Override
-    public ByteBuf getByteBuf() {
-        return scratch;
-    }
-
-    @Override
     public void write(byte[] source, int offset, int length) {
         byte[] copied = new byte[length];
         System.arraycopy(source, offset, copied, 0, length);

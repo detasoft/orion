@@ -8,20 +8,17 @@ import java.io.IOException;
 import java.util.Objects;
 
 public interface NativePackProducer extends AutoCloseable {
-    int DEFAULT_OUTPUT_BUFFER_SIZE = 8 * 1024;
+    int DEFAULT_OUTPUT_BUFFER_SIZE = 80 * 1024;
 
     Result produce(ByteBuf destination);
 
     default Result produce(BufferedByteOutput destination) throws IOException {
         Objects.requireNonNull(destination, "destination");
-        ByteBuf buffer = Unpooled.buffer(
-                DEFAULT_OUTPUT_BUFFER_SIZE,
-                DEFAULT_OUTPUT_BUFFER_SIZE);
+        ByteBuf buffer = Unpooled.buffer(DEFAULT_OUTPUT_BUFFER_SIZE, DEFAULT_OUTPUT_BUFFER_SIZE);
         try {
             Result result = produce(buffer);
             if (!buffer.isReadable() && result == Result.MORE) {
-                throw new IllegalStateException(
-                        "Native pack producer made no progress");
+                throw new IllegalStateException("Native pack producer made no progress");
             }
             destination.write(buffer);
             return result;
@@ -34,7 +31,6 @@ public interface NativePackProducer extends AutoCloseable {
     void close();
 
     enum Result {
-        MORE,
-        COMPLETED
+        MORE, COMPLETED
     }
 }
