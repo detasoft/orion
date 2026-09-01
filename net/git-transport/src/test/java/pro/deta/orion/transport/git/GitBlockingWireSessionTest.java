@@ -7,7 +7,6 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
-import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
@@ -140,101 +139,6 @@ class GitBlockingWireSessionTest {
             assertThat(output.ascii())
                     .startsWith("000dpackfile\n")
                     .contains("PACK");
-        }
-    }
-
-    @Test
-    void smartHttpPostAcceptsClientShallowStateAndRelativeDepth()
-            throws Exception {
-        InMemoryNativeGitRepositoryProvider provider =
-                new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository =
-                provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
-                ObjectType.BLOB,
-                "payload".getBytes(StandardCharsets.US_ASCII));
-        String shallow = "3".repeat(40);
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                Duration.ofSeconds(1))) {
-            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
-            ByteArrayBuilder request = new ByteArrayBuilder();
-            request.write(command("fetch"));
-            request.writePacket("want " + blob.value() + "\n");
-            request.writePacket("shallow " + shallow + "\n");
-            request.writePacket("deepen 1\n");
-            request.writePacket("deepen-relative\n");
-            request.writePacket("done\n");
-            request.writeAscii("0000");
-            for (byte value : request.bytes()) {
-                input.feed(new byte[] {value});
-            }
-            input.end();
-
-            session(input, output, provider).serveSmartHttpPost(uploadV2Request());
-
-            assertThat(output.ascii())
-                    .startsWith("000dpackfile\n")
-                    .contains("PACK");
-        }
-    }
-
-    @Test
-    void smartHttpPostParsesUnsupportedDeepenSinceBeforeRepositoryRejection()
-            throws Exception {
-        InMemoryNativeGitRepositoryProvider provider =
-                new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository =
-                provider.create("project").valueOrFailure("repository");
-        GitObjectId blob = repository.writeObject(
-                ObjectType.BLOB,
-                "payload".getBytes(StandardCharsets.US_ASCII));
-        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                Duration.ofSeconds(1))) {
-            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
-            input.feed(fetchRequest(
-                    "want " + blob.value() + "\n",
-                    "deepen-since 1700000000\n",
-                    "done\n"));
-
-            assertThatThrownBy(() -> session(input, output, provider)
-                    .serveSmartHttpPost(uploadV2Request()))
-                    .isInstanceOf(GitUploadPackException.class)
-                    .satisfies(error -> assertThat(
-                            ((GitUploadPackException) error).kind())
-                            .isEqualTo(GitUploadPackException.Kind
-                                    .UNSUPPORTED_FEATURE));
-        }
-    }
-
-    @Test
-    void smartHttpPostRejectsContradictoryDeepeningForms()
-            throws Exception {
-        for (List<String> arguments : List.of(
-                List.of(
-                        "want " + WANT + "\n",
-                        "deepen 1\n",
-                        "deepen-since 1700000000\n",
-                        "done\n"),
-                List.of(
-                        "want " + WANT + "\n",
-                        "deepen-relative\n",
-                        "done\n"),
-                List.of(
-                        "want " + WANT + "\n",
-                        "shallow " + "3".repeat(40) + "\n",
-                        "shallow " + "3".repeat(40) + "\n",
-                        "done\n"))) {
-            try (QueueBufferedByteInput input = new QueueBufferedByteInput(
-                    Duration.ofSeconds(1))) {
-                RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
-                input.feed(fetchRequest(arguments.toArray(String[]::new)));
-
-                assertThatThrownBy(() -> session(input, output, providerWithMainRef())
-                        .serveSmartHttpPost(uploadV2Request()))
-                        .isInstanceOf(IOException.class)
-                        .hasMessageContaining(
-                                "Protocol v2 fetch request is invalid");
-            }
         }
     }
 

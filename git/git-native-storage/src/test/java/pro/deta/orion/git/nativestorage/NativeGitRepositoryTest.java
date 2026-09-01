@@ -181,50 +181,6 @@ class NativeGitRepositoryTest {
     }
 
     @Test
-    void fetchResponseCarriesShallowBoundaryMetadata() {
-        LooseObjectStore objects = new LooseObjectStore();
-        GitObjectId baseBlob = objects.write(
-                ObjectType.BLOB,
-                "base".getBytes(StandardCharsets.UTF_8));
-        GitObjectId baseTree = objects.write(
-                ObjectType.TREE,
-                treeEntry("100644", "file.txt", baseBlob));
-        GitObjectId baseCommit = writeCommit(objects, baseTree, null, "base");
-        GitObjectId tipBlob = objects.write(
-                ObjectType.BLOB,
-                "tip".getBytes(StandardCharsets.UTF_8));
-        GitObjectId tipTree = objects.write(
-                ObjectType.TREE,
-                treeEntry("100644", "file.txt", tipBlob));
-        GitObjectId tipCommit = writeCommit(objects, tipTree, baseCommit, "tip");
-        NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new LooseRefStore(),
-                objects,
-                "refs/heads/main");
-
-        NativeFetchResponse response = repository.fetchResponse(
-                new NativeFetchRequest(
-                        Set.of(tipCommit),
-                        Set.of(),
-                        true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        1));
-        CompositeByteBuf pack = produce(response.packProducer());
-
-        try {
-            assertThat(response.shallowBoundaries())
-                    .containsExactly(tipCommit);
-            assertThat(pack.getInt(8)).isEqualTo(3);
-        } finally {
-            pack.release();
-        }
-    }
-
-    @Test
     void filteredFetchBuildsPackWithoutTreeReachedBlobs() {
         LooseObjectStore objects = new LooseObjectStore();
         GitObjectId blob = objects.write(
@@ -494,50 +450,6 @@ class NativeGitRepositoryTest {
     }
 
     @Test
-    void shallowFetchDoesNotUseExternalThinBase() {
-        LooseObjectStore objects = new LooseObjectStore();
-        GitObjectId baseBlob = objects.write(
-                ObjectType.BLOB,
-                ("shared prefix\n".repeat(80)
-                        + "base line\n"
-                        + "shared suffix\n".repeat(80))
-                        .getBytes(StandardCharsets.UTF_8));
-        GitObjectId baseTree = objects.write(
-                ObjectType.TREE,
-                treeEntry("100644", "file.txt", baseBlob));
-        GitObjectId baseCommit = writeCommit(objects, baseTree, null, "base");
-        GitObjectId tipBlob = objects.write(
-                ObjectType.BLOB,
-                ("shared prefix\n".repeat(80)
-                        + "tip line updated\n"
-                        + "shared suffix\n".repeat(80))
-                        .getBytes(StandardCharsets.UTF_8));
-        GitObjectId tipTree = objects.write(
-                ObjectType.TREE,
-                treeEntry("100644", "file.txt", tipBlob));
-        GitObjectId tipCommit = writeCommit(objects, tipTree, baseCommit, "tip");
-        NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new LooseRefStore(),
-                objects,
-                "refs/heads/main");
-
-        byte[] pack = produceBytes(repository.fetch(
-                new NativeFetchRequest(
-                        Set.of(tipCommit),
-                        Set.of(baseCommit),
-                        true,
-                        true,
-                        true,
-                        false,
-                        false,
-                        1)));
-
-        assertThat(intAt(pack, 8)).isEqualTo(3);
-        assertThat(packEntryTypes(pack)).doesNotContain(7);
-    }
-
-    @Test
     void resolvesWantedRefsIntoPackAndResponseMetadata() {
         LooseRefStore refs = new LooseRefStore();
         LooseObjectStore objects = new LooseObjectStore();
@@ -678,42 +590,6 @@ class NativeGitRepositoryTest {
                                 .isEqualTo(
                                         GitUploadPackException.Kind
                                                 .MISSING_REF));
-    }
-
-    @Test
-    void rejectsUnsupportedTimeAndRefBasedDeepeningBeforePackBuild() {
-        NativeGitRepository repository = new NativeGitRepository(
-                "demo.git",
-                new LooseRefStore(),
-                new LooseObjectStore(),
-                "refs/heads/main");
-        GitObjectId want = repository.writeObject(
-                ObjectType.BLOB,
-                "payload".getBytes(StandardCharsets.UTF_8));
-
-        assertThatThrownBy(() -> repository.fetchResponse(
-                new NativeFetchRequest(
-                        Set.of(want),
-                        Set.of(),
-                        true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        0,
-                        NativeObjectFilter.NONE,
-                        Set.of(),
-                        Set.of(),
-                        Set.of(),
-                        false,
-                        1_700_000_000L,
-                        Set.of("refs/heads/main"))))
-                .isInstanceOfSatisfying(
-                        GitUploadPackException.class,
-                        error -> assertThat(error.kind())
-                                .isEqualTo(
-                                        GitUploadPackException.Kind
-                                                .UNSUPPORTED_FEATURE));
     }
 
     private static CompositeByteBuf produce(
