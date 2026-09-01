@@ -680,6 +680,42 @@ class NativeGitRepositoryTest {
                                                 .MISSING_REF));
     }
 
+    @Test
+    void rejectsUnsupportedTimeAndRefBasedDeepeningBeforePackBuild() {
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        GitObjectId want = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(want),
+                        Set.of(),
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        0,
+                        NativeObjectFilter.NONE,
+                        Set.of(),
+                        Set.of(),
+                        Set.of(),
+                        false,
+                        1_700_000_000L,
+                        Set.of("refs/heads/main"))))
+                .isInstanceOfSatisfying(
+                        GitUploadPackException.class,
+                        error -> assertThat(error.kind())
+                                .isEqualTo(
+                                        GitUploadPackException.Kind
+                                                .UNSUPPORTED_FEATURE));
+    }
+
     private static CompositeByteBuf produce(
             NativePackProducer producer) {
         CompositeByteBuf complete = Unpooled.compositeBuffer();

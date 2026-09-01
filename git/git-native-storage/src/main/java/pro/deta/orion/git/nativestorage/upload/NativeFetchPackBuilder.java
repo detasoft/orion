@@ -104,6 +104,7 @@ public final class NativeFetchPackBuilder {
 
     public NativeFetchResponse build(NativeFetchRequest request) {
         Objects.requireNonNull(request, "request");
+        rejectUnsupportedDeepening(request);
         Map<String, GitObjectId> wantedRefs =
                 resolveWantedRefs(request.wantRefs());
         Set<GitObjectId> wants = new LinkedHashSet<>(request.wants());
@@ -134,6 +135,16 @@ public final class NativeFetchPackBuilder {
                 selection.shallowBoundaries(),
                 wantedRefs,
                 packfileUriSelection.packfileUris());
+    }
+
+    private static void rejectUnsupportedDeepening(
+            NativeFetchRequest request) {
+        if (request.deepenSince() >= 0
+                || !request.deepenNotRefs().isEmpty()) {
+            throw new GitUploadPackException(
+                    GitUploadPackException.Kind.UNSUPPORTED_FEATURE,
+                    "Time and ref based shallow deepening is unsupported");
+        }
     }
 
     private NativePackfileUriSelection packfileUriSelection(

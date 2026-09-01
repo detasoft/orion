@@ -95,6 +95,49 @@ class ProtocolV2PackfileResponseTest {
     }
 
     @Test
+    void writesUnshallowInfoBeforePackfileSection() throws Exception {
+        ByteBuf outbound = outputBuffer();
+        List<byte[]> sent = new ArrayList<>();
+        GitBlockingWireTransport output = collectingOutput(outbound, sent);
+        GitObjectId shallow = GitObjectId.of("1".repeat(40));
+        GitObjectId unshallow = GitObjectId.of("2".repeat(40));
+        byte[] pack = "PACK-data".getBytes(StandardCharsets.US_ASCII);
+        GitBlockingWireTransport.ProtocolV2PackfileResponse response =
+                output.beginProtocolV2Packfile(
+                        producer(pack),
+                        Set.of(shallow),
+                        Set.of(unshallow),
+                        Map.of(),
+                        List.of(),
+                        false);
+
+        try {
+            complete(response);
+
+            byte[] bytes = join(sent);
+            String prefix = new String(
+                    bytes,
+                    0,
+                    17 + 53 + 55 + 4 + 13,
+                    StandardCharsets.US_ASCII);
+            assertThat(prefix)
+                    .isEqualTo(
+                            "0011shallow-info\n"
+                                    + "0035shallow "
+                                    + shallow.value()
+                                    + "\n"
+                                    + "0037unshallow "
+                                    + unshallow.value()
+                                    + "\n"
+                                    + "0001"
+                                    + "000dpackfile\n");
+        } finally {
+            response.close();
+            outbound.release();
+        }
+    }
+
+    @Test
     void writesWantedRefsBeforePackfileSection() throws Exception {
         ByteBuf outbound = outputBuffer();
         List<byte[]> sent = new ArrayList<>();

@@ -12,4 +12,3 @@ Extend protocol v2 server fetch beyond the base request.
 - [x] [Add ref-in-want support](ref-in-want/TASK.md)
 - [x] [Add sideband-all support](sideband-all/TASK.md)
 - [x] [Add packfile URI responses](packfile-uri/TASK.md)
-- [ ] [Complete shallow history support](complete-shallow-history/TASK.md)

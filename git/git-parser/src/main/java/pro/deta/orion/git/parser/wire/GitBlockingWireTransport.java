@@ -279,28 +279,78 @@ public final class GitBlockingWireTransport {
         return new LegacyPackResponse(producer, sendNakBeforePack);
     }
 
-    public ProtocolV2PackfileResponse beginProtocolV2Packfile(NativePackProducer producer) {
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer) {
         return beginProtocolV2Packfile(producer, Set.of());
     }
 
-    public ProtocolV2PackfileResponse beginProtocolV2Packfile(NativePackProducer producer, Set<GitObjectId> shallowBoundaries) {
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries) {
         return beginProtocolV2Packfile(producer, shallowBoundaries, Map.of());
     }
 
-    public ProtocolV2PackfileResponse beginProtocolV2Packfile(NativePackProducer producer, Set<GitObjectId> shallowBoundaries, Map<String, GitObjectId> wantedRefs) {
-        return beginProtocolV2Packfile(producer, shallowBoundaries, wantedRefs, List.of(), false);
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Map<String, GitObjectId> wantedRefs) {
+        return beginProtocolV2Packfile(
+                producer,
+                shallowBoundaries,
+                Set.of(),
+                wantedRefs,
+                List.of(),
+                false);
     }
 
-    public ProtocolV2PackfileResponse beginProtocolV2Packfile(NativePackProducer producer, Set<GitObjectId> shallowBoundaries, Map<String, GitObjectId> wantedRefs, List<NativePackfileUri> packfileUris) {
-        return beginProtocolV2Packfile(producer, shallowBoundaries, wantedRefs, packfileUris, false);
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Map<String, GitObjectId> wantedRefs,
+            List<NativePackfileUri> packfileUris) {
+        return beginProtocolV2Packfile(
+                producer,
+                shallowBoundaries,
+                Set.of(),
+                wantedRefs,
+                packfileUris,
+                false);
     }
 
-    public ProtocolV2PackfileResponse beginProtocolV2Packfile(NativePackProducer producer, Set<GitObjectId> shallowBoundaries, Map<String, GitObjectId> wantedRefs, List<NativePackfileUri> packfileUris, boolean sidebandAll) {
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Map<String, GitObjectId> wantedRefs,
+            List<NativePackfileUri> packfileUris,
+            boolean sidebandAll) {
+        return beginProtocolV2Packfile(
+                producer,
+                shallowBoundaries,
+                Set.of(),
+                wantedRefs,
+                packfileUris,
+                sidebandAll);
+    }
+
+    public ProtocolV2PackfileResponse beginProtocolV2Packfile(
+            NativePackProducer producer,
+            Set<GitObjectId> shallowBoundaries,
+            Set<GitObjectId> unshallowBoundaries,
+            Map<String, GitObjectId> wantedRefs,
+            List<NativePackfileUri> packfileUris,
+            boolean sidebandAll) {
         Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
+        Objects.requireNonNull(unshallowBoundaries, "unshallowBoundaries");
         Objects.requireNonNull(wantedRefs, "wantedRefs");
         Objects.requireNonNull(packfileUris, "packfileUris");
         Objects.requireNonNull(producer, "producer");
-        return new ProtocolV2PackfileResponse(producer, shallowBoundaries, wantedRefs, packfileUris, sidebandAll);
+        return new ProtocolV2PackfileResponse(
+                producer,
+                shallowBoundaries,
+                unshallowBoundaries,
+                wantedRefs,
+                packfileUris,
+                sidebandAll);
     }
 
     private void sendPktLine(List<String> payloadParts, String failureMessage) throws IOException {
@@ -744,9 +794,20 @@ public final class GitBlockingWireTransport {
         private final byte[] packfileHeader;
         private boolean closed;
 
-        private ProtocolV2PackfileResponse(NativePackProducer producer, Set<GitObjectId> shallowBoundaries, Map<String, GitObjectId> wantedRefs, List<NativePackfileUri> packfileUris, boolean sidebandAll) {
+        private ProtocolV2PackfileResponse(
+                NativePackProducer producer,
+                Set<GitObjectId> shallowBoundaries,
+                Set<GitObjectId> unshallowBoundaries,
+                Map<String, GitObjectId> wantedRefs,
+                List<NativePackfileUri> packfileUris,
+                boolean sidebandAll) {
             this.producer = producer;
-            this.prePackSectionPackets = prePackSectionPackets(shallowBoundaries, wantedRefs, packfileUris, sidebandAll);
+            this.prePackSectionPackets = prePackSectionPackets(
+                    shallowBoundaries,
+                    unshallowBoundaries,
+                    wantedRefs,
+                    packfileUris,
+                    sidebandAll);
             this.packfileHeader = sidebandAll ? encodeAsciiPacket("packfile\n", true) : PACKFILE_HEADER;
         }
 
@@ -788,20 +849,41 @@ public final class GitBlockingWireTransport {
             }
         }
 
-        private static List<byte[]> prePackSectionPackets(Set<GitObjectId> shallowBoundaries, Map<String, GitObjectId> wantedRefs, List<NativePackfileUri> packfileUris, boolean sidebandAll) {
+        private static List<byte[]> prePackSectionPackets(
+                Set<GitObjectId> shallowBoundaries,
+                Set<GitObjectId> unshallowBoundaries,
+                Map<String, GitObjectId> wantedRefs,
+                List<NativePackfileUri> packfileUris,
+                boolean sidebandAll) {
             Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
+            Objects.requireNonNull(unshallowBoundaries, "unshallowBoundaries");
             Objects.requireNonNull(wantedRefs, "wantedRefs");
             Objects.requireNonNull(packfileUris, "packfileUris");
-            if (shallowBoundaries.isEmpty() && wantedRefs.isEmpty() && packfileUris.isEmpty()) {
+            if (shallowBoundaries.isEmpty()
+                    && unshallowBoundaries.isEmpty()
+                    && wantedRefs.isEmpty()
+                    && packfileUris.isEmpty()) {
                 return List.of();
             }
             List<byte[]> packets = new ArrayList<>();
-            if (!shallowBoundaries.isEmpty()) {
+            if (!shallowBoundaries.isEmpty()
+                    || !unshallowBoundaries.isEmpty()) {
                 packets.add(encodeAsciiPacket("shallow-info\n", sidebandAll));
                 for (GitObjectId shallowBoundary : shallowBoundaries) {
                     Objects.requireNonNull(shallowBoundary, "shallowBoundary");
                     validateObjectId(shallowBoundary.value());
                     packets.add(encodeAsciiPacket("shallow " + shallowBoundary.value() + "\n", sidebandAll));
+                }
+                for (GitObjectId unshallowBoundary : unshallowBoundaries) {
+                    Objects.requireNonNull(
+                            unshallowBoundary,
+                            "unshallowBoundary");
+                    validateObjectId(unshallowBoundary.value());
+                    packets.add(encodeAsciiPacket(
+                            "unshallow "
+                                    + unshallowBoundary.value()
+                                    + "\n",
+                            sidebandAll));
                 }
                 packets.add(DELIMITER);
             }

@@ -294,6 +294,7 @@ public final class GitBlockingWireSession {
             response = wire.beginProtocolV2Packfile(
                     fetch.packProducer(),
                     fetch.shallowBoundaries(),
+                    fetch.unshallowBoundaries(),
                     fetch.wantedRefs(),
                     packfileUrisForClient(fetch, nativeRequest),
                     request.sidebandAll());
@@ -798,13 +799,18 @@ public final class GitBlockingWireSession {
         private final Set<String> wantRefs = new LinkedHashSet<>();
         private final Set<String> packfileUriProtocols = new LinkedHashSet<>();
         private final Set<GitObjectId> haves = new LinkedHashSet<>();
+        private final Set<GitObjectId> clientShallowCommits =
+                new LinkedHashSet<>();
+        private final Set<String> deepenNotRefs = new LinkedHashSet<>();
         private boolean done;
         private boolean thinPack;
         private boolean ofsDelta;
         private boolean includeTag;
         private boolean waitForDone;
         private boolean sidebandAll;
+        private boolean deepenRelative;
         private int depth;
+        private long deepenSince = -1;
         private NativeObjectFilter objectFilter = NativeObjectFilter.NONE;
         private boolean invalid;
 
@@ -827,8 +833,20 @@ public final class GitBlockingWireSession {
                 haves.add(objectId(value, "have "));
                 return;
             }
+            if (value.startsWith("shallow ")) {
+                acceptShallow(value);
+                return;
+            }
             if (value.startsWith("deepen ")) {
                 acceptDepth(value);
+                return;
+            }
+            if (value.startsWith("deepen-since ")) {
+                acceptDeepenSince(value);
+                return;
+            }
+            if (value.startsWith("deepen-not ")) {
+                acceptDeepenNot(value);
                 return;
             }
             if (value.startsWith("filter ")) {
@@ -847,7 +865,9 @@ public final class GitBlockingWireSession {
         }
 
         private FetchRequest complete() throws IOException {
-            if (invalid || (wants.isEmpty() && wantRefs.isEmpty())) {
+            if (invalid
+                    || (wants.isEmpty() && wantRefs.isEmpty())
+                    || deepenRelative && depth == 0) {
                 throw invalidV2FetchRequest();
             }
             return new FetchRequest(
@@ -862,7 +882,11 @@ public final class GitBlockingWireSession {
                             depth,
                             objectFilter,
                             wantRefs,
-                            packfileUriProtocols),
+                            packfileUriProtocols,
+                            clientShallowCommits,
+                            deepenRelative,
+                            deepenSince,
+                            deepenNotRefs),
                     sidebandAll);
         }
 
@@ -873,6 +897,14 @@ public final class GitBlockingWireSession {
                 case "ofs-delta" -> ofsDelta = true;
                 case "include-tag" -> includeTag = true;
                 case "wait-for-done" -> waitForDone = true;
+                case "deepen-relative" -> {
+                    if (deepenRelative
+                            || !configuration.protocolV2().shallow()) {
+                        invalid = true;
+                    } else {
+                        deepenRelative = true;
+                    }
+                }
                 case "sideband-all" -> {
                     if (!configuration.protocolV2().sidebandAll()) {
                         invalid = true;
@@ -886,8 +918,19 @@ public final class GitBlockingWireSession {
             }
         }
 
+        private void acceptShallow(String value) throws IOException {
+            if (!configuration.protocolV2().shallow()
+                    || !clientShallowCommits.add(
+                            objectId(value, "shallow "))) {
+                invalid = true;
+            }
+        }
+
         private void acceptDepth(String value) throws IOException {
-            if (depth > 0 || !configuration.protocolV2().shallow()) {
+            if (depth > 0
+                    || deepenSince >= 0
+                    || !deepenNotRefs.isEmpty()
+                    || !configuration.protocolV2().shallow()) {
                 invalid = true;
                 return;
             }
@@ -910,6 +953,47 @@ public final class GitBlockingWireSession {
                 throw invalidV2FetchRequest();
             }
             depth = (int) parsed;
+        }
+
+        private void acceptDeepenSince(String value) throws IOException {
+            if (depth > 0
+                    || deepenSince >= 0
+                    || !deepenNotRefs.isEmpty()
+                    || !configuration.protocolV2().shallow()) {
+                invalid = true;
+                return;
+            }
+            String timestampValue = value.substring(
+                    "deepen-since ".length());
+            if (timestampValue.isEmpty()) {
+                throw invalidV2FetchRequest();
+            }
+            long parsed = 0;
+            for (int index = 0; index < timestampValue.length(); index++) {
+                char digit = timestampValue.charAt(index);
+                if (digit < '0' || digit > '9') {
+                    throw invalidV2FetchRequest();
+                }
+                parsed = parsed * 10 + digit - '0';
+                if (parsed < 0) {
+                    throw invalidV2FetchRequest();
+                }
+            }
+            deepenSince = parsed;
+        }
+
+        private void acceptDeepenNot(String value) throws IOException {
+            if (depth > 0
+                    || deepenSince >= 0
+                    || !configuration.protocolV2().shallow()) {
+                invalid = true;
+                return;
+            }
+            String refOrRevision = value.substring("deepen-not ".length());
+            if (!isValidDeepenNotRef(refOrRevision)
+                    || !deepenNotRefs.add(refOrRevision)) {
+                throw invalidV2FetchRequest();
+            }
         }
 
         private void acceptFilter(String value) throws IOException {
@@ -1000,6 +1084,19 @@ public final class GitBlockingWireSession {
 
         private static boolean isValidWantedRefName(String refName) {
             return "HEAD".equals(refName) || isValidFullRefName(refName);
+        }
+
+        private static boolean isValidDeepenNotRef(String value) {
+            if (value.isEmpty()) {
+                return false;
+            }
+            for (int index = 0; index < value.length(); index++) {
+                char character = value.charAt(index);
+                if (character <= 0x20 || character >= 0x7f) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static boolean isValidFullRefName(String refName) {
