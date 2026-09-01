@@ -127,6 +127,21 @@ final class GitBlockingClientWire {
                 advertisement, "report-status", GitClientFailure.Phase.NEGOTIATION);
         List<String> selected = new ArrayList<>();
         selected.add("report-status");
+        boolean deletesRef = false;
+        for (GitReceivePackRequest.Command command : request.commands()) {
+            if (GitClientValidation.NULL_ID.equalsIgnoreCase(
+                    command.newObjectId())) {
+                deletesRef = true;
+                break;
+            }
+        }
+        if (deletesRef) {
+            requireCapability(
+                    advertisement,
+                    "delete-refs",
+                    GitClientFailure.Phase.NEGOTIATION);
+            selected.add("delete-refs");
+        }
         boolean sideBand = advertisement.capabilities().contains("side-band-64k");
         if (sideBand) {
             selected.add("side-band-64k");
