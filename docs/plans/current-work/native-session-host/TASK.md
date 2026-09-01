@@ -23,9 +23,9 @@ commands, and survives independently of `agentd`.
 ## Child Tasks
 
 - [ ] [Replace the session journal with a CBOR Sequence](cbor-sequence-journal-format/TASK.md)
-- [ ] [Implement the Unix PTY process host](unix-process-host/TASK.md)
 - [ ] [Add journal segmentation, compression, and retention](journal-retention/TASK.md)
 - [ ] [Enforce the Linux Landlock sandbox](linux-sandbox/TASK.md)
+- [ ] [Harden Linux process-tree control](linux-process-tree-control/TASK.md)
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
 - [ ] [Implement the Windows ConPTY host](windows-host/TASK.md)
 - [ ] [Package targets and verify end-to-end acceptance](release-and-acceptance/TASK.md)

@@ -18,8 +18,9 @@ lifecycle. `agentd` discovers hosts and session directories, reads journals,
 and sends commands, but never owns a hosted child process.
 
 The Maven bootstrap executable JAR carries native session-host resources under
-`META-INF/orion/native/session-host/<target>/`. The release matrix contributes
-Linux, macOS, and Windows builds for x86_64 and aarch64 to that resource tree.
+`META-INF/orion/native/session-host/<target>/`. The production release matrix
+contributes Linux and Windows builds for x86_64 and aarch64 to that resource
+tree. macOS builds are development and diagnostic artifacts only.
 
 ## System Boundary
 
@@ -162,16 +163,18 @@ transport, and restart recovery are tracked separately in
 
 ## MVP Boundary
 
-The first usable host slice comprises tasks 1-6 on Linux, with macOS PTY
-support where the Unix abstraction permits it. It must run an interactive
-shell or agent, accept input and resize commands, preserve ordered raw terminal
-history, survive control-client loss, expose retention gaps, and enforce an
-inherited Landlock policy when requested. AgentD restart and network-resume
-acceptance belongs to the separate AgentD plan.
+The first usable host slice comprises tasks 1-6 on Linux, with best-effort
+macOS PTY support for local development where the Unix abstraction permits it.
+It must run an interactive shell or agent, accept input and resize commands,
+preserve ordered raw terminal history, survive control-client loss, expose
+retention gaps, and enforce an inherited Landlock policy when requested.
+AgentD restart and network-resume acceptance belongs to the separate AgentD
+plan.
 
-Windows parity and the complete six-target release matrix follow without
-changing the v1 logical protocols. Required artifacts are Linux, macOS, and
-Windows for both x86_64 and aarch64.
+Windows parity follows without changing the v1 logical protocols. Required
+production artifacts are Linux and Windows for both x86_64 and aarch64. macOS
+x86_64 and aarch64 artifacts remain development-only because an unprivileged
+host cannot guarantee ownership of fully daemonized descendants.
 
 ## Acceptance Scenarios
 

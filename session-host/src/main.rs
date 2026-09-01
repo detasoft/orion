@@ -43,10 +43,13 @@ fn main() -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        Ok(Command::Run(_options)) => {
-            eprintln!("session execution is not implemented in the protocol bootstrap");
-            ExitCode::from(69)
-        }
+        Ok(Command::Run(options)) => match platform::run(options) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("session-host: {error}");
+                ExitCode::from(70)
+            }
+        },
         Err(error) => {
             eprintln!("session-host: {error}\n\n{USAGE}");
             ExitCode::from(64)
