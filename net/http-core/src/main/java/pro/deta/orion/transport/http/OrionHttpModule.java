@@ -92,4 +92,10 @@ public class OrionHttpModule {
         return route;
     }
 
+    @Provides
+    @IntoSet
+    static OrionHttpRoute sessionHostDownloadRoute(SessionHostDownloadRoute route) {
+        return route;
+    }
+
 }
