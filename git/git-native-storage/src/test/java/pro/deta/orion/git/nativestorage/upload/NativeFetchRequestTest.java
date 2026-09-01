@@ -61,4 +61,32 @@ class NativeFetchRequestTest {
         assertThat(request.deepenNotRefs()).containsExactly("refs/heads/main");
         assertThat(request.shallow()).isTrue();
     }
+
+    @Test
+    void carriesFetchOptionsAsSingleValue() {
+        GitObjectId want = GitObjectId.of("1".repeat(40));
+        NativeFetchOptions options = new NativeFetchOptions(
+                true,
+                true,
+                true,
+                true,
+                NativeObjectFilter.BLOB_NONE,
+                Set.of("HTTPS"));
+
+        NativeFetchRequest request = new NativeFetchRequest(
+                Set.of(want),
+                Set.of(),
+                true,
+                Set.of(),
+                options);
+
+        assertThat(request.options()).isSameAs(options);
+        assertThat(request.thinPack()).isTrue();
+        assertThat(request.ofsDelta()).isTrue();
+        assertThat(request.includeTag()).isTrue();
+        assertThat(request.waitForDone()).isTrue();
+        assertThat(request.objectFilter())
+                .isEqualTo(NativeObjectFilter.BLOB_NONE);
+        assertThat(request.packfileUriProtocols()).containsExactly("https");
+    }
 }

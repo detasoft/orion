@@ -6,6 +6,7 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
@@ -892,23 +893,25 @@ public final class GitBlockingWireSession {
                     || deepenRelative && depth == 0) {
                 throw invalidV2FetchRequest();
             }
+            NativeFetchOptions options = new NativeFetchOptions(
+                    thinPack,
+                    ofsDelta,
+                    includeTag,
+                    waitForDone,
+                    depth,
+                    objectFilter,
+                    packfileUriProtocols,
+                    clientShallowCommits,
+                    deepenRelative,
+                    deepenSince,
+                    deepenNotRefs);
             return new FetchRequest(
                     new NativeFetchRequest(
                             wants,
                             haves,
                             done,
-                            thinPack,
-                            ofsDelta,
-                            includeTag,
-                            waitForDone,
-                            depth,
-                            objectFilter,
                             wantRefs,
-                            packfileUriProtocols,
-                            clientShallowCommits,
-                            deepenRelative,
-                            deepenSince,
-                            deepenNotRefs),
+                            options),
                     sidebandAll);
         }
 
