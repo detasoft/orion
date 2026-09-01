@@ -3,7 +3,6 @@ package pro.deta.orion.git.parser.wire;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.nativestorage.GitObjectId;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
@@ -45,27 +44,27 @@ public final class GitBlockingWireSession {
 
     private final GitBlockingWireTransport wire;
     private final GitNativeRepositoryService repositoryService;
+    private final GitNativeRepositoryAccessHook accessHook;
     private final GitWireConfiguration configuration;
+    private final NativePackfileUriSourceFactory packfileUriSourceFactory;
 
     public GitBlockingWireSession(
-            NativeGitRepositoryProvider repositoryProvider,
+            GitNativeRepositoryService repositoryService,
             GitNativeRepositoryAccessHook accessHook,
             GitWireConfiguration configuration,
             NativePackfileUriSourceFactory packfileUriSourceFactory,
             GitBlockingWireTransport wire) {
         this.wire = Objects.requireNonNull(wire, "wire");
+        this.repositoryService = Objects.requireNonNull(
+                repositoryService,
+                "repositoryService");
+        this.accessHook = Objects.requireNonNull(accessHook, "accessHook");
         this.configuration = Objects.requireNonNull(
                 configuration,
                 "configuration");
-        repositoryService = new GitNativeRepositoryService(
-                Objects.requireNonNull(
-                        repositoryProvider,
-                        "repositoryProvider"),
-                Objects.requireNonNull(accessHook, "accessHook"),
-                configuration,
-                Objects.requireNonNull(
-                        packfileUriSourceFactory,
-                        "packfileUriSourceFactory"));
+        this.packfileUriSourceFactory = Objects.requireNonNull(
+                packfileUriSourceFactory,
+                "packfileUriSourceFactory");
     }
 
     public void advertise(InitialRequestData data) throws IOException {
@@ -80,11 +79,17 @@ public final class GitBlockingWireSession {
         }
         if (data.getService() == InitialRequestService.UPLOAD_PACK) {
             wire.sendAdvertisement(
-                    repositoryService.legacyUploadPackAdvertisement(data));
+                    repositoryService.legacyUploadPackAdvertisement(
+                            data,
+                            accessHook,
+                            configuration));
             return;
         }
         wire.sendAdvertisement(
-                repositoryService.legacyReceivePackAdvertisement(data));
+                repositoryService.legacyReceivePackAdvertisement(
+                        data,
+                        accessHook,
+                        configuration));
     }
 
     public void serveCommand(InitialRequestData data) throws IOException {
@@ -188,7 +193,8 @@ public final class GitBlockingWireSession {
                 case FLUSH -> {
                     GitLsRefsResponse response = repositoryService.lsRefs(
                             data,
-                            request.complete());
+                            request.complete(),
+                            accessHook);
                     wire.sendLsRefs(response);
                     return;
                 }
@@ -283,14 +289,19 @@ public final class GitBlockingWireSession {
             wire.sendProtocolV2FetchAcknowledgments(
                     repositoryService.protocolV2FetchAcknowledgments(
                             data,
-                            nativeRequest),
+                            nativeRequest,
+                            accessHook),
                     request.sidebandAll());
             return;
         }
         GitBlockingWireTransport.ProtocolV2PackfileResponse response = null;
         try {
             NativeFetchResponse fetch =
-                    repositoryService.protocolV2Fetch(data, nativeRequest);
+                    repositoryService.protocolV2Fetch(
+                            data,
+                            nativeRequest,
+                            accessHook,
+                            packfileUriSourceFactory);
             response = wire.beginProtocolV2Packfile(
                     fetch.packProducer(),
                     fetch.shallowBoundaries(),
@@ -333,7 +344,10 @@ public final class GitBlockingWireSession {
     private void serveLegacyUpload(InitialRequestData data)
             throws IOException {
         GitV1Advertisement advertisement =
-                repositoryService.legacyUploadPackAdvertisement(data);
+                repositoryService.legacyUploadPackAdvertisement(
+                        data,
+                        accessHook,
+                        configuration);
         LegacyUploadRequest request = readLegacyUploadRequest(
                 data,
                 advertisement);
@@ -435,7 +449,8 @@ public final class GitBlockingWireSession {
                     GitObjectId have = acceptLegacyUploadHave(haves, line);
                     if (repositoryService.commonHaves(
                             request.initialRequest(),
-                            List.of(have)).isEmpty()) {
+                            List.of(have),
+                            accessHook).isEmpty()) {
                         continue;
                     }
                     lastCommon = have;
@@ -509,13 +524,17 @@ public final class GitBlockingWireSession {
             legacyUploadProducer(LegacyUploadNegotiation negotiation) {
         return repositoryService.legacyUploadPack(
                 negotiation.request().initialRequest(),
-                negotiation.nativeFetchRequest());
+                negotiation.nativeFetchRequest(),
+                accessHook);
     }
 
     private void serveLegacyReceive(InitialRequestData data)
             throws IOException {
         GitV1Advertisement advertisement =
-                repositoryService.legacyReceivePackAdvertisement(data);
+                repositoryService.legacyReceivePackAdvertisement(
+                        data,
+                        accessHook,
+                        configuration);
         LegacyReceiveCommandSection section = readLegacyReceiveCommands(
                 data,
                 advertisement);
@@ -711,7 +730,8 @@ public final class GitBlockingWireSession {
             LegacyReceiveCommandSection section) throws IOException {
         PackIngestionSession session =
                 repositoryService.beginLegacyReceivePack(
-                        section.initialRequest());
+                        section.initialRequest(),
+                        accessHook);
         try {
             while (true) {
                 ByteBuf buffer = Unpooled.buffer(DEFAULT_INPUT_BUFFER_SIZE);
@@ -753,7 +773,9 @@ public final class GitBlockingWireSession {
         List<GitBlockingWireTransport.ReceiveCommandStatus> outputStatuses =
                 new ArrayList<>();
         for (GitNativeRepositoryService.ReceivePackStatus status
-                : repositoryService.completeLegacyReceivePack(receivePack)) {
+                : repositoryService.completeLegacyReceivePack(
+                        receivePack,
+                        accessHook)) {
             outputStatuses.add(
                     new GitBlockingWireTransport.ReceiveCommandStatus(
                             status.refName(),

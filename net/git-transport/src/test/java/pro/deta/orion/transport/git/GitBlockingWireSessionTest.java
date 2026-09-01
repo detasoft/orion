@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.wire;
+package pro.deta.orion.transport.git;
 
 import io.netty.buffer.UnpooledByteBufAllocator;
 import org.junit.jupiter.api.Test;
@@ -8,6 +8,11 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
+import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
+import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitWireConfiguration;
+import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 
@@ -624,7 +629,7 @@ class GitBlockingWireSessionTest {
         GitBlockingWireTransport wire =
                 new GitBlockingWireTransport(input, output);
         return new GitBlockingWireSession(
-                provider,
+                new DefaultGitNativeRepositoryService(provider),
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
                 GitWireConfiguration.allSupported(),
                 NativePackfileUriSourceFactory.NONE,

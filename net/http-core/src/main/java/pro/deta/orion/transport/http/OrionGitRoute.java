@@ -4,15 +4,16 @@ import jakarta.inject.Inject;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.NonNull;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
@@ -47,12 +48,16 @@ public class OrionGitRoute implements OrionHttpRoute {
     private static final String UPLOAD_RESULT_TYPE = "application/x-git-upload-pack-result";
     private static final String RECEIVE_RESULT_TYPE = "application/x-git-receive-pack-result";
 
-    private final NativeGitRepositoryProvider nativeRepositoryProvider;
+    private final GitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
 
     @Inject
-    public OrionGitRoute(NativeGitRepositoryProvider nativeRepositoryProvider, GitTransportConfig gitTransportConfig) {
-        this.nativeRepositoryProvider = Objects.requireNonNull(nativeRepositoryProvider, "nativeRepositoryProvider");
+    public OrionGitRoute(
+            GitNativeRepositoryService repositoryService,
+            GitTransportConfig gitTransportConfig) {
+        this.repositoryService = Objects.requireNonNull(
+                repositoryService,
+                "repositoryService");
         this.gitTransportConfig = Objects.requireNonNull(gitTransportConfig, "gitTransportConfig");
     }
 
@@ -119,13 +124,7 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
         try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(req.getInputStream())) {
             OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(resp.getOutputStream());
-            GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
-                    input,
-                    output,
-                    request.service(),
-                    request.repositoryPath(),
-                    requestHost(req),
-                    req.getHeader(GIT_PROTOCOL_HEADER));
+            GitWireBootstrap bootstrap = getGitWireBootstrap(req, request, input, output);
             NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
             if (bootstrap.data()
                     .getProtocolVersion()
@@ -133,7 +132,8 @@ public class OrionGitRoute implements OrionHttpRoute {
                     .isEmpty()) {
                 writeServiceAnnouncement(bootstrap.wire(), request.service());
             }
-            session(req, packfileUriSourceFactory, bootstrap.wire()).advertise(bootstrap.data());
+            SecurityContext securityContext = securityContextFrom(req);
+            session(securityContext, packfileUriSourceFactory, bootstrap.wire()).advertise(bootstrap.data());
         }
     }
 
@@ -150,27 +150,33 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
         try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(req.getInputStream())) {
             OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(resp.getOutputStream());
-            GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
-                    input,
-                    output,
-                    request.service(),
-                    request.repositoryPath(),
-                    requestHost(req),
-                    req.getHeader(GIT_PROTOCOL_HEADER));
+            GitWireBootstrap bootstrap = getGitWireBootstrap(req, request, input, output);
             NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
-            session(req, packfileUriSourceFactory, bootstrap.wire())
+            SecurityContext securityContext = securityContextFrom(req);
+            session(securityContext, packfileUriSourceFactory, bootstrap.wire())
                     .serveSmartHttpPost(bootstrap.data());
         }
     }
 
+    private static @NonNull GitWireBootstrap getGitWireBootstrap(HttpServletRequest req, NativeHttpRequest request, InputStreamBufferedByteInput input, OutputStreamBufferedByteOutput output) {
+        GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
+                input,
+                output,
+                request.service(),
+                request.repositoryPath(),
+                requestHost(req),
+                req.getHeader(GIT_PROTOCOL_HEADER));
+        return bootstrap;
+    }
+
     private GitBlockingWireSession session(
-            HttpServletRequest request,
+            SecurityContext securityContext,
             NativePackfileUriSourceFactory packfileUriSourceFactory,
             GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
-                nativeRepositoryProvider,
+                repositoryService,
                 new AuthenticatedRepositoryAccessHook(
-                        securityContextFrom(request),
+                        securityContext,
                         true),
                 GitWireConfiguration.allSupported(),
                 packfileUriSourceFactory,

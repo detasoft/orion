@@ -5,6 +5,7 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
+import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitNativeTransportStateMachine;
 import pro.deta.orion.transport.git.GitSshTransportService;
@@ -193,7 +194,10 @@ class TransportLifecycleStateMachineTest {
         private RuntimeException startFailure;
 
         private RecordingGitNativeTransportService(OrionConfiguration configuration) {
-            super(configuration.getTransport().getGit(), new InMemoryNativeGitRepositoryProvider());
+            super(
+                    configuration.getTransport().getGit(),
+                    new DefaultGitNativeRepositoryService(
+                            new InMemoryNativeGitRepositoryProvider()));
             enabled = configuration.getTransport().getGit().isEnabled();
         }
 

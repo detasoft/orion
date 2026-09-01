@@ -42,7 +42,8 @@ class GitNativeTransportStateMachineTest {
     void disabledNativeTransportDoesNotBindSocket() {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(false),
-                new InMemoryNativeGitRepositoryProvider());
+                new DefaultGitNativeRepositoryService(
+                        new InMemoryNativeGitRepositoryProvider()));
 
         service.onStart();
 
@@ -54,7 +55,8 @@ class GitNativeTransportStateMachineTest {
     void enabledNativeTransportBindsLoopbackPortZero() {
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
-                new InMemoryNativeGitRepositoryProvider());
+                new DefaultGitNativeRepositoryService(
+                        new InMemoryNativeGitRepositoryProvider()));
 
         try {
             service.onStart();
@@ -78,7 +80,7 @@ class GitNativeTransportStateMachineTest {
                         virtualThread);
         GitNativeTransportService service = new GitNativeTransportService(
                 config(true),
-                provider);
+                new DefaultGitNativeRepositoryService(provider));
 
         try {
             service.onStart();

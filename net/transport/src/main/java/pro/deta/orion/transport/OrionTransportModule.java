@@ -9,6 +9,8 @@ import pro.deta.orion.schema.config.SshTransportConfig;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
+import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.http.OrionHttpModule;
 import pro.deta.orion.util.ConfigurationContext;
 
@@ -48,5 +50,12 @@ public class OrionTransportModule {
         } catch (IllegalArgumentException ignored) {
             return new InMemoryNativeGitRepositoryProvider();
         }
+    }
+
+    @Provides
+    @Singleton
+    static GitNativeRepositoryService gitNativeRepositoryService(
+            DefaultGitNativeRepositoryService service) {
+        return service;
     }
 }

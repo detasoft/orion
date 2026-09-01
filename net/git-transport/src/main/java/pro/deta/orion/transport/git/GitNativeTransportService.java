@@ -3,9 +3,9 @@ package pro.deta.orion.transport.git;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
@@ -26,7 +26,7 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     private static final long STOP_WAIT_MILLIS = 500;
 
     private final GitTransportConfig config;
-    private final NativeGitRepositoryProvider nativeRepositoryProvider;
+    private final GitNativeRepositoryService repositoryService;
 
     private volatile ServerSocket serverSocket;
     private volatile Thread acceptThread;
@@ -34,9 +34,9 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
     @Inject
     public GitNativeTransportService(
             GitTransportConfig config,
-            NativeGitRepositoryProvider nativeRepositoryProvider) {
+            GitNativeRepositoryService repositoryService) {
         this.config = config;
-        this.nativeRepositoryProvider = nativeRepositoryProvider;
+        this.repositoryService = repositoryService;
     }
 
     @Override
@@ -142,7 +142,7 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
                     new OutputStreamBufferedByteOutput(socket.getOutputStream());
             GitWireBootstrap bootstrap = GitWireBootstrap.nativeDaemon(input, output);
             new GitBlockingWireSession(
-                    nativeRepositoryProvider,
+                    repositoryService,
                     GitNativeRepositoryAccessHook.ALLOW_ALL,
                     GitWireConfiguration.allSupported(),
                     NativePackfileUriSourceFactory.NONE,

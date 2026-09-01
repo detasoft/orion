@@ -27,6 +27,7 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.pack.PublishedPack;
+import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -55,7 +56,9 @@ class OrionGitRouteNativeTest {
     void protocolV2DiscoveryOmitsServiceAnnouncement() throws Exception {
         FileNativeGitRepositoryProvider provider = provider();
         publishObject(provider);
-        OrionGitRoute route = new OrionGitRoute(provider, autoPackfileUriConfig());
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
         route.handle(
@@ -90,7 +93,9 @@ class OrionGitRouteNativeTest {
     void postUsesAutoPackfileUriBaseFromSmartHttpRequest() throws Exception {
         FileNativeGitRepositoryProvider provider = provider();
         PublishedObjectFixture fixture = publishObject(provider);
-        OrionGitRoute route = new OrionGitRoute(provider, autoPackfileUriConfig());
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
         route.handle(
@@ -125,7 +130,9 @@ class OrionGitRouteNativeTest {
             throws Exception {
         FileNativeGitRepositoryProvider provider = provider();
         provider.create(REPOSITORY_NAME).valueOrFailure("repository");
-        OrionGitRoute route = new OrionGitRoute(provider, autoPackfileUriConfig());
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
         route.handle(

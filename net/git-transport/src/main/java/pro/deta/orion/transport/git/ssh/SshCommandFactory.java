@@ -18,10 +18,10 @@ import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
+import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
@@ -65,7 +65,7 @@ public class SshCommandFactory implements CommandFactory {
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
     private final AggregateStateMachine runtimeStateMachine;
-    private final NativeGitRepositoryProvider nativeRepositoryProvider;
+    private final GitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
     private final long setKeyReadTimeoutMillis;
 
@@ -75,10 +75,10 @@ public class SshCommandFactory implements CommandFactory {
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
             @Named("runtime") AggregateStateMachine runtimeStateMachine,
-            NativeGitRepositoryProvider nativeRepositoryProvider,
+            GitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig) {
         this(orionExecutor, orionProvider, accessControlService,
-                runtimeStateMachine, 30_000, nativeRepositoryProvider,
+                runtimeStateMachine, 30_000, repositoryService,
                 gitTransportConfig);
     }
 
@@ -117,13 +117,13 @@ public class SshCommandFactory implements CommandFactory {
             OrionAccessControlService accessControlService,
             AggregateStateMachine runtimeStateMachine,
             long setKeyReadTimeoutMillis,
-            NativeGitRepositoryProvider nativeRepositoryProvider,
+            GitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig) {
         this.orionExecutor = orionExecutor;
         this.orionProvider = orionProvider;
         this.accessControlService = accessControlService;
         this.runtimeStateMachine = runtimeStateMachine;
-        this.nativeRepositoryProvider = nativeRepositoryProvider;
+        this.repositoryService = repositoryService;
         this.gitTransportConfig = gitTransportConfig;
         this.setKeyReadTimeoutMillis = setKeyReadTimeoutMillis;
     }
@@ -298,7 +298,7 @@ public class SshCommandFactory implements CommandFactory {
                             gitProtocol(environment));
                     try {
                         new GitBlockingWireSession(
-                                nativeRepositoryProvider,
+                                repositoryService,
                                 new AuthenticatedRepositoryAccessHook(
                                         securityContext),
                                 GitWireConfiguration.allSupported(),

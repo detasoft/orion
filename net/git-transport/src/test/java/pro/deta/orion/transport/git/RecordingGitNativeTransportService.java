@@ -19,7 +19,10 @@ final class RecordingGitNativeTransportService extends GitNativeTransportService
     }
 
     RecordingGitNativeTransportService(boolean enabled) {
-        super(config(enabled), new InMemoryNativeGitRepositoryProvider());
+        super(
+                config(enabled),
+                new DefaultGitNativeRepositoryService(
+                        new InMemoryNativeGitRepositoryProvider()));
         this.enabled = enabled;
     }
 
