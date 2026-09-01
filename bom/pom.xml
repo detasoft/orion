@@ -87,6 +87,11 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
+                <groupId>pro.deta.orion.git</groupId>
+                <artifactId>git-client</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>pro.deta.orion.connectors</groupId>
                 <artifactId>bc</artifactId>
                 <version>${project.version}</version>
