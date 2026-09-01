@@ -37,6 +37,9 @@
 - If a method is created only for use in tests and is not part of the public contract, mark it with `core/lifecycle-state-machine/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
 - When asked to add comments or explanations to classes, add class-level comments only. Do not add method or constructor comments unless explicitly requested.
 - Treat class-level comments tagged with `@AiRule` as local implementation rules. When changing a class, read these comments and verify the rules still hold before finishing the change.
+- For code reviews, read and apply the blocking criteria in
+  [`docs/reviews/RULES.md`](docs/reviews/RULES.md). Do not approve a change that
+  violates a blocking review rule.
 - Commit messages must be a single line. Do not add a body, bullet points, or multi-line descriptions — the entire meaning goes in the subject line.
 - Use the filesystem task tree rooted at `docs/plans/TASK.md` to track current
   high-level implementation work and upcoming tasks. Every task directory must
