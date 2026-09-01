@@ -17,9 +17,8 @@ local filesystem.
   reconstruction, pack building, and receive-pack publication semantics.
 - Define consistency, locking, compare-and-swap, cleanup, and recovery behavior
   for non-filesystem storage.
-- Coordinate with
-  `../../current-work/production-native-git-repository-backends/TASK.md`,
-  especially atomic publication boundaries.
+- Coordinate with the native repository backend's publication semantics,
+  especially ref visibility and recovery boundaries.
 
 ## Child Tasks
 
