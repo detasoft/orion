@@ -80,7 +80,12 @@ final class GitBlockingClientExecutor {
         GitClientResult<T> result = null;
         try {
             session = transport.open(service, remoteUri, options);
-            sessionState.opened(session);
+            if (!sessionState.opened(session)) {
+                throw new GitClientTransportException(
+                        GitClientFailure.Kind.CANCELLED,
+                        true,
+                        "Git operation was cancelled before the session opened");
+            }
             result = new GitClientResult.Success<>(operation.run(session));
         } catch (GitClientProtocolException error) {
             result = new GitClientResult.Failed<>(error.failure());
@@ -143,7 +148,7 @@ final class GitBlockingClientExecutor {
         private GitClientTransportSession session;
         private boolean cancelled;
 
-        void opened(GitClientTransportSession openedSession) {
+        boolean opened(GitClientTransportSession openedSession) {
             boolean closeImmediately;
             synchronized (this) {
                 closeImmediately = cancelled;
@@ -154,6 +159,7 @@ final class GitBlockingClientExecutor {
             if (closeImmediately) {
                 closeAfterCancellation(openedSession);
             }
+            return !closeImmediately;
         }
 
         synchronized void closed(GitClientTransportSession closedSession) {

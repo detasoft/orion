@@ -31,8 +31,9 @@ class GitClientsJGitDaemonTest {
             GitClientOptions options = GitClientOptions.defaults();
 
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
+            GitClientTransport transport = new GitTcpClientTransport();
             GitClientResult<GitUploadPackResult> fetch =
-                    new GitUploadPackClient(server.transport()).fetch(
+                    new GitUploadPackClient(transport).fetch(
                             server.repositoryUri(),
                             options,
                             GitUploadPackRequest.of(
@@ -48,7 +49,7 @@ class GitClientsJGitDaemonTest {
             ObjectId createdCommit = commit(testRepository.sourcePath(),
                     "Create branch through receive-pack\n");
             GitClientResult<GitReceivePackResult> createPush =
-                    new GitReceivePackClient(server.transport()).push(
+                    new GitReceivePackClient(transport).push(
                             server.repositoryUri(), options, receiveRequest(
                                     GitClientValidation.NULL_ID,
                                     createdCommit.name(),
@@ -69,7 +70,7 @@ class GitClientsJGitDaemonTest {
                     "refs/heads/pushed-with-pack",
                     pack(testRepository.sourcePath(), updatedCommit, createdCommit));
             GitClientResult<GitReceivePackResult> push =
-                    new GitReceivePackClient(server.transport()).push(
+                    new GitReceivePackClient(transport).push(
                             server.repositoryUri(), options, updateBranch);
 
             assertThat(push).isInstanceOf(GitClientResult.Success.class);

@@ -9,6 +9,7 @@ tasks may be ready at the same time.
 ## Child Tasks
 
 - [ ] [Add blocking native Git client transports](native-git-client-transport-compatibility/TASK.md)
+- [ ] [Build the native session host for the agent harness](native-session-host/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)
 - [ ] [Implement external Git repository synchronization](external-git-repository-sync/TASK.md)
 - [ ] [Externalize repository storage](externalized-repository-storage/TASK.md)

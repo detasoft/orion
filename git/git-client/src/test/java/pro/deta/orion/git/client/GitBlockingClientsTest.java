@@ -315,6 +315,7 @@ class GitBlockingClientsTest {
         assertThat(transport.openStarted.await(1, TimeUnit.SECONDS)).isTrue();
         transport.allowOpen.countDown();
         assertThat(transport.session.closed.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(transport.session.usedByProtocol).isFalse();
     }
 
     private static void assertMalformedPushStatus(byte[] report) {
@@ -567,14 +568,17 @@ class GitBlockingClientsTest {
     private static final class LateOpeningSession
             implements GitClientTransportSession {
         private final CountDownLatch closed = new CountDownLatch(1);
+        private volatile boolean usedByProtocol;
 
         @Override
         public BufferedByteInput input() {
+            usedByProtocol = true;
             throw new AssertionError("session must close before use");
         }
 
         @Override
         public BufferedByteOutput output() {
+            usedByProtocol = true;
             throw new AssertionError("session must close before use");
         }
 

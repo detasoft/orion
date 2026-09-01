@@ -87,10 +87,16 @@ public final class GitUploadPackClient {
             GitClientFailure.Phase phase,
             String message,
             IOException error) {
+        GitClientFailure.Kind kind = GitClientFailure.Kind.TRANSPORT_UNAVAILABLE;
+        boolean retryable = true;
+        if (error instanceof GitClientTransportException transportError) {
+            kind = transportError.kind();
+            retryable = transportError.retryable();
+        }
         return new GitClientProtocolException(new GitClientFailure(
-                GitClientFailure.Kind.TRANSPORT_UNAVAILABLE,
+                kind,
                 phase,
-                true,
+                retryable,
                 message,
                 error));
     }

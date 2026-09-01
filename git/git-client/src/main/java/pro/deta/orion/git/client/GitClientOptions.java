@@ -37,8 +37,8 @@ public record GitClientOptions(
 
     private static void requirePositive(Duration duration, String name) {
         Objects.requireNonNull(duration, name);
-        if (duration.isZero() || duration.isNegative()) {
-            throw new IllegalArgumentException(name + " must be positive");
+        if (duration.compareTo(Duration.ofMillis(1)) < 0) {
+            throw new IllegalArgumentException(name + " must be at least one millisecond");
         }
     }
 }
