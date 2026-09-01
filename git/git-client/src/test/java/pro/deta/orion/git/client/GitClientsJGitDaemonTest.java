@@ -1,8 +1,9 @@
 package pro.deta.orion.git.client;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.internal.storage.pack.PackWriter;
 import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.RefUpdate;
+import org.eclipse.jgit.lib.NullProgressMonitor;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -22,6 +24,7 @@ class GitClientsJGitDaemonTest {
     void fetchesAndPushesAgainstJGitDaemonOnOsAssignedPort(
             @TempDir Path temporaryDirectory) throws Exception {
         TestRepository testRepository = createRepository(temporaryDirectory);
+        ObjectId updatedCommit;
         try (JGitDaemonTestServer server = JGitDaemonTestServer.start(
                 testRepository.path())) {
             assertThat(server.repositoryUri().getPort()).isPositive();
@@ -42,15 +45,32 @@ class GitClientsJGitDaemonTest {
             assertThat(pack.toByteArray()).startsWith(
                     "PACK".getBytes(StandardCharsets.US_ASCII));
 
-            GitReceivePackRequest deleteBranch = new GitReceivePackRequest(
-                    List.of(new GitReceivePackRequest.Command(
-                            testRepository.commitId(),
-                            GitClientValidation.NULL_ID,
-                            "refs/heads/delete-me")),
-                    output -> { });
+            ObjectId createdCommit = commit(testRepository.sourcePath(),
+                    "Create branch through receive-pack\n");
+            GitClientResult<GitReceivePackResult> createPush =
+                    new GitReceivePackClient(server.transport()).push(
+                            server.repositoryUri(), options, receiveRequest(
+                                    GitClientValidation.NULL_ID,
+                                    createdCommit.name(),
+                                    "refs/heads/pushed-with-pack",
+                                    pack(testRepository.sourcePath(),
+                                            createdCommit,
+                                            ObjectId.fromString(
+                                                    testRepository.commitId()))));
+
+            assertThat(createPush).isInstanceOf(GitClientResult.Success.class);
+            assertThat(success(createPush).accepted()).isTrue();
+
+            updatedCommit = commit(testRepository.sourcePath(),
+                    "Update branch through receive-pack\n");
+            GitReceivePackRequest updateBranch = receiveRequest(
+                    createdCommit.name(),
+                    updatedCommit.name(),
+                    "refs/heads/pushed-with-pack",
+                    pack(testRepository.sourcePath(), updatedCommit, createdCommit));
             GitClientResult<GitReceivePackResult> push =
                     new GitReceivePackClient(server.transport()).push(
-                            server.repositoryUri(), options, deleteBranch);
+                            server.repositoryUri(), options, updateBranch);
 
             assertThat(push).isInstanceOf(GitClientResult.Success.class);
             assertThat(success(push).accepted()).isTrue();
@@ -59,7 +79,9 @@ class GitClientsJGitDaemonTest {
         try (Repository repository = new FileRepositoryBuilder()
                 .setGitDir(testRepository.path().toFile())
                 .build()) {
-            assertThat(repository.exactRef("refs/heads/delete-me")).isNull();
+            assertThat(repository.exactRef("refs/heads/pushed-with-pack"))
+                    .extracting(ref -> ref.getObjectId().name())
+                    .isEqualTo(updatedCommit.name());
         }
     }
 
@@ -93,14 +115,49 @@ class GitClientsJGitDaemonTest {
                 .setDirectory(bareRepository.toFile())
                 .setBare(true)
                 .call()) {
-            RefUpdate branch = remote.getRepository()
-                    .updateRef("refs/heads/delete-me");
-            branch.setNewObjectId(commitId);
-            assertThat(branch.update()).isEqualTo(RefUpdate.Result.NEW);
         }
-        return new TestRepository(bareRepository, commitId.name());
+        return new TestRepository(seedDirectory, bareRepository, commitId.name());
     }
 
-    private record TestRepository(Path path, String commitId) {
+    private static ObjectId commit(Path sourcePath, String contents)
+            throws Exception {
+        try (Git source = Git.open(sourcePath.toFile())) {
+            Files.writeString(sourcePath.resolve("README.md"), contents);
+            source.add().addFilepattern("README.md").call();
+            return source.commit()
+                    .setMessage(contents.strip())
+                    .setAuthor("Orion Test", "orion@example.invalid")
+                    .setCommitter("Orion Test", "orion@example.invalid")
+                    .call();
+        }
+    }
+
+    private static GitReceivePackRequest receiveRequest(
+            String oldObjectId,
+            String newObjectId,
+            String refName,
+            byte[] pack) {
+        return new GitReceivePackRequest(
+                List.of(new GitReceivePackRequest.Command(
+                        oldObjectId, newObjectId, refName)),
+                output -> output.write(pack));
+    }
+
+    private static byte[] pack(
+            Path sourcePath,
+            ObjectId want,
+            ObjectId have) throws Exception {
+        try (Git source = Git.open(sourcePath.toFile());
+                PackWriter writer = new PackWriter(source.getRepository());
+                ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            writer.preparePack(
+                    NullProgressMonitor.INSTANCE, Set.of(want), Set.of(have));
+            writer.writePack(NullProgressMonitor.INSTANCE,
+                    NullProgressMonitor.INSTANCE, output);
+            return output.toByteArray();
+        }
+    }
+
+    private record TestRepository(Path sourcePath, Path path, String commitId) {
     }
 }
