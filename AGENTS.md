@@ -21,6 +21,22 @@
 - If post-commit Maven tests fail because of unrelated or pre-existing working tree changes, do not debug those changes unless the user explicitly asks; report the failure and finish the requested commit task.
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
 - Do not use `git merge` or create merge commits when integrating `origin/main` or other upstream branches. Use `git rebase` instead, unless the user explicitly asks for a merge commit.
+- When finishing task work in a dedicated Git worktree:
+  - After implementation, review fixes, and verification are complete, squash
+    all commits unique to the task branch into one logical commit.
+  - Use the squashed commit subject template:
+    `<imperative summary> [task: <path-from-the-task-queue-without-TASK.md>]`.
+    Example:
+    `Implement native session host protocol bootstrap [task: native-session-host/contracts-and-build]`.
+  - Delete the completed leaf task directory and remove its link from the
+    parent `TASK.md` in the squashed commit instead of retaining a completed
+    task node.
+  - Transfer the squashed commit to `main` with `git cherry-pick`, never with a
+    merge commit. Run the required post-commit tests on `main`, then remove the
+    completed worktree and its branch only after confirming the transfer and a
+    clean worktree.
+  - Do not report the task complete until `git worktree list` no longer shows
+    the completed worktree and its task branch has been deleted.
 - When adding or changing functionality, add or extend tests in the same change. Cover the straightforward happy path and at least one meaningful non-trivial scenario, such as overwrite/update behavior, missing or invalid state, reloads, multiple backends, or other edge cases relevant to the feature.
 - For implementations of `Continuation`, write the production continuation
   logic first and add or update its tests afterward. Do not use test-first TDD

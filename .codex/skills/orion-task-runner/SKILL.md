@@ -115,6 +115,9 @@ user how to proceed instead of committing mixed changes.
 
 When the selected task is fully implemented and verified, mark it complete and
 remove the owner line. Add or adjust the next high-level task only if needed.
+When the task was completed in a dedicated Git worktree, follow the dedicated
+worktree completion rules in `AGENTS.md` instead of retaining a completed task
+node.
 
 When stopping with work incomplete, keep the task unchecked and replace or
 update the owner line with a short status line:
