@@ -27,6 +27,7 @@ public class LogInitializer {
 
     public LogInitializer() {
         categoryLevels.add(":INFO");
+        categoryLevels.add("org.apache.sshd.common.io.DefaultIoServiceFactoryFactory:WARN");
         categoryLevels.add("org.apache.sshd.server.channel.PipeDataReceiver:WARN");
         categoryLevels.add("org.apache.sshd.server.session:WARN");
         categoryLevels.add("pro.deta.orion.git.util.GitUtils:TRACE");

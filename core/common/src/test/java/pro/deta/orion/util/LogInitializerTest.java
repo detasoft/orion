@@ -46,6 +46,8 @@ class LogInitializerTest {
 
         assertThat(logger("pro.deta.orion.git").getLevel()).isEqualTo(Level.TRACE);
         assertThat(logger("org.eclipse.jgit").getLevel()).isEqualTo(Level.WARN);
+        assertThat(logger("org.apache.sshd.common.io.DefaultIoServiceFactoryFactory").getLevel())
+                .isEqualTo(Level.WARN);
         assertThat(logger(org.slf4j.Logger.ROOT_LOGGER_NAME).getLevel()).isEqualTo(Level.ERROR);
     }
 
