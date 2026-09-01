@@ -2,7 +2,7 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-01-native-session-host.md
-Depends on: ../journal-core/TASK.md
+Depends on: completed journal core
 
 Bound journal storage without changing the logical event stream or blocking PTY
 output at the retention limit.

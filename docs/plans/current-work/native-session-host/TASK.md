@@ -20,7 +20,6 @@ commands, and survives independently of `agentd`.
 
 ## Child Tasks
 
-- [ ] [Implement the journal core and metadata](journal-core/TASK.md)
 - [ ] [Implement the Unix PTY process host](unix-process-host/TASK.md)
 - [ ] [Add journal segmentation, compression, and retention](journal-retention/TASK.md)
 - [ ] [Enforce the Linux Landlock sandbox](linux-sandbox/TASK.md)

@@ -2,7 +2,7 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-01-native-session-host.md
-Depends on: ../contracts-and-build/TASK.md, ../journal-core/TASK.md,
+Depends on: completed contracts and build, completed journal core,
 ../unix-process-host/TASK.md
 
 Allow trusted local harness producers to append structured events only through
