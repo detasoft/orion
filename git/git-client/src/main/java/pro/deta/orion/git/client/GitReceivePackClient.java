@@ -19,8 +19,7 @@ public final class GitReceivePackClient {
                 GitClientService.RECEIVE_PACK,
                 remoteUri,
                 options,
-                session -> new GitBlockingClientWire(session)
-                        .readAdvertisement());
+                GitReceivePackClient::discover);
     }
 
     public GitClientResult<GitReceivePackResult> push(
@@ -64,11 +63,23 @@ public final class GitReceivePackClient {
                     error);
         }
         try {
-            return wire.readReceiveStatus(advertisement);
+            return wire.readReceiveStatus(advertisement, request);
         } catch (IOException error) {
             throw GitUploadPackClient.transportFailure(
                     GitClientFailure.Phase.REPORT_STATUS,
                     "Failed to read receive-pack status",
+                    error);
+        }
+    }
+
+    private static GitRemoteAdvertisement discover(
+            GitClientTransportSession session) throws GitClientProtocolException {
+        try {
+            return new GitBlockingClientWire(session).readAdvertisement();
+        } catch (IOException error) {
+            throw GitUploadPackClient.transportFailure(
+                    GitClientFailure.Phase.ADVERTISEMENT,
+                    "Failed to read receive-pack advertisement",
                     error);
         }
     }

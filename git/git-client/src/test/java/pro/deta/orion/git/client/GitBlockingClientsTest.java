@@ -21,6 +21,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitBlockingClientsTest {
     private static final String OLD_ID =
@@ -71,6 +72,47 @@ class GitBlockingClientsTest {
                         + " side-band-64k multi_ack_detailed\n")
                 .contains("have " + NEW_ID + "\n")
                 .contains("done\n");
+    }
+
+    @Test
+    void fetchesRawPackWhenRemoteDoesNotAdvertiseSideBand() {
+        byte[] packBytes = "PACKraw-payload".getBytes(StandardCharsets.US_ASCII);
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement(""),
+                packet("NAK\n"),
+                packBytes));
+        ByteArrayOutputStream pack = new ByteArrayOutputStream();
+        GitUploadPackRequest request = new GitUploadPackRequest(
+                List.of(OLD_ID),
+                List.of(),
+                new OutputStreamBufferedByteOutput(pack),
+                ignored -> { });
+
+        GitClientResult<GitUploadPackResult> result =
+                new GitUploadPackClient(transport).fetch(
+                        REMOTE, GitClientOptions.defaults(), request);
+
+        assertThat(success(result).packBytes()).isEqualTo(packBytes.length);
+        assertThat(pack.toByteArray()).isEqualTo(packBytes);
+        assertThat(transport.session.output.ascii())
+                .contains("want " + OLD_ID + "\n")
+                .doesNotContain("side-band");
+    }
+
+    @Test
+    void acceptsShallowBoundaryInAdvertisement() {
+        RecordingTransport transport = new RecordingTransport(concat(
+                packet("shallow " + NEW_ID + "\n"),
+                advertisement("side-band")));
+
+        GitClientResult<GitRemoteAdvertisement> result =
+                new GitUploadPackClient(transport).discover(
+                        REMOTE, GitClientOptions.defaults());
+
+        assertThat(success(result).capabilities()).containsExactly("side-band");
+        assertThat(success(result).refs())
+                .extracting(GitRemoteAdvertisement.Ref::name)
+                .containsExactly("refs/heads/main");
     }
 
     @Test
@@ -163,6 +205,55 @@ class GitBlockingClientsTest {
     }
 
     @Test
+    void rejectsPushStatusWithoutAStatusForEverySentCommand() {
+        assertMalformedPushStatus(packet("unpack ok\n"));
+        assertMalformedPushStatus(concat(
+                packet("unpack ok\n"),
+                packet("ok refs/heads/other\n")));
+        assertMalformedPushStatus(concat(
+                packet("unpack ok\n"),
+                packet("ok refs/heads/main\n"),
+                packet("ok refs/heads/main\n")));
+    }
+
+    @Test
+    void preservesUncheckedProgressCallbackFailureAndClosesSession() {
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement("side-band-64k"),
+                packet("NAK\n"),
+                sideBandPacket(2, "progress\n".getBytes(StandardCharsets.UTF_8)),
+                flush()));
+        GitUploadPackRequest request = new GitUploadPackRequest(
+                List.of(OLD_ID),
+                List.of(),
+                new RecordingOutput(),
+                ignored -> {
+                    throw new IllegalStateException("progress callback failed");
+                });
+
+        assertThatThrownBy(() -> new GitUploadPackClient(transport).fetch(
+                REMOTE, GitClientOptions.defaults(), request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("progress callback failed");
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
+    void reportsReadTransportErrorAsTransportFailure() {
+        FailingReadTransport transport = new FailingReadTransport();
+
+        GitClientResult<GitRemoteAdvertisement> result =
+                new GitUploadPackClient(transport).discover(
+                        REMOTE, GitClientOptions.defaults());
+
+        assertThat(failure(result).kind()).isEqualTo(
+                GitClientFailure.Kind.TRANSPORT_UNAVAILABLE);
+        assertThat(failure(result).phase()).isEqualTo(
+                GitClientFailure.Phase.ADVERTISEMENT);
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
     void rejectsPushPackThatExceedsConfiguredLimit() {
         RecordingTransport transport = new RecordingTransport(
                 advertisement("report-status"));
@@ -205,6 +296,43 @@ class GitBlockingClientsTest {
                 .isEqualTo(GitClientFailure.Kind.TIMEOUT);
         assertThat(transport.opened.await(1, TimeUnit.SECONDS)).isTrue();
         assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
+    void timeoutClosesSessionOpenedAfterCancellation() throws Exception {
+        LateOpeningTransport transport = new LateOpeningTransport();
+        GitClientOptions options = new GitClientOptions(
+                Duration.ofMillis(5),
+                Duration.ofMillis(5),
+                Duration.ofMillis(5),
+                Duration.ofMillis(50),
+                1024);
+
+        GitClientResult<GitRemoteAdvertisement> result =
+                new GitUploadPackClient(transport).discover(REMOTE, options);
+
+        assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.TIMEOUT);
+        assertThat(transport.openStarted.await(1, TimeUnit.SECONDS)).isTrue();
+        transport.allowOpen.countDown();
+        assertThat(transport.session.closed.await(1, TimeUnit.SECONDS)).isTrue();
+    }
+
+    private static void assertMalformedPushStatus(byte[] report) {
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement("report-status"), report, flush()));
+        GitReceivePackRequest request = new GitReceivePackRequest(
+                List.of(new GitReceivePackRequest.Command(
+                        OLD_ID, NEW_ID, "refs/heads/main")),
+                output -> { });
+
+        GitClientResult<GitReceivePackResult> result =
+                new GitReceivePackClient(transport).push(
+                        REMOTE, GitClientOptions.defaults(), request);
+
+        assertThat(failure(result).kind()).isEqualTo(
+                GitClientFailure.Kind.MALFORMED_RESPONSE);
+        assertThat(failure(result).phase()).isEqualTo(
+                GitClientFailure.Phase.REPORT_STATUS);
     }
 
     @SuppressWarnings("unchecked")
@@ -300,6 +428,66 @@ class GitBlockingClientsTest {
         }
     }
 
+    private static final class LateOpeningTransport implements GitClientTransport {
+        private final CountDownLatch openStarted = new CountDownLatch(1);
+        private final CountDownLatch allowOpen = new CountDownLatch(1);
+        private final LateOpeningSession session = new LateOpeningSession();
+
+        @Override
+        public GitClientTransportSession open(
+                GitClientService service,
+                URI remoteUri,
+                GitClientOptions options) {
+            openStarted.countDown();
+            boolean interrupted = false;
+            while (true) {
+                try {
+                    allowOpen.await();
+                    break;
+                } catch (InterruptedException ignored) {
+                    interrupted = true;
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            return session;
+        }
+    }
+
+    private static final class FailingReadTransport implements GitClientTransport {
+        private final RecordingSession session = new RecordingSession(
+                new BufferedByteInput() {
+                    @Override
+                    public int available() {
+                        return 0;
+                    }
+
+                    @Override
+                    public int readUnsignedByte() throws IOException {
+                        throw new IOException("connection reset");
+                    }
+
+                    @Override
+                    public ByteBuf readCopy(int length, ByteBufAllocator allocator) {
+                        throw new AssertionError("not reached");
+                    }
+
+                    @Override
+                    public int readInto(ByteBuf target, int maxLength) {
+                        return 0;
+                    }
+                });
+
+        @Override
+        public GitClientTransportSession open(
+                GitClientService service,
+                URI remoteUri,
+                GitClientOptions options) {
+            return session;
+        }
+    }
+
     private static final class RecordingSession
             implements GitClientTransportSession {
         private final BufferedByteInput input;
@@ -373,6 +561,26 @@ class GitBlockingClientsTest {
         public void close() {
             closed = true;
             close.countDown();
+        }
+    }
+
+    private static final class LateOpeningSession
+            implements GitClientTransportSession {
+        private final CountDownLatch closed = new CountDownLatch(1);
+
+        @Override
+        public BufferedByteInput input() {
+            throw new AssertionError("session must close before use");
+        }
+
+        @Override
+        public BufferedByteOutput output() {
+            throw new AssertionError("session must close before use");
+        }
+
+        @Override
+        public void close() {
+            closed.countDown();
         }
     }
 

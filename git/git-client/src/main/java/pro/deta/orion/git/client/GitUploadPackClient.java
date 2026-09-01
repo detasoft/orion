@@ -19,8 +19,7 @@ public final class GitUploadPackClient {
                 GitClientService.UPLOAD_PACK,
                 remoteUri,
                 options,
-                session -> new GitBlockingClientWire(session)
-                        .readAdvertisement());
+                GitUploadPackClient::discover);
     }
 
     public GitClientResult<GitUploadPackResult> fetch(
@@ -62,7 +61,7 @@ public final class GitUploadPackClient {
         long packBytes;
         try {
             packBytes = wire.readUploadPack(
-                    request, options.maximumPackBytes());
+                    request, advertisement, options.maximumPackBytes());
         } catch (IOException error) {
             throw transportFailure(
                     GitClientFailure.Phase.PACK_TRANSFER,
@@ -70,6 +69,18 @@ public final class GitUploadPackClient {
                     error);
         }
         return new GitUploadPackResult(advertisement, packBytes);
+    }
+
+    private static GitRemoteAdvertisement discover(
+            GitClientTransportSession session) throws GitClientProtocolException {
+        try {
+            return new GitBlockingClientWire(session).readAdvertisement();
+        } catch (IOException error) {
+            throw transportFailure(
+                    GitClientFailure.Phase.ADVERTISEMENT,
+                    "Failed to read upload-pack advertisement",
+                    error);
+        }
     }
 
     static GitClientProtocolException transportFailure(

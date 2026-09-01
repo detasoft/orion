@@ -11,6 +11,9 @@ public record GitReceivePackResult(
         Objects.requireNonNull(advertisement, "advertisement");
         Objects.requireNonNull(unpackStatus, "unpackStatus");
         refs = List.copyOf(Objects.requireNonNull(refs, "refs"));
+        if (refs.isEmpty()) {
+            throw new IllegalArgumentException("refs must not be empty");
+        }
     }
 
     public boolean accepted() {

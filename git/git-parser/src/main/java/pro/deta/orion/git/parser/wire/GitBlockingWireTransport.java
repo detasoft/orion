@@ -61,7 +61,9 @@ public final class GitBlockingWireTransport {
             return success.value();
         }
         Result.Failure<ControlState> failure = (Result.Failure<ControlState>) control;
-        throw new IOException("Invalid Git pkt-line header: " + failure.getMessage(), failure.throwable());
+        throw new GitPktLineFormatException(
+                "Invalid Git pkt-line header: " + failure.getMessage(),
+                failure.throwable());
     }
 
     public ByteBuf readPayload(ControlState control) throws IOException {

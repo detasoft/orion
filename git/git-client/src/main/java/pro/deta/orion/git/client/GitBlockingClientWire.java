@@ -1,7 +1,9 @@
 package pro.deta.orion.git.client;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
+import pro.deta.orion.git.parser.wire.GitPktLineFormatException;
 import pro.deta.orion.git.parser.wire.control.ControlState;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
@@ -63,17 +65,14 @@ final class GitBlockingClientWire {
             selected.add("side-band-64k");
         } else if (capabilities.contains("side-band")) {
             selected.add("side-band");
-        } else {
-            throw protocolFailure(
-                    GitClientFailure.Kind.CAPABILITY_MISSING,
-                    GitClientFailure.Phase.NEGOTIATION,
-                    "Remote Git service does not support side-band transfer");
         }
         if (capabilities.contains("multi_ack_detailed")) {
             selected.add("multi_ack_detailed");
         }
         for (int index = 0; index < request.wants().size(); index++) {
-            String suffix = index == 0 ? " " + String.join(" ", selected) : "";
+            String suffix = index == 0 && !selected.isEmpty()
+                    ? " " + String.join(" ", selected)
+                    : "";
             wire.writeTextLine("want " + request.wants().get(index) + suffix);
         }
         wire.writeFlush();
@@ -86,8 +85,11 @@ final class GitBlockingClientWire {
 
     long readUploadPack(
             GitUploadPackRequest request,
+            GitRemoteAdvertisement advertisement,
             long maximumPackBytes)
             throws IOException, GitClientProtocolException {
+        boolean sideBand = advertisement.capabilities().contains("side-band-64k")
+                || advertisement.capabilities().contains("side-band");
         while (true) {
             GitBlockingWireTransport.GitPktLine packet = readPacket(
                     GitClientFailure.Phase.NEGOTIATION);
@@ -98,7 +100,7 @@ final class GitBlockingClientWire {
                         GitClientFailure.Phase.NEGOTIATION,
                         "Expected upload-pack negotiation response");
             }
-            if (isSideBand(packet.payload())) {
+            if (sideBand && isSideBand(packet.payload())) {
                 return readSideBandPack(packet, request, maximumPackBytes);
             }
             try {
@@ -113,6 +115,37 @@ final class GitBlockingClientWire {
                 }
             } finally {
                 packet.payload().release();
+            }
+            if (!sideBand) {
+                return readRawPack(request, maximumPackBytes);
+            }
+        }
+    }
+
+    private long readRawPack(
+            GitUploadPackRequest request,
+            long maximumPackBytes)
+            throws IOException, GitClientProtocolException {
+        long total = 0;
+        while (true) {
+            ByteBuf buffer = Unpooled.buffer(GitBlockingWireTransport.BUFFER_CAPACITY);
+            try {
+                int read = wire.readRawInto(
+                        buffer, GitBlockingWireTransport.BUFFER_CAPACITY);
+                if (read == 0) {
+                    request.packTarget().flush();
+                    return total;
+                }
+                total += read;
+                if (total > maximumPackBytes) {
+                    throw protocolFailure(
+                            GitClientFailure.Kind.PACK_SIZE_LIMIT_EXCEEDED,
+                            GitClientFailure.Phase.PACK_TRANSFER,
+                            "Remote pack exceeds configured size limit");
+                }
+                request.packTarget().write(buffer);
+            } finally {
+                buffer.release();
             }
         }
     }
@@ -171,7 +204,8 @@ final class GitBlockingClientWire {
     }
 
     GitReceivePackResult readReceiveStatus(
-            GitRemoteAdvertisement advertisement)
+            GitRemoteAdvertisement advertisement,
+            GitReceivePackRequest request)
             throws IOException, GitClientProtocolException {
         boolean sideBand = advertisement.capabilities().contains("side-band-64k");
         List<String> lines = sideBand
@@ -207,7 +241,29 @@ final class GitBlockingClientWire {
                     GitClientFailure.Phase.REPORT_STATUS,
                     "Malformed receive-pack ref status");
         }
+        requireExpectedRefStatuses(request.commands(), refs);
         return new GitReceivePackResult(advertisement, unpackStatus, refs);
+    }
+
+    private static void requireExpectedRefStatuses(
+            List<GitReceivePackRequest.Command> commands,
+            List<GitReceivePackResult.RefStatus> statuses)
+            throws GitClientProtocolException {
+        Set<String> expected = new LinkedHashSet<>();
+        for (GitReceivePackRequest.Command command : commands) {
+            if (!expected.add(command.refName())) {
+                throw malformedStatus();
+            }
+        }
+        Set<String> received = new LinkedHashSet<>();
+        for (GitReceivePackResult.RefStatus status : statuses) {
+            if (!received.add(status.refName()) || !expected.contains(status.refName())) {
+                throw malformedStatus();
+            }
+        }
+        if (received.size() != expected.size()) {
+            throw malformedStatus();
+        }
     }
 
     private long readSideBandPack(
@@ -373,9 +429,15 @@ final class GitBlockingClientWire {
         }
         Set<String> capabilities = new LinkedHashSet<>();
         Map<String, RefBuilder> refs = new LinkedHashMap<>();
+        boolean capabilitiesRead = false;
         for (int index = 0; index < lines.size(); index++) {
             String line = lines.get(index);
-            if (index == 0) {
+            if (line.startsWith("shallow ")) {
+                validateShallowAdvertisement(line);
+                continue;
+            }
+            if (!capabilitiesRead) {
+                capabilitiesRead = true;
                 int separator = line.indexOf('\0');
                 if (separator >= 0) {
                     String capabilityText = line.substring(separator + 1).trim();
@@ -425,6 +487,16 @@ final class GitBlockingClientWire {
         return new GitRemoteAdvertisement(capabilities, outputRefs);
     }
 
+    private static void validateShallowAdvertisement(String line)
+            throws GitClientProtocolException {
+        try {
+            GitClientValidation.requireObjectId(
+                    line.substring("shallow ".length()), "objectId");
+        } catch (IllegalArgumentException error) {
+            throw malformedAdvertisement();
+        }
+    }
+
     private GitBlockingWireTransport.GitPktLine readPacket(
             GitClientFailure.Phase phase)
             throws IOException, GitClientProtocolException {
@@ -443,7 +515,7 @@ final class GitBlockingClientWire {
                     true,
                     "Remote Git operation timed out",
                     error);
-        } catch (IOException error) {
+        } catch (GitPktLineFormatException error) {
             throw protocolFailure(
                     GitClientFailure.Kind.MALFORMED_RESPONSE,
                     phase,

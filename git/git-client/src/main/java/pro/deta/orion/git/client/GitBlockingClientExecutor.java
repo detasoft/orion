@@ -8,7 +8,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
 
 final class GitBlockingClientExecutor {
     private GitBlockingClientExecutor() {
@@ -26,10 +25,9 @@ final class GitBlockingClientExecutor {
         Objects.requireNonNull(options, "options");
         Objects.requireNonNull(operation, "operation");
 
-        AtomicReference<GitClientTransportSession> openSession =
-                new AtomicReference<>();
+        SessionState sessionState = new SessionState();
         FutureTask<GitClientResult<T>> task = new FutureTask<>(() ->
-                run(transport, service, remoteUri, options, operation, openSession));
+                run(transport, service, remoteUri, options, operation, sessionState));
         Thread worker = Thread.ofVirtual()
                 .name("orion-git-client-" + service.name().toLowerCase())
                 .start(task);
@@ -38,7 +36,7 @@ final class GitBlockingClientExecutor {
                     options.operationTimeout().toNanos(),
                     TimeUnit.NANOSECONDS);
         } catch (TimeoutException error) {
-            cancel(worker, task, openSession);
+            cancel(worker, task, sessionState);
             return failed(
                     GitClientFailure.Kind.TIMEOUT,
                     GitClientFailure.Phase.OPEN,
@@ -46,7 +44,7 @@ final class GitBlockingClientExecutor {
                     "Git operation timed out",
                     error);
         } catch (InterruptedException error) {
-            cancel(worker, task, openSession);
+            cancel(worker, task, sessionState);
             Thread.currentThread().interrupt();
             return failed(
                     GitClientFailure.Kind.CANCELLED,
@@ -56,6 +54,12 @@ final class GitBlockingClientExecutor {
                     error);
         } catch (ExecutionException error) {
             Throwable cause = error.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error fatalError) {
+                throw fatalError;
+            }
             return failed(
                     GitClientFailure.Kind.MALFORMED_RESPONSE,
                     GitClientFailure.Phase.OPEN,
@@ -71,12 +75,12 @@ final class GitBlockingClientExecutor {
             URI remoteUri,
             GitClientOptions options,
             Operation<T> operation,
-            AtomicReference<GitClientTransportSession> openSession) {
+            SessionState sessionState) {
         GitClientTransportSession session = null;
-        GitClientResult<T> result;
+        GitClientResult<T> result = null;
         try {
             session = transport.open(service, remoteUri, options);
-            openSession.set(session);
+            sessionState.opened(session);
             result = new GitClientResult.Success<>(operation.run(session));
         } catch (GitClientProtocolException error) {
             result = new GitClientResult.Failed<>(error.failure());
@@ -101,26 +105,26 @@ final class GitBlockingClientExecutor {
                     true,
                     "Remote Git transport failed",
                     error);
-        }
-
-        if (session != null) {
-            try {
-                session.close();
-            } catch (IOException closeError) {
-                if (result instanceof GitClientResult.Failed<T> failed) {
-                    if (failed.failure().cause() != null) {
-                        failed.failure().cause().addSuppressed(closeError);
+        } finally {
+            if (session != null) {
+                try {
+                    session.close();
+                } catch (IOException closeError) {
+                    if (result instanceof GitClientResult.Failed<T> failed) {
+                        if (failed.failure().cause() != null) {
+                            failed.failure().cause().addSuppressed(closeError);
+                        }
+                    } else if (result != null) {
+                        result = failed(
+                                GitClientFailure.Kind.TRANSPORT_UNAVAILABLE,
+                                GitClientFailure.Phase.CLOSE,
+                                true,
+                                "Remote Git session failed to close",
+                                closeError);
                     }
-                } else {
-                    result = failed(
-                            GitClientFailure.Kind.TRANSPORT_UNAVAILABLE,
-                            GitClientFailure.Phase.CLOSE,
-                            true,
-                            "Remote Git session failed to close",
-                            closeError);
+                } finally {
+                    sessionState.closed(session);
                 }
-            } finally {
-                openSession.compareAndSet(session, null);
             }
         }
         return result;
@@ -129,17 +133,55 @@ final class GitBlockingClientExecutor {
     private static void cancel(
             Thread worker,
             FutureTask<?> task,
-            AtomicReference<GitClientTransportSession> openSession) {
-        GitClientTransportSession session = openSession.get();
-        if (session != null) {
+            SessionState sessionState) {
+        sessionState.cancel();
+        task.cancel(true);
+        worker.interrupt();
+    }
+
+    private static final class SessionState {
+        private GitClientTransportSession session;
+        private boolean cancelled;
+
+        void opened(GitClientTransportSession openedSession) {
+            boolean closeImmediately;
+            synchronized (this) {
+                closeImmediately = cancelled;
+                if (!closeImmediately) {
+                    session = openedSession;
+                }
+            }
+            if (closeImmediately) {
+                closeAfterCancellation(openedSession);
+            }
+        }
+
+        synchronized void closed(GitClientTransportSession closedSession) {
+            if (session == closedSession) {
+                session = null;
+            }
+        }
+
+        void cancel() {
+            GitClientTransportSession sessionToClose;
+            synchronized (this) {
+                cancelled = true;
+                sessionToClose = session;
+                session = null;
+            }
+            if (sessionToClose != null) {
+                closeAfterCancellation(sessionToClose);
+            }
+        }
+
+        private static void closeAfterCancellation(
+                GitClientTransportSession session) {
             try {
                 session.close();
             } catch (IOException ignored) {
                 // Cancellation already has a primary outcome.
             }
         }
-        task.cancel(true);
-        worker.interrupt();
     }
 
     private static <T> GitClientResult<T> failed(

@@ -72,7 +72,7 @@ class GitBlockingWireTransportTest {
         GitBlockingWireTransport transport = input("zzzz");
 
         assertThatThrownBy(transport::readControlState)
-                .isInstanceOf(IOException.class)
+                .isInstanceOf(GitPktLineFormatException.class)
                 .hasMessageContaining("Invalid Git pkt-line header");
     }
 
