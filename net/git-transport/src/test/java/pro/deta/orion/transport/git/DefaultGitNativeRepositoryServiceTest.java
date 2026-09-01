@@ -9,6 +9,7 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
+import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
@@ -20,8 +21,12 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
+import pro.deta.orion.git.parser.wire.capability.GitCapability;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommandSection;
+import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
 
 import java.nio.charset.StandardCharsets;
@@ -419,6 +424,112 @@ class DefaultGitNativeRepositoryServiceTest {
     }
 
     @Test
+    void receiveAppliesValidNonAtomicRefsAfterPublishingIncomingObjects() {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        NativeGitRepository repository = provider.find("/demo.git")
+                .valueOrFailure("repository");
+        GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId feature = quarantine.write(
+                ObjectType.BLOB,
+                "feature".getBytes(StandardCharsets.US_ASCII));
+
+        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+                service.completeLegacyReceivePack(
+                        receivePack(
+                                service,
+                                List.of(
+                                        new LegacyReceiveCommand(
+                                                GitObjectId.of(TAG_ID),
+                                                GitObjectId.of(NULL_ID),
+                                                "refs/heads/main"),
+                                        new LegacyReceiveCommand(
+                                                GitObjectId.of(NULL_ID),
+                                                feature,
+                                                "refs/heads/feature")),
+                                Set.of(),
+                                quarantine),
+                        GitNativeRepositoryAccessHook.ALLOW_ALL);
+
+        assertThat(statuses)
+                .containsExactly(
+                        new GitNativeRepositoryService.ReceivePackStatus(
+                                "refs/heads/main", false, "stale"),
+                        new GitNativeRepositoryService.ReceivePackStatus(
+                                "refs/heads/feature", true, ""));
+        assertThat(repository.refs())
+                .containsEntry("refs/heads/main", MAIN_ID)
+                .containsEntry("refs/heads/feature", feature.value());
+        assertThat(repository.readObject(feature)).isPresent();
+    }
+
+    @Test
+    void receiveDoesNotPublishAnyAtomicRefOrObjectWhenOneRefIsStale() {
+        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
+        NativeGitRepository repository = provider.find("/demo.git")
+                .valueOrFailure("repository");
+        GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId feature = quarantine.write(
+                ObjectType.BLOB,
+                "feature".getBytes(StandardCharsets.US_ASCII));
+
+        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+                service.completeLegacyReceivePack(
+                        receivePack(
+                                service,
+                                List.of(
+                                        new LegacyReceiveCommand(
+                                                GitObjectId.of(TAG_ID),
+                                                GitObjectId.of(NULL_ID),
+                                                "refs/heads/main"),
+                                        new LegacyReceiveCommand(
+                                                GitObjectId.of(NULL_ID),
+                                                feature,
+                                                "refs/heads/feature")),
+                                Set.of(GitCapability.ATOMIC.name()),
+                                quarantine),
+                        GitNativeRepositoryAccessHook.ALLOW_ALL);
+
+        assertThat(statuses)
+                .containsExactly(
+                        new GitNativeRepositoryService.ReceivePackStatus(
+                                "refs/heads/main", false, "stale"),
+                        new GitNativeRepositoryService.ReceivePackStatus(
+                                "refs/heads/feature", false, "atomic-push-failure"));
+        assertThat(repository.refs())
+                .containsExactly(Map.entry("refs/heads/main", MAIN_ID));
+        assertThat(repository.readObject(feature)).isEmpty();
+    }
+
+    @Test
+    void receiveDoesNotPublishRefWithIncompleteObjectClosure() {
+        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("/demo.git")
+                .valueOrFailure("repository");
+        GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
+        GitObjectId missing = GitObjectId.of("f".repeat(40));
+
+        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+                service.completeLegacyReceivePack(
+                        receivePack(
+                                service,
+                                List.of(new LegacyReceiveCommand(
+                                        GitObjectId.of(NULL_ID),
+                                        missing,
+                                        "refs/heads/main")),
+                                Set.of(),
+                                new LooseObjectStore()),
+                        GitNativeRepositoryAccessHook.ALLOW_ALL);
+
+        assertThat(statuses).containsExactly(
+                new GitNativeRepositoryService.ReceivePackStatus(
+                        "refs/heads/main", false, "missing-necessary-objects"));
+        assertThat(repository.refs()).isEmpty();
+        assertThat(repository.readObject(missing)).isEmpty();
+    }
+
+    @Test
     void fetchesPackFromRepositoryNamedByInitialRequest() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         provider.create("/demo.git").valueOrFailure("repository");
@@ -787,6 +898,25 @@ class DefaultGitNativeRepositoryServiceTest {
 
     private static InitialRequestData receiveRequest(String path) {
         return new InitialRequestData(InitialRequestService.RECEIVE_PACK, path, "localhost", Map.of());
+    }
+
+    private static LegacyReceivePack receivePack(
+            GitNativeRepositoryService service,
+            List<LegacyReceiveCommand> commands,
+            Set<String> capabilities,
+            LooseObjectStore quarantine) {
+        InitialRequestData request = receiveRequest("/demo.git");
+        GitV1Advertisement advertisement = service.legacyReceivePackAdvertisement(
+                request,
+                GitNativeRepositoryAccessHook.ALLOW_ALL,
+                GitWireConfiguration.allSupported());
+        return new LegacyReceivePack(
+                new LegacyReceiveCommandSection(
+                        request,
+                        commands,
+                        capabilities,
+                        advertisement),
+                quarantine);
     }
 
     private record UploadCapabilityCase(GitWireConfiguration configuration, List<String> expectedTokens) {

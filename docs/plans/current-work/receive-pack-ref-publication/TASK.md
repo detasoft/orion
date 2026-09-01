@@ -1,7 +1,6 @@
 # Verify Receive-Pack Ref Publication Ordering
 
-Status: in progress
-Owner: codex, session codex-receive-pack-59e18a, started 2026-09-02 01:39 Europe/Amsterdam.
+Status: complete
 Source: narrowed from the former atomic publication boundaries task.
 
 Ensure receive-pack makes new refs visible only after the incoming pack has
@@ -26,9 +25,9 @@ logical ref snapshot: either every eligible ref update is applied or none is.
 
 ## Acceptance
 
-- A ref is not published when pack ingestion, object validation, or closure
+- [x] A ref is not published when pack ingestion, object validation, or closure
   checks fail.
-- Non-atomic commands are applied independently after successful ingestion.
-- Atomic commands expose either the complete requested ref set or the prior
+- [x] Non-atomic commands are applied independently after successful ingestion.
+- [x] Atomic commands expose either the complete requested ref set or the prior
   ref set.
-- Tests document and enforce the publication order and failure behavior.
+- [x] Tests document and enforce the publication order and failure behavior.
