@@ -7,7 +7,10 @@ TEST_ANALYTICS_REPORT_ARGS ?=
 TEST_ANALYTICS_MAIN = pro.deta.orion.test.duration.TestAnalyticsReport
 TEST_JFR_MAVEN_ARGS ?=
 
-.PHONY: test test-jfr test-jfr-report
+.PHONY: dist test test-jfr test-jfr-report
+
+dist:
+	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
 test:
 	$(MAVEN) test -Pdev -T 4
@@ -35,4 +38,4 @@ test-jfr-report:
 		-Dexec.args="$(TEST_ANALYTICS_REPORT_ARGS)"
 
 include make/server.mk
-include make/session-host.mk
+include session-host/Makefile
