@@ -8,7 +8,10 @@ import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -64,18 +67,112 @@ public final class GitWireBootstrap {
     private static InitialRequestData nativeDaemonData(String request) {
         String value = request == null ? "" : request;
         int metadataStart = value.indexOf('\0');
-        if (metadataStart < 0) {
-            throw new IllegalArgumentException("Malformed native Git request");
+        String command = metadataStart < 0
+                ? value
+                : value.substring(0, metadataStart);
+        if (command.endsWith("\n")) {
+            command = command.substring(0, command.length() - 1);
         }
-        String command = value.substring(0, metadataStart).trim();
+        command = command.trim();
         int commandSeparator = firstWhitespace(command);
         if (commandSeparator <= 0) {
-            throw new IllegalArgumentException("Malformed native Git request");
+            throw malformedNativeRequest();
         }
         String service = command.substring(0, commandSeparator);
         String repositoryPath = command.substring(commandSeparator).trim();
-        Map<String, String> metadata = metadata(value.substring(metadataStart + 1));
-        return new InitialRequestData(InitialRequestService.fromWireName(service), normalizeRepositoryPath(repositoryPath), metadata.get("host"), versionParameter(metadata.get(VERSION_PARAMETER)));
+        NativeDaemonMetadata metadata = metadataStart < 0
+                ? NativeDaemonMetadata.EMPTY
+                : nativeDaemonMetadata(value.substring(metadataStart + 1));
+        List<String> protocolParameters = metadata.protocolParameters();
+        return new InitialRequestData(
+                InitialRequestService.fromWireName(service),
+                normalizeRepositoryPath(repositoryPath),
+                metadata.host(),
+                gitProtocolParameters(String.join(":", protocolParameters)),
+                protocolParameters);
+    }
+
+    private static NativeDaemonMetadata nativeDaemonMetadata(String value) {
+        int firstEnd = value.indexOf('\0');
+        String firstArgument = firstEnd < 0
+                ? value
+                : value.substring(0, firstEnd);
+        String host = null;
+        int protocolStart = 0;
+        if (!firstArgument.isEmpty()) {
+            if (!firstArgument.regionMatches(true, 0, "host=", 0, 5)) {
+                throw malformedNativeRequest();
+            }
+            host = canonicalHost(firstArgument.substring(5));
+            protocolStart = firstEnd < 0 ? value.length() : firstEnd + 1;
+            if (protocolStart < value.length()
+                    && value.charAt(protocolStart) != '\0') {
+                throw malformedNativeRequest();
+            }
+        }
+        return new NativeDaemonMetadata(
+                host,
+                nativeDaemonProtocolParameters(value, protocolStart));
+    }
+
+    private static List<String> nativeDaemonProtocolParameters(
+            String value,
+            int start) {
+        List<String> parameters = new ArrayList<>();
+        int tokenStart = start;
+        while (tokenStart < value.length()) {
+            int tokenEnd = value.indexOf('\0', tokenStart);
+            if (tokenEnd < 0) {
+                tokenEnd = value.length();
+            }
+            if (tokenEnd > tokenStart) {
+                parameters.add(value.substring(tokenStart, tokenEnd));
+            }
+            tokenStart = tokenEnd + 1;
+        }
+        return List.copyOf(parameters);
+    }
+
+    private static String canonicalHost(String value) {
+        String host = hostWithoutPort(value);
+        StringBuilder sanitized = new StringBuilder(host.length());
+        for (int index = 0; index < host.length(); index++) {
+            char character = host.charAt(index);
+            if (character == '/' || character == '\\') {
+                continue;
+            }
+            if (character == '.'
+                    && (sanitized.isEmpty()
+                    || sanitized.charAt(sanitized.length() - 1) == '.')) {
+                continue;
+            }
+            sanitized.append(character);
+        }
+        while (!sanitized.isEmpty()
+                && sanitized.charAt(sanitized.length() - 1) == '.') {
+            sanitized.setLength(sanitized.length() - 1);
+        }
+        return sanitized.toString().toLowerCase(Locale.ROOT);
+    }
+
+    private static String hostWithoutPort(String value) {
+        if (!value.startsWith("[")) {
+            int portSeparator = value.lastIndexOf(':');
+            return portSeparator < 0
+                    ? value
+                    : value.substring(0, portSeparator);
+        }
+        int bracket = value.indexOf(']');
+        if (bracket < 0
+                || bracket + 1 < value.length()
+                && value.charAt(bracket + 1) != ':') {
+            throw malformedNativeRequest();
+        }
+        return value.substring(1, bracket);
+    }
+
+    private static IllegalArgumentException malformedNativeRequest() {
+        return new IllegalArgumentException("Malformed native Git request");
     }
 
     private static GitSshRequest parseGitSshCommand(String commandLine) {
@@ -116,18 +213,6 @@ public final class GitWireBootstrap {
         return -1;
     }
 
-    private static Map<String, String> metadata(String value) {
-        Map<String, String> metadata = new LinkedHashMap<>();
-        for (String token : value.split("\0")) {
-            int separator = token.indexOf('=');
-            if (separator <= 0) {
-                continue;
-            }
-            metadata.put(token.substring(0, separator).trim(), token.substring(separator + 1).trim());
-        }
-        return Map.copyOf(metadata);
-    }
-
     private static Map<String, String> gitProtocolParameters(String value) {
         if (value == null || value.isBlank()) {
             return Map.of();
@@ -140,18 +225,33 @@ public final class GitWireBootstrap {
             }
             String name = token.substring(0, separator).trim();
             String parameterValue = token.substring(separator + 1).trim();
-            if (VERSION_PARAMETER.equals(name) && !parameterValue.isEmpty()) {
-                parameters.put(name, parameterValue);
+            if (VERSION_PARAMETER.equals(name)) {
+                acceptProtocolVersion(parameters, parameterValue);
             }
         }
         return Map.copyOf(parameters);
     }
 
-    private static Map<String, String> versionParameter(String version) {
-        if (version == null || version.isBlank()) {
-            return Map.of();
+    private static void acceptProtocolVersion(
+            Map<String, String> parameters,
+            String candidate) {
+        int candidateRank = protocolVersionRank(candidate);
+        if (candidateRank < 0) {
+            return;
         }
-        return Map.of(VERSION_PARAMETER, version);
+        String current = parameters.get(VERSION_PARAMETER);
+        if (current == null || candidateRank > protocolVersionRank(current)) {
+            parameters.put(VERSION_PARAMETER, candidate);
+        }
+    }
+
+    private static int protocolVersionRank(String value) {
+        return switch (value) {
+            case "0" -> 0;
+            case "1" -> 1;
+            case "2" -> 2;
+            default -> -1;
+        };
     }
 
     private static String normalizeRepositoryPath(String repository) {
@@ -167,5 +267,12 @@ public final class GitWireBootstrap {
     }
 
     private record GitSshRequest(InitialRequestService service, String repositoryPath) {
+    }
+
+    private record NativeDaemonMetadata(
+            String host,
+            List<String> protocolParameters) {
+        private static final NativeDaemonMetadata EMPTY =
+                new NativeDaemonMetadata(null, List.of());
     }
 }
