@@ -326,23 +326,6 @@ class GitBlockingWireTransportTest {
     }
 
     @Test
-    void closesProducerWhenConcurrentPackResponseIsRejected() {
-        GitBlockingWireTransport output = output(new RecordingBufferedByteOutput());
-        TrackingProducer rejected = new TrackingProducer("PACK");
-        GitBlockingWireTransport.LegacyPackResponse active =
-                output.beginLegacyPack(producer("active"));
-
-        try {
-            assertThatThrownBy(() -> output.beginLegacyPack(rejected))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("Client output operation is already in progress");
-            assertThat(rejected.closed).isTrue();
-        } finally {
-            active.close();
-        }
-    }
-
-    @Test
     void rejectsProducerThatMakesNoProgress() {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         GitBlockingWireTransport output = output(

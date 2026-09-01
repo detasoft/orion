@@ -36,9 +36,6 @@ public final class GitBlockingWireTransport {
     private final BufferedByteInput input;
     private final BufferedByteOutput outputSink;
     private final GitPktLineWriter pktLineWriter;
-    private LegacySideBandResponse sideBandResponse;
-    private LegacyPackResponse legacyPackResponse;
-    private ProtocolV2PackfileResponse protocolV2PackfileResponse;
 
     public GitBlockingWireTransport(BufferedByteOutput outputSink) {
         this(null, outputSink);
@@ -350,32 +347,16 @@ public final class GitBlockingWireTransport {
             NativePackProducer producer,
             SideBandChannel channel) {
         Objects.requireNonNull(channel, "channel");
-        Result<NativePackProducer> availableProducer =
-                availableProducer(producer);
-        if (availableProducer instanceof
-                Result.Failure<NativePackProducer> failure) {
-            throw outputUnavailable(failure);
-        }
-        LegacySideBandResponse response =
-                new LegacySideBandResponse(
-                        producer,
-                        channel);
-        sideBandResponse = response;
-        return response;
+        Objects.requireNonNull(producer, "producer");
+        return new LegacySideBandResponse(
+                producer,
+                channel);
     }
 
     public LegacyPackResponse beginLegacyPack(
             NativePackProducer producer) {
-        Result<NativePackProducer> availableProducer =
-                availableProducer(producer);
-        if (availableProducer instanceof
-                Result.Failure<NativePackProducer> failure) {
-            throw outputUnavailable(failure);
-        }
-        LegacyPackResponse response =
-                new LegacyPackResponse(producer);
-        legacyPackResponse = response;
-        return response;
+        Objects.requireNonNull(producer, "producer");
+        return new LegacyPackResponse(producer);
     }
 
     public ProtocolV2PackfileResponse beginProtocolV2Packfile(
@@ -436,44 +417,13 @@ public final class GitBlockingWireTransport {
         Objects.requireNonNull(shallowBoundaries, "shallowBoundaries");
         Objects.requireNonNull(wantedRefs, "wantedRefs");
         Objects.requireNonNull(packfileUris, "packfileUris");
-        Result<NativePackProducer> availableProducer =
-                availableProducer(producer);
-        if (availableProducer instanceof
-                Result.Failure<NativePackProducer> failure) {
-            throw outputUnavailable(failure);
-        }
-        ProtocolV2PackfileResponse response =
-                new ProtocolV2PackfileResponse(
-                        producer,
-                        shallowBoundaries,
-                        wantedRefs,
-                        packfileUris,
-                        sidebandAll);
-        protocolV2PackfileResponse = response;
-        return response;
-    }
-
-    private Result<NativePackProducer> availableProducer(
-            NativePackProducer producer) {
         Objects.requireNonNull(producer, "producer");
-        if (sideBandResponse != null
-                || legacyPackResponse != null
-                || protocolV2PackfileResponse != null) {
-            producer.close();
-            return new Result.Failure<>(
-                    Result.FailureCode.GENERAL,
-                    "Client output operation is already in progress",
-                    new IllegalStateException(
-                            "Client output operation is already in progress"));
-        }
-        return new Result.Success<>(producer);
-    }
-
-    private static IllegalStateException outputUnavailable(
-            Result.Failure<?> failure) {
-        return new IllegalStateException(
-                failure.getMessage(),
-                failure.throwable());
+        return new ProtocolV2PackfileResponse(
+                producer,
+                shallowBoundaries,
+                wantedRefs,
+                packfileUris,
+                sidebandAll);
     }
 
     private void sendPktLine(
@@ -618,17 +568,7 @@ public final class GitBlockingWireTransport {
 
     private void sendSerialization(
             OutputSerialization operation) throws IOException {
-        ensureNoActiveResponse();
         operation.writeTo(this);
-    }
-
-    private void ensureNoActiveResponse() {
-        if (sideBandResponse != null
-                || legacyPackResponse != null
-                || protocolV2PackfileResponse != null) {
-            throw new IllegalStateException(
-                    "Client output operation is already in progress");
-        }
     }
 
     private BufferedByteInput requireInput() {
@@ -1085,9 +1025,6 @@ public final class GitBlockingWireTransport {
                 }
             } finally {
                 releaseMessages();
-                if (sideBandResponse == this) {
-                    sideBandResponse = null;
-                }
             }
         }
 
@@ -1159,14 +1096,8 @@ public final class GitBlockingWireTransport {
                 return;
             }
             closed = true;
-            try {
-                if (producer != null) {
-                    producer.close();
-                }
-            } finally {
-                if (legacyPackResponse == this) {
-                    legacyPackResponse = null;
-                }
+            if (producer != null) {
+                producer.close();
             }
         }
     }
@@ -1239,14 +1170,8 @@ public final class GitBlockingWireTransport {
                 return;
             }
             closed = true;
-            try {
-                if (producer != null) {
-                    producer.close();
-                }
-            } finally {
-                if (protocolV2PackfileResponse == this) {
-                    protocolV2PackfileResponse = null;
-                }
+            if (producer != null) {
+                producer.close();
             }
         }
 
