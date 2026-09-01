@@ -31,15 +31,6 @@ public record LegacyUploadNegotiation(
 
     public boolean negotiated(GitCapability capability) {
         Objects.requireNonNull(capability, "capability");
-        if (!request.capabilities().contains(capability.name())) {
-            return false;
-        }
-        for (GitCapability advertised
-                : request.serverAdvertisement().capabilities()) {
-            if (advertised.name().equals(capability.name())) {
-                return true;
-            }
-        }
-        return false;
+        return request.negotiated(capability);
     }
 }

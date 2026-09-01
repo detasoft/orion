@@ -73,7 +73,16 @@ class GitNativeRepositoryServiceTest {
         GitV1Advertisement advertisement = service.legacyUploadPackAdvertisement(request("/demo.git"));
 
         assertThat(advertisement.refs()).containsExactly(GitAdvertisedRef.direct(MAIN_ID, "HEAD"), GitAdvertisedRef.direct(MAIN_ID, "refs/heads/main"), GitAdvertisedRef.direct(TAG_ID, "refs/tags/v1"));
-        assertThat(advertisement.capabilities()).extracting(capability -> capability.wireToken()).containsExactly("multi_ack_detailed", "thin-pack", "side-band-64k", "ofs-delta", "agent=orion-native", "symref=HEAD:refs/heads/main");
+        assertThat(advertisement.capabilities())
+                .extracting(capability -> capability.wireToken())
+                .containsExactly(
+                        "multi_ack_detailed",
+                        "multi_ack",
+                        "thin-pack",
+                        "side-band-64k",
+                        "ofs-delta",
+                        "agent=orion-native",
+                        "symref=HEAD:refs/heads/main");
     }
 
     @Test
@@ -95,7 +104,60 @@ class GitNativeRepositoryServiceTest {
     @Test
     void omitsEachDisabledUploadPackCapabilityWithoutReorderingOthers() {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
-        List<UploadCapabilityCase> cases = List.of(new UploadCapabilityCase(uploadConfiguration(false, true, true, true, true, true), List.of("thin-pack", "side-band-64k", "ofs-delta", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, false, true, true, true, true), List.of("multi_ack_detailed", "side-band-64k", "ofs-delta", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, true, false, true, true, true), List.of("multi_ack_detailed", "thin-pack", "ofs-delta", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, true, true, false, true, true), List.of("multi_ack_detailed", "thin-pack", "side-band-64k", "agent=orion-native", "symref=HEAD:refs/heads/main")), new UploadCapabilityCase(uploadConfiguration(true, true, true, true, false, true), List.of("multi_ack_detailed", "thin-pack", "side-band-64k", "ofs-delta", "agent=orion-native")), new UploadCapabilityCase(uploadConfiguration(true, true, true, true, true, false), List.of("multi_ack_detailed", "thin-pack", "side-band-64k", "ofs-delta", "symref=HEAD:refs/heads/main")));
+        List<UploadCapabilityCase> cases = List.of(
+                new UploadCapabilityCase(
+                        uploadConfiguration(false, true, true, true, true, true),
+                        List.of(
+                                "thin-pack",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, false, true, true, true, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "multi_ack",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, false, true, true, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "multi_ack",
+                                "thin-pack",
+                                "ofs-delta",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, true, false, true, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "multi_ack",
+                                "thin-pack",
+                                "side-band-64k",
+                                "agent=orion-native",
+                                "symref=HEAD:refs/heads/main")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, true, true, false, true),
+                        List.of(
+                                "multi_ack_detailed",
+                                "multi_ack",
+                                "thin-pack",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "agent=orion-native")),
+                new UploadCapabilityCase(
+                        uploadConfiguration(true, true, true, true, true, false),
+                        List.of(
+                                "multi_ack_detailed",
+                                "multi_ack",
+                                "thin-pack",
+                                "side-band-64k",
+                                "ofs-delta",
+                                "symref=HEAD:refs/heads/main")));
 
         for (UploadCapabilityCase capabilityCase : cases) {
             GitV1Advertisement advertisement = new GitNativeRepositoryService(provider, capabilityCase.configuration()).legacyUploadPackAdvertisement(request("/demo.git"));

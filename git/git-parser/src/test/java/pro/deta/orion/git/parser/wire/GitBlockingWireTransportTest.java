@@ -289,7 +289,7 @@ class GitBlockingWireTransportTest {
         ByteArrayRecordingOutput sink = new ByteArrayRecordingOutput();
         GitBlockingWireTransport output = output(sink);
         GitBlockingWireTransport.LegacyPackResponse response =
-                output.beginLegacyPack(producer("PACK"));
+                output.beginLegacyPack(producer("PACK"), true);
 
         response.advance();
 
@@ -304,23 +304,17 @@ class GitBlockingWireTransportTest {
         GitBlockingWireTransport.LegacySideBandResponse response =
                 output.beginLegacySideBand64k(
                         producer("PACK-data"),
-                        GitBlockingWireTransport.SideBandChannel.DATA);
-        ByteBuf progress = Unpooled.copiedBuffer(
-                "counting\n",
-                StandardCharsets.US_ASCII);
+                        true);
 
         try {
-            response.progress(progress);
             response.advance();
 
             assertThat(new String(bytes.toByteArray(), StandardCharsets.US_ASCII))
                     .isEqualTo(
                             "0008NAK\n"
-                                    + "000e\u0002counting\n"
                                     + "000e\u0001PACK-data"
                                     + "0000");
         } finally {
-            progress.release();
             response.close();
         }
     }
@@ -340,7 +334,7 @@ class GitBlockingWireTransportTest {
                     @Override
                     public void close() {
                     }
-                });
+                }, true);
 
         try {
             assertThatThrownBy(response::advance)
@@ -357,7 +351,7 @@ class GitBlockingWireTransportTest {
         GitBlockingWireTransport output = output(
                 new OutputStreamBufferedByteOutput(bytes));
         GitBlockingWireTransport.LegacyPackResponse response =
-                output.beginLegacyPack(producer("PACK"));
+                output.beginLegacyPack(producer("PACK"), true);
 
         response.advance();
 

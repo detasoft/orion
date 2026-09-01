@@ -408,16 +408,44 @@ public final class GitBlockingWireSession {
     private void readLegacyUploadNegotiation(
             LegacyUploadRequest request) throws IOException {
         Set<GitObjectId> haves = new LinkedHashSet<>();
+        GitObjectId lastCommon = null;
         while (true) {
             ControlState control = wire.readControlState();
             switch (control.type()) {
                 case DATA -> {
-                    LegacyUploadNegotiation negotiation =
-                            acceptLegacyUploadNegotiation(request, haves,
-                                    readAsciiPayload(control));
-                    if (negotiation != null) {
-                        serveLegacyUploadResponse(negotiation);
+                    String line = readAsciiPayload(control);
+                    if ("done".equals(line)) {
+                        if (lastCommon == null) {
+                            wire.sendNak();
+                        } else if (request.negotiated(
+                                GitCapability.MULTI_ACK_DETAILED)) {
+                            wire.sendAck(
+                                    lastCommon,
+                                    GitBlockingWireTransport.AckStatus.READY);
+                        } else {
+                            wire.sendAck(
+                                    lastCommon,
+                                    GitBlockingWireTransport.AckStatus.FINAL);
+                        }
+                        serveLegacyUploadResponse(
+                                new LegacyUploadNegotiation(request, haves));
                         return;
+                    }
+                    GitObjectId have = acceptLegacyUploadHave(haves, line);
+                    if (repositoryService.commonHaves(
+                            request.initialRequest(),
+                            List.of(have)).isEmpty()) {
+                        continue;
+                    }
+                    lastCommon = have;
+                    if (request.negotiated(GitCapability.MULTI_ACK_DETAILED)) {
+                        wire.sendAck(
+                                have,
+                                GitBlockingWireTransport.AckStatus.COMMON);
+                    } else if (request.negotiated(GitCapability.MULTI_ACK)) {
+                        wire.sendAck(
+                                have,
+                                GitBlockingWireTransport.AckStatus.CONTINUE);
                     }
                 }
                 case FLUSH -> wire.sendNak();
@@ -429,13 +457,9 @@ public final class GitBlockingWireSession {
         }
     }
 
-    private static LegacyUploadNegotiation acceptLegacyUploadNegotiation(
-            LegacyUploadRequest request,
+    private static GitObjectId acceptLegacyUploadHave(
             Set<GitObjectId> haves,
             String line) throws IOException {
-        if ("done".equals(line)) {
-            return new LegacyUploadNegotiation(request, haves);
-        }
         if (!line.startsWith("have ")) {
             throw invalidLegacyUploadRequest(
                     GitWireError.Kind
@@ -446,8 +470,9 @@ public final class GitBlockingWireSession {
             throw invalidLegacyUploadRequest(
                     GitWireError.Kind.INVALID_LEGACY_UPLOAD_HAVE_OBJECT_ID);
         }
-        haves.add(GitObjectId.of(objectId));
-        return null;
+        GitObjectId have = GitObjectId.of(objectId);
+        haves.add(have);
+        return have;
     }
 
     private void serveLegacyUploadResponse(
@@ -457,7 +482,7 @@ public final class GitBlockingWireSession {
             try {
                 response = wire.beginLegacySideBand64k(
                         legacyUploadProducer(negotiation),
-                        GitBlockingWireTransport.SideBandChannel.DATA);
+                        false);
                 response.advance();
             } finally {
                 if (response != null) {
@@ -469,7 +494,8 @@ public final class GitBlockingWireSession {
         GitBlockingWireTransport.LegacyPackResponse response = null;
         try {
             response = wire.beginLegacyPack(
-                    legacyUploadProducer(negotiation));
+                    legacyUploadProducer(negotiation),
+                    false);
             response.advance();
         } finally {
             if (response != null) {

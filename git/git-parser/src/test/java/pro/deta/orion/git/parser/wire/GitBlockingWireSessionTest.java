@@ -306,6 +306,94 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
+    void smartHttpPostWritesLegacyMultiAckDetailedCommonAndReady()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        GitObjectId want = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.US_ASCII));
+        GitObjectId have = repository.writeObject(
+                ObjectType.BLOB,
+                "base".getBytes(StandardCharsets.US_ASCII));
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRequest(
+                    "want " + want.value() + " multi_ack_detailed\n",
+                    "have " + have.value() + "\n",
+                    "done\n"));
+
+            session(input, output, provider).serveSmartHttpPost(uploadV1Request());
+
+            assertThat(output.ascii())
+                    .startsWith(
+                            "0038ACK " + have.value() + " common\n"
+                                    + "0037ACK " + have.value() + " ready\n")
+                    .contains("PACK");
+        }
+    }
+
+    @Test
+    void smartHttpPostWritesLegacyMultiAckDetailedNakWhenNoHaveIsCommon()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        GitObjectId want = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.US_ASCII));
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRequest(
+                    "want " + want.value() + " multi_ack_detailed\n",
+                    "have " + WANT + "\n",
+                    "done\n"));
+
+            session(input, output, provider).serveSmartHttpPost(uploadV1Request());
+
+            assertThat(output.ascii())
+                    .startsWith("0008NAK\n")
+                    .contains("PACK");
+        }
+    }
+
+    @Test
+    void smartHttpPostWritesLegacyMultiAckContinueForCommonHave()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        GitObjectId want = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.US_ASCII));
+        GitObjectId have = repository.writeObject(
+                ObjectType.BLOB,
+                "base".getBytes(StandardCharsets.US_ASCII));
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRequest(
+                    "want " + want.value() + " multi_ack\n",
+                    "have " + have.value() + "\n",
+                    "done\n"));
+
+            session(input, output, provider).serveSmartHttpPost(uploadV1Request());
+
+            assertThat(output.ascii())
+                    .startsWith(
+                            "003aACK " + have.value() + " continue\n"
+                                    + "0031ACK " + have.value() + "\n")
+                    .contains("PACK");
+        }
+    }
+
+    @Test
     void smartHttpPostRejectsLegacyUploadInvalidObjectId()
             throws Exception {
         try (QueueBufferedByteInput input = new QueueBufferedByteInput(

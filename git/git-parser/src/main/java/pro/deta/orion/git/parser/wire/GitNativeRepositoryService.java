@@ -182,10 +182,19 @@ public final class GitNativeRepositoryService {
             NativeFetchRequest request) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
+        return commonHaves(data, request.haves());
+    }
+
+    public List<GitObjectId> commonHaves(
+            InitialRequestData data,
+            Iterable<GitObjectId> haves) {
+        Objects.requireNonNull(data, "data");
+        Objects.requireNonNull(haves, "haves");
         String repositoryPath = data.getRepositoryPath();
         NativeGitRepository repository = findOrFail(repositoryPath);
         List<GitObjectId> acknowledgments = new ArrayList<>();
-        for (GitObjectId have : request.haves()) {
+        for (GitObjectId have : haves) {
+            Objects.requireNonNull(have, "have");
             if (repository.readObject(have).isPresent()) {
                 acknowledgments.add(have);
             }
@@ -458,6 +467,7 @@ public final class GitNativeRepositoryService {
         List<GitCapability> capabilities = new ArrayList<>();
         if (uploadPack.multiAckDetailed()) {
             capabilities.add(GitCapability.MULTI_ACK_DETAILED);
+            capabilities.add(GitCapability.MULTI_ACK);
         }
         if (uploadPack.thinPack()) {
             capabilities.add(GitCapability.THIN_PACK);

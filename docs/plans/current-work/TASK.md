@@ -14,4 +14,4 @@ completed current tasks.
 - [x] [Implement legacy receive-pack advertisement](legacy-receive-pack-advertisement/TASK.md)
 - [ ] [Track Git protocol canonical parity gaps](git-protocol-canonical-parity/TASK.md)
 - [ ] [Implement production native repository backends](production-native-git-repository-backends/TASK.md)
-- [ ] [Fix legacy upload-pack `multi_ack_detailed`](multi-ack-detailed/TASK.md)
+- [x] [Fix legacy upload-pack `multi_ack_detailed`](multi-ack-detailed/TASK.md)

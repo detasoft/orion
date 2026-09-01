@@ -20,7 +20,9 @@ the reference before changing behavior.
 
 ## Known Open Gaps
 
-- [ ] [Fix legacy upload-pack `multi_ack_detailed`](../multi-ack-detailed/TASK.md).
+These are follow-up protocol parity tasks, not remaining work for the current
+closed fix.
+
 - [ ] Complete protocol v2 shallow history support:
       `docs/plans/upcoming-work/protocol-v2-server-fetch-extensions/complete-shallow-history/TASK.md`.
 - [ ] Audit upload-pack, receive-pack, daemon, and HTTP edge cases against the
@@ -29,6 +31,9 @@ the reference before changing behavior.
 
 ## Recently Closed Gaps
 
+- [x] Legacy upload-pack `multi_ack_detailed` emits common/ready ACKs, and
+      legacy upload-pack advertisement includes both `multi_ack_detailed` and
+      `multi_ack`.
 - [x] Receive-pack refname parsing accepts UTF-8/non-ASCII ref names while
       rejecting ASCII control, space, and forbidden Git ref characters.
 - [x] Protocol v2 `want-ref` rejects duplicate ref requests instead of silently
