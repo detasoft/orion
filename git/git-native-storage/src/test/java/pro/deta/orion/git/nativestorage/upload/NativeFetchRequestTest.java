@@ -18,18 +18,19 @@ class NativeFetchRequestTest {
                 Set.of(want),
                 Set.of(),
                 true,
-                false,
-                false,
-                false,
-                false,
-                2,
-                NativeObjectFilter.NONE,
                 Set.of(),
-                Set.of(),
-                Set.of(shallow),
-                true,
-                0,
-                Set.of());
+                new NativeFetchOptions(
+                        false,
+                        false,
+                        false,
+                        false,
+                        2,
+                        NativeObjectFilter.NONE,
+                        Set.of(),
+                        Set.of(shallow),
+                        true,
+                        0,
+                        Set.of()));
 
         assertThat(request.clientShallowCommits()).containsExactly(shallow);
         assertThat(request.deepenRelative()).isTrue();
@@ -44,18 +45,19 @@ class NativeFetchRequestTest {
                 Set.of(want),
                 Set.of(),
                 true,
-                false,
-                false,
-                false,
-                false,
-                0,
-                NativeObjectFilter.NONE,
                 Set.of(),
-                Set.of(),
-                Set.of(),
-                false,
-                1_700_000_000L,
-                Set.of("refs/heads/main"));
+                new NativeFetchOptions(
+                        false,
+                        false,
+                        false,
+                        false,
+                        0,
+                        NativeObjectFilter.NONE,
+                        Set.of(),
+                        Set.of(),
+                        false,
+                        1_700_000_000L,
+                        Set.of("refs/heads/main")));
 
         assertThat(request.deepenSince()).isEqualTo(1_700_000_000L);
         assertThat(request.deepenNotRefs()).containsExactly("refs/heads/main");
@@ -65,13 +67,10 @@ class NativeFetchRequestTest {
     @Test
     void carriesFetchOptionsAsSingleValue() {
         GitObjectId want = GitObjectId.of("1".repeat(40));
-        NativeFetchOptions options = new NativeFetchOptions(
+        NativeFetchOptions options = NativeFetchOptions.initial(
                 true,
                 true,
-                true,
-                true,
-                NativeObjectFilter.BLOB_NONE,
-                Set.of("HTTPS"));
+                true);
 
         NativeFetchRequest request = new NativeFetchRequest(
                 Set.of(want),
@@ -84,9 +83,9 @@ class NativeFetchRequestTest {
         assertThat(request.thinPack()).isTrue();
         assertThat(request.ofsDelta()).isTrue();
         assertThat(request.includeTag()).isTrue();
-        assertThat(request.waitForDone()).isTrue();
+        assertThat(request.waitForDone()).isFalse();
         assertThat(request.objectFilter())
-                .isEqualTo(NativeObjectFilter.BLOB_NONE);
-        assertThat(request.packfileUriProtocols()).containsExactly("https");
+                .isEqualTo(NativeObjectFilter.NONE);
+        assertThat(request.packfileUriProtocols()).isEmpty();
     }
 }

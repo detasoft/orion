@@ -10,7 +10,9 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
@@ -315,7 +317,15 @@ class DefaultGitNativeRepositoryServiceTest {
         provider.create("/demo.git").valueOrFailure("repository");
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        NativePackProducer producer = legacyUploadPack(service, request("/demo.git"), new NativeFetchRequest(Set.of(), Set.of(), true, false, false));
+        NativePackProducer producer = legacyUploadPack(
+                service,
+                request("/demo.git"),
+                new NativeFetchRequest(
+                        Set.of(),
+                        Set.of(),
+                        true,
+                        Set.of(),
+                        NativeFetchOptions.initial(false, false, false)));
 
         ByteBuf pack = Unpooled.buffer();
         try (producer) {
@@ -340,7 +350,21 @@ class DefaultGitNativeRepositoryServiceTest {
         haves.add(firstPresent);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        List<GitObjectId> acknowledgments = protocolV2FetchAcknowledgments(service, request("/demo.git"), new NativeFetchRequest(Set.of(firstPresent), haves, false, false, false, false, true));
+        List<GitObjectId> acknowledgments = protocolV2FetchAcknowledgments(
+                service,
+                request("/demo.git"),
+                new NativeFetchRequest(
+                        Set.of(firstPresent),
+                        haves,
+                        false,
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                true,
+                                NativeObjectFilter.NONE,
+                                Set.of())));
 
         assertThat(acknowledgments).containsExactly(secondPresent, firstPresent);
     }

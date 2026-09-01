@@ -34,6 +34,19 @@ public record NativeFetchOptions(
             -1,
             Set.of());
 
+    public static NativeFetchOptions initial(
+            boolean thinPack,
+            boolean ofsDelta,
+            boolean includeTag) {
+        return new NativeFetchOptions(
+                thinPack,
+                ofsDelta,
+                includeTag,
+                false,
+                NativeObjectFilter.NONE,
+                Set.of());
+    }
+
     public NativeFetchOptions(
             boolean thinPack,
             boolean ofsDelta,

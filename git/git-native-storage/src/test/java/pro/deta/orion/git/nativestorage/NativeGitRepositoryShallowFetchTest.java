@@ -10,6 +10,7 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
@@ -57,11 +58,19 @@ class NativeGitRepositoryShallowFetchTest {
                         Set.of(tipCommit),
                         Set.of(),
                         true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        1));
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                1,
+                                NativeObjectFilter.NONE,
+                                Set.of(),
+                                Set.of(),
+                                false,
+                                -1,
+                                Set.of())));
         CompositeByteBuf pack = produce(response.packProducer());
 
         try {
@@ -107,18 +116,214 @@ class NativeGitRepositoryShallowFetchTest {
                         Set.of(tipCommit),
                         Set.of(baseCommit),
                         true,
-                        true,
-                        true,
-                        false,
-                        false,
-                        1)));
+                        Set.of(),
+                        new NativeFetchOptions(
+                                true,
+                                true,
+                                false,
+                                false,
+                                1,
+                                NativeObjectFilter.NONE,
+                                Set.of(),
+                                Set.of(),
+                                false,
+                                -1,
+                                Set.of()))));
 
         assertThat(intAt(pack, 8)).isEqualTo(3);
         assertThat(packEntryTypes(pack)).doesNotContain(7);
     }
 
     @Test
-    void rejectsUnsupportedTimeAndRefBasedDeepeningBeforePackBuild() {
+    void fetchResponseAppliesDeepenSinceCutoff() {
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId rootBlob = objects.write(
+                ObjectType.BLOB,
+                "root".getBytes(StandardCharsets.UTF_8));
+        GitObjectId rootTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "root.txt", rootBlob));
+        GitObjectId rootCommit = writeCommit(
+                objects,
+                rootTree,
+                null,
+                "root",
+                100);
+        GitObjectId tipBlob = objects.write(
+                ObjectType.BLOB,
+                "tip".getBytes(StandardCharsets.UTF_8));
+        GitObjectId tipTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "tip.txt", tipBlob));
+        GitObjectId tipCommit = writeCommit(
+                objects,
+                tipTree,
+                rootCommit,
+                "tip",
+                300);
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(tipCommit),
+                        Set.of(),
+                        true,
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                0,
+                                NativeObjectFilter.NONE,
+                                Set.of(),
+                                Set.of(),
+                                false,
+                                200,
+                                Set.of())));
+
+        assertThat(response.shallowBoundaries()).containsExactly(tipCommit);
+    }
+
+    @Test
+    void fetchResponseAppliesDeepenNotFullRef() {
+        LooseRefStore refs = new LooseRefStore();
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId rootBlob = objects.write(
+                ObjectType.BLOB,
+                "root".getBytes(StandardCharsets.UTF_8));
+        GitObjectId rootTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "root.txt", rootBlob));
+        GitObjectId rootCommit = writeCommit(objects, rootTree, null, "root");
+        GitObjectId baseTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "base.txt", rootBlob));
+        GitObjectId baseCommit = writeCommit(objects, baseTree, rootCommit, "base");
+        GitObjectId tipTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "tip.txt", rootBlob));
+        GitObjectId tipCommit = writeCommit(objects, tipTree, baseCommit, "tip");
+        refs.update("refs/heads/base", NULL_ID, baseCommit.value());
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                refs,
+                objects,
+                "refs/heads/main");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(tipCommit),
+                        Set.of(),
+                        true,
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                0,
+                                NativeObjectFilter.NONE,
+                                Set.of(),
+                                Set.of(),
+                                false,
+                                -1,
+                                Set.of("refs/heads/base"))));
+
+        assertThat(response.shallowBoundaries()).containsExactly(tipCommit);
+    }
+
+    @Test
+    void fetchResponseAppliesDeepenNotHead() {
+        LooseRefStore refs = new LooseRefStore();
+        LooseObjectStore objects = new LooseObjectStore();
+        GitObjectId rootBlob = objects.write(
+                ObjectType.BLOB,
+                "root".getBytes(StandardCharsets.UTF_8));
+        GitObjectId rootTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "root.txt", rootBlob));
+        GitObjectId rootCommit = writeCommit(objects, rootTree, null, "root");
+        GitObjectId baseTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "base.txt", rootBlob));
+        GitObjectId baseCommit = writeCommit(objects, baseTree, rootCommit, "base");
+        GitObjectId tipTree = objects.write(
+                ObjectType.TREE,
+                treeEntry("100644", "tip.txt", rootBlob));
+        GitObjectId tipCommit = writeCommit(objects, tipTree, baseCommit, "tip");
+        refs.update("refs/heads/main", NULL_ID, baseCommit.value());
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                refs,
+                objects,
+                "refs/heads/main");
+
+        NativeFetchResponse response = repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(tipCommit),
+                        Set.of(),
+                        true,
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                0,
+                                NativeObjectFilter.NONE,
+                                Set.of(),
+                                Set.of(),
+                                false,
+                                -1,
+                                Set.of("HEAD"))));
+
+        assertThat(response.shallowBoundaries()).containsExactly(tipCommit);
+    }
+
+    @Test
+    void rejectsMissingDeepenNotRef() {
+        LooseObjectStore objects = new LooseObjectStore();
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                objects,
+                "refs/heads/main");
+        GitObjectId want = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() -> repository.fetchResponse(
+                new NativeFetchRequest(
+                        Set.of(want),
+                        Set.of(),
+                        true,
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                0,
+                                NativeObjectFilter.NONE,
+                                Set.of(),
+                                Set.of(),
+                                false,
+                                -1,
+                                Set.of("refs/heads/missing")))))
+                .isInstanceOfSatisfying(
+                        GitUploadPackException.class,
+                        error -> assertThat(error.kind())
+                                .isEqualTo(GitUploadPackException.Kind
+                                        .MISSING_REF));
+    }
+
+    @Test
+    void rejectsUnsupportedShortDeepenNotRevision() {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",
                 new LooseRefStore(),
@@ -133,6 +338,63 @@ class NativeGitRepositoryShallowFetchTest {
                         Set.of(want),
                         Set.of(),
                         true,
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                0,
+                                NativeObjectFilter.NONE,
+                                Set.of(),
+                                Set.of(),
+                                false,
+                                -1,
+                                Set.of("main")))))
+                .isInstanceOfSatisfying(
+                        GitUploadPackException.class,
+                        error -> assertThat(error.kind())
+                                .isEqualTo(GitUploadPackException.Kind
+                                        .INVALID_REQUEST));
+    }
+
+    @Test
+    void rejectsContradictoryDeepeningAtStorageLayer() {
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        GitObjectId want = repository.writeObject(
+                ObjectType.BLOB,
+                "payload".getBytes(StandardCharsets.UTF_8));
+
+        for (NativeFetchOptions options : List.of(
+                new NativeFetchOptions(
+                        false,
+                        false,
+                        false,
+                        false,
+                        1,
+                        NativeObjectFilter.NONE,
+                        Set.of(),
+                        Set.of(),
+                        false,
+                        200,
+                        Set.of()),
+                new NativeFetchOptions(
+                        false,
+                        false,
+                        false,
+                        false,
+                        1,
+                        NativeObjectFilter.NONE,
+                        Set.of(),
+                        Set.of(),
+                        false,
+                        -1,
+                        Set.of("refs/heads/main")),
+                new NativeFetchOptions(
                         false,
                         false,
                         false,
@@ -141,16 +403,22 @@ class NativeGitRepositoryShallowFetchTest {
                         NativeObjectFilter.NONE,
                         Set.of(),
                         Set.of(),
-                        Set.of(),
-                        false,
-                        1_700_000_000L,
-                        Set.of("refs/heads/main"))))
-                .isInstanceOfSatisfying(
-                        GitUploadPackException.class,
-                        error -> assertThat(error.kind())
-                                .isEqualTo(
-                                        GitUploadPackException.Kind
-                                                .UNSUPPORTED_FEATURE));
+                        true,
+                        -1,
+                        Set.of()))) {
+            assertThatThrownBy(() -> repository.fetchResponse(
+                    new NativeFetchRequest(
+                            Set.of(want),
+                            Set.of(),
+                            true,
+                            Set.of(),
+                            options)))
+                    .isInstanceOfSatisfying(
+                            GitUploadPackException.class,
+                            error -> assertThat(error.kind())
+                                    .isEqualTo(GitUploadPackException.Kind
+                                            .INVALID_REQUEST));
+        }
     }
 
     private static CompositeByteBuf produce(
@@ -192,6 +460,15 @@ class NativeGitRepositoryShallowFetchTest {
             GitObjectId tree,
             GitObjectId parent,
             String message) {
+        return writeCommit(objects, tree, parent, message, 0);
+    }
+
+    private static GitObjectId writeCommit(
+            LooseObjectStore objects,
+            GitObjectId tree,
+            GitObjectId parent,
+            String message,
+            long committerTimestamp) {
         StringBuilder data = new StringBuilder()
                 .append("tree ")
                 .append(tree)
@@ -200,7 +477,9 @@ class NativeGitRepositoryShallowFetchTest {
             data.append("parent ").append(parent).append('\n');
         }
         data.append("author Test <test@example.com> 0 +0000\n")
-                .append("committer Test <test@example.com> 0 +0000\n")
+                .append("committer Test <test@example.com> ")
+                .append(committerTimestamp)
+                .append(" +0000\n")
                 .append('\n')
                 .append(message)
                 .append('\n');

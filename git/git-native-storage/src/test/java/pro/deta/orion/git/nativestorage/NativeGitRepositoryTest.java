@@ -21,6 +21,7 @@ import pro.deta.orion.git.nativestorage.pack.PublishedPack;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.GitUploadPackException;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
@@ -123,12 +124,11 @@ class NativeGitRepositoryTest {
 
         CompositeByteBuf pack = produce(repository.fetch(
                 new NativeFetchRequest(
-                Set.of(wanted, have),
-                Set.of(have),
-                true,
-                true,
-                true,
-                false)));
+                        Set.of(wanted, have),
+                        Set.of(have),
+                        true,
+                        Set.of(),
+                        NativeFetchOptions.initial(true, true, false))));
 
         try {
             assertThat(pack.getCharSequence(
@@ -169,9 +169,8 @@ class NativeGitRepositoryTest {
                         Set.of(blob),
                         Set.of(),
                         true,
-                        false,
-                        false,
-                        true)));
+                        Set.of(),
+                        NativeFetchOptions.initial(false, false, true))));
 
         try {
             assertThat(pack.getInt(8)).isEqualTo(2);
@@ -201,12 +200,14 @@ class NativeGitRepositoryTest {
                         Set.of(commit),
                         Set.of(),
                         true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        0,
-                        NativeObjectFilter.BLOB_NONE));
+                        Set.of(),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                NativeObjectFilter.BLOB_NONE,
+                                Set.of())));
         CompositeByteBuf pack = produce(response.packProducer());
 
         try {
@@ -238,14 +239,14 @@ class NativeGitRepositoryTest {
                         Set.of(blob),
                         Set.of(),
                         true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        0,
-                        NativeObjectFilter.NONE,
                         Set.of(),
-                        Set.of("https")),
+                        new NativeFetchOptions(
+                                false,
+                                false,
+                                false,
+                                false,
+                                NativeObjectFilter.NONE,
+                                Set.of("https"))),
                 (objectIds, protocols) ->
                         new NativePackfileUriSelection(
                                 List.of(uri),
@@ -277,8 +278,8 @@ class NativeGitRepositoryTest {
                         Set.of(blob),
                         Set.of(),
                         true,
-                        false,
-                        false),
+                        Set.of(),
+                        NativeFetchOptions.initial(false, false, false)),
                 (objectIds, protocols) ->
                         new NativePackfileUriSelection(
                                 List.of(new NativePackfileUri(
@@ -327,9 +328,8 @@ class NativeGitRepositoryTest {
                         Set.of(first.objectId(), second.objectId()),
                         Set.of(),
                         true,
-                        true,
-                        true,
-                        false)));
+                        Set.of(),
+                        NativeFetchOptions.initial(true, true, false))));
 
         try {
             byte[] generatedPack = ByteBufUtil.getBytes(fetchPack);
@@ -359,17 +359,15 @@ class NativeGitRepositoryTest {
                         Set.of(blobs.first(), blobs.second()),
                         Set.of(),
                         true,
-                        true,
-                        false,
-                        false)));
+                        Set.of(),
+                        NativeFetchOptions.initial(true, false, false))));
         byte[] deltaPack = produceBytes(repository.fetch(
                 new NativeFetchRequest(
                         Set.of(blobs.first(), blobs.second()),
                         Set.of(),
                         true,
-                        false,
-                        true,
-                        false)));
+                        Set.of(),
+                        NativeFetchOptions.initial(false, true, false))));
 
         assertThat(packEntryTypes(thinOnlyPack)).doesNotContain(7);
         assertThat(packEntryTypes(deltaPack)).contains(7);
@@ -392,9 +390,8 @@ class NativeGitRepositoryTest {
                         Set.of(blobs.second()),
                         Set.of(blobs.first()),
                         true,
-                        true,
-                        true,
-                        false)));
+                        Set.of(),
+                        NativeFetchOptions.initial(true, true, false))));
 
         assertThat(packEntryTypes(thinPack)).containsExactly(7);
         assertThat(refDeltaBaseIds(thinPack))
@@ -418,9 +415,8 @@ class NativeGitRepositoryTest {
                         Set.of(blobs.second()),
                         Set.of(blobs.first()),
                         true,
-                        false,
-                        true,
-                        false)));
+                        Set.of(),
+                        NativeFetchOptions.initial(false, true, false))));
 
         assertThat(packEntryTypes(pack))
                 .containsExactly(ObjectType.BLOB.packTypeId());
@@ -441,9 +437,8 @@ class NativeGitRepositoryTest {
                         Set.of(blobs.second()),
                         Set.of(GitObjectId.of("a".repeat(40))),
                         true,
-                        true,
-                        true,
-                        false)));
+                        Set.of(),
+                        NativeFetchOptions.initial(true, true, false))));
 
         assertThat(packEntryTypes(pack))
                 .containsExactly(ObjectType.BLOB.packTypeId());
@@ -468,13 +463,8 @@ class NativeGitRepositoryTest {
                         Set.of(),
                         Set.of(),
                         true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        0,
-                        NativeObjectFilter.NONE,
-                        Set.of("refs/heads/main")));
+                        Set.of("refs/heads/main"),
+                        NativeFetchOptions.DEFAULT));
         CompositeByteBuf pack = produce(response.packProducer());
 
         try {
@@ -577,13 +567,8 @@ class NativeGitRepositoryTest {
                         Set.of(),
                         Set.of(),
                         true,
-                        false,
-                        false,
-                        false,
-                        false,
-                        0,
-                        NativeObjectFilter.NONE,
-                        Set.of("refs/heads/missing"))))
+                        Set.of("refs/heads/missing"),
+                        NativeFetchOptions.DEFAULT)))
                 .isInstanceOfSatisfying(
                         GitUploadPackException.class,
                         error -> assertThat(error.kind())
