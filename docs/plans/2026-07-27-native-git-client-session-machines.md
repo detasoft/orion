@@ -1,6 +1,12 @@
 # Native Git Client Session Machines Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+Status: superseded by
+`docs/plans/2026-09-01-virtual-thread-native-git-clients.md`.
+
+Do not execute this plan. Native upload-pack and receive-pack clients should use
+ordinary blocking control flow on virtual threads, not `GitClientMachine`
+actions or `ContinuationRuntime`. This file is retained only as historical
+design context.
 
 **Goal:** Add native upload-pack and receive-pack clients whose service-specific
 state machines are driven over a transport session by one shared session

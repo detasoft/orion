@@ -1,5 +1,12 @@
 # Completion-Aware Native Client Output Design
 
+Status: superseded by
+`docs/plans/2026-08-31-blocking-git-native-client-output.md`.
+
+The asynchronous ownership model below is historical. Native Git sessions now
+use blocking `BufferedByteOutput` writes on virtual threads, so neither the
+double-buffer coordinator nor the proposed ring buffer is current architecture.
+
 ## Goal
 
 Replace per-send output copies with a completion-aware buffering contract that
@@ -162,4 +169,3 @@ Ring-buffer tests additionally cover:
 - out-of-order write completion;
 - ordered reclamation;
 - failure and close with wrapped in-flight ranges.
-

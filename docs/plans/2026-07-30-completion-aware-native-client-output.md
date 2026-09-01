@@ -1,6 +1,11 @@
 # Completion-Aware Native Client Output Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+Status: superseded by
+`docs/plans/2026-08-31-blocking-git-native-client-output.md`.
+
+Do not execute this plan. The asynchronous coordinator and its proposed ring
+buffer were removed when native Git sessions moved to blocking writes on
+virtual threads. This file is retained only as historical design context.
 
 **Goal:** Replace copied native Git output chunks with a completion-aware buffering API, implement double buffering, and leave a tested boundary for a later ring buffer.
 
@@ -244,4 +249,3 @@ mvn verify -Pdev -T 4
 ```
 
 Expected: `BUILD SUCCESS`.
-
