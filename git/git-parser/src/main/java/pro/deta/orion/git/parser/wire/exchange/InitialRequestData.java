@@ -69,7 +69,8 @@ public final class InitialRequestData {
                     return version;
                 }
             }
-            throw new IllegalArgumentException("Unsupported Git protocol version '" + wireValue + "'");
+            throw new IllegalArgumentException(
+                    "Unsupported Git protocol version '" + wireValue + "'");
         }
     }
 }

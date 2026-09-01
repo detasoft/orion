@@ -13,6 +13,7 @@ import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
 import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
@@ -22,10 +23,8 @@ import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -41,32 +40,20 @@ public class OrionGitRoute implements OrionHttpRoute {
     private static final String CACHE_CONTROL = "Cache-Control";
     private static final String NO_CACHE = "no-cache";
     private static final String GIT_PROTOCOL_HEADER = "Git-Protocol";
-    private static final String UPLOAD_ADVERTISEMENT_TYPE =
-            "application/x-git-upload-pack-advertisement";
-    private static final String RECEIVE_ADVERTISEMENT_TYPE =
-            "application/x-git-receive-pack-advertisement";
-    private static final String UPLOAD_REQUEST_TYPE =
-            "application/x-git-upload-pack-request";
-    private static final String RECEIVE_REQUEST_TYPE =
-            "application/x-git-receive-pack-request";
-    private static final String UPLOAD_RESULT_TYPE =
-            "application/x-git-upload-pack-result";
-    private static final String RECEIVE_RESULT_TYPE =
-            "application/x-git-receive-pack-result";
+    private static final String UPLOAD_ADVERTISEMENT_TYPE = "application/x-git-upload-pack-advertisement";
+    private static final String RECEIVE_ADVERTISEMENT_TYPE = "application/x-git-receive-pack-advertisement";
+    private static final String UPLOAD_REQUEST_TYPE = "application/x-git-upload-pack-request";
+    private static final String RECEIVE_REQUEST_TYPE = "application/x-git-receive-pack-request";
+    private static final String UPLOAD_RESULT_TYPE = "application/x-git-upload-pack-result";
+    private static final String RECEIVE_RESULT_TYPE = "application/x-git-receive-pack-result";
 
     private final NativeGitRepositoryProvider nativeRepositoryProvider;
     private final GitTransportConfig gitTransportConfig;
 
     @Inject
-    public OrionGitRoute(
-            NativeGitRepositoryProvider nativeRepositoryProvider,
-            GitTransportConfig gitTransportConfig) {
-        this.nativeRepositoryProvider = Objects.requireNonNull(
-                nativeRepositoryProvider,
-                "nativeRepositoryProvider");
-        this.gitTransportConfig = Objects.requireNonNull(
-                gitTransportConfig,
-                "gitTransportConfig");
+    public OrionGitRoute(NativeGitRepositoryProvider nativeRepositoryProvider, GitTransportConfig gitTransportConfig) {
+        this.nativeRepositoryProvider = Objects.requireNonNull(nativeRepositoryProvider, "nativeRepositoryProvider");
+        this.gitTransportConfig = Objects.requireNonNull(gitTransportConfig, "gitTransportConfig");
     }
 
     @Override
@@ -85,11 +72,7 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     @Override
-    public void handle(
-            HttpServletRequest req,
-            HttpServletResponse resp,
-            OrionHttpResponseWriter responseWriter)
-            throws IOException, ServletException {
+    public void handle(HttpServletRequest req, HttpServletResponse resp, OrionHttpResponseWriter responseWriter) throws IOException, ServletException {
         String method = req.getMethod().toUpperCase(Locale.ROOT);
         if (!ALLOWED_METHODS.contains(method)) {
             resp.setHeader("Allow", String.join(", ", ALLOWED_METHODS));
@@ -99,10 +82,7 @@ public class OrionGitRoute implements OrionHttpRoute {
         handleNative(req, resp);
     }
 
-    private void handleNative(
-            HttpServletRequest req,
-            HttpServletResponse resp)
-            throws IOException {
+    private void handleNative(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         Optional<NativeHttpRequest> nativeRequest = nativeRequest(req);
         if (nativeRequest.isEmpty()) {
             resp.sendError(SC_BAD_REQUEST);
@@ -133,56 +113,53 @@ public class OrionGitRoute implements OrionHttpRoute {
     private void handleNativeDiscovery(
             HttpServletRequest req,
             HttpServletResponse resp,
-            NativeHttpRequest request)
-            throws IOException {
+            NativeHttpRequest request) throws IOException {
         resp.setStatus(SC_OK);
         resp.setContentType(advertisementContentType(request.service()));
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
-        OutputStreamBufferedByteOutput output =
-                new OutputStreamBufferedByteOutput(resp.getOutputStream());
-        GitBlockingWireTransport wire =
-                new GitBlockingWireTransport(output);
-        NativePackfileUriSourceFactory packfileUriSourceFactory =
-                packfileUriSourceFactory(req);
-        if (request.data().getProtocolVersion()
-                .filter(InitialRequestData.ProtocolVersion.V2::equals)
-                .isEmpty()) {
-            writeServiceAnnouncement(wire, request.service());
+        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(req.getInputStream())) {
+            OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(resp.getOutputStream());
+            GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
+                    input,
+                    output,
+                    request.service(),
+                    request.repositoryPath(),
+                    requestHost(req),
+                    req.getHeader(GIT_PROTOCOL_HEADER));
+            NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
+            if (bootstrap.data()
+                    .getProtocolVersion()
+                    .filter(InitialRequestData.ProtocolVersion.V2::equals)
+                    .isEmpty()) {
+                writeServiceAnnouncement(bootstrap.wire(), request.service());
+            }
+            session(req, packfileUriSourceFactory, bootstrap.wire()).advertise(bootstrap.data());
         }
-        session(
-                req,
-                packfileUriSourceFactory,
-                wire)
-                .advertise(request.data());
     }
 
     private void handleNativePost(
             HttpServletRequest req,
             HttpServletResponse resp,
-            NativeHttpRequest request)
-            throws IOException {
-        if (!contentTypeMatches(
-                req.getContentType(),
-                requestContentType(request.service()))) {
+            NativeHttpRequest request) throws IOException {
+        if (!contentTypeMatches(req.getContentType(), requestContentType(request.service()))) {
             resp.sendError(SC_BAD_REQUEST);
             return;
         }
         resp.setStatus(SC_OK);
         resp.setContentType(resultContentType(request.service()));
         resp.setHeader(CACHE_CONTROL, NO_CACHE);
-        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
-                req.getInputStream())) {
-            OutputStreamBufferedByteOutput output =
-                    new OutputStreamBufferedByteOutput(resp.getOutputStream());
-            GitBlockingWireTransport wire =
-                    new GitBlockingWireTransport(input, output);
-            NativePackfileUriSourceFactory packfileUriSourceFactory =
-                    packfileUriSourceFactory(req);
-            session(
-                    req,
-                    packfileUriSourceFactory,
-                    wire)
-                    .serveSmartHttpPost(request.data());
+        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(req.getInputStream())) {
+            OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(resp.getOutputStream());
+            GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
+                    input,
+                    output,
+                    request.service(),
+                    request.repositoryPath(),
+                    requestHost(req),
+                    req.getHeader(GIT_PROTOCOL_HEADER));
+            NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
+            session(req, packfileUriSourceFactory, bootstrap.wire())
+                    .serveSmartHttpPost(bootstrap.data());
         }
     }
 
@@ -200,13 +177,9 @@ public class OrionGitRoute implements OrionHttpRoute {
                 wire);
     }
 
-    private NativePackfileUriSourceFactory packfileUriSourceFactory(
-            HttpServletRequest request) {
-        GitPackfileUriConfig packfileUri = gitTransportConfig == null
-                ? null
-                : gitTransportConfig.getPackfileUri();
-        Optional<String> baseUri =
-                OrionGitPackfileUriBaseResolver.resolve(request, packfileUri);
+    private NativePackfileUriSourceFactory packfileUriSourceFactory(HttpServletRequest request) {
+        GitPackfileUriConfig packfileUri = gitTransportConfig == null ? null : gitTransportConfig.getPackfileUri();
+        Optional<String> baseUri = OrionGitPackfileUriBaseResolver.resolve(request, packfileUri);
         if (baseUri.isEmpty()) {
             return NativePackfileUriSourceFactory.NONE;
         }
@@ -218,8 +191,7 @@ public class OrionGitRoute implements OrionHttpRoute {
                         packId));
     }
 
-    private Optional<NativeHttpRequest> nativeRequest(
-            HttpServletRequest request) {
+    private Optional<NativeHttpRequest> nativeRequest(HttpServletRequest request) {
         String method = request.getMethod().toUpperCase(Locale.ROOT);
         String path = stripRoutePrefix(routePath(request));
         if ("GET".equals(method) && path.endsWith("/info/refs")) {
@@ -227,35 +199,21 @@ public class OrionGitRoute implements OrionHttpRoute {
             if (service == null) {
                 return Optional.empty();
             }
-            String repositoryPath = path.substring(
-                    0,
-                    path.length() - "/info/refs".length());
-            return Optional.of(NativeHttpRequest.discovery(
-                    initialRequestData(request, service, repositoryPath)));
+            String repositoryPath = path.substring(0, path.length() - "/info/refs".length());
+            return Optional.of(NativeHttpRequest.discovery(service, repositoryPath));
         }
         if ("POST".equals(method) && path.endsWith("/git-upload-pack")) {
-            String repositoryPath = path.substring(
-                    0,
-                    path.length() - "/git-upload-pack".length());
-            return Optional.of(NativeHttpRequest.post(initialRequestData(
-                    request,
-                    InitialRequestService.UPLOAD_PACK,
-                    repositoryPath)));
+            String repositoryPath = path.substring(0, path.length() - "/git-upload-pack".length());
+            return Optional.of(NativeHttpRequest.post(InitialRequestService.UPLOAD_PACK, repositoryPath));
         }
         if ("POST".equals(method) && path.endsWith("/git-receive-pack")) {
-            String repositoryPath = path.substring(
-                    0,
-                    path.length() - "/git-receive-pack".length());
-            return Optional.of(NativeHttpRequest.post(initialRequestData(
-                    request,
-                    InitialRequestService.RECEIVE_PACK,
-                    repositoryPath)));
+            String repositoryPath = path.substring(0, path.length() - "/git-receive-pack".length());
+            return Optional.of(NativeHttpRequest.post(InitialRequestService.RECEIVE_PACK, repositoryPath));
         }
         return Optional.empty();
     }
 
-    private static InitialRequestService serviceParameter(
-            HttpServletRequest request) {
+    private static InitialRequestService serviceParameter(HttpServletRequest request) {
         try {
             String service = request.getParameter("service");
             if (service == null || service.isBlank()) {
@@ -265,36 +223,6 @@ public class OrionGitRoute implements OrionHttpRoute {
         } catch (RuntimeException error) {
             return null;
         }
-    }
-
-    private InitialRequestData initialRequestData(
-            HttpServletRequest request,
-            InitialRequestService service,
-            String repositoryPath) {
-        return new InitialRequestData(
-                service,
-                normalizeNativeRepositoryName(repositoryPath),
-                requestHost(request),
-                gitProtocolParameters(request.getHeader(GIT_PROTOCOL_HEADER)));
-    }
-
-    private static Map<String, String> gitProtocolParameters(String value) {
-        if (value == null || value.isBlank()) {
-            return Map.of();
-        }
-        Map<String, String> parameters = new LinkedHashMap<>();
-        for (String token : value.split(":")) {
-            int separator = token.indexOf('=');
-            if (separator <= 0) {
-                continue;
-            }
-            String name = token.substring(0, separator).trim();
-            String parameterValue = token.substring(separator + 1).trim();
-            if ("version".equals(name) && !parameterValue.isEmpty()) {
-                parameters.put(name, parameterValue);
-            }
-        }
-        return Map.copyOf(parameters);
     }
 
     private static String requestHost(HttpServletRequest request) {
@@ -307,47 +235,34 @@ public class OrionGitRoute implements OrionHttpRoute {
 
     private static void writeServiceAnnouncement(
             GitBlockingWireTransport wire,
-            InitialRequestService service)
-            throws IOException {
+            InitialRequestService service) throws IOException {
         wire.writeTextLine("# service=" + service.wireName());
         wire.writeFlush();
     }
 
-    private static String advertisementContentType(
-            InitialRequestService service) {
-        return service == InitialRequestService.UPLOAD_PACK
-                ? UPLOAD_ADVERTISEMENT_TYPE
-                : RECEIVE_ADVERTISEMENT_TYPE;
+    private static String advertisementContentType(InitialRequestService service) {
+        return service == InitialRequestService.UPLOAD_PACK ? UPLOAD_ADVERTISEMENT_TYPE : RECEIVE_ADVERTISEMENT_TYPE;
     }
 
     private static String requestContentType(InitialRequestService service) {
-        return service == InitialRequestService.UPLOAD_PACK
-                ? UPLOAD_REQUEST_TYPE
-                : RECEIVE_REQUEST_TYPE;
+        return service == InitialRequestService.UPLOAD_PACK ? UPLOAD_REQUEST_TYPE : RECEIVE_REQUEST_TYPE;
     }
 
     private static String resultContentType(InitialRequestService service) {
-        return service == InitialRequestService.UPLOAD_PACK
-                ? UPLOAD_RESULT_TYPE
-                : RECEIVE_RESULT_TYPE;
+        return service == InitialRequestService.UPLOAD_PACK ? UPLOAD_RESULT_TYPE : RECEIVE_RESULT_TYPE;
     }
 
-    private static boolean contentTypeMatches(
-            String actual,
-            String expected) {
+    private static boolean contentTypeMatches(String actual, String expected) {
         if (actual == null) {
             return false;
         }
-        return actual.split(";", 2)[0]
-                .trim()
-                .equalsIgnoreCase(expected);
+        return actual.split(";", 2)[0].trim().equalsIgnoreCase(expected);
     }
 
     private static boolean causedByAccessDenied(Throwable error) {
         Throwable current = error;
         while (current != null) {
-            if (current instanceof GitNativeRepositoryAccessHook
-                    .AccessDeniedException) {
+            if (current instanceof GitNativeRepositoryAccessHook.AccessDeniedException) {
                 return true;
             }
             current = current.getCause();
@@ -359,8 +274,7 @@ public class OrionGitRoute implements OrionHttpRoute {
         Throwable current = error;
         while (current != null) {
             String message = current.getMessage();
-            if (message != null
-                    && message.contains("Native repository does not exist")) {
+            if (message != null && message.contains("Native repository does not exist")) {
                 return true;
             }
             current = current.getCause();
@@ -368,39 +282,21 @@ public class OrionGitRoute implements OrionHttpRoute {
         return false;
     }
 
-    private static String normalizeNativeRepositoryName(
-            String rawRepositoryName) {
-        String repositoryName = rawRepositoryName == null ? "" : rawRepositoryName;
-        while (repositoryName.startsWith("/")) {
-            repositoryName = repositoryName.substring(1);
-        }
-        repositoryName = repositoryName.replaceFirst("\\.git$", "");
-        if (repositoryName.isBlank()
-                || repositoryName.contains("\0")
-                || repositoryName.contains("\\")
-                || repositoryName.contains("..")) {
-            throw new IllegalArgumentException(
-                    "Invalid Git repository path");
-        }
-        return repositoryName;
-    }
-
     private record NativeHttpRequest(
             boolean discovery,
-            InitialRequestData data) {
-
-        private InitialRequestService service() {
-            return data.getService();
-        }
+            InitialRequestService service,
+            String repositoryPath) {
 
         private static NativeHttpRequest discovery(
-                InitialRequestData data) {
-            return new NativeHttpRequest(true, data);
+                InitialRequestService service,
+                String repositoryPath) {
+            return new NativeHttpRequest(true, service, repositoryPath);
         }
 
         private static NativeHttpRequest post(
-                InitialRequestData data) {
-            return new NativeHttpRequest(false, data);
+                InitialRequestService service,
+                String repositoryPath) {
+            return new NativeHttpRequest(false, service, repositoryPath);
         }
     }
 

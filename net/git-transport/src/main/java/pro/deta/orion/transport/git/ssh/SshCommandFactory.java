@@ -22,7 +22,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
 import pro.deta.orion.git.nativestorage.upload.PublishedPackfileUriSource;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
-import pro.deta.orion.git.parser.wire.GitBlockingWireTransport;
+import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
@@ -42,9 +42,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
@@ -293,8 +291,11 @@ public class SshCommandFactory implements CommandFactory {
                     OutputStreamBufferedByteOutput output =
                             new OutputStreamBufferedByteOutput(
                                     streams.getOutputStream());
-                    GitBlockingWireTransport wire =
-                            new GitBlockingWireTransport(input, output);
+                    GitWireBootstrap bootstrap = GitWireBootstrap.sshCommand(
+                            input,
+                            output,
+                            commandLine,
+                            gitProtocol(environment));
                     try {
                         new GitBlockingWireSession(
                                 nativeRepositoryProvider,
@@ -302,11 +303,8 @@ public class SshCommandFactory implements CommandFactory {
                                         securityContext),
                                 GitWireConfiguration.allSupported(),
                                 packfileUriSourceFactory(),
-                                wire)
-                                .serveCommand(
-                                        initialRequestData(
-                                                commandLine,
-                                                environment));
+                                bootstrap.wire())
+                                .serveCommand(bootstrap.data());
                     } catch (Exception error) {
                         writeGitProtocolException(
                                 streams.getOutputStream(),
@@ -416,101 +414,16 @@ public class SshCommandFactory implements CommandFactory {
     static InitialRequestData initialRequestData(
             String commandLine,
             Environment environment) {
-        GitSshRequest request = parseGitSshCommand(commandLine);
-        return new InitialRequestData(
-                request.service(),
-                request.repositoryPath(),
-                null,
-                gitProtocolParameters(environment));
+        return GitWireBootstrap.sshCommandData(
+                commandLine,
+                gitProtocol(environment));
     }
 
-    private static GitSshRequest parseGitSshCommand(String commandLine) {
-        String value = commandLine == null ? "" : commandLine.trim();
-        int firstSeparator = firstWhitespace(value);
-        if (firstSeparator <= 0) {
-            throw new IllegalArgumentException(
-                    "Malformed Git SSH command: " + commandLine);
-        }
-        String serviceName = value.substring(0, firstSeparator);
-        String repository = parseRepositoryArgument(
-                value.substring(firstSeparator).trim());
-        return new GitSshRequest(
-                InitialRequestService.fromWireName(serviceName),
-                normalizeRepositoryPath(repository));
-    }
-
-    private static String parseRepositoryArgument(String value) {
-        if (value.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Malformed Git SSH command: missing repository");
-        }
-        if (value.charAt(0) != '\'') {
-            String[] parts = value.split("\\s+", -1);
-            if (parts.length != 1) {
-                throw new IllegalArgumentException(
-                        "Malformed Git SSH command: too many arguments");
-            }
-            return parts[0];
-        }
-        int closingQuote = value.indexOf('\'', 1);
-        if (closingQuote < 0
-                || !value.substring(closingQuote + 1).trim().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Malformed Git SSH command: invalid repository quoting");
-        }
-        return value.substring(1, closingQuote);
-    }
-
-    private static int firstWhitespace(String value) {
-        for (int index = 0; index < value.length(); index++) {
-            if (Character.isWhitespace(value.charAt(index))) {
-                return index;
-            }
-        }
-        return -1;
-    }
-
-    private static String normalizeRepositoryPath(String repository) {
-        String normalized = repository == null ? "" : repository.trim();
-        while (normalized.startsWith("/")) {
-            normalized = normalized.substring(1);
-        }
-        normalized = normalized.replaceFirst("\\.git$", "");
-        if (normalized.isBlank()
-                || normalized.contains("\0")
-                || normalized.contains("\\")
-                || normalized.contains("..")) {
-            throw new IllegalArgumentException(
-                    "Malformed Git SSH repository path");
-        }
-        return normalized;
-    }
-
-    private static Map<String, String> gitProtocolParameters(
-            Environment environment) {
+    private static String gitProtocol(Environment environment) {
         if (environment == null) {
-            return Map.of();
+            return null;
         }
-        return gitProtocolParameters(environment.getEnv().get("GIT_PROTOCOL"));
-    }
-
-    private static Map<String, String> gitProtocolParameters(String value) {
-        if (value == null || value.isBlank()) {
-            return Map.of();
-        }
-        Map<String, String> parameters = new LinkedHashMap<>();
-        for (String token : value.split(":")) {
-            int separator = token.indexOf('=');
-            if (separator <= 0) {
-                continue;
-            }
-            String name = token.substring(0, separator).trim();
-            String parameterValue = token.substring(separator + 1).trim();
-            if ("version".equals(name) && !parameterValue.isEmpty()) {
-                parameters.put(name, parameterValue);
-            }
-        }
-        return Map.copyOf(parameters);
+        return environment.getEnv().get("GIT_PROTOCOL");
     }
 
     private NativePackfileUriSourceFactory packfileUriSourceFactory() {
@@ -531,8 +444,4 @@ public class SshCommandFactory implements CommandFactory {
                         packId));
     }
 
-    private record GitSshRequest(
-            InitialRequestService service,
-            String repositoryPath) {
-    }
 }

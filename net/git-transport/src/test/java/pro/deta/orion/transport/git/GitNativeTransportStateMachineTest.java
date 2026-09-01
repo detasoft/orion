@@ -3,11 +3,18 @@ package pro.deta.orion.transport.git;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.lifecycle.state.*;
 import pro.deta.orion.lifecycle.state.Void;
+import pro.deta.orion.util.Result;
 
+import java.io.OutputStream;
 import java.lang.reflect.Constructor;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,6 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -30,6 +38,64 @@ import static pro.deta.orion.lifecycle.state.StateMachineEventType.TRANSITION_ST
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.*;
 
 class GitNativeTransportStateMachineTest {
+    @Test
+    void disabledNativeTransportDoesNotBindSocket() {
+        GitNativeTransportService service = new GitNativeTransportService(
+                config(false),
+                new InMemoryNativeGitRepositoryProvider());
+
+        service.onStart();
+
+        assertFalse(service.isRunning());
+        assertEquals(0, service.boundPort());
+    }
+
+    @Test
+    void enabledNativeTransportBindsLoopbackPortZero() {
+        GitNativeTransportService service = new GitNativeTransportService(
+                config(true),
+                new InMemoryNativeGitRepositoryProvider());
+
+        try {
+            service.onStart();
+
+            assertTrue(service.isRunning());
+            assertTrue(service.boundPort() > 0);
+        } finally {
+            service.onStop();
+        }
+
+        assertFalse(service.isRunning());
+    }
+
+    @Test
+    void acceptedNativeConnectionRunsOnVirtualThread() throws Exception {
+        CountDownLatch handled = new CountDownLatch(1);
+        AtomicBoolean virtualThread = new AtomicBoolean();
+        RecordingNativeGitRepositoryProvider provider =
+                new RecordingNativeGitRepositoryProvider(
+                        handled,
+                        virtualThread);
+        GitNativeTransportService service = new GitNativeTransportService(
+                config(true),
+                provider);
+
+        try {
+            service.onStart();
+            try (Socket socket = new Socket("127.0.0.1", service.boundPort())) {
+                OutputStream output = socket.getOutputStream();
+                output.write("002dgit-upload-pack /repo.git\0host=localhost\0"
+                        .getBytes(StandardCharsets.US_ASCII));
+                output.flush();
+                assertTrue(handled.await(5, TimeUnit.SECONDS));
+            }
+        } finally {
+            service.onStop();
+        }
+
+        assertTrue(virtualThread.get());
+    }
+
     @Test
     void nativeGitStateMachineUsesGenericServiceLifecycleAdapter() {
         assertTrue(ServiceLifecycleStateMachineAdapter.class.isAssignableFrom(GitNativeTransportStateMachine.class));
@@ -262,6 +328,39 @@ class GitNativeTransportStateMachineTest {
         GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
         config.setEnabled(enabled);
         return config;
+    }
+
+    private static final class RecordingNativeGitRepositoryProvider
+            implements NativeGitRepositoryProvider {
+        private final InMemoryNativeGitRepositoryProvider delegate =
+                new InMemoryNativeGitRepositoryProvider();
+        private final CountDownLatch handled;
+        private final AtomicBoolean virtualThread;
+
+        private RecordingNativeGitRepositoryProvider(
+                CountDownLatch handled,
+                AtomicBoolean virtualThread) {
+            this.handled = handled;
+            this.virtualThread = virtualThread;
+            delegate.create("repo");
+        }
+
+        @Override
+        public boolean exists(String repositoryName) {
+            return delegate.exists(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> find(String repositoryName) {
+            virtualThread.set(Thread.currentThread().isVirtual());
+            handled.countDown();
+            return delegate.find(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> create(String repositoryName) {
+            return delegate.create(repositoryName);
+        }
     }
 
 }
