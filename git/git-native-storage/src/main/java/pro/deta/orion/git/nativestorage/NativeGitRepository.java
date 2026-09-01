@@ -17,6 +17,7 @@ import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchPackBuilder;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSource;
 
 import java.util.List;
@@ -198,5 +199,12 @@ public class NativeGitRepository implements AutoCloseable {
                         packfileUriSource,
                         "packfileUriSource"))
                 .build(request);
+    }
+
+    public boolean legacyUploadReady(
+            Iterable<GitObjectId> wants,
+            Iterable<GitObjectId> commonHaves) {
+        return new NativeObjectClosure(this::readObject)
+                .allRootsReachAny(wants, commonHaves);
     }
 }

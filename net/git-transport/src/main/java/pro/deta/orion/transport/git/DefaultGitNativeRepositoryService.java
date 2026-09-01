@@ -191,6 +191,21 @@ public final class DefaultGitNativeRepositoryService
     }
 
     @Override
+    public boolean legacyUploadReady(
+            InitialRequestData data,
+            Iterable<GitObjectId> wants,
+            Iterable<GitObjectId> commonHaves,
+            GitNativeRepositoryAccessHook accessHook) {
+        Objects.requireNonNull(data, "data");
+        Objects.requireNonNull(wants, "wants");
+        Objects.requireNonNull(commonHaves, "commonHaves");
+        NativeGitRepository repository = findOrFail(
+                data.getRepositoryPath(),
+                accessHook);
+        return repository.legacyUploadReady(wants, commonHaves);
+    }
+
+    @Override
     public PackIngestionSession beginLegacyReceivePack(
             InitialRequestData data,
             GitNativeRepositoryAccessHook accessHook) {

@@ -95,11 +95,17 @@ public final class GitBlockingWireSession {
 
     public void serveCommand(InitialRequestData data) throws IOException {
         advertise(data);
-        serveSmartHttpPost(data);
+        serveRequest(data, false);
     }
 
     public void serveSmartHttpPost(InitialRequestData data)
             throws IOException {
+        serveRequest(data, true);
+    }
+
+    private void serveRequest(
+            InitialRequestData data,
+            boolean stateless) throws IOException {
         Objects.requireNonNull(data, "data");
         InitialRequestData.ProtocolVersion version =
                 data.getProtocolVersion().orElse(null);
@@ -114,7 +120,7 @@ public final class GitBlockingWireSession {
             return;
         }
         if (data.getService() == InitialRequestService.UPLOAD_PACK) {
-            serveLegacyUpload(data);
+            serveLegacyUpload(data, stateless);
             return;
         }
         serveLegacyReceive(data);
@@ -342,7 +348,9 @@ public final class GitBlockingWireSession {
         }
     }
 
-    private void serveLegacyUpload(InitialRequestData data)
+    private void serveLegacyUpload(
+            InitialRequestData data,
+            boolean stateless)
             throws IOException {
         GitV1Advertisement advertisement =
                 repositoryService.legacyUploadPackAdvertisement(
@@ -352,7 +360,7 @@ public final class GitBlockingWireSession {
         LegacyUploadRequest request = readLegacyUploadRequest(
                 data,
                 advertisement);
-        readLegacyUploadNegotiation(request);
+        readLegacyUploadNegotiation(request, stateless);
     }
 
     private LegacyUploadRequest readLegacyUploadRequest(
@@ -422,8 +430,10 @@ public final class GitBlockingWireSession {
     }
 
     private void readLegacyUploadNegotiation(
-            LegacyUploadRequest request) throws IOException {
+            LegacyUploadRequest request,
+            boolean stateless) throws IOException {
         Set<GitObjectId> haves = new LinkedHashSet<>();
+        Set<GitObjectId> commonHaves = new LinkedHashSet<>();
         GitObjectId lastCommon = null;
         while (true) {
             ControlState control = wire.readControlState();
@@ -433,11 +443,6 @@ public final class GitBlockingWireSession {
                     if ("done".equals(line)) {
                         if (lastCommon == null) {
                             wire.sendNak();
-                        } else if (request.negotiated(
-                                GitCapability.MULTI_ACK_DETAILED)) {
-                            wire.sendAck(
-                                    lastCommon,
-                                    GitBlockingWireTransport.AckStatus.READY);
                         } else {
                             wire.sendAck(
                                     lastCommon,
@@ -455,6 +460,7 @@ public final class GitBlockingWireSession {
                         continue;
                     }
                     lastCommon = have;
+                    commonHaves.add(have);
                     if (request.negotiated(GitCapability.MULTI_ACK_DETAILED)) {
                         wire.sendAck(
                                 have,
@@ -465,7 +471,24 @@ public final class GitBlockingWireSession {
                                 GitBlockingWireTransport.AckStatus.CONTINUE);
                     }
                 }
-                case FLUSH -> wire.sendNak();
+                case FLUSH -> {
+                    if (lastCommon != null
+                            && request.negotiated(
+                                    GitCapability.MULTI_ACK_DETAILED)
+                            && repositoryService.legacyUploadReady(
+                                    request.initialRequest(),
+                                    request.wants(),
+                                    commonHaves,
+                                    accessHook)) {
+                        wire.sendAck(
+                                lastCommon,
+                                GitBlockingWireTransport.AckStatus.READY);
+                    }
+                    wire.sendNak();
+                    if (stateless) {
+                        return;
+                    }
+                }
                 case DELIMITER, RESPONSE_END ->
                         throw invalidLegacyUploadRequest(
                                 GitWireError.Kind

@@ -14,15 +14,24 @@ import java.util.LinkedHashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 public final class NativeObjectClosure {
     private static final int RAW_OBJECT_ID_BYTES = 20;
 
-    private final LooseObjectStore objects;
+    private final Function<GitObjectId, Optional<LooseObject>> objectReader;
 
     public NativeObjectClosure(LooseObjectStore objects) {
-        this.objects = Objects.requireNonNull(objects, "objects");
+        this(Objects.requireNonNull(objects, "objects")::read);
+    }
+
+    public NativeObjectClosure(
+            Function<GitObjectId, Optional<LooseObject>> objectReader) {
+        this.objectReader = Objects.requireNonNull(
+                objectReader,
+                "objectReader");
     }
 
     public Set<GitObjectId> objectIdsFor(
@@ -117,6 +126,31 @@ public final class NativeObjectClosure {
         return traverse(roots, true);
     }
 
+    public boolean allRootsReachAny(
+            Iterable<GitObjectId> roots,
+            Iterable<GitObjectId> candidates) {
+        Objects.requireNonNull(roots, "roots");
+        Objects.requireNonNull(candidates, "candidates");
+        Set<GitObjectId> candidateIds = new LinkedHashSet<>();
+        for (GitObjectId candidate : candidates) {
+            candidateIds.add(Objects.requireNonNull(candidate, "candidate"));
+        }
+        if (candidateIds.isEmpty()) {
+            return false;
+        }
+        boolean foundRoot = false;
+        for (GitObjectId root : roots) {
+            foundRoot = true;
+            Set<GitObjectId> reachable = traverse(
+                    Set.of(Objects.requireNonNull(root, "root")),
+                    true);
+            if (Collections.disjoint(reachable, candidateIds)) {
+                return false;
+            }
+        }
+        return foundRoot;
+    }
+
     private void applyObjectFilter(
             Set<GitObjectId> objectIds,
             Set<GitObjectId> directWants,
@@ -128,7 +162,7 @@ public final class NativeObjectClosure {
             if (directWants.contains(id)) {
                 continue;
             }
-            LooseObject object = objects.read(id)
+            LooseObject object = objectReader.apply(id)
                     .orElseThrow(NativeObjectClosure::missingObject);
             if (objectFilter == NativeObjectFilter.BLOB_NONE
                     && object.type() == ObjectType.BLOB) {
@@ -147,7 +181,7 @@ public final class NativeObjectClosure {
             if (!visited.add(id)) {
                 continue;
             }
-            LooseObject object = objects.read(id).orElse(null);
+            LooseObject object = objectReader.apply(id).orElse(null);
             if (object == null) {
                 if (ignoreMissing) {
                     continue;
@@ -198,7 +232,7 @@ public final class NativeObjectClosure {
 
         while (!pending.isEmpty()) {
             ShallowPendingObject current = pending.removeFirst();
-            LooseObject object = objects.read(current.objectId())
+            LooseObject object = objectReader.apply(current.objectId())
                     .orElseThrow(NativeObjectClosure::missingObject);
             switch (object.type()) {
                 case COMMIT -> addShallowCommit(
@@ -349,7 +383,7 @@ public final class NativeObjectClosure {
             Set<GitObjectId> includedCommits) {
         Set<GitObjectId> boundaries = new LinkedHashSet<>(stoppedBoundaries);
         for (GitObjectId commitId : includedCommits) {
-            LooseObject object = objects.read(commitId)
+            LooseObject object = objectReader.apply(commitId)
                     .orElseThrow(NativeObjectClosure::missingObject);
             CommitReferences references = commitReferences(object.data());
             for (GitObjectId parent : references.parents()) {
@@ -367,7 +401,7 @@ public final class NativeObjectClosure {
         Set<GitObjectId> reachable = traverse(roots, true);
         Set<GitObjectId> commits = new LinkedHashSet<>();
         for (GitObjectId id : reachable) {
-            LooseObject object = objects.read(id).orElse(null);
+            LooseObject object = objectReader.apply(id).orElse(null);
             if (object != null && object.type() == ObjectType.COMMIT) {
                 commits.add(id);
             }
@@ -385,7 +419,7 @@ public final class NativeObjectClosure {
                     || shallowBoundaries.contains(commitId)) {
                 continue;
             }
-            LooseObject object = objects.read(commitId).orElse(null);
+            LooseObject object = objectReader.apply(commitId).orElse(null);
             if (object == null || object.type() != ObjectType.COMMIT) {
                 continue;
             }
@@ -407,7 +441,7 @@ public final class NativeObjectClosure {
         if (deepenSince < 0) {
             return false;
         }
-        LooseObject object = objects.read(commitId)
+        LooseObject object = objectReader.apply(commitId)
                 .orElseThrow(NativeObjectClosure::missingObject);
         if (object.type() != ObjectType.COMMIT) {
             return false;

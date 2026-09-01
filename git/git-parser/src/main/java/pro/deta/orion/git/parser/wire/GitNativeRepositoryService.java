@@ -46,6 +46,12 @@ public interface GitNativeRepositoryService {
             Iterable<GitObjectId> haves,
             GitNativeRepositoryAccessHook accessHook);
 
+    boolean legacyUploadReady(
+            InitialRequestData data,
+            Iterable<GitObjectId> wants,
+            Iterable<GitObjectId> commonHaves,
+            GitNativeRepositoryAccessHook accessHook);
+
     PackIngestionSession beginLegacyReceivePack(
             InitialRequestData data,
             GitNativeRepositoryAccessHook accessHook);

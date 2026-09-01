@@ -311,7 +311,7 @@ class GitBlockingWireSessionTest {
     }
 
     @Test
-    void smartHttpPostWritesLegacyMultiAckDetailedCommonAndReady()
+    void smartHttpPostWritesLegacyMultiAckDetailedCommonAndFinalAckOnDone()
             throws Exception {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
@@ -336,7 +336,115 @@ class GitBlockingWireSessionTest {
             assertThat(output.ascii())
                     .startsWith(
                             "0038ACK " + have.value() + " common\n"
-                                    + "0037ACK " + have.value() + " ready\n")
+                                    + "0031ACK " + have.value() + "\n")
+                    .contains("PACK");
+        }
+    }
+
+    @Test
+    void smartHttpPostEndsReadyNegotiationRoundWithNak() throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        repository.saveFiles(
+                "main",
+                Map.of("README.md", "base".getBytes(StandardCharsets.US_ASCII)),
+                "base",
+                GitCommitAuthor.EMPTY);
+        String have = repository.refs().get("refs/heads/main");
+        repository.saveFiles(
+                "main",
+                Map.of("README.md", "next".getBytes(StandardCharsets.US_ASCII)),
+                "next",
+                GitCommitAuthor.EMPTY);
+        String want = repository.refs().get("refs/heads/main");
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRound(
+                    List.of("want " + want + " multi_ack_detailed\n"),
+                    "have " + have + "\n"));
+
+            session(input, output, provider).serveSmartHttpPost(uploadV1Request());
+
+            assertThat(output.ascii())
+                    .isEqualTo(
+                            "0038ACK " + have + " common\n"
+                                    + "0037ACK " + have + " ready\n"
+                                    + "0008NAK\n");
+        }
+    }
+
+    @Test
+    void smartHttpPostDoesNotSignalReadyUntilEveryWantReachesACommonHave()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        GitObjectId firstWant = repository.writeObject(
+                ObjectType.BLOB,
+                "first".getBytes(StandardCharsets.US_ASCII));
+        GitObjectId secondWant = repository.writeObject(
+                ObjectType.BLOB,
+                "second".getBytes(StandardCharsets.US_ASCII));
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRound(
+                    List.of(
+                            "want " + firstWant.value()
+                                    + " multi_ack_detailed\n",
+                            "want " + secondWant.value() + "\n"),
+                    "have " + firstWant.value() + "\n"));
+
+            session(input, output, provider).serveSmartHttpPost(uploadV1Request());
+
+            assertThat(output.ascii())
+                    .isEqualTo(
+                            "0038ACK " + firstWant.value() + " common\n"
+                                    + "0008NAK\n");
+        }
+    }
+
+    @Test
+    void commandPreservesLegacyNegotiationAcrossFlushDelimitedRounds()
+            throws Exception {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository =
+                provider.create("project").valueOrFailure("repository");
+        repository.saveFiles(
+                "main",
+                Map.of("README.md", "base".getBytes(StandardCharsets.US_ASCII)),
+                "base",
+                GitCommitAuthor.EMPTY);
+        String have = repository.refs().get("refs/heads/main");
+        repository.saveFiles(
+                "main",
+                Map.of("README.md", "next".getBytes(StandardCharsets.US_ASCII)),
+                "next",
+                GitCommitAuthor.EMPTY);
+        String want = repository.refs().get("refs/heads/main");
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(
+                Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyUploadRounds(
+                    "want " + want + " multi_ack_detailed\n",
+                    List.of("have " + WANT + "\n"),
+                    List.of("have " + have + "\n"),
+                    "done\n"));
+
+            session(input, output, provider).serveCommand(uploadV1Request());
+
+            assertThat(output.ascii())
+                    .contains(
+                            "0008NAK\n"
+                                    + "0038ACK " + have + " common\n"
+                                    + "0037ACK " + have + " ready\n"
+                                    + "0008NAK\n"
+                                    + "0031ACK " + have + "\n")
                     .contains("PACK");
         }
     }
@@ -609,6 +717,41 @@ class GitBlockingWireSessionTest {
         for (int index = 1; index < lines.length; index++) {
             output.writePacket(lines[index]);
         }
+        return output.bytes();
+    }
+
+    private static byte[] legacyUploadRound(
+            List<String> wants,
+            String... haves) {
+        ByteArrayBuilder output = new ByteArrayBuilder();
+        for (String want : wants) {
+            output.writePacket(want);
+        }
+        output.writeAscii("0000");
+        for (String have : haves) {
+            output.writePacket(have);
+        }
+        output.writeAscii("0000");
+        return output.bytes();
+    }
+
+    private static byte[] legacyUploadRounds(
+            String want,
+            List<String> firstRound,
+            List<String> secondRound,
+            String done) {
+        ByteArrayBuilder output = new ByteArrayBuilder();
+        output.writePacket(want);
+        output.writeAscii("0000");
+        for (String have : firstRound) {
+            output.writePacket(have);
+        }
+        output.writeAscii("0000");
+        for (String have : secondRound) {
+            output.writePacket(have);
+        }
+        output.writeAscii("0000");
+        output.writePacket(done);
         return output.bytes();
     }
 

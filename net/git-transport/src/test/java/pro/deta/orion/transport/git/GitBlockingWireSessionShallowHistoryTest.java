@@ -297,6 +297,15 @@ class GitBlockingWireSessionShallowHistoryTest {
         }
 
         @Override
+        public boolean legacyUploadReady(
+                InitialRequestData data,
+                Iterable<GitObjectId> wants,
+                Iterable<GitObjectId> commonHaves,
+                GitNativeRepositoryAccessHook accessHook) {
+            return false;
+        }
+
+        @Override
         public PackIngestionSession beginLegacyReceivePack(
                 InitialRequestData data,
                 GitNativeRepositoryAccessHook accessHook) {
