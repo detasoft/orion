@@ -15,7 +15,6 @@ dependency injection.
 
 ## Child Tasks
 
-- [ ] [Introduce typed material capabilities](typed-material-capabilities/TASK.md)
 - [ ] [Add configuration secret cryptography](configuration-secret-cryptography/TASK.md)
 - [ ] [Migrate server identity and JWT signing](server-identity-migration/TASK.md)
 - [ ] [Migrate the remaining Orion key owners](remaining-key-owner-migration/TASK.md)
