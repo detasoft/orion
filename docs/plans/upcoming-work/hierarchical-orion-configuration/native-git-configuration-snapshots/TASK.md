@@ -1,10 +1,12 @@
 # Load and Activate Native Git Configuration Snapshots
 
 Status: todo
-Depends on: ../xml-schema-v2/TASK.md
+Depends on: ../../internal-configuration-repository/TASK.md,
+../xml-schema-v2/TASK.md
 
-Load `orion.xml` directly from the configured commit in local native Git and
-publish it as one immutable, revisioned desired-state snapshot.
+Extend the restored internal configuration repository by loading `orion.xml`
+from its configured commit and publishing it as one immutable, revisioned
+desired-state snapshot.
 
 ## Scope
 
