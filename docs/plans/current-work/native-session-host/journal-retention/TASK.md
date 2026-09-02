@@ -13,7 +13,8 @@ output at the retention limit.
 - Add Zstandard compression for closed segments while keeping the active
   segment as an uncompressed `.cbor` file.
 - Preserve the exact logical CBOR Sequence after decompression without adding
-  block framing or segment header records.
+  block framing, segment header records, a `FINAL` flag, or an equivalent
+  completion marker.
 - Enforce configurable maximum storage with `DROP_OLDEST` over closed segments.
 - Derive `firstAvailableEventId` from the first record of the oldest retained
   segment and report an event cursor gap after history has been deleted.

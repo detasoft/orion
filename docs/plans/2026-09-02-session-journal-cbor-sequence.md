@@ -6,6 +6,10 @@ Store each session journal as numbered segments containing a CBOR Sequence.
 Each segment is a sequence of independent CBOR items without a segment header,
 block header, length prefix, or framing outside CBOR itself.
 
+The format has no `FINAL` flag or equivalent completion marker. A record is
+complete exactly when its CBOR item is complete; writers and readers must not
+reintroduce a separate persisted completion state under another name.
+
 This document supersedes the journal framing, timestamp, cursor, segmentation,
 compression, retention, and recovery requirements in
 `2026-09-01-native-session-host.md`. The remaining session-host architecture
@@ -142,6 +146,7 @@ copy.
 Abnormal termination may leave the active `.cbor` segment ending in a partial
 CBOR item. A reader must return every preceding complete item, ignore the
 incomplete trailing item, and must not classify the whole segment as corrupt.
+No flag written before or after an item participates in this decision.
 
 Recovery may truncate the active file to the last valid CBOR boundary before
 appending. Corruption inside an already completed item or before the trailing
@@ -189,6 +194,8 @@ The format change is complete when tests cover:
 - rebuilding an optional index from uncompressed and compressed segments;
 - discovery of the first event without decompressing an entire large segment;
 - a partial active tail and truncation to the last complete boundary;
+- absence of `FINAL` or any equivalent persisted completion marker in encoded
+  fixtures and writer output;
 - additional trailing fields and unknown event types;
 - unchanged logical records across session-host, AgentD, and server fixtures.
 

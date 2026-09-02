@@ -112,6 +112,10 @@ segment header and add a block layer only when batching or compression is implem
 keep the bytes but narrow the documented contract: codec `1` is reserved/unsupported and `FINAL` is not a
 completion proof. Avoid implementing compression solely to justify the existing abstraction.
 
+**Planned resolution.** The approved CBOR Sequence replacement removes block framing and `FINAL` entirely.
+Its task and format contract explicitly prohibit introducing an equivalent persisted completion marker; a
+complete CBOR item is the only record-completion boundary.
+
 **Contract change.** Removing blocks breaks the binary format. Narrowing the documentation withdraws promised
 Zstandard support and changes the meaning of `FINAL`. Persisted or external v1 consumers must be identified
 before either change.

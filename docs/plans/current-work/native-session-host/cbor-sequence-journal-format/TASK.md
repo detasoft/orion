@@ -11,6 +11,9 @@ segments and one monotonic session-scoped event ID.
 
 - Encode every event as `[eventId, eventType, payload, ...futureFields]` with no
   segment header or framing outside CBOR.
+- Remove the legacy block header and its `FINAL` flag. Do not introduce an
+  equivalent completion flag or marker under another name; only a complete
+  CBOR item establishes a record boundary.
 - Replace separate timestamp, sequence, and cursor values with one strictly
   increasing `u64` `eventId` derived from the session monotonic clock.
 - Discover segment ranges from the first event and implement
@@ -34,5 +37,7 @@ segments and one monotonic session-scoped event ID.
   segment rotation, and journal recovery.
 - Reading works across uncompressed and compressed segments without any
   persistent index or journal metadata.
-- A partial final item loses only that item, and unknown compatible records do
+- A partial trailing item loses only that item, and unknown compatible records do
   not prevent later records from being read.
+- The encoded format and compatibility fixtures contain no `FINAL` flag or
+  equivalent record/block completion marker.
