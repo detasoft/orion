@@ -3,7 +3,7 @@
 Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
 Depends on: ../identity-and-registration/TASK.md,
-../http2-transport/TASK.md, ../journal-sync/TASK.md,
+completed AgentD HTTP/2 transport, ../journal-sync/TASK.md,
 ../command-orchestration/TASK.md
 
 Complete AgentD's machine reporting, scheduling isolation, reconnect policy,

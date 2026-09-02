@@ -2,7 +2,7 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-01-native-session-host.md
-Depends on: ../unix-process-host/TASK.md
+Depends on: completed Unix process host
 
 Apply filesystem policy to the hosted child tree while leaving the host able to
 manage journal and control files.

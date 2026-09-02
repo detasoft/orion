@@ -2,8 +2,8 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
-Depends on: ../http2-transport/TASK.md, ../session-discovery/TASK.md,
-../journal-reader/TASK.md
+Depends on: completed AgentD HTTP/2 transport,
+../session-discovery/TASK.md, ../journal-reader/TASK.md
 
 Pump raw session-host journal records to the server and resume from the
 server's durable event ID after every reconnect.

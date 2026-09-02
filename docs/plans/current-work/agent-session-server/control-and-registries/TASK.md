@@ -1,7 +1,8 @@
 # Implement Control Streams and Registries
 
 Status: todo
-Depends on: ../protocol-contracts/TASK.md, ../session-replication/TASK.md
+Depends on: completed server Agent protocol contracts,
+../session-replication/TASK.md
 
 Integrate authenticated AgentD connections with durable logical agent and
 session metadata while keeping connection state transient.

@@ -2,8 +2,8 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
-Depends on: ../http2-transport/TASK.md, ../session-discovery/TASK.md,
-../session-runtime-and-control/TASK.md
+Depends on: completed AgentD HTTP/2 transport,
+../session-discovery/TASK.md, ../session-runtime-and-control/TASK.md
 
 Validate and route server commands to the correct runtime or host and report
 their actual outcome.

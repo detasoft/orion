@@ -21,7 +21,7 @@ transports.
   fast-forward policy, conflict reporting, retry behavior, and loop prevention.
 - Provide administration state for configured external remotes, last sync run,
   pending work, and typed sync failures.
-- Coordinate with `github-commit-replication/TASK.md` so the older GitHub
+- Coordinate with `../github-commit-replication/TASK.md` so the older GitHub
   replication plan becomes either a GitHub profile or a narrower follow-up.
 
 ## Child Tasks

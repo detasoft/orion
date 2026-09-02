@@ -2,8 +2,8 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
-Depends on: completed AgentD contracts and build,
-../http2-transport/TASK.md
+Depends on: completed AgentD contracts and build, completed AgentD HTTP/2
+transport
 
 Give each machine a stable identity and each AgentD process start a distinct
 instance identity, then implement secure initial registration.

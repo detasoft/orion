@@ -1,7 +1,7 @@
 # Implement Durable Session Journal Storage
 
 Status: todo
-Depends on: ../protocol-contracts/TASK.md
+Depends on: completed server Agent protocol contracts
 Journal contract: ../../../2026-09-02-session-journal-cbor-sequence.md
 
 Store the authoritative replicated prefix of each raw session journal and make

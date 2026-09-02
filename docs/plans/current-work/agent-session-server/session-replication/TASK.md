@@ -1,7 +1,8 @@
 # Replicate Session Journals over HTTP/2
 
 Status: todo
-Depends on: ../protocol-contracts/TASK.md, ../journal-storage/TASK.md
+Depends on: completed server Agent protocol contracts,
+../journal-storage/TASK.md
 
 Accept one current logical replication stream per session and resume directly
 from the durable server journal after every reconnect.

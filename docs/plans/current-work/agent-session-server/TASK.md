@@ -22,7 +22,6 @@ journal, route commands, and expose durable history and live events to clients.
 
 ## Child Tasks
 
-- [x] [Define the server Agent protocol contracts](protocol-contracts/TASK.md)
 - [ ] [Implement durable session journal storage](journal-storage/TASK.md)
 - [ ] [Replicate session journals over HTTP/2](session-replication/TASK.md)
 - [ ] [Implement control streams and registries](control-and-registries/TASK.md)
