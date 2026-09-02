@@ -1,6 +1,7 @@
 # Add Configuration Secret Cryptography
 
-Status: todo
+Status: active
+Owner: codex, session keymat-6f2a, started 2026-09-02 22:53 Europe/Amsterdam.
 Depends on: ../typed-material-capabilities/TASK.md
 
 Provide authenticated envelope encryption for secret payloads stored in the
