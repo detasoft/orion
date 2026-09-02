@@ -144,23 +144,25 @@ providers and must not alter terminal or journal protocols.
 | 3 | Unix process host | 1, 2 | PTY lifecycle and Unix control commands |
 | 4 | Retention and compression | 2 | Segments, Zstd blocks, gap reporting, durability modes |
 | 5 | Linux sandbox | 3 | Landlock policy inherited by the child tree |
-| 6 | `agentd` integration | 1-4 | Discovery, cursor reads, wake-up, reconnect, control client |
-| 7 | Harness event ingress | 1-3 | Structured producers share host-assigned ordering |
-| 8 | Windows host | 1-4 | ConPTY and named-pipe parity |
-| 9 | Release and acceptance | 3-8 | Target artifacts and end-to-end harness scenarios |
+| 6 | Harness event ingress | 1-3 | Structured producers share host-assigned ordering |
+| 7 | Windows host | 1-4 | ConPTY and named-pipe parity |
+| 8 | Release and acceptance | 3-7 | Target artifacts and host acceptance scenarios |
 
 Journal retention can proceed in parallel with the Unix host after the journal
-core is stable. Harness event ingress can proceed in parallel with `agentd` and
-the Linux sandbox. Windows implementation follows validated common contracts
-and does not block the first Linux/macOS harness slice.
+core is stable. Harness event ingress can proceed in parallel with the Linux
+sandbox. Windows implementation follows validated common contracts and does
+not block the first Linux/macOS harness slice. Agent-side discovery, journal
+transport, and restart recovery are tracked separately in
+[`upcoming-work/agentd/TASK.md`](upcoming-work/agentd/TASK.md).
 
 ## MVP Boundary
 
-The first usable slice comprises tasks 1-7 on Linux, with macOS PTY support
-where the Unix abstraction permits it. It must run an interactive shell or
-agent, accept input and resize commands, preserve ordered raw terminal history,
-survive `agentd` loss, allow `agentd` to discover and resume the session, expose
-retention gaps, and enforce an inherited Landlock policy when requested.
+The first usable host slice comprises tasks 1-6 on Linux, with macOS PTY
+support where the Unix abstraction permits it. It must run an interactive
+shell or agent, accept input and resize commands, preserve ordered raw terminal
+history, survive control-client loss, expose retention gaps, and enforce an
+inherited Landlock policy when requested. AgentD restart and network-resume
+acceptance belongs to the separate AgentD plan.
 
 Windows parity and the complete six-target release matrix follow without
 changing the v1 logical protocols. Required artifacts are Linux, macOS, and

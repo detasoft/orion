@@ -14,7 +14,8 @@ commands, and survives independently of `agentd`.
 - Support recovery, bounded retention, session discovery, and control reconnects.
 - Restrict the Linux child process tree with an optional fail-closed Landlock
   policy.
-- Integrate the native binary and Java-side reader/client into the Orion build.
+- Publish stable journal and control compatibility fixtures for external
+  consumers such as `agentd`.
 - Keep terminal emulation, central-server transport, and semantic agent models
   outside the host.
 
@@ -23,7 +24,6 @@ commands, and survives independently of `agentd`.
 - [ ] [Implement the Unix PTY process host](unix-process-host/TASK.md)
 - [ ] [Add journal segmentation, compression, and retention](journal-retention/TASK.md)
 - [ ] [Enforce the Linux Landlock sandbox](linux-sandbox/TASK.md)
-- [ ] [Integrate session discovery and replay with agentd](agentd-integration/TASK.md)
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
 - [ ] [Implement the Windows ConPTY host](windows-host/TASK.md)
 - [ ] [Package targets and verify end-to-end acceptance](release-and-acceptance/TASK.md)

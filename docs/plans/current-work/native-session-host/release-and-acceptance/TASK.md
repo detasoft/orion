@@ -16,8 +16,8 @@ the complete agent-harness scenario.
   protocol version information.
 - Exercise shell input, raw output, resize ordering, input deduplication,
   rotation, crash recovery, and `xterm.js` replay.
-- Run Claude or Codex through the host, kill and restart `agentd`, resume from
-  the prior cursor, and continue input/output without terminating the session.
+- Run Claude or Codex through the host, disconnect and reconnect the local
+  control client, and continue input/output without terminating the session.
 - Verify Landlock restrictions for the agent and one of its subprocesses.
 - Publish a support matrix, operational defaults, and diagnostics for session
   discovery, gaps, sandbox failures, and incompatible formats.
