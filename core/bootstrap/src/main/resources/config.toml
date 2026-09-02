@@ -5,7 +5,7 @@ threadPoolSize = 10
 
 [bootstrap.accessControl]
 location = "local:orion"
-branch = "master"
+ref = "refs/heads/main"
 paths = ["orion.xml"]
 createDefaultIfMissing = true
 

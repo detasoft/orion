@@ -15,6 +15,7 @@ public class ConfigurationRuntimeTest {
 
         assertEquals("orion_root", oc.getBootstrap().getBaseDir());
         assertEquals("local:orion", oc.getBootstrap().getAccessControl().getLocation());
+        assertEquals("refs/heads/main", oc.getBootstrap().getAccessControl().configurationRef());
         assertEquals("orion.xml", oc.getBootstrap().getAccessControl().primaryPath());
         assertEquals("repos", oc.getStorage().getLocation());
         assertTrue(oc.getTransport().getGit().isEnabled());

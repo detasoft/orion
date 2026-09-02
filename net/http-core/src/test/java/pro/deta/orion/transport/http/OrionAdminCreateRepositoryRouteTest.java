@@ -12,15 +12,32 @@ import java.io.IOException;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.List;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_CREATED;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionAdminCreateRepositoryRouteTest {
+    private final InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
     private final OrionAdminCreateRepositoryRoute route = new OrionAdminCreateRepositoryRoute(
-            new InMemoryNativeGitRepositoryProvider(),
+            provider,
             new ObjectMapper());
+
+    @Test
+    void listsExistingRepositoriesInStableOrder() {
+        provider.create("zeta").valueOrFailure("repository");
+        provider.create("internal/configuration").valueOrFailure("repository");
+
+        OrionHttpResponse response = route.doGet(null);
+
+        assertThat(response.status()).isEqualTo(SC_OK);
+        assertThat(response.body()).isEqualTo(Map.of(
+                "repositories",
+                List.of(
+                        new OrionAdminCreateRepositoryRoute.RepositoryResponse("internal/configuration"),
+                        new OrionAdminCreateRepositoryRoute.RepositoryResponse("zeta"))));
+    }
 
     @Test
     void returnsCreatedOnlyForANewRepository() throws Exception {

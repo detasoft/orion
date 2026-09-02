@@ -19,6 +19,19 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('loads repository discovery from the Admin API', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ repositories: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const client = createOrionClient({ fetchImpl })
+
+    await client.repositories()
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/admin/repositories')
+    expect(fetchImpl.mock.calls[0][1].method).toBeUndefined()
+  })
+
   it('sends the bearer token and normalized repository name', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ok' }), {
       status: 201,

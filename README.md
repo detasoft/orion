@@ -202,7 +202,7 @@ bootstrap:
   threadPoolSize: 10
   accessControl:
     location: local:orion
-    branch: master
+    ref: refs/heads/main
     paths:
       - orion.xml
     createDefaultIfMissing: true
@@ -247,7 +247,12 @@ transports.
 
 That means `transport` settings never participate in ACL bootstrap. A
 repository-backed ACL such as `local:orion` is opened directly through the
-storage backend, while a filesystem ACL uses the configured `file:` directory.
+native storage backend, while a filesystem ACL uses the configured `file:`
+directory. Orion creates an empty configured repository or ref during first
+startup, commits the generated `orion.xml`, and reuses that commit on restart.
+Accepted pushes to the configured ref reload the ACL; an invalid candidate
+leaves the last valid ACL active. The internal repository is returned by
+`GET /api/admin/repositories` together with user-created repositories.
 Remote storage credentials, for example S3 credentials, should come from the
 backend's normal environment or provider-specific mechanisms.
 

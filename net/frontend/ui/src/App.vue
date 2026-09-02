@@ -20,7 +20,7 @@ const settingsOpen = ref(false)
 const submitting = ref(false)
 const connectionState = ref('disconnected')
 const serverSnapshot = ref({ lifecycle: '', routes: [], transports: {} })
-const createdRepositories = ref([])
+const repositories = ref([])
 const connectedActivity = ref([])
 const toast = ref(null)
 const newRepository = ref({ name: '' })
@@ -42,7 +42,7 @@ const titles = {
 
 const currentTitle = computed(() => titles[activeView.value] ?? titles.overview)
 const isConnected = computed(() => connectionState.value === 'connected')
-const shownRepositories = computed(() => createdRepositories.value)
+const shownRepositories = computed(() => repositories.value)
 const shownActivity = computed(() => connectedActivity.value)
 const filteredRepositories = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -98,7 +98,7 @@ function closeSettings() {
 
 function clearConnectedState(nextState = 'disconnected') {
   serverSnapshot.value = { lifecycle: '', routes: [], transports: {} }
-  createdRepositories.value = []
+  repositories.value = []
   connectedActivity.value = []
   connectionState.value = nextState
 }
@@ -216,7 +216,7 @@ async function createRepository() {
       time: 'just now',
       type: 'create',
     }
-    createdRepositories.value.unshift(repository)
+    repositories.value.unshift(repository)
     connectedActivity.value.unshift(event)
     createOpen.value = false
     newRepository.value = { name: '' }
@@ -278,13 +278,21 @@ async function connectSavedSettings() {
   const attempt = ++connectionAttempt
   connectionState.value = 'checking'
   try {
-    const [routes, lifecycle, transports] = await Promise.all([
+    const [routes, lifecycle, transports, repositoryResponse] = await Promise.all([
       api.routes(),
       api.lifecycleState(),
       api.transports(),
+      api.repositories(),
     ])
     if (attempt === connectionAttempt) {
       serverSnapshot.value = { lifecycle, routes: routes.routes ?? [], transports }
+      repositories.value = (repositoryResponse.repositories ?? []).map((repository) => ({
+        name: repository.name,
+        language: '—',
+        color: '#a8b0a9',
+        updated: new Date(),
+        size: '—',
+      }))
       connectionState.value = 'connected'
       showToast('Connected to Orion')
     }
@@ -426,8 +434,8 @@ onMounted(() => {
             <section class="panel api-limit-panel">
               <AppIcon name="repository" :size="19" />
               <div>
-                <h2>Repository and member lists are not exposed by the current Admin API.</h2>
-                <p>Only repositories created in this browser session appear in the Repositories view.</p>
+                <h2>{{ shownRepositories.length }} repositories available.</h2>
+                <p>The list includes Orion's internal configuration repository.</p>
               </div>
             </section>
           </template>
@@ -447,7 +455,7 @@ onMounted(() => {
           <div class="content-toolbar">
             <p>
               {{ filteredRepositories.length }} repositories
-              <span v-if="isConnected">created in this session</span>
+              <span v-if="isConnected">reported by Orion</span>
             </p>
             <button class="primary-button" :disabled="!isConnected" @click="createOpen = true">
               <AppIcon name="plus" :size="17" />New repository
@@ -485,10 +493,10 @@ onMounted(() => {
             </div>
             <div v-if="!filteredRepositories.length" class="empty-state">
               <AppIcon name="search" :size="28" />
-              <h3>{{ isConnected ? 'No repositories created in this session' : 'Connect to Orion first' }}</h3>
+              <h3>{{ isConnected ? 'No repositories found' : 'Connect to Orion first' }}</h3>
               <p>
                 {{ isConnected
-                  ? 'The current Admin API does not list existing repositories.'
+                  ? 'Create a repository to get started.'
                   : 'No repository data is stored in the interface.' }}
               </p>
             </div>

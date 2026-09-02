@@ -15,7 +15,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +37,22 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
                 rootDirectory,
                 "rootDirectory").toAbsolutePath().normalize();
         createDirectories(this.rootDirectory);
+    }
+
+    @Override
+    public synchronized List<String> repositoryNames() {
+        List<String> names = new ArrayList<>();
+        try (var entries = Files.newDirectoryStream(rootDirectory)) {
+            for (Path entry : entries) {
+                if (Files.isRegularFile(entry.resolve(METADATA_FILE))) {
+                    names.add(readMetadata(entry).name());
+                }
+            }
+        } catch (IOException error) {
+            throw new UncheckedIOException("Failed to list native repositories", error);
+        }
+        names.sort(String::compareTo);
+        return List.copyOf(names);
     }
 
     @Override

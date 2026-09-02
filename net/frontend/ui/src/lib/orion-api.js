@@ -65,6 +65,9 @@ export function createOrionClient(options = {}) {
     lifecycleState() {
       return request('/api/admin/lifecycle/state')
     },
+    repositories() {
+      return request('/api/admin/repositories')
+    },
     createRepository(name) {
       return request('/api/admin/repositories', {
         method: 'POST',

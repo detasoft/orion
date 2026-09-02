@@ -1,5 +1,6 @@
 package pro.deta.orion.git.nativestorage;
 
+import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
@@ -27,7 +28,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
+@Slf4j
 public class NativeGitRepository implements AutoCloseable {
     private final String name;
     private final LooseRefStore looseRefStore;
@@ -35,6 +39,8 @@ public class NativeGitRepository implements AutoCloseable {
     private final String defaultHead;
     private final PackPublicationStore packPublicationStore;
     private final PackObjectDirectory packObjectDirectory;
+    private final CopyOnWriteArrayList<Consumer<RefUpdate>> refUpdateListeners =
+            new CopyOnWriteArrayList<>();
 
     public NativeGitRepository(
             String name,
@@ -122,10 +128,18 @@ public class NativeGitRepository implements AutoCloseable {
             String refName,
             String expectedOldId,
             String newId) {
-        return looseRefStore.update(
+        RefUpdateResult result = looseRefStore.update(
                 refName,
                 expectedOldId,
                 newId);
+        notifyRefUpdate(new RefUpdate(refName, expectedOldId, newId, result));
+        return result;
+    }
+
+    public RefUpdateSubscription onRefUpdate(Consumer<RefUpdate> listener) {
+        Consumer<RefUpdate> registered = Objects.requireNonNull(listener, "listener");
+        refUpdateListeners.add(registered);
+        return () -> refUpdateListeners.remove(registered);
     }
 
     public GitObjectId writeObject(ObjectType type, byte[] data) {
@@ -184,14 +198,53 @@ public class NativeGitRepository implements AutoCloseable {
             boolean atomic) {
         Objects.requireNonNull(quarantinedObjects, "quarantinedObjects");
         Objects.requireNonNull(updates, "updates");
+        List<RefUpdateResult> results;
         if (!atomic) {
-            return looseRefStore.updateAllIndependently(
+            results = looseRefStore.updateAllIndependently(
+                    updates,
+                    () -> looseObjectStore.putAll(quarantinedObjects));
+        } else {
+            results = looseRefStore.updateAll(
                     updates,
                     () -> looseObjectStore.putAll(quarantinedObjects));
         }
-        return looseRefStore.updateAll(
-                updates,
-                () -> looseObjectStore.putAll(quarantinedObjects));
+        notifyRefUpdates(updates, results, atomic);
+        return results;
+    }
+
+    private void notifyRefUpdates(
+            List<LooseRefStore.Update> updates,
+            List<RefUpdateResult> results,
+            boolean atomic) {
+        if (atomic && results.contains(RefUpdateResult.STALE)) {
+            return;
+        }
+        for (int index = 0; index < results.size(); index++) {
+            LooseRefStore.Update update = updates.get(index);
+            notifyRefUpdate(new RefUpdate(
+                    update.refName(),
+                    update.expectedOldId(),
+                    update.newId(),
+                    results.get(index)));
+        }
+    }
+
+    private void notifyRefUpdate(RefUpdate update) {
+        if (update.result() == RefUpdateResult.STALE
+                || update.result() == RefUpdateResult.NO_OP) {
+            return;
+        }
+        for (Consumer<RefUpdate> listener : refUpdateListeners) {
+            try {
+                listener.accept(update);
+            } catch (RuntimeException error) {
+                log.error(
+                        "Native repository ref-update listener failed for {} {}",
+                        name,
+                        update.refName(),
+                        error);
+            }
+        }
     }
 
     public boolean hasCompleteObjectClosure(
@@ -239,5 +292,24 @@ public class NativeGitRepository implements AutoCloseable {
             Iterable<GitObjectId> commonHaves) {
         return new NativeObjectClosure(this::readObject)
                 .allRootsReachAny(wants, commonHaves);
+    }
+
+    public record RefUpdate(
+            String refName,
+            String oldObjectId,
+            String newObjectId,
+            RefUpdateResult result) {
+        public RefUpdate {
+            Objects.requireNonNull(refName, "refName");
+            Objects.requireNonNull(oldObjectId, "oldObjectId");
+            Objects.requireNonNull(newObjectId, "newObjectId");
+            Objects.requireNonNull(result, "result");
+        }
+    }
+
+    @FunctionalInterface
+    public interface RefUpdateSubscription extends AutoCloseable {
+        @Override
+        void close();
     }
 }

@@ -108,6 +108,53 @@ class NativeGitRepositoryTest {
     }
 
     @Test
+    void reportsDirectAndReceivePackRefUpdatesAfterPublication() {
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId first = quarantine.write(ObjectType.BLOB, "first".getBytes(StandardCharsets.UTF_8));
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        List<NativeGitRepository.RefUpdate> updates = new ArrayList<>();
+        repository.onRefUpdate(updates::add);
+
+        repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
+        repository.publishObjectsAndRefs(
+                quarantine,
+                List.of(new LooseRefStore.Update(
+                        "refs/heads/configuration",
+                        NULL_ID,
+                        first.value())));
+
+        assertThat(updates)
+                .extracting(NativeGitRepository.RefUpdate::refName)
+                .containsExactly("refs/heads/main", "refs/heads/configuration");
+    }
+
+    @Test
+    void doesNotReportRejectedAtomicRefUpdates() {
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
+        List<NativeGitRepository.RefUpdate> updates = new ArrayList<>();
+        repository.onRefUpdate(updates::add);
+
+        repository.publishObjectsAndRefs(
+                new LooseObjectStore(),
+                List.of(
+                        new LooseRefStore.Update("refs/heads/topic", NULL_ID, "2".repeat(40)),
+                        new LooseRefStore.Update("refs/heads/main", "3".repeat(40), "4".repeat(40))),
+                true);
+
+        assertThat(updates).isEmpty();
+        assertThat(repository.refs()).doesNotContainKey("refs/heads/topic");
+    }
+
+    @Test
     void validatesObjectClosureAcrossQuarantineAndPublishedObjects() {
         LooseObjectStore publishedObjects = new LooseObjectStore();
         LooseObjectStore quarantine = new LooseObjectStore();

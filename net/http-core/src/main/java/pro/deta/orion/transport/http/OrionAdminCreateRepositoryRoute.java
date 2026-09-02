@@ -8,6 +8,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
@@ -15,15 +17,28 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
     private final NativeGitRepositoryProvider gitRepositoryProvider;
 
     @Inject
-    public OrionAdminCreateRepositoryRoute(NativeGitRepositoryProvider gitRepositoryProvider, ObjectMapper objectMapper) {
-        super(OrionAdminPaths.REPOSITORIES, "POST");
+    public OrionAdminCreateRepositoryRoute(
+            NativeGitRepositoryProvider gitRepositoryProvider,
+            ObjectMapper objectMapper) {
+        super(OrionAdminPaths.REPOSITORIES, "GET", "POST");
         this.gitRepositoryProvider = gitRepositoryProvider;
         this.objectMapper = objectMapper;
     }
 
     @Override
+    protected OrionHttpResponse doGet(HttpServletRequest req) {
+        List<RepositoryResponse> repositories = new ArrayList<>();
+        for (String name : gitRepositoryProvider.repositoryNames()) {
+            repositories.add(new RepositoryResponse(name));
+        }
+        return OrionHttpResponse.ok(Map.of("repositories", repositories));
+    }
+
+    @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
-        AdminRepositoryRequest request = objectMapper.readValue(req.getInputStream(), AdminRepositoryRequest.class);
+        AdminRepositoryRequest request = objectMapper.readValue(
+                req.getInputStream(),
+                AdminRepositoryRequest.class);
         if (request.name() == null || request.name().isBlank()) {
             throw new IllegalArgumentException("Repository name is required");
         }
@@ -56,5 +71,8 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
     }
 
     public record AdminRepositoryRequest(String name) {
+    }
+
+    public record RepositoryResponse(String name) {
     }
 }

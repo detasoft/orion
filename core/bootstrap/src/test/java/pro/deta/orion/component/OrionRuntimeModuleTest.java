@@ -8,6 +8,8 @@ import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
+import pro.deta.orion.acl.storage.NativeGitAccessControlStorage;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -74,6 +76,24 @@ class OrionRuntimeModuleTest {
     }
 
     @Test
+    void localLocatorUsesConfiguredNativeRepository() {
+        OrionConfiguration configuration = configurationWithAcl("local:internal/settings");
+        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+
+        AccessControlStorage storage = new AccessControlStorageResolver(configuration, provider).resolve();
+        storage.save(
+                AccessControlSnapshot.singleFile(ACL_FILE, "versioned acl".getBytes(StandardCharsets.UTF_8)),
+                new AccessControlSaveRequest("versioned acl", UserEmail.EMPTY));
+
+        assertInstanceOf(NativeGitAccessControlStorage.class, storage);
+        assertEquals(List.of("internal/settings"), provider.repositoryNames());
+        assertEquals(
+                "versioned acl",
+                new String(storage.load().valueOrFailure("ACL should load").files().get(ACL_FILE),
+                        StandardCharsets.UTF_8));
+    }
+
+    @Test
     void remoteGitAclIsUnsupported() {
         OrionConfiguration configuration = configurationWithAcl("ssh://git@example.test/acl.git");
 
@@ -85,7 +105,9 @@ class OrionRuntimeModuleTest {
     }
 
     private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration) {
-        return new AccessControlStorageResolver(configuration).resolve();
+        return new AccessControlStorageResolver(
+                configuration,
+                new InMemoryNativeGitRepositoryProvider()).resolve();
     }
 
     private byte[] aclBytes(String userId) throws Exception {

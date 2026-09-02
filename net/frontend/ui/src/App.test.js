@@ -5,6 +5,7 @@ const client = {
   createRepository: vi.fn(),
   createOrUpdateUser: vi.fn(),
   lifecycleState: vi.fn(),
+  repositories: vi.fn(),
   routes: vi.fn(),
   transports: vi.fn(),
 }
@@ -38,6 +39,7 @@ beforeEach(() => {
     routes: [{ urlPattern: '/api/admin/routes', methods: ['GET'], authorization: 'admin' }],
   })
   client.lifecycleState.mockResolvedValue('RUNNING')
+  client.repositories.mockResolvedValue({ repositories: [] })
   client.transports.mockResolvedValue({
     http: { enabled: true, url: 'http://localhost:8000' },
     https: { enabled: true, url: 'https://localhost:8443' },
@@ -49,15 +51,20 @@ beforeEach(() => {
 
 describe('Orion connection', () => {
   it('shows verified server data after connecting', async () => {
+    client.repositories.mockResolvedValue({
+      repositories: [{ name: 'internal/configuration' }, { name: 'existing/project' }],
+    })
     const wrapper = mountApp()
 
     await connect(wrapper)
 
     expect(client.routes).toHaveBeenCalledOnce()
     expect(client.lifecycleState).toHaveBeenCalledOnce()
+    expect(client.repositories).toHaveBeenCalledOnce()
     expect(client.transports).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('Registered routes')
     expect(wrapper.text()).toContain('RUNNING')
+    expect(wrapper.text()).toContain('2 repositories available')
   })
 
   it('restores the session token and verifies the saved connection on reload', async () => {
@@ -72,7 +79,7 @@ describe('Orion connection', () => {
     expect(localStorage.getItem('orion.ui.token')).toBeNull()
   })
 
-  it('creates a repository through the connected API and marks it as session-local', async () => {
+  it('adds a newly created repository to the discovered list', async () => {
     client.transports.mockResolvedValue({
       http: { enabled: true, url: 'https://git.example' },
       https: { enabled: true, url: 'https://git.example' },
@@ -90,7 +97,7 @@ describe('Orion connection', () => {
 
     expect(client.createRepository).toHaveBeenCalledWith('platform/my repo#?')
     expect(wrapper.text()).toContain('platform/my repo#?')
-    expect(wrapper.text()).toContain('created in this session')
+    expect(wrapper.text()).toContain('reported by Orion')
     expect(wrapper.text()).toContain('ssh://alice@git.example:2222/platform/my%20repo%23%3F.git')
     expect(wrapper.text()).toContain('https://git.example/r/platform/my%20repo%23%3F')
     expect(wrapper.text()).toContain('git://git.example:9418/platform/my%20repo%23%3F')

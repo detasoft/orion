@@ -28,7 +28,8 @@ public class OrionConfiguration {
     @Data
     public static class BootstrapAccessControlConfig {
         private String location = "local:orion";
-        private String branch = "master";
+        private String ref = "refs/heads/main";
+        private String branch;
         private List<String> paths = new ArrayList<>(List.of("orion.xml"));
         private boolean createDefaultIfMissing = true;
         private Map<String, String> auth = new LinkedHashMap<>();
@@ -38,6 +39,13 @@ public class OrionConfiguration {
                 throw new IllegalStateException("At least one ACL path must be configured");
             }
             return paths.getFirst();
+        }
+
+        public String configurationRef() {
+            if (branch != null && !branch.isBlank()) {
+                return branch;
+            }
+            return ref;
         }
     }
 

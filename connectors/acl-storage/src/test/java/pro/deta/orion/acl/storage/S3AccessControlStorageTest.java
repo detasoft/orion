@@ -2,6 +2,7 @@ package pro.deta.orion.acl.storage;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.util.Result;
@@ -137,7 +138,9 @@ class S3AccessControlStorageTest {
         configuration.getBootstrap().getAccessControl().setLocation("s3://acl-bucket/bootstrap");
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
 
-        AccessControlStorage storage = new AccessControlStorageResolver(configuration).resolve();
+        AccessControlStorage storage = new AccessControlStorageResolver(
+                configuration,
+                new InMemoryNativeGitRepositoryProvider()).resolve();
 
         assertThat(storage).isInstanceOf(S3AccessControlStorage.class);
     }

@@ -1,7 +1,6 @@
 # Restore the Internal Configuration Repository
 
-Status: active
-Owner: codex, session 01a06019-ac7b-76d0-af10-d014cf95076b, started 2026-09-02 05:12 Europe/Amsterdam.
+Status: complete
 
 Restore the versioned internal repository as Orion's bootstrap and live ACL
 configuration source. Its repository name, configuration ref, and `orion.xml`

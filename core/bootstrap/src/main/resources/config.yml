@@ -4,7 +4,7 @@ bootstrap:
   threadPoolSize: 10
   accessControl:
     location: local:orion
-    branch: master
+    ref: refs/heads/main
     paths:
       - orion.xml
     createDefaultIfMissing: true

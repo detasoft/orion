@@ -4,6 +4,8 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.util.Result;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -11,6 +13,13 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
     private static final String DEFAULT_HEAD = "refs/heads/main";
 
     private final ConcurrentMap<String, NativeGitRepository> repositories = new ConcurrentHashMap<>();
+
+    @Override
+    public List<String> repositoryNames() {
+        List<String> names = new ArrayList<>(repositories.keySet());
+        names.sort(String::compareTo);
+        return List.copyOf(names);
+    }
 
     @Override
     public boolean exists(String repositoryName) {

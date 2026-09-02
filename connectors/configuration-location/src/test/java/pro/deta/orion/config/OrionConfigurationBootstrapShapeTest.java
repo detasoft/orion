@@ -25,7 +25,7 @@ class OrionConfigurationBootstrapShapeTest {
                   threadPoolSize: 7
                   accessControl:
                     location: local:orion
-                    branch: master
+                    ref: refs/heads/configuration
                     paths:
                       - acl/orion.xml
                     createDefaultIfMissing: false
@@ -76,6 +76,9 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals("work", configuration.getBootstrap().getWorkDir());
         assertEquals(7, configuration.getBootstrap().getThreadPoolSize());
         assertEquals("local:orion", configuration.getBootstrap().getAccessControl().getLocation());
+        assertEquals(
+                "refs/heads/configuration",
+                configuration.getBootstrap().getAccessControl().configurationRef());
         assertEquals("acl/orion.xml", configuration.getBootstrap().getAccessControl().primaryPath());
         assertFalse(configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         assertEquals("acl", configuration.getBootstrap().getAccessControl().getAuth().get("username"));

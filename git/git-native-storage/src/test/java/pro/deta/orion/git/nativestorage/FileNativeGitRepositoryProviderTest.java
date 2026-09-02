@@ -76,6 +76,19 @@ class FileNativeGitRepositoryProviderTest {
     }
 
     @Test
+    void listsPersistedRepositoriesInStableOrder(@TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider first =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        first.create("team/zeta").valueOrFailure("repository");
+        first.create("alpha").valueOrFailure("repository");
+
+        FileNativeGitRepositoryProvider reopened =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+
+        assertThat(reopened.repositoryNames()).containsExactly("alpha", "team/zeta");
+    }
+
+    @Test
     void createFailsWhenRepositoryAlreadyExists(@TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);

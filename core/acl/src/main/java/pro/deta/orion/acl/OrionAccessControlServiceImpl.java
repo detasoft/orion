@@ -59,6 +59,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
+    private final Object reloadLock = new Object();
+    private volatile AccessControlStorage.ChangeSubscription changeSubscription;
 
     @Inject
     public OrionAccessControlServiceImpl(
@@ -81,6 +83,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             log.debug("Request to update ACL received: {}", event);
             requestToUpdate();
         });
+        changeSubscription = accessControlStorage.onChange(initiator -> requestToUpdate());
         try {
             switch (loadAccessControl()) {
                 case Result.Success<AccessControl> ignored -> requestAclUpdateAndWait("access-control start");
@@ -109,6 +112,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void onStop() {
+        AccessControlStorage.ChangeSubscription subscription = changeSubscription;
+        if (subscription != null) {
+            subscription.close();
+            changeSubscription = null;
+        }
         // ACL state remains available until process shutdown.
     }
 
@@ -271,11 +279,12 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     private void requestToUpdate() {
-        switch (loadAccessControl()) {
-            case Result.Success<AccessControl>(var ac) -> prepareAndUpdateAccessControl(ac);
-            case Result.Failure<AccessControl> f -> {
-                log.error("Error while reloading ACL: [{}] {}", f.code(), f.message(), f.throwable());
-                throw new IllegalStateException("ACL cannot be reloaded.", f.throwable());
+        synchronized (reloadLock) {
+            switch (loadAccessControl()) {
+                case Result.Success<AccessControl>(var ac) -> prepareAndUpdateAccessControl(ac);
+                case Result.Failure<AccessControl> f ->
+                        log.error("Retaining the last valid ACL after reload failure: [{}] {}",
+                                f.code(), f.message(), f.throwable());
             }
         }
     }
@@ -295,14 +304,18 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private void createDefaultAccessControlAndRequestUpdate() {
         PasswordHashingAlgorithm passwordHashingAlgorithm = defaultPasswordHashingAlgorithm();
         char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
-        String passwordHash = orionPasswordHashingService.calculateHash(
-                passwordHashingAlgorithm,
-                defaultRootPassword);
-        printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
-        AccessControl ac = createDefaultAccessControl(
-                passwordHash,
-                defaultPasswordCredentialType(passwordHashingAlgorithm));
-        saveAccessControlAndRequestUpdate(ac, "default scheme applied", UserEmail.EMPTY);
+        try {
+            String passwordHash = orionPasswordHashingService.calculateHash(
+                    passwordHashingAlgorithm,
+                    defaultRootPassword);
+            AccessControl ac = createDefaultAccessControl(
+                    passwordHash,
+                    defaultPasswordCredentialType(passwordHashingAlgorithm));
+            saveAccessControlAndRequestUpdate(ac, "default scheme applied", UserEmail.EMPTY);
+            printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
+        } finally {
+            Arrays.fill(defaultRootPassword, '\0');
+        }
     }
 
     protected PasswordHashingAlgorithm defaultPasswordHashingAlgorithm() {

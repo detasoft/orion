@@ -6,10 +6,12 @@ import dagger.Component;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.schema.config.ConfigurationProvider;
-import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
+import pro.deta.orion.lifecycle.state.TestOnly;
+import pro.deta.orion.schema.config.ConfigurationProvider;
+import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.transport.OrionTransportModule;
 
 @Singleton
@@ -19,6 +21,9 @@ public interface OrionComponent {
     OrionApplicationLifecycle orionApplicationLifecycle();
 
     OrionAccessControlServiceImpl orionAccessControlService();
+
+    @TestOnly
+    NativeGitRepositoryProvider nativeGitRepositoryProvider();
 
     @Named("runtime")
     AggregateStateMachine runtimeStateMachine();
