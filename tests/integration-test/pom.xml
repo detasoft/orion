@@ -12,6 +12,10 @@
     </parent>
     <artifactId>integration-test</artifactId>
 
+    <properties>
+        <cloudflare.it.enabled>false</cloudflare.it.enabled>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
@@ -56,6 +60,9 @@
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
                     <workingDirectory>${project.build.directory}</workingDirectory>
+                    <systemPropertyVariables>
+                        <cloudflare.it.enabled>${cloudflare.it.enabled}</cloudflare.it.enabled>
+                    </systemPropertyVariables>
                 </configuration>
                 <executions>
                     <execution>
@@ -68,5 +75,14 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>dist</id>
+            <properties>
+                <cloudflare.it.enabled>true</cloudflare.it.enabled>
+            </properties>
+        </profile>
+    </profiles>
 
 </project>

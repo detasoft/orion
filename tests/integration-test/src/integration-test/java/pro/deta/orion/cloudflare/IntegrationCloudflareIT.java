@@ -1,6 +1,7 @@
 package pro.deta.orion.cloudflare;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import pro.deta.orion.cloudflare.config.CloudflareConfig;
 import pro.deta.orion.cloudflare.model.CloudflareResponse;
 import pro.deta.orion.cloudflare.model.DnsRecord;
@@ -11,6 +12,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+@EnabledIfSystemProperty(named = "cloudflare.it.enabled", matches = "true")
 public class IntegrationCloudflareIT {
 
     @Test
