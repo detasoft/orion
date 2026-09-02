@@ -15,7 +15,6 @@ dependency injection.
 
 ## Child Tasks
 
-- [ ] [Add configuration secret cryptography](configuration-secret-cryptography/TASK.md)
 - [ ] [Migrate server identity and JWT signing](server-identity-migration/TASK.md)
 - [ ] [Migrate the remaining Orion key owners](remaining-key-owner-migration/TASK.md)
 - [ ] [Support short-lived JWT rotation and refresh](short-lived-jwt-rotation-and-refresh/TASK.md)

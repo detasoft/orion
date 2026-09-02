@@ -5,7 +5,9 @@ import java.security.GeneralSecurityException;
 public interface ConfigurationCipherCapability {
     KeyMaterialDescriptor descriptor();
 
-    EncryptedConfigurationValue encrypt(byte[] plaintext) throws GeneralSecurityException;
+    ConfigurationSecretEnvelope seal(byte[] plaintext, ConfigurationSecretContext context)
+            throws GeneralSecurityException;
 
-    byte[] decrypt(EncryptedConfigurationValue encrypted) throws GeneralSecurityException;
+    byte[] open(ConfigurationSecretEnvelope envelope, ConfigurationSecretContext context)
+            throws GeneralSecurityException;
 }

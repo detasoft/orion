@@ -1,11 +1,14 @@
 package pro.deta.orion.keymaterial;
 
+import javax.crypto.AEADBadTagException;
 import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import java.security.GeneralSecurityException;
+import java.security.InvalidKeyException;
 import java.security.KeyPair;
 import java.security.KeyStore;
 import java.security.SecureRandom;
@@ -20,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 public final class KeyMaterialCapabilities {
-    private static final String AES_GCM = "AES/GCM/NoPadding";
+    private static final int DATA_KEY_BITS = 256;
     private static final int GCM_TAG_BITS = 128;
     private static final int GCM_NONCE_BYTES = 12;
 
@@ -182,23 +185,120 @@ public final class KeyMaterialCapabilities {
             }
 
             @Override
-            public EncryptedConfigurationValue encrypt(byte[] plaintext) throws GeneralSecurityException {
-                requireBytes(plaintext, "Configuration plaintext");
-                byte[] nonce = new byte[GCM_NONCE_BYTES];
-                secureRandom.nextBytes(nonce);
-                Cipher cipher = initCipher(Cipher.ENCRYPT_MODE, registered, nonce);
-                return new EncryptedConfigurationValue(nonce, cipher.doFinal(plaintext));
+            public ConfigurationSecretEnvelope seal(
+                    byte[] plaintext,
+                    ConfigurationSecretContext context) throws GeneralSecurityException {
+                return sealConfigurationSecret(registered, plaintext, context);
             }
 
             @Override
-            public byte[] decrypt(EncryptedConfigurationValue encrypted) throws GeneralSecurityException {
-                if (encrypted == null) {
-                    throw new IllegalArgumentException("Encrypted configuration value must not be null");
-                }
-                Cipher cipher = initCipher(Cipher.DECRYPT_MODE, registered, encrypted.nonce());
-                return cipher.doFinal(encrypted.ciphertext());
+            public byte[] open(
+                    ConfigurationSecretEnvelope envelope,
+                    ConfigurationSecretContext context) throws GeneralSecurityException {
+                return openConfigurationSecret(registered, envelope, context);
             }
         };
+    }
+
+    private ConfigurationSecretEnvelope sealConfigurationSecret(
+            KeyMaterialDescriptor descriptor,
+            byte[] plaintext,
+            ConfigurationSecretContext context) throws GeneralSecurityException {
+        requireBytes(plaintext, "Configuration plaintext");
+        requireContext(context);
+        KeyGenerator generator = KeyGenerator.getInstance("AES");
+        generator.init(DATA_KEY_BITS, secureRandom);
+        SecretKey dataKey = generator.generateKey();
+        byte[] nonce = new byte[GCM_NONCE_BYTES];
+        secureRandom.nextBytes(nonce);
+
+        Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
+        wrappingCipher.init(Cipher.WRAP_MODE, owner.secretKey(descriptor.alias().value()));
+        byte[] wrappedDataKey = wrappingCipher.wrap(dataKey);
+
+        Cipher encryptionCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_GCM);
+        encryptionCipher.init(
+                Cipher.ENCRYPT_MODE,
+                dataKey,
+                new GCMParameterSpec(GCM_TAG_BITS, nonce));
+        encryptionCipher.updateAAD(context.authenticatedBytes());
+        byte[] ciphertext = encryptionCipher.doFinal(plaintext);
+        return new ConfigurationSecretEnvelope(
+                ConfigurationSecretEnvelopeCodec.CURRENT_VERSION,
+                descriptor.alias(),
+                descriptor.version(),
+                ConfigurationSecretEnvelopeCodec.AES_WRAP,
+                ConfigurationSecretEnvelopeCodec.AES_GCM,
+                ConfigurationSecretEnvelopeCodec.BASE64_URL,
+                wrappedDataKey,
+                nonce,
+                ciphertext);
+    }
+
+    private byte[] openConfigurationSecret(
+            KeyMaterialDescriptor descriptor,
+            ConfigurationSecretEnvelope envelope,
+            ConfigurationSecretContext context) throws GeneralSecurityException {
+        requireContext(context);
+        requireEnvelopeMatches(descriptor, envelope);
+        Cipher wrappingCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_WRAP);
+        wrappingCipher.init(Cipher.UNWRAP_MODE, owner.secretKey(descriptor.alias().value()));
+        SecretKey dataKey;
+        try {
+            dataKey = (SecretKey) wrappingCipher.unwrap(
+                    envelope.wrappedDataKey(),
+                    "AES",
+                    Cipher.SECRET_KEY);
+        } catch (InvalidKeyException e) {
+            throw authenticationFailure(e);
+        }
+
+        Cipher decryptionCipher = Cipher.getInstance(ConfigurationSecretEnvelopeCodec.AES_GCM);
+        decryptionCipher.init(
+                Cipher.DECRYPT_MODE,
+                dataKey,
+                new GCMParameterSpec(GCM_TAG_BITS, envelope.nonce()));
+        decryptionCipher.updateAAD(context.authenticatedBytes());
+        try {
+            return decryptionCipher.doFinal(envelope.ciphertext());
+        } catch (AEADBadTagException e) {
+            throw authenticationFailure(e);
+        }
+    }
+
+    private static void requireEnvelopeMatches(
+            KeyMaterialDescriptor descriptor,
+            ConfigurationSecretEnvelope envelope) throws ConfigurationSecretException {
+        if (envelope == null) {
+            throw new IllegalArgumentException("Configuration secret envelope must not be null");
+        }
+        if (!descriptor.alias().equals(envelope.keyAlias())
+                || !descriptor.version().equals(envelope.keyVersion())) {
+            throw new ConfigurationSecretException(
+                    ConfigurationSecretException.Reason.MATERIAL_MISMATCH,
+                    "Configuration secret wrapping material does not match the capability");
+        }
+        if (envelope.version() != ConfigurationSecretEnvelopeCodec.CURRENT_VERSION
+                || !ConfigurationSecretEnvelopeCodec.AES_WRAP.equals(envelope.wrappingAlgorithm())
+                || !ConfigurationSecretEnvelopeCodec.AES_GCM.equals(envelope.encryptionAlgorithm())
+                || !ConfigurationSecretEnvelopeCodec.BASE64_URL.equals(envelope.encoding())) {
+            throw new ConfigurationSecretException(
+                    ConfigurationSecretException.Reason.UNSUPPORTED,
+                    "Configuration secret envelope metadata is unsupported");
+        }
+    }
+
+    private static void requireContext(ConfigurationSecretContext context) {
+        if (context == null) {
+            throw new IllegalArgumentException("Configuration secret context must not be null");
+        }
+    }
+
+    private static ConfigurationSecretException authenticationFailure(Throwable cause) {
+        return new ConfigurationSecretException(
+                ConfigurationSecretException.Reason.AUTHENTICATION_FAILED,
+                "Configuration secret authentication failed",
+                cause);
     }
 
     private byte[] signWith(KeyMaterialDescriptor descriptor, byte[] payload)
@@ -231,14 +331,6 @@ public final class KeyMaterialCapabilities {
         } finally {
             Arrays.fill(password, '\0');
         }
-    }
-
-    private Cipher initCipher(int mode, KeyMaterialDescriptor descriptor, byte[] nonce)
-            throws GeneralSecurityException {
-        SecretKey secretKey = owner.secretKey(descriptor.alias().value());
-        Cipher cipher = Cipher.getInstance(AES_GCM);
-        cipher.init(mode, secretKey, new GCMParameterSpec(GCM_TAG_BITS, nonce));
-        return cipher;
     }
 
     private KeyMaterialDescriptor requireRegistered(

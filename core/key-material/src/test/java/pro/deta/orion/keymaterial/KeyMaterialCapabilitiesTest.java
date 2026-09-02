@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import javax.net.ssl.SSLContext;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -177,7 +178,7 @@ class KeyMaterialCapabilitiesTest {
     }
 
     @Test
-    void encryptsConfigurationWithSymmetricMaterialKeptBehindCapability() throws Exception {
+    void sealsConfigurationEnvelopeAcrossMaterialReload() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor cipher = descriptor(
                 "configuration-v1",
@@ -185,21 +186,126 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialAlgorithm.AES,
                 1,
                 CLUSTER);
+        ConfigurationSecretContext context = new ConfigurationSecretContext("github-token", "access-token");
+        byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
+        ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
+        String serializedEnvelope;
         try (KeyMaterialService service = KeyMaterialService.open(store, options(true))) {
             service.generateSecretKeyIfMissing(cipher, 256);
             service.save();
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(cipher));
+
+            ConfigurationSecretEnvelope envelope = capabilities
+                    .configurationCipher(cipher)
+                    .seal(plaintext, context);
+            serializedEnvelope = codec.serialize(envelope);
         }
 
         try (KeyMaterialService reloaded = KeyMaterialService.open(store, options(false))) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(reloaded, List.of(cipher));
-            byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
+            ConfigurationSecretEnvelope envelope = codec.parse(serializedEnvelope);
 
-            EncryptedConfigurationValue encrypted = capabilities.configurationCipher(cipher).encrypt(plaintext);
-
-            assertThat(encrypted.ciphertext()).isNotEqualTo(plaintext);
-            assertThat(capabilities.configurationCipher(cipher).decrypt(encrypted)).isEqualTo(plaintext);
+            assertThat(envelope.keyAlias()).isEqualTo(cipher.alias());
+            assertThat(envelope.keyVersion()).isEqualTo(cipher.version());
+            assertThat(envelope.wrappingAlgorithm()).isEqualTo("AESWrap");
+            assertThat(envelope.encryptionAlgorithm()).isEqualTo("AES/GCM/NoPadding");
+            assertThat(envelope.encoding()).isEqualTo("base64url");
+            assertThat(envelope.ciphertext()).isNotEqualTo(plaintext);
+            assertThat(capabilities.configurationCipher(cipher).open(envelope, context))
+                    .isEqualTo(plaintext);
             assertThat(ConfigurationCipherCapability.class.getMethods())
                     .noneMatch(method -> method.getReturnType().getSimpleName().contains("SecretKey"));
+        }
+    }
+
+    @Test
+    void usesFreshDataKeyNonceAndCiphertextForEverySeal() throws Exception {
+        KeyMaterialDescriptor cipher = descriptor(
+                "configuration-v1",
+                KeyMaterialPurpose.CONFIGURATION_CIPHER,
+                KeyMaterialAlgorithm.AES,
+                1,
+                CLUSTER);
+        try (KeyMaterialService service = service()) {
+            service.generateSecretKeyIfMissing(cipher, 256);
+            ConfigurationCipherCapability capability = KeyMaterialCapabilities
+                    .open(service, List.of(cipher))
+                    .configurationCipher(cipher);
+            byte[] plaintext = "same-password".getBytes(StandardCharsets.UTF_8);
+
+            ConfigurationSecretEnvelope first = capability.seal(plaintext, context());
+            ConfigurationSecretEnvelope second = capability.seal(plaintext, context());
+
+            assertThat(first.wrappedDataKey()).isNotEqualTo(second.wrappedDataKey());
+            assertThat(first.nonce()).isNotEqualTo(second.nonce());
+            assertThat(first.ciphertext()).isNotEqualTo(second.ciphertext());
+            assertThat(capability.open(first, context())).isEqualTo(plaintext);
+            assertThat(capability.open(second, context())).isEqualTo(plaintext);
+        }
+    }
+
+    @Test
+    void rejectsEveryChangedContextWithTypedAuthenticationFailure() throws Exception {
+        KeyMaterialDescriptor cipher = descriptor(
+                "configuration-v1",
+                KeyMaterialPurpose.CONFIGURATION_CIPHER,
+                KeyMaterialAlgorithm.AES,
+                1,
+                CLUSTER);
+        try (KeyMaterialService service = service()) {
+            service.generateSecretKeyIfMissing(cipher, 256);
+            ConfigurationCipherCapability capability = KeyMaterialCapabilities
+                    .open(service, List.of(cipher))
+                    .configurationCipher(cipher);
+            ConfigurationSecretEnvelope envelope = capability.seal(
+                    "password".getBytes(StandardCharsets.UTF_8), context());
+            List<ConfigurationSecretContext> changed = List.of(
+                    new ConfigurationSecretContext("other", "access-token"),
+                    new ConfigurationSecretContext("github-token", "other"));
+
+            for (ConfigurationSecretContext candidate : changed) {
+                assertSecretFailure(
+                        () -> capability.open(envelope, candidate),
+                        ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
+            }
+        }
+    }
+
+    @Test
+    void rejectsTamperedEnvelopeAndMismatchedMaterialWithoutSecretValues() throws Exception {
+        KeyMaterialDescriptor cipher = descriptor(
+                "configuration-v1",
+                KeyMaterialPurpose.CONFIGURATION_CIPHER,
+                KeyMaterialAlgorithm.AES,
+                1,
+                CLUSTER);
+        try (KeyMaterialService service = service()) {
+            service.generateSecretKeyIfMissing(cipher, 256);
+            ConfigurationCipherCapability capability = KeyMaterialCapabilities
+                    .open(service, List.of(cipher))
+                    .configurationCipher(cipher);
+            ConfigurationSecretEnvelope envelope = capability.seal(
+                    "do-not-report".getBytes(StandardCharsets.UTF_8), context());
+
+            assertSecretFailure(
+                    () -> capability.open(
+                            withWrappedKey(envelope, changed(envelope.wrappedDataKey())),
+                            context()),
+                    ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
+            assertSecretFailure(
+                    () -> capability.open(withNonce(envelope, changed(envelope.nonce())), context()),
+                    ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
+            assertSecretFailure(
+                    () -> capability.open(withCiphertext(envelope, changed(envelope.ciphertext())), context()),
+                    ConfigurationSecretException.Reason.AUTHENTICATION_FAILED);
+            assertSecretFailure(
+                    () -> capability.open(
+                            withAlias(envelope, new KeyMaterialAlias("configuration-v2")),
+                            context()),
+                    ConfigurationSecretException.Reason.MATERIAL_MISMATCH);
+            assertSecretFailure(
+                    () -> capability.open(withVersion(envelope, new KeyMaterialVersion(2)), context()),
+                    ConfigurationSecretException.Reason.MATERIAL_MISMATCH);
         }
     }
 
@@ -244,6 +350,81 @@ class KeyMaterialCapabilitiesTest {
 
     private static KeyMaterialService service() throws Exception {
         return KeyMaterialService.open(new InMemoryKeyMaterialContentStore(), options(true));
+    }
+
+    private static ConfigurationSecretContext context() {
+        return new ConfigurationSecretContext("github-token", "access-token");
+    }
+
+    private static void assertSecretFailure(
+            org.assertj.core.api.ThrowableAssert.ThrowingCallable operation,
+            ConfigurationSecretException.Reason reason) {
+        assertThatThrownBy(operation)
+                .isInstanceOfSatisfying(
+                        ConfigurationSecretException.class,
+                        failure -> assertThat(failure.reason()).isEqualTo(reason))
+                .hasMessageNotContaining("do-not-report")
+                .hasMessageNotContaining("password");
+    }
+
+    private static ConfigurationSecretEnvelope withWrappedKey(
+            ConfigurationSecretEnvelope envelope,
+            byte[] wrappedDataKey) {
+        return copy(envelope, envelope.keyAlias(), envelope.keyVersion(), wrappedDataKey,
+                envelope.nonce(), envelope.ciphertext());
+    }
+
+    private static ConfigurationSecretEnvelope withNonce(
+            ConfigurationSecretEnvelope envelope,
+            byte[] nonce) {
+        return copy(envelope, envelope.keyAlias(), envelope.keyVersion(), envelope.wrappedDataKey(),
+                nonce, envelope.ciphertext());
+    }
+
+    private static ConfigurationSecretEnvelope withCiphertext(
+            ConfigurationSecretEnvelope envelope,
+            byte[] ciphertext) {
+        return copy(envelope, envelope.keyAlias(), envelope.keyVersion(), envelope.wrappedDataKey(),
+                envelope.nonce(), ciphertext);
+    }
+
+    private static ConfigurationSecretEnvelope withAlias(
+            ConfigurationSecretEnvelope envelope,
+            KeyMaterialAlias alias) {
+        return copy(envelope, alias, envelope.keyVersion(), envelope.wrappedDataKey(),
+                envelope.nonce(), envelope.ciphertext());
+    }
+
+    private static ConfigurationSecretEnvelope withVersion(
+            ConfigurationSecretEnvelope envelope,
+            KeyMaterialVersion version) {
+        return copy(envelope, envelope.keyAlias(), version, envelope.wrappedDataKey(),
+                envelope.nonce(), envelope.ciphertext());
+    }
+
+    private static ConfigurationSecretEnvelope copy(
+            ConfigurationSecretEnvelope envelope,
+            KeyMaterialAlias alias,
+            KeyMaterialVersion version,
+            byte[] wrappedDataKey,
+            byte[] nonce,
+            byte[] ciphertext) {
+        return new ConfigurationSecretEnvelope(
+                envelope.version(),
+                alias,
+                version,
+                envelope.wrappingAlgorithm(),
+                envelope.encryptionAlgorithm(),
+                envelope.encoding(),
+                wrappedDataKey,
+                nonce,
+                ciphertext);
+    }
+
+    private static byte[] changed(byte[] value) {
+        byte[] changed = Arrays.copyOf(value, value.length);
+        changed[changed.length - 1] ^= 1;
+        return changed;
     }
 
     private static KeyMaterialOptions options(boolean createIfMissing) {
