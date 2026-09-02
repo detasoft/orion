@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture Simplifier"
+  short_description: "Find structural complexity and simpler models"
+  default_prompt: "Use $architecture-simplifier to review this codebase for architectural inconsistency, semantic duplication, and safe simplification opportunities."
