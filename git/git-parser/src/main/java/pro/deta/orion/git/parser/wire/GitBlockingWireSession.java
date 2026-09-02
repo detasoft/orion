@@ -4,8 +4,8 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionOutput;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
-import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
@@ -836,44 +836,65 @@ public final class GitBlockingWireSession {
 
     private LegacyReceivePack readLegacyReceivePack(
             LegacyReceiveCommandSection section) throws IOException {
-        PackIngestionSession session =
+        try (PackIngestionOutput target = new PackIngestionOutput(
                 repositoryService.beginLegacyReceivePack(
                         section.initialRequest(),
-                        accessHook);
-        try {
+                        accessHook))) {
             while (true) {
                 ByteBuf buffer = Unpooled.buffer(DEFAULT_INPUT_BUFFER_SIZE);
                 try {
                     int read = wire.readRawInto(
                             buffer,
                             DEFAULT_INPUT_BUFFER_SIZE);
-                    PackIngestionResult result = read == 0
-                            ? session.endOfInput()
-                            : session.accept(buffer);
-                    switch (result) {
-                        case PackIngestionResult.NeedInput ignored -> {
-                        }
-                        case PackIngestionResult.Complete complete -> {
-                            return new LegacyReceivePack(
-                                    section,
-                                    complete.quarantine());
-                        }
-                        case PackIngestionResult.Failed failed ->
-                                throw new IOException(
-                                        "Failed to ingest native Git receive pack",
-                                        failed.failure());
-                    }
                     if (read == 0) {
-                        throw new EOFException(
-                                "Legacy receive-pack body ended before pack completed");
+                        return receivePack(section, completeReceivePack(target));
+                    }
+                    writeReceivePack(target, buffer);
+                    if (target.completed()) {
+                        return receivePack(section, completeReceivePack(target));
                     }
                 } finally {
                     buffer.release();
                 }
             }
-        } finally {
-            session.close();
         }
+    }
+
+    private static void writeReceivePack(
+            PackIngestionOutput target,
+            ByteBuf buffer) throws IOException {
+        try {
+            target.write(buffer);
+        } catch (IOException failure) {
+            throw receivePackFailure(failure);
+        }
+    }
+
+    private static PackIngestionResult.Complete
+            completeReceivePack(PackIngestionOutput target) throws IOException {
+        try {
+            return target.complete();
+        } catch (PackIngestionOutput.IncompleteException incomplete) {
+            EOFException failure = new EOFException(
+                    "Legacy receive-pack body ended before pack completed");
+            failure.initCause(incomplete);
+            throw failure;
+        } catch (IOException failure) {
+            throw receivePackFailure(failure);
+        }
+    }
+
+    private static IOException receivePackFailure(IOException failure) {
+        Throwable cause = failure.getCause() == null
+                ? failure
+                : failure.getCause();
+        return new IOException("Failed to ingest native Git receive pack", cause);
+    }
+
+    private static LegacyReceivePack receivePack(
+            LegacyReceiveCommandSection section,
+            PackIngestionResult.Complete complete) {
+        return new LegacyReceivePack(section, complete.quarantine());
     }
 
     private void completeLegacyReceivePack(LegacyReceivePack receivePack)

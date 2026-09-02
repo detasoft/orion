@@ -536,31 +536,13 @@ public final class GitBlockingWireTransport {
         return payload.getBytes(StandardCharsets.UTF_8);
     }
 
-    private void producePack(NativePackProducer producer, PackOutput output) throws IOException {
-        NativePackProducer.Result result;
-        do {
-            long before = output.bytesWritten();
-            result = producer.produce(output);
-            if (result == NativePackProducer.Result.MORE && output.bytesWritten() == before) {
-                throw new IllegalStateException("Native pack producer made no progress");
-            }
-        } while (result == NativePackProducer.Result.MORE);
-    }
-
-    private interface PackOutput extends BufferedByteOutput {
-        long bytesWritten();
-    }
-
-    private final class RawPackOutput implements PackOutput {
-        private long bytesWritten;
-
+    private final class RawPackOutput implements BufferedByteOutput {
         @Override
         public void write(byte[] bytes, int offset, int length) throws IOException {
             if (length == 0) {
                 return;
             }
             outputSink.write(bytes, offset, length);
-            bytesWritten += length;
         }
 
         @Override
@@ -570,25 +552,18 @@ public final class GitBlockingWireTransport {
                 return;
             }
             outputSink.write(buffer);
-            bytesWritten += length;
         }
 
         @Override
         public void flush() throws IOException {
             outputSink.flush();
         }
-
-        @Override
-        public long bytesWritten() {
-            return bytesWritten;
-        }
     }
 
-    private final class SideBandOutput implements PackOutput {
+    private final class SideBandOutput implements BufferedByteOutput {
         private static final int MAXIMUM_PAYLOAD = MAX_PKT_LINE_LENGTH - PKT_LINE_HEADER_SIZE - 1;
 
         private final SideBandChannel channel;
-        private long bytesWritten;
 
         private SideBandOutput(SideBandChannel channel) {
             this.channel = Objects.requireNonNull(channel, "channel");
@@ -600,7 +575,6 @@ public final class GitBlockingWireTransport {
                 return;
             }
             writeSideBand(channel, bytes, offset, length);
-            bytesWritten += length;
         }
 
         @Override
@@ -610,17 +584,11 @@ public final class GitBlockingWireTransport {
                 return;
             }
             writeSideBand(channel, buffer);
-            bytesWritten += length;
         }
 
         @Override
         public void flush() throws IOException {
             outputSink.flush();
-        }
-
-        @Override
-        public long bytesWritten() {
-            return bytesWritten;
         }
     }
 
@@ -728,14 +696,7 @@ public final class GitBlockingWireTransport {
                     writeRaw(NAK);
                 }
                 SideBandOutput packOutput = new SideBandOutput(SideBandChannel.DATA);
-                NativePackProducer.Result result;
-                do {
-                    long before = packOutput.bytesWritten();
-                    result = producer.produce(packOutput);
-                    if (result == NativePackProducer.Result.MORE && packOutput.bytesWritten() == before) {
-                        throw new IllegalStateException("Native pack producer made no progress");
-                    }
-                } while (result == NativePackProducer.Result.MORE);
+                producer.writeTo(packOutput);
                 writeRaw(FLUSH);
                 flush();
                 complete();
@@ -790,7 +751,7 @@ public final class GitBlockingWireTransport {
                     writeRaw(NAK);
                 }
                 RawPackOutput packOutput = new RawPackOutput();
-                producePack(producer, packOutput);
+                producer.writeTo(packOutput);
                 flush();
                 close();
             } catch (IOException | RuntimeException error) {
@@ -855,7 +816,7 @@ public final class GitBlockingWireTransport {
                     writeRaw(packet);
                 }
                 writeRaw(packfileHeader);
-                producePack(producer, new SideBandOutput(SideBandChannel.DATA));
+                producer.writeTo(new SideBandOutput(SideBandChannel.DATA));
                 writeRaw(FLUSH);
                 flush();
                 close();

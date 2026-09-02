@@ -1,8 +1,13 @@
 package pro.deta.orion.transport.git;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -13,8 +18,13 @@ import pro.deta.orion.util.Result;
 
 import java.io.OutputStream;
 import java.lang.reflect.Constructor;
+import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.SocketChannel;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -96,6 +106,57 @@ class GitNativeTransportStateMachineTest {
         }
 
         assertTrue(virtualThread.get());
+    }
+
+    @Test
+    void stopClosesAnAcceptedConnectionBlockedInTheProtocol() throws Exception {
+        CountDownLatch handled = new CountDownLatch(1);
+        GitNativeTransportService service = new GitNativeTransportService(
+                config(true),
+                new DefaultGitNativeRepositoryService(
+                        new RecordingNativeGitRepositoryProvider(
+                                handled,
+                                new AtomicBoolean())));
+
+        try (ConnectionFailureLogCapture logs = new ConnectionFailureLogCapture()) {
+            service.onStart();
+            try (SocketChannel channel = SocketChannel.open(
+                    new InetSocketAddress("127.0.0.1", service.boundPort()))) {
+                channel.write(ByteBuffer.wrap(
+                        "002dgit-upload-pack /repo.git\0host=localhost\0"
+                                .getBytes(StandardCharsets.US_ASCII)));
+                assertTrue(handled.await(5, TimeUnit.SECONDS));
+
+                service.onStop();
+                service.onStop();
+
+                assertTrue(awaitEndOfInput(channel, Duration.ofSeconds(2)));
+                assertFalse(logs.hasConnectionFailure());
+            } finally {
+                service.onStop();
+            }
+        }
+    }
+
+    @Test
+    void genuineClientEofStillWarns() throws Exception {
+        GitNativeTransportService service = new GitNativeTransportService(
+                config(true),
+                new DefaultGitNativeRepositoryService(
+                        new InMemoryNativeGitRepositoryProvider()));
+
+        try (ConnectionFailureLogCapture logs = new ConnectionFailureLogCapture()) {
+            service.onStart();
+            try (Socket socket = new Socket("127.0.0.1", service.boundPort())) {
+                socket.getOutputStream().write("00".getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+                socket.shutdownOutput();
+
+                assertTrue(logs.awaitConnectionFailure(Duration.ofSeconds(5)));
+            } finally {
+                service.onStop();
+            }
+        }
     }
 
     @Test
@@ -326,6 +387,31 @@ class GitNativeTransportStateMachineTest {
         throw new AssertionError("Missing @Inject constructor");
     }
 
+    private static boolean awaitEndOfInput(
+            SocketChannel channel,
+            Duration timeout) throws Exception {
+        channel.configureBlocking(false);
+        long deadline = System.nanoTime() + timeout.toNanos();
+        ByteBuffer buffer = ByteBuffer.allocate(1024);
+        try (Selector selector = Selector.open()) {
+            channel.register(selector, SelectionKey.OP_READ);
+            while (System.nanoTime() < deadline) {
+                int read = channel.read(buffer);
+                if (read < 0) {
+                    return true;
+                }
+                if (read > 0) {
+                    buffer.clear();
+                    continue;
+                }
+                long remaining = deadline - System.nanoTime();
+                selector.select(Math.max(1, TimeUnit.NANOSECONDS.toMillis(remaining)));
+                selector.selectedKeys().clear();
+            }
+        }
+        return false;
+    }
+
     private static GitTransportConfig config(boolean enabled) {
         GitTransportConfig config = new GitTransportConfig("127.0.0.1", 0);
         config.setEnabled(enabled);
@@ -362,6 +448,50 @@ class GitNativeTransportStateMachineTest {
         @Override
         public Result<NativeGitRepository> create(String repositoryName) {
             return delegate.create(repositoryName);
+        }
+    }
+
+    private static final class ConnectionFailureLogCapture
+            extends AppenderBase<ILoggingEvent>
+            implements AutoCloseable {
+        private final Logger logger =
+                (Logger) LoggerFactory.getLogger(GitNativeTransportService.class);
+        private final Level previousLevel;
+        private final boolean previousAdditive;
+        private final AtomicBoolean connectionFailure = new AtomicBoolean();
+        private final CountDownLatch connectionFailureLogged = new CountDownLatch(1);
+
+        private ConnectionFailureLogCapture() {
+            previousLevel = logger.getLevel();
+            previousAdditive = logger.isAdditive();
+            logger.setLevel(Level.WARN);
+            logger.setAdditive(false);
+            start();
+            logger.addAppender(this);
+        }
+
+        @Override
+        protected void append(ILoggingEvent event) {
+            if ("Native Git connection failed".equals(event.getFormattedMessage())) {
+                connectionFailure.set(true);
+                connectionFailureLogged.countDown();
+            }
+        }
+
+        private boolean awaitConnectionFailure(Duration timeout) throws InterruptedException {
+            return connectionFailureLogged.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        private boolean hasConnectionFailure() {
+            return connectionFailure.get();
+        }
+
+        @Override
+        public void close() {
+            logger.detachAppender(this);
+            stop();
+            logger.setLevel(previousLevel);
+            logger.setAdditive(previousAdditive);
         }
     }
 

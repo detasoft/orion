@@ -254,7 +254,7 @@ public final class GitWireBootstrap {
         };
     }
 
-    private static String normalizeRepositoryPath(String repository) {
+    public static String normalizeRepositoryPath(String repository) {
         String normalized = repository == null ? "" : repository.trim();
         while (normalized.startsWith("/")) {
             normalized = normalized.substring(1);

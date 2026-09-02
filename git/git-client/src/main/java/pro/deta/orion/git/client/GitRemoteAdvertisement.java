@@ -15,6 +15,16 @@ public record GitRemoteAdvertisement(
         refs = List.copyOf(Objects.requireNonNull(refs, "refs"));
     }
 
+    public Optional<Ref> findRef(String name) {
+        Objects.requireNonNull(name, "name");
+        for (Ref ref : refs) {
+            if (name.equals(ref.name())) {
+                return Optional.of(ref);
+            }
+        }
+        return Optional.empty();
+    }
+
     public record Ref(
             String objectId,
             String name,

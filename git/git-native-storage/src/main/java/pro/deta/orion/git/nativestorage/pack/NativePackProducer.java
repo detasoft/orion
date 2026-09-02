@@ -27,6 +27,40 @@ public interface NativePackProducer extends AutoCloseable {
         }
     }
 
+    default void writeTo(BufferedByteOutput destination) throws IOException {
+        Objects.requireNonNull(destination, "destination");
+        class CountingOutput implements BufferedByteOutput {
+            private long bytesWritten;
+
+            @Override
+            public void write(byte[] bytes, int offset, int length) throws IOException {
+                destination.write(bytes, offset, length);
+                bytesWritten += length;
+            }
+
+            @Override
+            public void write(ByteBuf buffer) throws IOException {
+                int length = buffer.readableBytes();
+                destination.write(buffer);
+                bytesWritten += length;
+            }
+
+            @Override
+            public void flush() throws IOException {
+                destination.flush();
+            }
+        }
+        CountingOutput output = new CountingOutput();
+        Result result;
+        do {
+            long before = output.bytesWritten;
+            result = produce(output);
+            if (result == Result.MORE && output.bytesWritten == before) {
+                throw new IllegalStateException("Native pack producer made no progress");
+            }
+        } while (result == Result.MORE);
+    }
+
     @Override
     void close();
 

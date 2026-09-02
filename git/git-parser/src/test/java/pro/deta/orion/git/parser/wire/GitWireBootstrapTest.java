@@ -17,6 +17,27 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitWireBootstrapTest {
 
     @Test
+    void normalizesRepositoryPathsForTransportLookup() {
+        assertThat(GitWireBootstrap.normalizeRepositoryPath(" /team/project.git "))
+                .isEqualTo("team/project");
+        assertThat(GitWireBootstrap.normalizeRepositoryPath("project"))
+                .isEqualTo("project");
+    }
+
+    @Test
+    void rejectsInvalidRepositoryPathsForTransportLookup() {
+        assertThatThrownBy(() -> GitWireBootstrap.normalizeRepositoryPath("/"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Invalid Git repository path");
+        assertThatThrownBy(() -> GitWireBootstrap.normalizeRepositoryPath("../project.git"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Invalid Git repository path");
+        assertThatThrownBy(() -> GitWireBootstrap.normalizeRepositoryPath("team\\project.git"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Invalid Git repository path");
+    }
+
+    @Test
     void readsNativeGitDaemonInitialRequest() throws Exception {
         GitWireBootstrap bootstrap = nativeDaemonPayload(
                 "git-upload-pack /repo.git\0host=localhost\0\0version=2\0");
