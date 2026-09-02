@@ -2,7 +2,7 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
-Depends on: ../contracts-and-build/TASK.md
+Depends on: completed AgentD contracts and build
 
 Connect AgentD to the central server with a disposable TLS HTTP/2 connection
 and application-level logical streams.

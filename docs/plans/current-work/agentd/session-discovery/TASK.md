@@ -2,7 +2,7 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
-Depends on: ../contracts-and-build/TASK.md and native session-host journal
+Depends on: completed AgentD contracts and build, native session-host journal
 contracts
 
 Reconstruct AgentD's local session registry entirely from durable session

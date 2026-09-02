@@ -2,7 +2,7 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
-Depends on: ../contracts-and-build/TASK.md and the native session-host process
+Depends on: completed AgentD contracts and build, native session-host process
 and control contracts
 
 Add a runtime and local-control layer that starts `session-host` without making
