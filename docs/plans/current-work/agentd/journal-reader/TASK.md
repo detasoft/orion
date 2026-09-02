@@ -11,12 +11,12 @@ protocol versions or semantics to the journal format.
 ## Scope
 
 - Read closed and active segments, uncompressed tails, and compressed blocks
-  from a timestamp cursor.
+  after a session-scoped event ID cursor.
 - Ignore incomplete tail data, verify framing and checksums, cross rotation,
   and recover every complete record preceding damage.
-- Expose oldest and latest available timestamps and return an explicit cursor
+- Expose the first and last available event IDs and return an explicit cursor
   gap when retention deleted requested history.
-- Preserve unknown event type, schema version, and payload bytes exactly while
-  skipping structures the current AgentD does not interpret.
+- Preserve unknown event types, payload bytes, and optional trailing fields
+  exactly while skipping structures the current AgentD does not interpret.
 - Test segment and block boundaries, partial and corrupt tails, rotation,
   retention gaps, concurrent writers, unknown events, and restart reads.

@@ -14,10 +14,11 @@ orchestration remain independent from session execution.
 - Start a shell through the central-server protocol, deliver all local control
   commands, and receive ordered input, output, resize, signal, and exit events.
 - Kill and restart AgentD during multiple live sessions, rediscover hosts,
-  resume from server timestamps, and continue commands without stopping child
-  process trees.
+  resume from the server's durable event IDs, and continue commands without
+  stopping child process trees.
 - Disconnect the server, verify journals continue independently, reconnect and
-  catch up retained data, then force retention and verify exact gap reporting.
+  catch up retained data, then force retention and verify the server records
+  the exact missing range.
 - Exercise a corrupt session alongside healthy sessions and verify heartbeat,
   commands, fair journal progress, credential redaction, and graceful shutdown.
 - Publish the MVP support matrix, operational defaults, compatibility versions,
