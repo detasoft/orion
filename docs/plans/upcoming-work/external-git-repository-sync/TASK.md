@@ -1,6 +1,8 @@
 # Implement External Git Repository Synchronization
 
 Status: todo
+Depends on: ../unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md,
+../hierarchical-orion-configuration/repository-and-mirror-configuration/TASK.md
 
 Implement synchronization mode where an Orion repository can proxy an external
 Git repository and keep refs and objects synchronized through ordinary Git
