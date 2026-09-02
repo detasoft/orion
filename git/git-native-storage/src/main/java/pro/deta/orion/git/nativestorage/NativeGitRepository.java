@@ -185,15 +185,9 @@ public class NativeGitRepository implements AutoCloseable {
         Objects.requireNonNull(quarantinedObjects, "quarantinedObjects");
         Objects.requireNonNull(updates, "updates");
         if (!atomic) {
-            looseObjectStore.putAll(quarantinedObjects);
-            List<RefUpdateResult> results = new ArrayList<>();
-            for (LooseRefStore.Update update : updates) {
-                results.add(looseRefStore.update(
-                        update.refName(),
-                        update.expectedOldId(),
-                        update.newId()));
-            }
-            return List.copyOf(results);
+            return looseRefStore.updateAllIndependently(
+                    updates,
+                    () -> looseObjectStore.putAll(quarantinedObjects));
         }
         return looseRefStore.updateAll(
                 updates,

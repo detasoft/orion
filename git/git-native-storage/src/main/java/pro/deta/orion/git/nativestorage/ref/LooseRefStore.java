@@ -93,6 +93,23 @@ public final class LooseRefStore {
         return List.copyOf(results);
     }
 
+    public synchronized List<RefUpdateResult> updateAllIndependently(
+            List<Update> updates,
+            Runnable beforeUpdates) {
+        Objects.requireNonNull(updates, "updates");
+        Objects.requireNonNull(beforeUpdates, "beforeUpdates");
+        beforeUpdates.run();
+        List<RefUpdateResult> results = new ArrayList<>(updates.size());
+        for (Update update : updates) {
+            Objects.requireNonNull(update, "update");
+            results.add(update(
+                    update.refName(),
+                    update.expectedOldId(),
+                    update.newId()));
+        }
+        return List.copyOf(results);
+    }
+
     private void loadRefs() {
         if (repositoryDirectory == null) {
             return;

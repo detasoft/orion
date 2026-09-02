@@ -136,6 +136,22 @@ class LooseRefStoreTest {
     }
 
     @Test
+    void independentBatchPublishesObjectsBeforeUpdatingEachRef() {
+        AtomicBoolean objectsPublished = new AtomicBoolean();
+
+        List<RefUpdateResult> results = store.updateAllIndependently(
+                List.of(new LooseRefStore.Update("refs/heads/main", NULL_ID, SHA1_A)),
+                () -> {
+                    assertThat(store.read("refs/heads/main")).isEmpty();
+                    objectsPublished.set(true);
+                });
+
+        assertThat(results).containsExactly(RefUpdateResult.CREATED);
+        assertThat(objectsPublished).isTrue();
+        assertThat(store.read("refs/heads/main")).contains(GitObjectId.of(SHA1_A));
+    }
+
+    @Test
     void batchDoesNotPublishObjectsWhenEveryUpdateIsStale() {
         store.update("refs/heads/main", NULL_ID, SHA1_A);
         AtomicBoolean objectsPublished = new AtomicBoolean();

@@ -15,6 +15,9 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -464,15 +467,21 @@ class DefaultGitNativeRepositoryServiceTest {
     }
 
     @Test
-    void receiveDoesNotPublishAnyAtomicRefOrObjectWhenOneRefIsStale() {
-        InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
-        NativeGitRepository repository = provider.find("/demo.git")
+    void receiveKeepsPublishedPackWhenAtomicRefTransactionIsStale(
+            @TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("/demo.git")
                 .valueOrFailure("repository");
+        repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
-        LooseObjectStore quarantine = new LooseObjectStore();
-        GitObjectId feature = quarantine.write(
+        LooseObjectStore incoming = new LooseObjectStore();
+        GitObjectId feature = incoming.write(
                 ObjectType.BLOB,
                 "feature".getBytes(StandardCharsets.US_ASCII));
+        PackIngestionResult.Complete complete = ingestReceivePack(
+                service,
+                pack(incoming, feature));
 
         List<GitNativeRepositoryService.ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
@@ -488,7 +497,7 @@ class DefaultGitNativeRepositoryServiceTest {
                                                 feature,
                                                 "refs/heads/feature")),
                                 Set.of(GitCapability.ATOMIC.name()),
-                                quarantine),
+                                complete.quarantine()),
                         GitNativeRepositoryAccessHook.ALLOW_ALL);
 
         assertThat(statuses)
@@ -499,7 +508,17 @@ class DefaultGitNativeRepositoryServiceTest {
                                 "refs/heads/feature", false, "atomic-push-failure"));
         assertThat(repository.refs())
                 .containsExactly(Map.entry("refs/heads/main", MAIN_ID));
-        assertThat(repository.readObject(feature)).isEmpty();
+        assertThat(complete.publishedPack()).isPresent();
+        String packId = complete.publishedPack().orElseThrow().packId();
+        assertThat(repository.publishedPacks())
+                .extracting(manifest -> manifest.packId())
+                .containsExactly(packId);
+        try (var published = repository.openPublishedPack(packId).orElseThrow()) {
+            assertThat(published.input().readAllBytes()).isNotEmpty();
+        } catch (java.io.IOException error) {
+            throw new AssertionError(error);
+        }
+        assertThat(repository.readObject(feature)).isPresent();
     }
 
     @Test
@@ -508,7 +527,11 @@ class DefaultGitNativeRepositoryServiceTest {
         NativeGitRepository repository = provider.create("/demo.git")
                 .valueOrFailure("repository");
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
-        GitObjectId missing = GitObjectId.of("f".repeat(40));
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId missingTree = GitObjectId.of("f".repeat(40));
+        GitObjectId incompleteCommit = quarantine.write(
+                ObjectType.COMMIT,
+                incompleteCommit(missingTree).getBytes(StandardCharsets.US_ASCII));
 
         List<GitNativeRepositoryService.ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
@@ -516,17 +539,18 @@ class DefaultGitNativeRepositoryServiceTest {
                                 service,
                                 List.of(new LegacyReceiveCommand(
                                         GitObjectId.of(NULL_ID),
-                                        missing,
+                                        incompleteCommit,
                                         "refs/heads/main")),
                                 Set.of(),
-                                new LooseObjectStore()),
+                                quarantine),
                         GitNativeRepositoryAccessHook.ALLOW_ALL);
 
         assertThat(statuses).containsExactly(
                 new GitNativeRepositoryService.ReceivePackStatus(
                         "refs/heads/main", false, "missing-necessary-objects"));
         assertThat(repository.refs()).isEmpty();
-        assertThat(repository.readObject(missing)).isEmpty();
+        assertThat(repository.readObject(incompleteCommit)).isPresent();
+        assertThat(repository.readObject(missingTree)).isEmpty();
     }
 
     @Test
@@ -917,6 +941,48 @@ class DefaultGitNativeRepositoryServiceTest {
                         capabilities,
                         advertisement),
                 quarantine);
+    }
+
+    private static PackIngestionResult.Complete ingestReceivePack(
+            GitNativeRepositoryService service,
+            byte[] pack) {
+        try (PackIngestionSession session = service.beginLegacyReceivePack(
+                receiveRequest("/demo.git"),
+                GitNativeRepositoryAccessHook.ALLOW_ALL)) {
+            ByteBuf input = Unpooled.wrappedBuffer(pack);
+            try {
+                PackIngestionResult result = session.accept(input);
+                if (result instanceof PackIngestionResult.NeedInput) {
+                    result = session.endOfInput();
+                }
+                assertThat(result).isInstanceOf(PackIngestionResult.Complete.class);
+                return (PackIngestionResult.Complete) result;
+            } finally {
+                input.release();
+            }
+        }
+    }
+
+    private static byte[] pack(LooseObjectStore objects, GitObjectId objectId) {
+        ByteBuf output = Unpooled.buffer();
+        try (NativePackProducer producer = new NoDeltaPackBuilder().producer(
+                objects,
+                List.of(objectId))) {
+            assertThat(producer.produce(output))
+                    .isEqualTo(NativePackProducer.Result.COMPLETED);
+            byte[] pack = new byte[output.readableBytes()];
+            output.getBytes(output.readerIndex(), pack);
+            return pack;
+        } finally {
+            output.release();
+        }
+    }
+
+    private static String incompleteCommit(GitObjectId missingTree) {
+        return "tree " + missingTree.value() + "\n"
+                + "author Orion <orion@example.com> 0 +0000\n"
+                + "committer Orion <orion@example.com> 0 +0000\n\n"
+                + "missing tree\n";
     }
 
     private record UploadCapabilityCase(GitWireConfiguration configuration, List<String> expectedTokens) {
