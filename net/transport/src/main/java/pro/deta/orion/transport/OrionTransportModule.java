@@ -11,10 +11,11 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
+import pro.deta.orion.transport.git.command.SshCommandModule;
 import pro.deta.orion.transport.http.OrionHttpModule;
 import pro.deta.orion.util.ConfigurationContext;
 
-@Module(includes = OrionHttpModule.class)
+@Module(includes = {OrionHttpModule.class, SshCommandModule.class})
 public class OrionTransportModule {
     @Provides
     @Singleton

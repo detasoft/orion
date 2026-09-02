@@ -7,16 +7,20 @@ import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
-import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
-import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.command.CommandCancellation;
+import pro.deta.orion.command.CommandContext;
+import pro.deta.orion.command.CommandDispatcher;
+import pro.deta.orion.command.CommandFailureCode;
+import pro.deta.orion.command.CommandPath;
+import pro.deta.orion.command.CommandPresentation;
+import pro.deta.orion.command.CommandRequest;
+import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.render.PlainCommandRenderer;
+import pro.deta.orion.command.render.RenderedCommand;
 import pro.deta.orion.auth.check.OrionSecurityException;
-import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
-import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
-import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
-import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
@@ -30,197 +34,144 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.git.parser.wire.pkt.GitPktLineWriter;
 import pro.deta.orion.internal.OrionExecutor;
-import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
-import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.stream.*;
 
-import jakarta.inject.Named;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Slf4j
 public class SshCommandFactory implements CommandFactory {
-    public static final String SHUTDOWN = "shutdown";
+    public static final String ISSUE_TOKEN = "issue-token";
+    public static final String STATE = "state";
     private static final GitPktLineWriter PKT_LINE_WRITER =
             new GitPktLineWriter();
-    public static final String ISSUE_TOKEN = "issue-token";
-    public static final String TOKEN = "token";
-    public static final String STATE = "state";
-    public static final String STATUS = "status";
-    public static final String REPOSITORIES = "repositories";
     private final OrionExecutor orionExecutor;
-    private final OrionProvider orionProvider;
-    private final OrionAccessControlService accessControlService;
-    private final AggregateStateMachine runtimeStateMachine;
-    private final NativeGitRepositoryProvider repositoryProvider;
+    private final CommandDispatcher commandDispatcher;
+    private final PlainCommandRenderer commandRenderer;
     private final GitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
 
     @Inject
     public SshCommandFactory(
             OrionExecutor orionExecutor,
-            OrionProvider orionProvider,
-            OrionAccessControlService accessControlService,
-            @Named("runtime") AggregateStateMachine runtimeStateMachine,
-            NativeGitRepositoryProvider repositoryProvider,
+            CommandDispatcher commandDispatcher,
+            PlainCommandRenderer commandRenderer,
             GitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig) {
         this.orionExecutor = orionExecutor;
-        this.orionProvider = orionProvider;
-        this.accessControlService = accessControlService;
-        this.runtimeStateMachine = runtimeStateMachine;
-        this.repositoryProvider = repositoryProvider;
+        this.commandDispatcher = commandDispatcher;
+        this.commandRenderer = commandRenderer;
         this.repositoryService = repositoryService;
         this.gitTransportConfig = gitTransportConfig;
     }
 
-    public SshCommandFactory(
-            OrionExecutor orionExecutor,
-            OrionProvider orionProvider,
-            OrionAccessControlService accessControlService,
-            AggregateStateMachine runtimeStateMachine) {
-        this(
-                orionExecutor,
-                orionProvider,
-                accessControlService,
-                runtimeStateMachine,
-                null,
-                null,
-                null);
-    }
-
     @Override
     public Command createCommand(ChannelSession channelSession, String commandLine) throws IOException {
-        if (commandLine.startsWith("git-"))
+        if (commandLine.startsWith("git-")) {
             return new GitSshCommand(commandLine);
-        else {
-            return new OtherSshCommand(commandLine);
         }
+        return new OtherSshCommand(commandLine);
     }
 
     @RequiredArgsConstructor
     private class OtherSshCommand extends CloseOnDestroyCommand {
         private final String commandLine;
+        private final AtomicBoolean cancelled = new AtomicBoolean();
+        private final AtomicBoolean completed = new AtomicBoolean();
+        private final Object completionLock = new Object();
 
         @Override
         public void start(ChannelSession channel, Environment env) throws IOException {
             try {
-                orionExecutor.submit(() -> {
-                    int returnCode = 0;
-                    SecurityContext securityContext = securityContextFor(channel);
-                    try {
-                        accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
-
-                        List<String> arguments = commandArguments(commandLine);
-                        String command = arguments.getFirst();
-
-                        if (SHUTDOWN.equalsIgnoreCase(command)) {
-                            accessEnforcer().require(
-                                    securityContext,
-                                    ApplicationShutdownResource.applicationShutdown(),
-                                    ApplicationAccessRules.shutdown());
-                            orionExecutor.submit(() -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
-                        } else if (ISSUE_TOKEN.equalsIgnoreCase(command) || TOKEN.equalsIgnoreCase(command)) {
-                            issueToken(securityContext, arguments);
-                        } else if (STATE.equalsIgnoreCase(command) || STATUS.equalsIgnoreCase(command)) {
-                            writeLifecycleStatus(securityContext);
-                        } else if (REPOSITORIES.equalsIgnoreCase(command)) {
-                            writeRepositories(securityContext, arguments);
-                        } else {
-                            log.warn("SSH Transport Unknown command: {}", commandLine);
-                            outputStream.write("Unknown command".getBytes(StandardCharsets.UTF_8));
-                            returnCode = 127;
-                        }
-                    } catch (OrionSecurityException e) {
-                        log.warn(e.getMessage());
-                        writePlainError("ACCESS_DENIED");
-                        returnCode = 10;
-                    } catch (Exception e) {
-                        log.warn("SSH Transport command failed: {}", commandLine, e);
-                        writePlainError("Command failed");
-                        returnCode = -1;
-                    } finally {
-                        exitCallback.onExit(returnCode);
-                    }
-                });
-            } catch (RejectedExecutionException e) {
-                log.warn("SSH command rejected, executor saturated: {}", commandLine);
-                writePlainError("Service unavailable");
-                exitCallback.onExit(1);
+                orionExecutor.submit(() -> execute(channel));
+            } catch (RejectedExecutionException exception) {
+                log.warn("SSH command rejected because the executor is saturated");
+                deliver(failure(CommandFailureCode.HANDLER_FAILED, "Service unavailable"));
             }
         }
 
-        private void writePlainError(String message) {
+        @Override
+        public void destroy(ChannelSession channel) {
+            synchronized (completionLock) {
+                cancelled.set(true);
+                completeLocked(125);
+            }
+            super.destroy(channel);
+        }
+
+        private void execute(ChannelSession channel) {
+            CommandResult result;
             try {
-                errorStream.write(message.getBytes(StandardCharsets.UTF_8));
-            } catch (IOException e) {
-                log.warn("SSH Transport command failed to write response: {}", commandLine, e);
+                result = commandDispatcher.dispatch(commandRequest(channel));
+            } catch (RuntimeException exception) {
+                log.warn("SSH command dispatcher failed", exception);
+                result = failure(CommandFailureCode.HANDLER_FAILED, "Command handler failed");
             }
+            deliver(result);
         }
 
-        private List<String> commandArguments(String commandLine) {
-            String normalizedCommandLine = commandLine == null ? "" : commandLine.trim();
-            if (normalizedCommandLine.isEmpty()) {
-                return List.of("");
+        private CommandRequest commandRequest(ChannelSession channel) {
+            String requestId = UUID.randomUUID().toString();
+            UserIdentity identity = channel.getSession().getAttribute(SSH_AUTHENTICATED_USER);
+            if (identity == null) {
+                log.warn("SSH exec session has no authenticated user attribute");
             }
-            return List.of(normalizedCommandLine.split("\\s+"));
+            SecurityContext securityContext = SecurityContext.createContext()
+                    .withUserIdentity(identity)
+                    .withRequestId(requestId);
+            CommandCancellation cancellation = () -> cancelled.get() || Thread.currentThread().isInterrupted();
+            CommandContext context = new CommandContext(
+                    securityContext,
+                    requestId,
+                    channel.getSession().toString(),
+                    String.valueOf(channel.getSession().getRemoteAddress()),
+                    CommandPath.root(),
+                    CommandPresentation.plain(),
+                    cancellation,
+                    Map.of("transport", "ssh", "requestType", "exec"));
+            return new CommandRequest(commandLine, context);
         }
 
-        private void issueToken(SecurityContext securityContext, List<String> arguments) throws IOException {
-            if (arguments.size() != 2) {
-                throw new IllegalArgumentException("Usage: " + ISSUE_TOKEN + " <expires-in-seconds>");
-            }
-            long expiresInSeconds;
+        private void deliver(CommandResult result) {
+            RenderedCommand rendered = commandRenderer.render(result);
             try {
-                expiresInSeconds = Long.parseLong(arguments.get(1));
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("Token expiration must be a number of seconds", e);
-            }
-            if (expiresInSeconds <= 0) {
-                throw new IllegalArgumentException("Token expiration must be positive");
-            }
-
-            TokenIssueResult token = accessControlService.issueTokenFor(
-                    securityContext.getUserIdentity(),
-                    expiresInSeconds);
-            switch (token) {
-                case TokenIssueResult.Success(var value, var ignoredExpiresAtEpochSecond) ->
-                        outputStream.write((value + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
-                case TokenIssueResult.Failure(var reason, var throwable) ->
-                        throw new IllegalStateException(reason, throwable);
+                outputStream.write(rendered.stdout().getBytes(StandardCharsets.UTF_8));
+                outputStream.flush();
+                errorStream.write(rendered.stderr().getBytes(StandardCharsets.UTF_8));
+                errorStream.flush();
+                complete(rendered.exitCode());
+            } catch (IOException exception) {
+                log.warn("SSH command response delivery failed", exception);
+                complete(1);
             }
         }
 
-        private void writeLifecycleStatus(SecurityContext securityContext) throws IOException, OrionSecurityException {
-            accessEnforcer().require(
-                    securityContext,
-                    ApplicationAdminResource.applicationAdmin(),
-                    ApplicationAccessRules.admin());
-            outputStream.write((runtimeStateMachine.describeStatus() + System.lineSeparator())
-                    .getBytes(StandardCharsets.UTF_8));
+        private void complete(int exitCode) {
+            synchronized (completionLock) {
+                completeLocked(cancelled.get() ? 125 : exitCode);
+            }
         }
 
-        private void writeRepositories(SecurityContext securityContext, List<String> arguments)
-                throws IOException, OrionSecurityException {
-            if (arguments.size() != 1) {
-                throw new IllegalArgumentException("Usage: " + REPOSITORIES);
+        private void completeLocked(int exitCode) {
+            if (completed.compareAndSet(false, true)) {
+                exitCallback.onExit(exitCode);
             }
-            accessEnforcer().require(
-                    securityContext,
-                    ApplicationAdminResource.applicationAdmin(),
-                    ApplicationAccessRules.admin());
-            for (String repository : repositoryProvider.repositoryNames()) {
-                outputStream.write((repository + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
-            }
+        }
+
+        private CommandResult.Failure failure(CommandFailureCode code, String message) {
+            return new CommandResult.Failure(code, message, List.of());
         }
     }
 

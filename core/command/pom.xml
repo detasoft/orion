@@ -5,29 +5,22 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>pro.deta.orion.net</groupId>
-        <artifactId>net</artifactId>
+        <groupId>pro.deta.orion.core</groupId>
+        <artifactId>core</artifactId>
         <version>${revision}</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
-    <artifactId>git-transport</artifactId>
+
+    <artifactId>command</artifactId>
 
     <dependencies>
-        <dependency>
-            <groupId>pro.deta.orion.git</groupId>
-            <artifactId>git-parser</artifactId>
-        </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>authorization</artifactId>
         </dependency>
         <dependency>
-            <groupId>pro.deta.orion.core</groupId>
-            <artifactId>command</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.sshd</groupId>
-            <artifactId>sshd-core</artifactId>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
         </dependency>
     </dependencies>
 </project>

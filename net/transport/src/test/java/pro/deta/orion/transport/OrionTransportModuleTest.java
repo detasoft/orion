@@ -1,9 +1,11 @@
 package pro.deta.orion.transport;
 
+import dagger.Module;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
+import pro.deta.orion.transport.git.command.SshCommandModule;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
@@ -28,6 +30,19 @@ class OrionTransportModuleTest {
         assertFalse(containsType(parameterTypes, "GitNativeTransportService"));
         assertFalse(containsType(parameterTypes, "GitSshTransportService"));
         assertFalse(containsType(parameterTypes, "JettyHTTPServer"));
+    }
+
+    @Test
+    void transportModuleIncludesSshCommandBindingsWithoutLifecycleParameters() {
+        Module module = OrionTransportModule.class.getAnnotation(Module.class);
+
+        assertTrue(List.of(module.includes()).contains(SshCommandModule.class));
+        for (Method method : SshCommandModule.class.getDeclaredMethods()) {
+            for (Type parameterType : method.getGenericParameterTypes()) {
+                assertFalse(parameterType.getTypeName().contains("AggregateStateMachine"));
+                assertFalse(parameterType.getTypeName().contains("OrionApplicationLifecycle"));
+            }
+        }
     }
 
     @Test

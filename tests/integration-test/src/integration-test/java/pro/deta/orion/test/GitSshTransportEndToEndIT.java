@@ -441,6 +441,26 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void unknownSshExecCommandReturnsStableFailure() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(
+                orionRoot.resolve("server-identity").resolve("signing-rsa.pem")
+        ).valueOrFailure("Server identity key should be available after startup");
+
+        SshCommandResult result = executeCommandOverSsh(
+                startedOrion,
+                "root",
+                serverIdentityKey,
+                "definitely-unknown"
+        );
+
+        assertThat(result.exitStatus()).isEqualTo(127);
+        assertThat(result.output()).isEmpty();
+        assertThat(result.error()).isEqualTo("UNKNOWN_COMMAND: Unknown command\n");
+    }
+
+    @Test
     void regularUserCannotListRepositoriesOverSsh() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);

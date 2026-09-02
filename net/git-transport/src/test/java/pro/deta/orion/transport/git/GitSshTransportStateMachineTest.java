@@ -18,6 +18,9 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.command.CommandFailureCode;
+import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
@@ -155,7 +158,15 @@ class GitSshTransportStateMachineTest {
         configuration.getTransport().getSsh().setPort(port);
         ConfigurationContext configurationContext = new ConfigurationContext(configuration);
         SshHostKeyService hostKeyService = new SshHostKeyService(configurationContext);
-        SshCommandFactory commandFactory = new SshCommandFactory(null, null, null, null);
+        SshCommandFactory commandFactory = new SshCommandFactory(
+                null,
+                request -> new CommandResult.Failure(
+                        CommandFailureCode.UNKNOWN_COMMAND,
+                        "Unknown command",
+                        List.of()),
+                new PlainCommandRenderer(),
+                null,
+                null);
         SshEnrollmentTokenStore tokenStore = new SshEnrollmentTokenStore(
                 configurationContext,
                 OrionRuntimeOptions.defaults());

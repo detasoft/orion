@@ -23,6 +23,7 @@
         <module>common</module>
         <module>common-runtime</module>
         <module>authorization</module>
+        <module>command</module>
         <module>communication</module>
     </modules>
 

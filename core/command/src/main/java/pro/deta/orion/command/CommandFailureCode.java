@@ -1,0 +1,14 @@
+package pro.deta.orion.command;
+
+public enum CommandFailureCode {
+    INVALID_SYNTAX,
+    INVALID_ARGUMENTS,
+    MISSING_RESOURCE,
+    AMBIGUOUS_RESOURCE,
+    ACCESS_DENIED,
+    CANCELLED,
+    HANDLER_FAILED,
+    UNSUPPORTED_RESULT,
+    UNKNOWN_COMMAND,
+    UNKNOWN_PATH
+}
