@@ -64,3 +64,6 @@
   Keep task nodes short, update them when starting or finishing substantial
   work, and leave detailed designs and implementation steps in ordinary
   `docs/plans/` plan files.
+- Whenever you create a task, commit its task-tree changes immediately without
+  waiting for a separate commit request. Treat this as a documentation-only
+  commit and do not run tests afterward.
