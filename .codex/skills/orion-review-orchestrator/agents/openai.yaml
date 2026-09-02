@@ -1,0 +1,5 @@
+interface:
+  display_name: "Orion Review Orchestrator"
+  short_description: "Review-gated Orion task pool runner"
+  default_prompt: >-
+    Use $orion-review-orchestrator to run a task pool with a Terra worker and pause each task for reviewed integration.
