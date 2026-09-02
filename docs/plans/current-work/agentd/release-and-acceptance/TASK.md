@@ -4,13 +4,13 @@ Status: todo
 Detailed plan: ../../../2026-09-02-agentd.md
 Depends on: all sibling AgentD tasks and the packaged native session host
 
-Package AgentD for supported service managers and prove that transport and
-orchestration remain independent from session execution.
+Package AgentD as a jlink runtime for server-controlled SSH launch and prove
+that transport and orchestration remain independent from session execution.
 
 ## Scope
 
-- Produce the executable artifact and documented systemd, launchd, and Windows
-  Service installation, configuration, credential, upgrade, and log paths.
+- Produce the executable jlink artifacts and document server-side machine
+  configuration, detached SSH launch, local state, update, and log paths.
 - Start a shell through the central-server protocol, deliver all local control
   commands, and receive ordered input, output, resize, signal, and exit events.
 - Kill and restart AgentD during multiple live sessions, rediscover hosts,

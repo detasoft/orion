@@ -30,14 +30,14 @@ changing any local session.
 
 | ID | Direction | Message | Array positions after type |
 | ---: | --- | --- | --- |
-| `0x0001` | agent to server | `HELLO` | versions, AgentId, instance, agent version, machine, capabilities |
+| `0x0001` | agent to server | `HELLO` | versions, AgentId, instance, agent version, machine, capabilities, optional authentication tail |
 | `0x0002` | agent to server | `HEARTBEAT` | AgentId, AgentInstanceId, epoch milliseconds |
 | `0x0003` | agent to server | `AGENT_STATUS` | IDs, version, machine, session count, metrics, capabilities |
 | `0x0004` | agent to server | `SESSION_STATUS` | session descriptor |
 | `0x0005` | agent to server | `COMMAND_RESULT` | CommandId, optional SessionId, outcome, detail |
 | `0x0006` | agent to server | `SESSION_LIST` | array of session descriptors |
 | `0x0010` | agent to server | `SESSION_OPEN` | SessionId, optional first/last EventId, state |
-| `0x8001` | server to agent | `WELCOME` | protocol version, journal version, ConnectionId, configuration |
+| `0x8001` | server to agent | `WELCOME` | protocol version, journal version, ConnectionId, configuration, optional reconnect token |
 | `0x8002` | server to agent | `REQUEST_SESSION_LIST` | none |
 | `0x8100` | server to agent | `START_SESSION` | IDs, workspace, argv, cwd, env, PTY size, sandbox, runtime |
 | `0x8101` | server to agent | `INPUT` | CommandId, SessionId, input UUID, bytes |
@@ -59,6 +59,13 @@ Termination modes are graceful `0` and force `1`.
 
 `HELLO` and `WELCOME` negotiate the Agent protocol and session journal format
 independently. Version 1 uses protocol version `1` and journal version `1`.
+The frozen eight-field `HELLO` prefix may append `[generation, launchId,
+credentialKind, credentialBytes]`, where generation is positive, launch ID is
+a UUID, kind `1` is a launch permit, kind `2` is a reconnect token, and the
+credential contains 32 through 512 bytes. A partial authentication tail is
+invalid. The generic codec retains legacy readability, but the server control
+endpoint must reject an unauthenticated `HELLO`. The frozen five-field
+`WELCOME` prefix may append a 32-through-512-byte reconnect token.
 `SESSION_OPEN` starts each logical replication stream. The server answers with
 `SESSION_SYNC`; a null cursor requests the first available event, otherwise
 AgentD sends records whose EventId is greater than the committed cursor.

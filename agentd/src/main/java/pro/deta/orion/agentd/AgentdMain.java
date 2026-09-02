@@ -2,7 +2,11 @@ package pro.deta.orion.agentd;
 
 import pro.deta.orion.agentd.core.Agent;
 import pro.deta.orion.agentd.core.AgentConfiguration;
+import pro.deta.orion.agentd.core.AgentLaunchContext;
+import pro.deta.orion.agentd.core.LaunchPermit;
+import pro.deta.orion.agentd.core.LaunchPermitReader;
 
+import java.io.InputStream;
 import java.io.PrintStream;
 
 public final class AgentdMain {
@@ -11,6 +15,9 @@ public final class AgentdMain {
 
             Options:
               --state-dir PATH       persistent AgentD state directory
+              --agent-id ID          server-assigned stable agent identity
+              --generation N         server-assigned positive launch generation
+              --launch-id UUID       server-assigned launch identity
               --max-frame-bytes N    maximum Agent protocol frame size
               --agent-version VALUE  version reported during registration
               --help                 show this help
@@ -27,6 +34,16 @@ public final class AgentdMain {
     }
 
     static int run(String[] args, PrintStream output, PrintStream errors) {
+        return run(args, System.in, output, errors, AgentdMain::launch);
+    }
+
+    static int run(
+            String[] args,
+            InputStream input,
+            PrintStream output,
+            PrintStream errors,
+            Launcher launcher
+    ) {
         if (args.length == 1 && "--help".equals(args[0])) {
             output.print(USAGE);
             return 0;
@@ -41,16 +58,13 @@ public final class AgentdMain {
             return 2;
         }
 
-        try (Agent agent = Agent.create(configuration)) {
-            Thread shutdownHook = new Thread(agent::close, "agentd-shutdown-hook");
-            Runtime.getRuntime().addShutdownHook(shutdownHook);
-            try {
-                agent.start();
-                agent.awaitTermination();
-                return 0;
-            } finally {
-                removeShutdownHook(shutdownHook);
-            }
+        try (LaunchPermit permit = new LaunchPermitReader().read(input);
+             AgentLaunchContext context = AgentLaunchContext.create(configuration, permit)) {
+            launcher.launch(configuration, context);
+            return 0;
+        } catch (java.io.IOException e) {
+            errors.println("Invalid AgentD launch permit");
+            return 2;
         } catch (RuntimeException e) {
             errors.println("AgentD failed: " + e.getMessage());
             return 1;
@@ -59,6 +73,25 @@ public final class AgentdMain {
             errors.println("AgentD interrupted");
             return 1;
         }
+    }
+
+    private static void launch(AgentConfiguration configuration, AgentLaunchContext context)
+            throws InterruptedException {
+        try (Agent agent = Agent.create(configuration, context)) {
+            Thread shutdownHook = new Thread(agent::close, "agentd-shutdown-hook");
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+            try {
+                agent.start();
+                agent.awaitTermination();
+            } finally {
+                removeShutdownHook(shutdownHook);
+            }
+        }
+    }
+
+    @FunctionalInterface
+    interface Launcher {
+        void launch(AgentConfiguration configuration, AgentLaunchContext context) throws InterruptedException;
     }
 
     private static void removeShutdownHook(Thread shutdownHook) {

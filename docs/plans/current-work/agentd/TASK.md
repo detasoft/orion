@@ -10,7 +10,8 @@ the AgentD lifecycle.
 
 ## Scope
 
-- Register the machine and maintain one outbound, versioned HTTP/2 connection.
+- Authenticate a server-launched process and maintain one outbound, versioned
+  HTTP/2 connection.
 - Discover, launch, control, and recover local sessions without owning their
   PTYs or process trees.
 - Synchronize durable journal events through per-session streams with durable
@@ -21,7 +22,6 @@ the AgentD lifecycle.
 
 ## Child Tasks
 
-- [ ] [Persist identity and implement registration](identity-and-registration/TASK.md)
 - [ ] [Discover and recover local sessions](session-discovery/TASK.md)
 - [ ] [Launch and control session hosts](session-runtime-and-control/TASK.md)
 - [ ] [Read session journals](journal-reader/TASK.md)

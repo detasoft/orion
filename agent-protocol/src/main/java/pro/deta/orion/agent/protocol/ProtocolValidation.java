@@ -48,6 +48,14 @@ final class ProtocolValidation {
         return value;
     }
 
+    static int byteLength(int value, int minimum, int maximum, String name) {
+        if (value < minimum || value > maximum) {
+            throw new IllegalArgumentException(
+                    name + " must contain between " + minimum + " and " + maximum + " bytes");
+        }
+        return value;
+    }
+
     static List<String> command(List<String> values) {
         Objects.requireNonNull(values, "command");
         List<String> command = List.copyOf(values);

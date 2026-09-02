@@ -14,6 +14,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 class AgentProtocolCodecTest {
     private static final AgentProtocolLimits LIMITS = AgentProtocolLimits.defaults();
@@ -32,13 +33,15 @@ class AgentProtocolCodecTest {
 
     @Test
     void ignoresFutureFieldsInKnownMessageAndNestedStructures() throws Exception {
-        byte[] hello = CODEC.encode(hello(Map.of("pty", "true")));
+        AgentMessage.Hello expected = authenticatedHello(
+                authentication(AgentAuthentication.Kind.LAUNCH_PERMIT, 32));
+        byte[] hello = CODEC.encode(expected);
         byte[] futureTail = Hex.parse("d82a9f01ff");
         byte[] withTail = java.util.Arrays.copyOf(hello, hello.length + futureTail.length);
         withTail[0] = (byte) ((hello[0] & 0xff) + 1);
         System.arraycopy(futureTail, 0, withTail, hello.length, futureTail.length);
 
-        assertThat(CODEC.decode(withTail)).isEqualTo(hello(Map.of("pty", "true")));
+        assertThat(CODEC.decode(withTail)).isEqualTo(expected);
     }
 
     @Test
@@ -191,6 +194,56 @@ class AgentProtocolCodecTest {
         assertThat(bytes.toString()).isEqualTo("ProtocolBytes[size=3]");
     }
 
+    @Test
+    void roundTripsLaunchPermitAndReconnectAuthenticationTails() throws Exception {
+        AgentAuthentication authentication = authentication(AgentAuthentication.Kind.LAUNCH_PERMIT, 32);
+        AgentMessage.Hello hello = authenticatedHello(authentication);
+        AgentMessage.Welcome welcome = new AgentMessage.Welcome(
+                AgentProtocolVersion.CURRENT,
+                JournalFormatVersion.CURRENT,
+                new ConnectionId("connection-01KJKL"),
+                Map.of("heartbeatMillis", "10000"),
+                Optional.of(ProtocolBytes.copyOf(new byte[32])));
+
+        assertThat(CODEC.decode(CODEC.encode(hello))).isEqualTo(hello);
+        assertThat(CODEC.decode(CODEC.encode(welcome))).isEqualTo(welcome);
+        AgentMessage.Hello reconnect = authenticatedHello(
+                authentication(AgentAuthentication.Kind.RECONNECT_TOKEN, 512));
+        assertThat(CODEC.decode(CODEC.encode(reconnect))).isEqualTo(reconnect);
+    }
+
+    @Test
+    void acceptsBothAuthenticationKindsAndCredentialBounds() {
+        assertThat(authentication(AgentAuthentication.Kind.LAUNCH_PERMIT, 32).credential().size()).isEqualTo(32);
+        assertThat(authentication(AgentAuthentication.Kind.RECONNECT_TOKEN, 512).credential().size()).isEqualTo(512);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> new AgentGeneration(0));
+        assertThatIllegalArgumentException().isThrownBy(() -> new AgentGeneration(-1));
+        assertThatIllegalArgumentException().isThrownBy(() -> authentication(
+                AgentAuthentication.Kind.LAUNCH_PERMIT, 31));
+        assertThatIllegalArgumentException().isThrownBy(() -> authentication(
+                AgentAuthentication.Kind.RECONNECT_TOKEN, 513));
+        assertThatIllegalArgumentException().isThrownBy(() -> new AgentMessage.Welcome(
+                AgentProtocolVersion.CURRENT,
+                JournalFormatVersion.CURRENT,
+                new ConnectionId("connection-1"),
+                Map.of(),
+                Optional.of(ProtocolBytes.copyOf(new byte[31]))));
+    }
+
+    @Test
+    void rejectsPartiallyPresentHelloAuthenticationTail() throws Exception {
+        byte[] legacy = CODEC.encode(hello(Map.of()));
+        byte[] partial = java.util.Arrays.copyOf(legacy, legacy.length + 1);
+        partial[0] = (byte) 0x89;
+        partial[legacy.length] = 7;
+
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(() -> CODEC.decode(partial))
+                .extracting(AgentProtocolException::reason)
+                .isEqualTo(AgentProtocolException.Reason.MISSING_FIELD);
+    }
+
     private static Stream<AgentMessage> knownMessages() {
         MachineInfo machine = new MachineInfo("worker-1", "linux", "aarch64");
         SessionDescriptor running = new SessionDescriptor(
@@ -268,6 +321,26 @@ class AgentProtocolCodecTest {
                 "1.0.0",
                 new MachineInfo("worker-1", "linux", "aarch64"),
                 capabilities);
+    }
+
+    private static AgentMessage.Hello authenticatedHello(AgentAuthentication authentication) {
+        return new AgentMessage.Hello(
+                AgentProtocolVersion.CURRENT,
+                JournalFormatVersion.CURRENT,
+                AGENT_ID,
+                INSTANCE_ID,
+                "1.0.0",
+                new MachineInfo("worker-1", "linux", "aarch64"),
+                Map.of(),
+                Optional.of(authentication));
+    }
+
+    private static AgentAuthentication authentication(AgentAuthentication.Kind kind, int credentialSize) {
+        return new AgentAuthentication(
+                new AgentGeneration(7),
+                new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
+                kind,
+                ProtocolBytes.copyOf(new byte[credentialSize]));
     }
 
     private static SessionDescriptor session(String id) {

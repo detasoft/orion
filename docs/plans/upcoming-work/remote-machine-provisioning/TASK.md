@@ -25,8 +25,17 @@ to make them available as AgentD workers.
 - Verify remote host identity and report actionable connection,
   authentication, and privilege failures.
 - Detect the target platform and architecture, then transfer compatible,
-  versioned `agentd` and `session-host` artifacts and configuration.
-- Idempotently install, update, start, and verify `agentd` as a system service;
-  stage `session-host` for per-session launch rather than as a second daemon.
+  versioned `agentd` and `session-host` artifacts. Keep machine launch
+  configuration in the server-side agent record.
+- Use a short-lived SSH connection to verify and terminate the previous AgentD,
+  pass a single-use launch permit through stdin or an anonymous channel, start
+  the replacement detached from SSH, and close the SSH connection immediately.
+- Do not install AgentD as a systemd, initd, launchd, or Windows service. After
+  reboot or a sustained control-channel outage, Orion Server starts it again.
+- Verify versioned AgentD artifacts with a server-recorded SHA-256 digest before
+  launch and switch updates atomically without terminating session hosts.
+- Apply the configured startup timeout, offline recovery timeout, and bounded
+  retry backoff; never start a replacement unless termination of the previous
+  AgentD was confirmed.
 - Verify provisioning end to end through AgentD registration and a successfully
   launched session host, including safe retry after partial provisioning.

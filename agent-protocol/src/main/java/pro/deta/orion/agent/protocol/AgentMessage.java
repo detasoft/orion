@@ -23,7 +23,8 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
             AgentInstanceId instanceId,
             String agentVersion,
             MachineInfo machine,
-            Map<String, String> capabilities
+            Map<String, String> capabilities,
+            Optional<AgentAuthentication> authentication
     ) implements AgentMessage {
         public Hello {
             Objects.requireNonNull(protocolVersion, "protocolVersion");
@@ -33,6 +34,14 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
             agentVersion = ProtocolValidation.nonBlank(agentVersion, "agentVersion");
             Objects.requireNonNull(machine, "machine");
             capabilities = ProtocolValidation.stringMap(capabilities, "capabilities");
+            authentication = ProtocolValidation.optional(authentication, "authentication");
+        }
+
+        public Hello(AgentProtocolVersion protocolVersion, JournalFormatVersion journalFormatVersion,
+                     AgentId agentId, AgentInstanceId instanceId, String agentVersion,
+                     MachineInfo machine, Map<String, String> capabilities) {
+            this(protocolVersion, journalFormatVersion, agentId, instanceId, agentVersion,
+                    machine, capabilities, Optional.empty());
         }
 
         @Override
@@ -45,13 +54,23 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
             AgentProtocolVersion protocolVersion,
             JournalFormatVersion journalFormatVersion,
             ConnectionId connectionId,
-            Map<String, String> configuration
+            Map<String, String> configuration,
+            Optional<ProtocolBytes> reconnectToken
     ) implements AgentMessage {
         public Welcome {
             Objects.requireNonNull(protocolVersion, "protocolVersion");
             Objects.requireNonNull(journalFormatVersion, "journalFormatVersion");
             Objects.requireNonNull(connectionId, "connectionId");
             configuration = ProtocolValidation.stringMap(configuration, "configuration");
+            reconnectToken = ProtocolValidation.optional(reconnectToken, "reconnectToken");
+            reconnectToken.ifPresent(token -> ProtocolValidation.byteLength(
+                    token.size(), AgentAuthentication.MIN_CREDENTIAL_BYTES,
+                    AgentAuthentication.MAX_CREDENTIAL_BYTES, "reconnect token"));
+        }
+
+        public Welcome(AgentProtocolVersion protocolVersion, JournalFormatVersion journalFormatVersion,
+                       ConnectionId connectionId, Map<String, String> configuration) {
+            this(protocolVersion, journalFormatVersion, connectionId, configuration, Optional.empty());
         }
 
         @Override

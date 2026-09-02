@@ -1,23 +1,30 @@
 package pro.deta.orion.agentd.core;
 
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.AgentGeneration;
+import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLaunchId;
 
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.UUID;
 
 public record AgentConfiguration(
         URI serverUri,
         Path stateDirectory,
+        AgentId agentId,
+        AgentGeneration generation,
+        AgentLaunchId launchId,
         AgentProtocolLimits protocolLimits,
         String agentVersion
 ) {
-    private static final Path DEFAULT_STATE_DIRECTORY = Path.of(
-            System.getProperty("user.home"), ".orion", "agentd");
-
     public AgentConfiguration {
         serverUri = validateServerUri(serverUri);
         stateDirectory = Objects.requireNonNull(stateDirectory, "stateDirectory").toAbsolutePath().normalize();
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(generation, "generation");
+        Objects.requireNonNull(launchId, "launchId");
         protocolLimits = Objects.requireNonNull(protocolLimits, "protocolLimits");
         agentVersion = requireValue(agentVersion, "agentVersion");
     }
@@ -25,15 +32,23 @@ public record AgentConfiguration(
     public static AgentConfiguration parse(String[] arguments) {
         Objects.requireNonNull(arguments, "arguments");
         URI serverUri = null;
-        Path stateDirectory = DEFAULT_STATE_DIRECTORY;
+        Path stateDirectory = null;
+        AgentId agentId = null;
+        AgentGeneration generation = null;
+        AgentLaunchId launchId = null;
         int maxFrameBytes = AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES;
-        String agentVersion = "development";
+        String agentVersion = null;
 
         for (int index = 0; index < arguments.length; index++) {
             String option = arguments[index];
             switch (option) {
                 case "--server" -> serverUri = URI.create(nextValue(arguments, ++index, option));
                 case "--state-dir" -> stateDirectory = Path.of(nextValue(arguments, ++index, option));
+                case "--agent-id" -> agentId = new AgentId(nextValue(arguments, ++index, option));
+                case "--generation" -> generation = new AgentGeneration(
+                        parsePositiveLong(nextValue(arguments, ++index, option)));
+                case "--launch-id" -> launchId = new AgentLaunchId(
+                        UUID.fromString(nextValue(arguments, ++index, option)));
                 case "--max-frame-bytes" ->
                         maxFrameBytes = parsePositiveInt(nextValue(arguments, ++index, option));
                 case "--agent-version" -> agentVersion = nextValue(arguments, ++index, option);
@@ -44,15 +59,27 @@ public record AgentConfiguration(
         if (serverUri == null) {
             throw new IllegalArgumentException("Missing required option: --server");
         }
+        requireOption(stateDirectory, "--state-dir");
+        requireOption(agentId, "--agent-id");
+        requireOption(generation, "--generation");
+        requireOption(launchId, "--launch-id");
+        requireOption(agentVersion, "--agent-version");
         return new AgentConfiguration(
                 serverUri,
                 stateDirectory,
+                agentId,
+                generation,
+                launchId,
                 AgentProtocolLimits.defaults().withMaxFrameBytes(maxFrameBytes),
                 agentVersion);
     }
 
     public Path sessionsDirectory() {
         return stateDirectory.resolve("sessions");
+    }
+
+    public Path processLockFile() {
+        return stateDirectory.resolve("agentd.lock");
     }
 
     private static URI validateServerUri(URI serverUri) {
@@ -82,6 +109,24 @@ public record AgentConfiguration(
             return parsed;
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Expected a positive integer but got: " + value, e);
+        }
+    }
+
+    private static long parsePositiveLong(String value) {
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed <= 0) {
+                throw new IllegalArgumentException("Expected a positive integer");
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Expected a positive integer", e);
+        }
+    }
+
+    private static void requireOption(Object value, String option) {
+        if (value == null) {
+            throw new IllegalArgumentException("Missing required option: " + option);
         }
     }
 

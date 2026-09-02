@@ -156,11 +156,20 @@ public final class AgentProtocolCodec {
         if (items.size() < minimum) {
             throw failure(MISSING_FIELD, type + " has fewer than " + minimum + " fields");
         }
-        List<CborReader.Value> values = new ArrayList<>(minimum);
-        for (int index = 0; index < minimum; index++) {
+        int known = Math.min(items.size(), maximumKnownFields(type));
+        List<CborReader.Value> values = new ArrayList<>(known);
+        for (int index = 0; index < known; index++) {
             values.add(read(encoded, items.get(index)));
         }
         return Fields.array(new CborReader.ArrayValue(List.copyOf(values)), type.toString());
+    }
+
+    private static int maximumKnownFields(AgentMessageType type) {
+        return switch (type) {
+            case HELLO -> 12;
+            case WELCOME -> 6;
+            default -> minimumFields(type);
+        };
     }
 
     private CborReader.Value read(byte[] encoded, CborArrayItems.Slice slice)
@@ -192,7 +201,7 @@ public final class AgentProtocolCodec {
 
     private void encodeHello(CborWriter writer, AgentMessage.Hello value) throws AgentProtocolException {
         requireCurrent(value.protocolVersion(), value.journalFormatVersion());
-        writer.array(8);
+        writer.array(value.authentication().isPresent() ? 12 : 8);
         writer.unsigned(value.typeCode());
         writer.unsigned(value.protocolVersion().value());
         writer.unsigned(value.journalFormatVersion().value());
@@ -201,16 +210,26 @@ public final class AgentProtocolCodec {
         writer.text(value.agentVersion());
         machine(writer, value.machine());
         writer.stringMap(value.capabilities());
+        if (value.authentication().isPresent()) {
+            AgentAuthentication authentication = value.authentication().orElseThrow();
+            writer.signed(authentication.generation().value());
+            writer.uuid(authentication.launchId().value());
+            writer.unsigned(authentication.kind().wireCode());
+            writer.bytes(authentication.credential());
+        }
     }
 
     private void encodeWelcome(CborWriter writer, AgentMessage.Welcome value) throws AgentProtocolException {
         requireCurrent(value.protocolVersion(), value.journalFormatVersion());
-        writer.array(5);
+        writer.array(value.reconnectToken().isPresent() ? 6 : 5);
         writer.unsigned(value.typeCode());
         writer.unsigned(value.protocolVersion().value());
         writer.unsigned(value.journalFormatVersion().value());
         writer.text(value.connectionId().value());
         writer.stringMap(value.configuration());
+        if (value.reconnectToken().isPresent()) {
+            writer.bytes(value.reconnectToken().orElseThrow());
+        }
     }
 
     private void encodeHeartbeat(CborWriter writer, AgentMessage.Heartbeat value)
@@ -343,6 +362,17 @@ public final class AgentProtocolCodec {
         JournalFormatVersion journal = new JournalFormatVersion(
                 fields.unsignedShort(2, "journalFormatVersion"));
         requireCurrent(protocol, journal);
+        if (fields.size() > 8 && fields.size() < 12) {
+            throw failure(MISSING_FIELD, "HELLO authentication tail must contain four fields");
+        }
+        Optional<AgentAuthentication> authentication = fields.size() < 12
+                ? Optional.empty()
+                : Optional.of(new AgentAuthentication(
+                        new AgentGeneration(fields.signedLong(8, "generation")),
+                        new AgentLaunchId(fields.uuid(9, "launchId")),
+                        requiredEnum(AgentAuthentication.Kind.fromWireCode(
+                                fields.unsignedShort(10, "credentialKind")), "authentication kind"),
+                        ProtocolBytes.copyOf(fields.bytes(11, "credential"))));
         return new AgentMessage.Hello(
                 protocol,
                 journal,
@@ -350,7 +380,8 @@ public final class AgentProtocolCodec {
                 new AgentInstanceId(fields.uuid(4, "instanceId")),
                 fields.text(5, "agentVersion"),
                 machine(fields.required(6, "machine")),
-                fields.stringMap(7, "capabilities"));
+                fields.stringMap(7, "capabilities"),
+                authentication);
     }
 
     private AgentMessage.Welcome decodeWelcome(Fields fields) throws AgentProtocolException {
@@ -362,7 +393,10 @@ public final class AgentProtocolCodec {
                 protocol,
                 journal,
                 new ConnectionId(fields.text(3, "connectionId")),
-                fields.stringMap(4, "configuration"));
+                fields.stringMap(4, "configuration"),
+                fields.size() < 6
+                        ? Optional.empty()
+                        : Optional.of(ProtocolBytes.copyOf(fields.bytes(5, "reconnectToken"))));
     }
 
     private AgentMessage.AgentStatus decodeAgentStatus(Fields fields) throws AgentProtocolException {
@@ -513,6 +547,10 @@ public final class AgentProtocolCodec {
             if (array.values().size() < count) {
                 throw failure(MISSING_FIELD, "Message has fewer than " + count + " fields");
             }
+        }
+
+        int size() {
+            return array.values().size();
         }
 
         String text(int index, String name) throws AgentProtocolException {

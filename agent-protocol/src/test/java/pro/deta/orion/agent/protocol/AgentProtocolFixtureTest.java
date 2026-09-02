@@ -10,6 +10,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,6 +34,7 @@ class AgentProtocolFixtureTest {
 
         assertThat(AGENT_CODEC.encode(hello)).containsExactly(fixture);
         assertThat(AGENT_CODEC.decode(fixture)).isEqualTo(hello);
+        assertThat(hello.authentication()).isEqualTo(Optional.empty());
     }
 
     @Test
