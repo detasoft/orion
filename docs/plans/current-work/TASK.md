@@ -12,3 +12,4 @@ This task node tracks active high-level implementation work.
 - [ ] [Build the native session host for the agent harness](native-session-host/TASK.md)
 - [ ] [Unify key material bootstrap and short-lived JWTs](unified-key-material-bootstrap/TASK.md)
 - [ ] [Add the Orion Git interoperability matrix](git-interoperability-matrix/TASK.md)
+- [ ] [Add transparent remote Git proxy bootstrap](remote-git-proxy-bootstrap/TASK.md)

@@ -21,6 +21,7 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
+import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
@@ -467,6 +468,76 @@ class DefaultGitNativeRepositoryServiceTest {
     }
 
     @Test
+    void receiveRejectsUnauthorizedRefWithoutPublishingIt() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("/demo.git")
+                .valueOrFailure("repository");
+        GitNativeRepositoryService service =
+                new DefaultGitNativeRepositoryService(provider);
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId feature = quarantine.write(
+                ObjectType.BLOB,
+                "feature".getBytes(StandardCharsets.US_ASCII));
+        RecordingAccessHook accessHook = new RecordingAccessHook();
+        accessHook.rejectUpdates();
+
+        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+                service.completeLegacyReceivePack(
+                        receivePack(
+                                service,
+                                List.of(new LegacyReceiveCommand(
+                                        GitObjectId.of(NULL_ID),
+                                        feature,
+                                        "refs/heads/feature")),
+                                Set.of(),
+                                quarantine),
+                        accessHook);
+
+        assertThat(statuses).containsExactly(
+                new GitNativeRepositoryService.ReceivePackStatus(
+                        "refs/heads/feature", false, "ACCESS_DENIED"));
+        assertThat(repository.refs()).doesNotContainKey("refs/heads/feature");
+        assertThat(accessHook.calls()).contains("update /demo.git refs/heads/feature false");
+    }
+
+    @Test
+    void receiveIdentifiesNonFastForwardUpdateForAuthorization() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("/demo.git")
+                .valueOrFailure("repository");
+        GitObjectId oldObject = repository.writeObject(
+                ObjectType.BLOB,
+                "old".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef("refs/heads/main", NULL_ID, oldObject.value());
+        GitNativeRepositoryService service =
+                new DefaultGitNativeRepositoryService(provider);
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId newObject = quarantine.write(
+                ObjectType.BLOB,
+                "new".getBytes(StandardCharsets.US_ASCII));
+        RecordingAccessHook accessHook = new RecordingAccessHook();
+
+        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+                service.completeLegacyReceivePack(
+                        receivePack(
+                                service,
+                                List.of(new LegacyReceiveCommand(
+                                        oldObject,
+                                        newObject,
+                                        "refs/heads/main")),
+                                Set.of(),
+                                quarantine),
+                        accessHook);
+
+        assertThat(statuses).containsExactly(
+                new GitNativeRepositoryService.ReceivePackStatus(
+                        "refs/heads/main", true, ""));
+        assertThat(accessHook.calls()).contains("update /demo.git refs/heads/main true");
+    }
+
+    @Test
     void receiveKeepsPublishedPackWhenAtomicRefTransactionIsStale(
             @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
@@ -577,6 +648,126 @@ class DefaultGitNativeRepositoryServiceTest {
         } finally {
             pack.release();
         }
+    }
+
+    @Test
+    void fetchResolvesBranchesContainingEachWantedObject() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("/demo.git")
+                .valueOrFailure("repository");
+        GitObjectId wanted = repository.writeObject(
+                ObjectType.BLOB,
+                "wanted".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef("refs/heads/main", NULL_ID, wanted.value());
+        repository.updateRef("refs/heads/feature", NULL_ID, wanted.value());
+        GitNativeRepositoryService service =
+                new DefaultGitNativeRepositoryService(provider);
+        RecordingAccessHook accessHook = new RecordingAccessHook();
+
+        try (NativePackProducer ignored = service.legacyUploadPack(
+                request("/demo.git"),
+                new NativeFetchRequest(
+                        Set.of(wanted),
+                        Set.of(),
+                        true,
+                        Set.of(),
+                        NativeFetchOptions.initial(false, false, false)),
+                accessHook)) {
+            assertThat(accessHook.calls()).containsExactly(
+                    "read /demo.git",
+                    "fetch /demo.git [feature, main]");
+        }
+    }
+
+    @Test
+    void fetchReportsUnresolvedWantToAccessHook() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        provider.create("/demo.git").valueOrFailure("repository");
+        GitNativeRepositoryService service =
+                new DefaultGitNativeRepositoryService(provider);
+        RecordingAccessHook accessHook = new RecordingAccessHook();
+        accessHook.rejectUnresolvedFetch();
+        GitObjectId missing = GitObjectId.of("f".repeat(40));
+
+        assertThatThrownBy(() -> service.legacyUploadPack(
+                request("/demo.git"),
+                new NativeFetchRequest(
+                        Set.of(missing),
+                        Set.of(),
+                        true,
+                        Set.of(),
+                        NativeFetchOptions.initial(false, false, false)),
+                accessHook))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("unresolved want");
+        assertThat(accessHook.calls()).containsExactly(
+                "read /demo.git",
+                "fetch /demo.git []");
+    }
+
+    @Test
+    void protocolV2FetchResolvesBranchesContainingWantedObject() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = provider.create("/demo.git")
+                .valueOrFailure("repository");
+        GitObjectId wanted = repository.writeObject(
+                ObjectType.BLOB,
+                "wanted".getBytes(StandardCharsets.US_ASCII));
+        repository.updateRef("refs/heads/main", NULL_ID, wanted.value());
+        GitNativeRepositoryService service =
+                new DefaultGitNativeRepositoryService(provider);
+        RecordingAccessHook accessHook = new RecordingAccessHook();
+        NativeFetchRequest fetchRequest = new NativeFetchRequest(
+                Set.of(wanted),
+                Set.of(),
+                true,
+                Set.of(),
+                NativeFetchOptions.initial(false, false, false));
+
+        try (NativePackProducer ignored = service.protocolV2Fetch(
+                request("/demo.git"),
+                fetchRequest,
+                accessHook,
+                NativePackfileUriSourceFactory.NONE)
+                .packProducer()) {
+            assertThat(accessHook.calls()).containsExactly(
+                    "read /demo.git",
+                    "fetch /demo.git [main]");
+        }
+    }
+
+    @Test
+    void protocolV2FetchReportsUnresolvedWantToAccessHook() {
+        InMemoryNativeGitRepositoryProvider provider =
+                new InMemoryNativeGitRepositoryProvider();
+        provider.create("/demo.git").valueOrFailure("repository");
+        GitNativeRepositoryService service =
+                new DefaultGitNativeRepositoryService(provider);
+        RecordingAccessHook accessHook = new RecordingAccessHook();
+        accessHook.rejectUnresolvedFetch();
+        GitObjectId missing = GitObjectId.of("f".repeat(40));
+        NativeFetchRequest fetchRequest = new NativeFetchRequest(
+                Set.of(missing),
+                Set.of(),
+                true,
+                Set.of(),
+                NativeFetchOptions.initial(false, false, false));
+
+        assertThatThrownBy(() -> service.protocolV2Fetch(
+                request("/demo.git"),
+                fetchRequest,
+                accessHook,
+                NativePackfileUriSourceFactory.NONE))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("unresolved want");
+        assertThat(accessHook.calls()).containsExactly(
+                "read /demo.git",
+                "fetch /demo.git []");
     }
 
     @Test
@@ -996,6 +1187,8 @@ class DefaultGitNativeRepositoryServiceTest {
         private final List<String> calls = new ArrayList<>();
         private boolean rejectRead;
         private boolean rejectReceive;
+        private boolean rejectUpdates;
+        private boolean rejectUnresolvedFetch;
 
         @Override
         public void beforeRead(String repositoryName) {
@@ -1027,12 +1220,41 @@ class DefaultGitNativeRepositoryServiceTest {
             calls.add("write " + repositoryName);
         }
 
+        @Override
+        public void beforeFetch(
+                String repositoryName,
+                List<String> branchNames) {
+            calls.add("fetch " + repositoryName + " " + branchNames);
+            if (rejectUnresolvedFetch && branchNames.isEmpty()) {
+                throw new AccessDeniedException("unresolved want", null);
+            }
+        }
+
+        @Override
+        public void beforeUpdate(
+                String repositoryName,
+                String refName,
+                boolean force) {
+            calls.add("update " + repositoryName + " " + refName + " " + force);
+            if (rejectUpdates) {
+                throw new AccessDeniedException("denied update", null);
+            }
+        }
+
         private void rejectRead() {
             rejectRead = true;
         }
 
         private void rejectReceive() {
             rejectReceive = true;
+        }
+
+        private void rejectUpdates() {
+            rejectUpdates = true;
+        }
+
+        private void rejectUnresolvedFetch() {
+            rejectUnresolvedFetch = true;
         }
 
         private List<String> calls() {

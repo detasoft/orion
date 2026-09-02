@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.GZIPOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -123,6 +124,119 @@ class OrionGitRouteNativeTest {
                         + " https://git.example/r/team/project/objects/pack/"
                         + fixture.publishedPack().packId()
                         + ".pack\n");
+    }
+
+    @Test
+    void postDecodesGzipRequestBody() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        PublishedObjectFixture fixture = publishObject(provider);
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig());
+        ResponseRecorder response = new ResponseRecorder();
+
+        route.handle(
+                request(
+                        "POST",
+                        "/r/team/project.git/git-upload-pack",
+                        "application/x-git-upload-pack-request",
+                        null,
+                        Map.of(
+                                "Content-Encoding", "gzip",
+                                "Git-Protocol", "version=2"),
+                        gzip(fetchRequest(fixture.objectId())),
+                        repositorySecurityContext()),
+                response.proxy(),
+                null);
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType)
+                .isEqualTo("application/x-git-upload-pack-result");
+        assertNoCacheHeaders(response);
+        assertThat(response.body()).contains("packfile-uris\n");
+    }
+
+    @Test
+    void postDecodesGzipReceivePackRequestBody() throws Exception {
+        FileNativeGitRepositoryProvider provider = provider();
+        NativeGitRepository repository = provider.create(REPOSITORY_NAME)
+                .valueOrFailure("repository");
+        byte[] data = "received".getBytes(StandardCharsets.UTF_8);
+        LooseObjectStore sourceObjects = new LooseObjectStore();
+        GitObjectId objectId = sourceObjects.write(ObjectType.BLOB, data);
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider),
+                autoPackfileUriConfig());
+        ResponseRecorder response = new ResponseRecorder();
+
+        route.handle(
+                request(
+                        "POST",
+                        "/r/team/project.git/git-receive-pack",
+                        "application/x-git-receive-pack-request",
+                        null,
+                        Map.of("Content-Encoding", "gzip"),
+                        gzip(receiveRequest(objectId, pack(objectId, data))),
+                        repositoryWriteSecurityContext()),
+                response.proxy(),
+                null);
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
+        assertThat(response.contentType)
+                .isEqualTo("application/x-git-receive-pack-result");
+        assertNoCacheHeaders(response);
+        assertThat(response.body())
+                .contains("unpack ok\n")
+                .contains("ok refs/heads/main\n");
+        assertThat(repository.refs())
+                .containsEntry("refs/heads/main", objectId.value());
+    }
+
+    @Test
+    void postRejectsUnsupportedContentEncoding() throws Exception {
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider()),
+                autoPackfileUriConfig());
+        ResponseRecorder response = new ResponseRecorder();
+
+        route.handle(
+                request(
+                        "POST",
+                        "/r/team/project.git/git-upload-pack",
+                        "application/x-git-upload-pack-request",
+                        null,
+                        Map.of("Content-Encoding", "br"),
+                        new byte[0],
+                        repositorySecurityContext()),
+                response.proxy(),
+                null);
+
+        assertThat(response.status)
+                .isEqualTo(HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE);
+        assertNoCacheHeaders(response);
+    }
+
+    @Test
+    void postRejectsMalformedGzipRequestBody() throws Exception {
+        OrionGitRoute route = new OrionGitRoute(
+                new DefaultGitNativeRepositoryService(provider()),
+                autoPackfileUriConfig());
+        ResponseRecorder response = new ResponseRecorder();
+
+        route.handle(
+                request(
+                        "POST",
+                        "/r/team/project.git/git-upload-pack",
+                        "application/x-git-upload-pack-request",
+                        null,
+                        Map.of("Content-Encoding", "gzip"),
+                        new byte[]{0x1f, (byte) 0x8b},
+                        repositorySecurityContext()),
+                response.proxy(),
+                null);
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+        assertNoCacheHeaders(response);
     }
 
     @Test
@@ -343,6 +457,27 @@ class OrionGitRouteNativeTest {
         return output.toByteArray();
     }
 
+    private static byte[] gzip(byte[] body) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(output)) {
+            gzip.write(body);
+        }
+        return output.toByteArray();
+    }
+
+    private static byte[] receiveRequest(GitObjectId objectId, byte[] pack) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        writePacket(
+                output,
+                NULL_ID
+                        + " "
+                        + objectId.value()
+                        + " refs/heads/main\0report-status\n");
+        output.writeBytes("0000".getBytes(StandardCharsets.US_ASCII));
+        output.writeBytes(pack);
+        return output.toByteArray();
+    }
+
     private static void writePacket(
             ByteArrayOutputStream output,
             String payload) {
@@ -399,6 +534,21 @@ class OrionGitRouteNativeTest {
                 "repository",
                 new ArrayList<>())
                 .addKey(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME)
+                .toAccessControl();
+        return SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl(
+                        "git-user",
+                        List.of(grant)));
+    }
+
+    private static SecurityContext repositoryWriteSecurityContext() {
+        AccessControl.Grant grant = new AccessControlDraft.Grant(
+                "repository",
+                new ArrayList<>())
+                .addKey(AccessControl.GrantKey.REPOSITORY, REPOSITORY_NAME)
+                .addKey(
+                        AccessControl.GrantKey.WRITE,
+                        AccessControl.TRUE_STRING)
                 .toAccessControl();
         return SecurityContext.createContext()
                 .withUserIdentity(new InternalUserImpl(

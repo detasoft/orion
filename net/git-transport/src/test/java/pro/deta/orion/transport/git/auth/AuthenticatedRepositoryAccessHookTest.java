@@ -80,6 +80,63 @@ class AuthenticatedRepositoryAccessHookTest {
     }
 
     @Test
+    void fetchAllowsAnyReachableGrantedBranch() {
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
+                        branchSecurityContext("project", "main", false));
+
+        assertThatCode(() -> hook.beforeFetch(
+                "project",
+                List.of("feature", "main")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void fetchRejectsDeniedAndUnresolvedWants() {
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
+                        branchSecurityContext("project", "main", false));
+
+        assertThatThrownBy(() -> hook.beforeFetch(
+                "project",
+                List.of("feature")))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("branch fetch");
+        assertThatThrownBy(() -> hook.beforeFetch("project", List.of()))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("reachable branch");
+    }
+
+    @Test
+    void updateEnforcesBranchAndForceGrants() {
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
+                        branchSecurityContext("project", "main", false));
+
+        assertThatCode(() -> hook.beforeUpdate(
+                "project",
+                "refs/heads/main",
+                false))
+                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> hook.beforeUpdate(
+                "project",
+                "refs/heads/feature",
+                false))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("branch push");
+        assertThatThrownBy(() -> hook.beforeUpdate(
+                "project",
+                "refs/heads/main",
+                true))
+                .isInstanceOf(
+                        GitNativeRepositoryAccessHook.AccessDeniedException.class)
+                .hasMessageContaining("repository force");
+    }
+
+    @Test
     void createRequiresRepositoryCreateGrant() {
         AuthenticatedRepositoryAccessHook denied =
                 new AuthenticatedRepositoryAccessHook(
@@ -164,6 +221,34 @@ class AuthenticatedRepositoryAccessHookTest {
         if (create) {
             grant.addKey(
                     AccessControl.GrantKey.CREATE,
+                    AccessControl.TRUE_STRING);
+        }
+        return SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl(
+                        "git-user",
+                        List.of(grant.toAccessControl())));
+    }
+
+    private static SecurityContext branchSecurityContext(
+            String repositoryName,
+            String branchName,
+            boolean force) {
+        AccessControlDraft.Grant grant =
+                new AccessControlDraft.Grant(
+                        "repository",
+                        new ArrayList<>())
+                        .addKey(
+                                AccessControl.GrantKey.REPOSITORY,
+                                repositoryName)
+                        .addKey(
+                                AccessControl.GrantKey.BRANCH,
+                                branchName)
+                        .addKey(
+                                AccessControl.GrantKey.WRITE,
+                                AccessControl.TRUE_STRING);
+        if (force) {
+            grant.addKey(
+                    AccessControl.GrantKey.FORCE,
                     AccessControl.TRUE_STRING);
         }
         return SecurityContext.createContext()

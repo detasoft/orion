@@ -2,17 +2,22 @@ package pro.deta.orion.transport.git.auth;
 
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
+import pro.deta.orion.auth.check.resource.BranchResource;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
+import pro.deta.orion.auth.check.rule.BranchAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 
+import java.util.List;
 import java.util.Objects;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 
 public final class AuthenticatedRepositoryAccessHook
         implements GitNativeRepositoryAccessHook {
+    private static final String BRANCH_REF_PREFIX = "refs/heads/";
+
     private final SecurityContext securityContext;
     private final boolean strictRepositoryName;
 
@@ -53,6 +58,35 @@ public final class AuthenticatedRepositoryAccessHook
     }
 
     @Override
+    public void beforeFetch(
+            String repositoryName,
+            List<String> branchNames) {
+        Objects.requireNonNull(branchNames, "branchNames");
+        if (branchNames.isEmpty()) {
+            throw new AccessDeniedException(
+                    "Requested Git object does not resolve to a reachable branch",
+                    null);
+        }
+        RepositoryResource repositoryResource =
+                repositoryResource(
+                        repositoryName,
+                        strictRepositoryName);
+        AccessDeniedException denied = null;
+        for (String branchName : branchNames) {
+            try {
+                require(() -> accessEnforcer().require(
+                        securityContext,
+                        BranchResource.of(repositoryResource, branchName),
+                        BranchAccessRules.fetch()));
+                return;
+            } catch (AccessDeniedException error) {
+                denied = error;
+            }
+        }
+        throw denied;
+    }
+
+    @Override
     public void beforeCreate(String repositoryName) {
         RepositoryResource repositoryResource =
                 repositoryResource(
@@ -74,6 +108,30 @@ public final class AuthenticatedRepositoryAccessHook
                 securityContext,
                 repositoryResource,
                 RepositoryAccessRules.write()));
+    }
+
+    @Override
+    public void beforeUpdate(
+            String repositoryName,
+            String refName,
+            boolean force) {
+        RepositoryResource repositoryResource =
+                repositoryResource(
+                        repositoryName,
+                        strictRepositoryName);
+        if (refName.startsWith(BRANCH_REF_PREFIX)) {
+            String branchName = refName.substring(BRANCH_REF_PREFIX.length());
+            require(() -> accessEnforcer().require(
+                    securityContext,
+                    BranchResource.of(repositoryResource, branchName),
+                    BranchAccessRules.push()));
+        }
+        if (force) {
+            require(() -> accessEnforcer().require(
+                    securityContext,
+                    repositoryResource,
+                    RepositoryAccessRules.force()));
+        }
     }
 
     private static void require(AccessCheck accessCheck) {

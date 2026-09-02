@@ -112,6 +112,8 @@ public class OrionGitRoute implements OrionHttpRoute {
             } else {
                 handleNativePost(req, resp, request);
             }
+        } catch (UnsupportedContentEncodingException error) {
+            resp.sendError(SC_UNSUPPORTED_MEDIA_TYPE);
         } catch (GitNativeRepositoryAccessHook.AccessDeniedException error) {
             resp.sendError(SC_FORBIDDEN);
         } catch (IllegalArgumentException error) {
@@ -119,6 +121,8 @@ public class OrionGitRoute implements OrionHttpRoute {
         } catch (IOException error) {
             if (causedByAccessDenied(error)) {
                 resp.sendError(SC_FORBIDDEN);
+            } else if (causedByInvalidContentEncoding(error)) {
+                resp.sendError(SC_BAD_REQUEST);
             } else if (missingRepository(error)) {
                 resp.sendError(SC_NOT_FOUND);
             } else {
@@ -161,7 +165,10 @@ public class OrionGitRoute implements OrionHttpRoute {
         resp.setStatus(SC_OK);
         resp.setContentType(resultContentType(request.service()));
         setNoCacheHeaders(resp);
-        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(req.getInputStream())) {
+        try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
+                GitHttpRequestBody.decode(
+                        req.getInputStream(),
+                        req.getHeader("Content-Encoding")))) {
             OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(resp.getOutputStream());
             GitWireBootstrap bootstrap = getGitWireBootstrap(req, request, input, output);
             NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
@@ -306,6 +313,17 @@ public class OrionGitRoute implements OrionHttpRoute {
         Throwable current = error;
         while (current != null) {
             if (current instanceof GitNativeRepositoryAccessHook.AccessDeniedException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static boolean causedByInvalidContentEncoding(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof InvalidContentEncodingException) {
                 return true;
             }
             current = current.getCause();

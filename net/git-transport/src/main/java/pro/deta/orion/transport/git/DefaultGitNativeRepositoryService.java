@@ -9,6 +9,7 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
+import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
@@ -30,8 +31,11 @@ import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -136,7 +140,7 @@ public final class DefaultGitNativeRepositoryService
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        return findOrFail(data.getRepositoryPath(), accessHook)
+        return fetchRepository(data, request, accessHook)
                 .fetch(request);
     }
 
@@ -147,7 +151,7 @@ public final class DefaultGitNativeRepositoryService
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        return findOrFail(data.getRepositoryPath(), accessHook)
+        return fetchRepository(data, request, accessHook)
                 .fetchResponse(request);
     }
 
@@ -162,8 +166,9 @@ public final class DefaultGitNativeRepositoryService
         Objects.requireNonNull(
                 packfileUriSourceFactory,
                 "packfileUriSourceFactory");
-        NativeGitRepository repository = findOrFail(
-                data.getRepositoryPath(),
+        NativeGitRepository repository = fetchRepository(
+                data,
+                request,
                 accessHook);
         return repository.fetchResponse(
                 request,
@@ -177,7 +182,11 @@ public final class DefaultGitNativeRepositoryService
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(request, "request");
-        return commonHaves(data, request.haves(), accessHook);
+        NativeGitRepository repository = fetchRepository(
+                data,
+                request,
+                accessHook);
+        return commonHaves(repository, request.haves());
     }
 
     @Override
@@ -191,6 +200,12 @@ public final class DefaultGitNativeRepositoryService
         NativeGitRepository repository = findOrFail(
                 repositoryPath,
                 accessHook);
+        return commonHaves(repository, haves);
+    }
+
+    private static List<GitObjectId> commonHaves(
+            NativeGitRepository repository,
+            Iterable<GitObjectId> haves) {
         List<GitObjectId> acknowledgments = new ArrayList<>();
         for (GitObjectId have : haves) {
             Objects.requireNonNull(have, "have");
@@ -199,6 +214,81 @@ public final class DefaultGitNativeRepositoryService
             }
         }
         return List.copyOf(acknowledgments);
+    }
+
+    private NativeGitRepository fetchRepository(
+            InitialRequestData data,
+            NativeFetchRequest request,
+            GitNativeRepositoryAccessHook accessHook) {
+        String repositoryPath = data.getRepositoryPath();
+        NativeGitRepository repository = findOrFail(
+                repositoryPath,
+                accessHook);
+        authorizeFetch(repositoryPath, repository, request, accessHook);
+        return repository;
+    }
+
+    private static void authorizeFetch(
+            String repositoryPath,
+            NativeGitRepository repository,
+            NativeFetchRequest request,
+            GitNativeRepositoryAccessHook accessHook) {
+        Set<GitObjectId> wants = new LinkedHashSet<>(request.wants());
+        Map<String, String> refs = repository.refs();
+        for (String wantRef : request.wantRefs()) {
+            String refName = "HEAD".equals(wantRef)
+                    ? effectiveHeadTarget(repository, refs)
+                    : wantRef;
+            String objectId = refs.get(refName);
+            if (objectId == null) {
+                accessHook.beforeFetch(repositoryPath, List.of());
+                continue;
+            }
+            wants.add(GitObjectId.of(objectId));
+        }
+        Map<GitObjectId, List<String>> branchNames =
+                resolveBranchNames(repository, wants, refs);
+        for (GitObjectId want : wants) {
+            accessHook.beforeFetch(
+                    repositoryPath,
+                    branchNames.getOrDefault(want, List.of()));
+        }
+    }
+
+    private static Map<GitObjectId, List<String>> resolveBranchNames(
+            NativeGitRepository repository,
+            Set<GitObjectId> wants,
+            Map<String, String> refs) {
+        Map<GitObjectId, List<String>> resolved = new LinkedHashMap<>();
+        for (GitObjectId want : wants) {
+            resolved.put(want, new ArrayList<>());
+        }
+        if (wants.isEmpty()) {
+            return resolved;
+        }
+        List<String> branchRefs = new ArrayList<>();
+        for (String refName : refs.keySet()) {
+            if (refName.startsWith("refs/heads/")) {
+                branchRefs.add(refName);
+            }
+        }
+        Collections.sort(branchRefs);
+        NativeObjectClosure closure = new NativeObjectClosure(repository::readObject);
+        for (String branchRef : branchRefs) {
+            GitObjectId branchTip = GitObjectId.of(refs.get(branchRef));
+            Set<GitObjectId> reachable =
+                    closure.existingObjectIdsReachableFrom(Set.of(branchTip));
+            for (GitObjectId want : wants) {
+                if (reachable.contains(want)) {
+                    resolved.get(want).add(
+                            branchRef.substring("refs/heads/".length()));
+                }
+            }
+        }
+        for (Map.Entry<GitObjectId, List<String>> entry : resolved.entrySet()) {
+            entry.setValue(List.copyOf(entry.getValue()));
+        }
+        return resolved;
     }
 
     @Override
@@ -244,7 +334,7 @@ public final class DefaultGitNativeRepositoryService
         List<ReceivePackStatus> statuses = new ArrayList<>(commands.size());
         List<LooseRefStore.Update> validUpdates = new ArrayList<>();
         List<Integer> validIndexes = new ArrayList<>();
-        boolean missingTarget = false;
+        boolean commandFailure = false;
         for (int index = 0; index < commands.size(); index++) {
             LegacyReceiveCommand command = commands.get(index);
             if (command.type() != LegacyReceiveCommand.Type.DELETE
@@ -255,7 +345,20 @@ public final class DefaultGitNativeRepositoryService
                         command.refName(),
                         false,
                         "missing-necessary-objects"));
-                missingTarget = true;
+                commandFailure = true;
+                continue;
+            }
+            try {
+                accessHook.beforeUpdate(
+                        repositoryPath,
+                        command.refName(),
+                        isForceUpdate(repository, receivePack, command));
+            } catch (GitNativeRepositoryAccessHook.AccessDeniedException error) {
+                statuses.add(new ReceivePackStatus(
+                        command.refName(),
+                        false,
+                        "ACCESS_DENIED"));
+                commandFailure = true;
                 continue;
             }
             statuses.add(null);
@@ -267,7 +370,7 @@ public final class DefaultGitNativeRepositoryService
         }
         boolean atomic = receivePack.commandSection()
                 .negotiated(GitCapability.ATOMIC);
-        if (atomic && missingTarget) {
+        if (atomic && commandFailure) {
             for (int index : validIndexes) {
                 statuses.set(index, new ReceivePackStatus(
                         commands.get(index).refName(),
@@ -298,6 +401,21 @@ public final class DefaultGitNativeRepositoryService
                                     : ""));
         }
         return List.copyOf(statuses);
+    }
+
+    private static boolean isForceUpdate(
+            NativeGitRepository repository,
+            LegacyReceivePack receivePack,
+            LegacyReceiveCommand command) {
+        if (command.type() != LegacyReceiveCommand.Type.UPDATE) {
+            return false;
+        }
+        NativeObjectClosure closure = new NativeObjectClosure(objectId ->
+                receivePack.quarantine().read(objectId)
+                        .or(() -> repository.readObject(objectId)));
+        return !closure.allRootsReachAny(
+                List.of(command.newObjectId()),
+                List.of(command.oldObjectId()));
     }
 
     @Override

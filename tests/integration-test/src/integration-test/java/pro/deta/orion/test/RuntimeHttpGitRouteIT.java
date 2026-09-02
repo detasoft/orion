@@ -4,17 +4,16 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.TransportException;
 import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.PushResult;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
 import org.eclipse.jgit.transport.TransportHttp;
-import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -47,7 +46,7 @@ class RuntimeHttpGitRouteIT {
     void jgitClientCanPushCloneAndFetchThroughHttpGitRoute() throws Exception {
         Path orionRoot = tempDir.resolve("orion-http-git");
         String repositoryName = "http-project";
-        Path serverRepository = orionRoot.resolve("repos").resolve(repositoryName);
+        Path repositoryRoot = orionRoot.resolve("repos");
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
@@ -62,7 +61,7 @@ class RuntimeHttpGitRouteIT {
                         .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
                         .call())
                         .isInstanceOf(TransportException.class);
-                assertThat(serverRepository).doesNotExist();
+                assertRepositoryDoesNotExist(repositoryRoot, repositoryName);
 
                 String rootToken = TestBearerTokens.issueRootToken(
                         orion.accessControlService(),
@@ -93,7 +92,12 @@ class RuntimeHttpGitRouteIT {
                         .flatExtracting(PushResult::getRemoteUpdates)
                         .extracting(RemoteRefUpdate::getStatus)
                         .containsExactly(RemoteRefUpdate.Status.OK);
-                assertRepositoryContains(serverRepository, initialCommit, "README.md", "hello over http\n");
+                assertRepositoryContains(
+                        repositoryRoot,
+                        repositoryName,
+                        initialCommit,
+                        "README.md",
+                        "hello over http\n");
 
                 try (Git clone = Git.cloneRepository()
                         .setURI(remoteUrl)
@@ -109,7 +113,12 @@ class RuntimeHttpGitRouteIT {
                             .setTransportConfigCallback(authorization)
                             .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
                             .call();
-                    assertRepositoryContains(serverRepository, updatedCommit, "README.md", "updated over http\n");
+                    assertRepositoryContains(
+                            repositoryRoot,
+                            repositoryName,
+                            updatedCommit,
+                            "README.md",
+                            "updated over http\n");
 
                     clone.fetch()
                             .setRemote("origin")
@@ -121,7 +130,8 @@ class RuntimeHttpGitRouteIT {
             }
         }
 
-        assertThat(orionRoot.resolve("repos").resolve("r").resolve(repositoryName + ".git")).doesNotExist();
+        assertThat(new FileNativeGitRepositoryProvider(repositoryRoot).repositoryNames())
+                .contains(repositoryName);
     }
 
     @Test
@@ -129,8 +139,7 @@ class RuntimeHttpGitRouteIT {
         Path orionRoot = tempDir.resolve("orion-http-git-read-only");
         String repositoryName = "http-read-only-project";
         String createdRepositoryName = "http-read-only-created";
-        Path serverRepository = orionRoot.resolve("repos").resolve(repositoryName);
-        Path createdServerRepository = orionRoot.resolve("repos").resolve(createdRepositoryName);
+        Path repositoryRoot = orionRoot.resolve("repos");
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
@@ -155,7 +164,12 @@ class RuntimeHttpGitRouteIT {
                         .flatExtracting(PushResult::getRemoteUpdates)
                         .extracting(RemoteRefUpdate::getStatus)
                         .containsExactly(RemoteRefUpdate.Status.OK);
-                assertRepositoryContains(serverRepository, initialCommit, "README.md", "seeded for read-only http\n");
+                assertRepositoryContains(
+                        repositoryRoot,
+                        repositoryName,
+                        initialCommit,
+                        "README.md",
+                        "seeded for read-only http\n");
 
                 RuntimeHttpTestSupport.HttpResponse updateAcl = RuntimeHttpTestSupport.request(
                         "POST",
@@ -178,7 +192,7 @@ class RuntimeHttpGitRouteIT {
                         .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
                         .call())
                         .isInstanceOf(TransportException.class);
-                assertThat(createdServerRepository).doesNotExist();
+                assertRepositoryDoesNotExist(repositoryRoot, createdRepositoryName);
 
                 try (Git clone = Git.cloneRepository()
                         .setURI(remoteUrl)
@@ -197,7 +211,12 @@ class RuntimeHttpGitRouteIT {
                             .isInstanceOf(TransportException.class);
                 }
 
-                assertRepositoryContains(serverRepository, initialCommit, "README.md", "seeded for read-only http\n");
+                assertRepositoryContains(
+                        repositoryRoot,
+                        repositoryName,
+                        initialCommit,
+                        "README.md",
+                        "seeded for read-only http\n");
             }
         }
     }
@@ -207,7 +226,7 @@ class RuntimeHttpGitRouteIT {
         Path orionRoot = tempDir.resolve("orion-http-git-branch");
         String repositoryName = "http-branch-project";
         String featureBranch = "feature";
-        Path serverRepository = orionRoot.resolve("repos").resolve(repositoryName);
+        Path repositoryRoot = orionRoot.resolve("repos");
         OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot);
 
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
@@ -246,8 +265,8 @@ class RuntimeHttpGitRouteIT {
                         RemoteRefUpdate.Status.OK);
                 source.checkout().setName(BRANCH).call();
 
-                assertRepositoryRef(serverRepository, BRANCH, masterCommit);
-                assertRepositoryRef(serverRepository, featureBranch, featureCommit);
+                assertRepositoryRef(repositoryRoot, repositoryName, BRANCH, masterCommit);
+                assertRepositoryRef(repositoryRoot, repositoryName, featureBranch, featureCommit);
 
                 RuntimeHttpTestSupport.HttpResponse updateAcl = RuntimeHttpTestSupport.request(
                         "POST",
@@ -291,7 +310,7 @@ class RuntimeHttpGitRouteIT {
                                 .setRefSpecs(new RefSpec("refs/heads/" + featureBranch + ":refs/heads/" + featureBranch))
                                 .call(),
                         RemoteRefUpdate.Status.REJECTED_OTHER_REASON);
-                assertRepositoryRef(serverRepository, featureBranch, featureCommit);
+                assertRepositoryRef(repositoryRoot, repositoryName, featureBranch, featureCommit);
 
                 try (Git forceSource = initRepository(forceDirectory)) {
                     createCommit(forceSource, "README.md", "denied force over http\n", "denied force");
@@ -303,7 +322,7 @@ class RuntimeHttpGitRouteIT {
                                     .call(),
                             RemoteRefUpdate.Status.REJECTED_OTHER_REASON);
                 }
-                assertRepositoryRef(serverRepository, BRANCH, masterCommit);
+                assertRepositoryRef(repositoryRoot, repositoryName, BRANCH, masterCommit);
             }
         }
     }
@@ -389,21 +408,45 @@ class RuntimeHttpGitRouteIT {
                 .toObjectId();
     }
 
-    private static void assertRepositoryContains(Path repositoryPath, ObjectId commitId, String fileName, String expectedContent)
-            throws Exception {
-        try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile())) {
-            assertThat(repository.exactRef("refs/heads/" + BRANCH).getObjectId()).isEqualTo(commitId);
-            assertThat(repository.getObjectDatabase().has(commitId)).isTrue();
-            assertThat(readFileFromCommit(repository, commitId, fileName)).isEqualTo(expectedContent);
-        }
+    private static void assertRepositoryContains(
+            Path repositoryRoot,
+            String repositoryName,
+            ObjectId commitId,
+            String fileName,
+            String expectedContent) throws Exception {
+        NativeGitRepository repository = nativeRepository(repositoryRoot, repositoryName);
+        assertThat(repository.refs())
+                .containsEntry("refs/heads/" + BRANCH, commitId.name());
+        assertThat(repository.readObject(GitObjectId.of(commitId.name())))
+                .isPresent();
+        var snapshot = repository.loadFiles(BRANCH, List.of(fileName));
+        assertThat(snapshot.version()).contains(commitId.name());
+        assertThat(new String(snapshot.files().get(fileName), StandardCharsets.UTF_8))
+                .isEqualTo(expectedContent);
     }
 
-    private static void assertRepositoryRef(Path repositoryPath, String branch, ObjectId commitId) throws Exception {
-        try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile())) {
-            var ref = repository.exactRef("refs/heads/" + branch);
-            assertThat(ref).isNotNull();
-            assertThat(ref.getObjectId()).isEqualTo(commitId);
-        }
+    private static void assertRepositoryRef(
+            Path repositoryRoot,
+            String repositoryName,
+            String branch,
+            ObjectId commitId) {
+        assertThat(nativeRepository(repositoryRoot, repositoryName).refs())
+                .containsEntry("refs/heads/" + branch, commitId.name());
+    }
+
+    private static void assertRepositoryDoesNotExist(
+            Path repositoryRoot,
+            String repositoryName) {
+        assertThat(new FileNativeGitRepositoryProvider(repositoryRoot).exists(repositoryName))
+                .isFalse();
+    }
+
+    private static NativeGitRepository nativeRepository(
+            Path repositoryRoot,
+            String repositoryName) {
+        return new FileNativeGitRepositoryProvider(repositoryRoot)
+                .find(repositoryName)
+                .valueOrFailure("repository");
     }
 
     private static void assertPushStatus(Iterable<PushResult> pushResults, RemoteRefUpdate.Status status) {
@@ -413,15 +456,4 @@ class RuntimeHttpGitRouteIT {
                 .containsExactly(status);
     }
 
-    private static String readFileFromCommit(Repository repository, ObjectId commitId, String fileName) throws Exception {
-        try (RevWalk revWalk = new RevWalk(repository)) {
-            var commit = revWalk.parseCommit(commitId);
-            try (TreeWalk treeWalk = TreeWalk.forPath(repository, fileName, commit.getTree())) {
-                assertThat(treeWalk).isNotNull();
-                try (var reader = repository.newObjectReader()) {
-                    return new String(reader.open(treeWalk.getObjectId(0)).getBytes(), StandardCharsets.UTF_8);
-                }
-            }
-        }
-    }
 }
