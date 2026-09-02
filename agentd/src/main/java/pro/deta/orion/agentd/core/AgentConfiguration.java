@@ -1,6 +1,6 @@
 package pro.deta.orion.agentd.core;
 
-import pro.deta.orion.agentd.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 
 import java.net.URI;
 import java.nio.file.Path;

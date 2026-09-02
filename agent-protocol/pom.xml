@@ -11,13 +11,9 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>agentd</artifactId>
+    <artifactId>agent-protocol</artifactId>
 
     <dependencies>
-        <dependency>
-            <groupId>pro.deta.orion</groupId>
-            <artifactId>agent-protocol</artifactId>
-        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-engine</artifactId>
@@ -31,18 +27,14 @@
     </dependencies>
 
     <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <mainClass>pro.deta.orion.agentd.AgentdMain</mainClass>
-                        </manifest>
-                    </archive>
-                </configuration>
-            </plugin>
-        </plugins>
+        <testResources>
+            <testResource>
+                <directory>src/test/resources</directory>
+            </testResource>
+            <testResource>
+                <directory>protocol/fixtures</directory>
+                <targetPath>protocol</targetPath>
+            </testResource>
+        </testResources>
     </build>
 </project>
