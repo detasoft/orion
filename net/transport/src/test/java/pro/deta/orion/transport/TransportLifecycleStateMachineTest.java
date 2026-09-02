@@ -159,7 +159,12 @@ class TransportLifecycleStateMachineTest {
         OrionConfiguration configuration = new OrionConfiguration();
         SshTransportConfig disabled = configuration.getTransport().getSsh();
         disabled.setEnabled(false);
-        return new GitSshTransportStateMachine(() -> new GitSshTransportService(configuration, null, null, null));
+        return new GitSshTransportStateMachine(() -> new GitSshTransportService(
+                configuration,
+                null,
+                null,
+                null,
+                null));
     }
 
     private static JettyHTTPServerStateMachine disabledHttpMachine() {

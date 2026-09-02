@@ -15,6 +15,7 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -164,6 +165,7 @@ class OrionRuntimeModuleTest {
     private OrionComponent runtimeComponent(OrionConfiguration configuration) {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .build();
     }
 }

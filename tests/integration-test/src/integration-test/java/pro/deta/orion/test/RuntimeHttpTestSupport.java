@@ -4,6 +4,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 import java.io.IOException;
@@ -43,6 +44,7 @@ final class RuntimeHttpTestSupport {
     static StartedOrion start(OrionConfiguration orionConfiguration) {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> orionConfiguration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);

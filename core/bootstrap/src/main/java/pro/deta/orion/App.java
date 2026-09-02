@@ -68,6 +68,7 @@ public class App {
     private static int runApplication(AppOptions options) {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(configurationProvider(options))
+                .runtimeOptions(options.runtimeOptions())
                 .build();
         return run(orionComponent.orionApplicationLifecycle(), true);
     }

@@ -4,7 +4,7 @@ Status: todo
 Detailed plan: ../../../2026-09-02-interactive-ssh-shell.md
 Depends on: ../command-core-and-exec/TASK.md,
 ../interactive-terminal/TASK.md
-Related hierarchy: ../../hierarchical-orion-configuration/TASK.md
+Related hierarchy: ../../../upcoming-work/hierarchical-orion-configuration/TASK.md
 Related sessions: ../../../current-work/agent-session-server/TASK.md
 
 Expose Orion domain state through structured, ACL-filtered command handlers and

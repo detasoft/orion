@@ -19,6 +19,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
@@ -199,6 +200,7 @@ class OrionStartupIT {
         try {
             OrionComponent orionComponent = DaggerOrionComponent.builder()
                     .configurationProvider(() -> configuration)
+                    .runtimeOptions(OrionRuntimeOptions.defaults())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
 
@@ -230,6 +232,7 @@ class OrionStartupIT {
 
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
 
@@ -246,6 +249,7 @@ class OrionStartupIT {
     private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> orionConfiguration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);

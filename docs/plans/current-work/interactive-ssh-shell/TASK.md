@@ -12,7 +12,6 @@ explicit follow-up slices over the same command and result abstractions.
 
 ## Child Tasks
 
-- [ ] [Add named-user SSH authentication and key enrollment](authentication-and-enrollment/TASK.md)
 - [ ] [Build the command core and SSH exec adapter](command-core-and-exec/TASK.md)
 - [ ] [Build the interactive Orion terminal](interactive-terminal/TASK.md)
 - [ ] [Add SSH credential commands](credential-commands/TASK.md)

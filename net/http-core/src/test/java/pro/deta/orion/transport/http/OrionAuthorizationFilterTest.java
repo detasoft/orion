@@ -222,12 +222,32 @@ class OrionAuthorizationFilterTest {
         }
 
         @Override
+        public void addSshKeysToUser(String username, List<String> publicKeys) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
             throw new UnsupportedOperationException();
         }
 
         @Override
+        public boolean userExists(String userName) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public AuthenticationResult authenticateUser(String userName, byte[] credential) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AuthenticationResult authenticateGitSshKey(byte[] encodedPublicKey) {
             throw new UnsupportedOperationException();
         }
 

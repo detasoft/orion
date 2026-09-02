@@ -3,6 +3,7 @@ package pro.deta.orion.acl;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.acl.storage.AccessControlStorage;
@@ -159,12 +160,22 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void addKeyToUser(String username, String publicKey) {
-        new AccessControlWriter().addKeyToUser(username, publicKey);
+        addSshKeysToUser(username, List.of(publicKey));
+    }
+
+    @Override
+    public void addSshKeysToUser(String username, List<String> publicKeys) {
+        new AccessControlWriter().addSshKeysToUser(username, publicKeys);
     }
 
     @Override
     public void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
         new AccessControlWriter().createOrUpdateUser(userUpdate);
+    }
+
+    @Override
+    public boolean userExists(String userName) {
+        return findSingleUser(userName) instanceof Result.Success<?>;
     }
 
     @Override
@@ -175,6 +186,35 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 return createUserIdentity(u);
         }
         log.warn("Attempt to authenticate as '{}' failed.", userName);
+        return AuthenticationResult.failure("authentication failed");
+    }
+
+    @Override
+    public AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey) {
+        Result<AccessControl.User> user = findSingleUser(userName);
+        if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
+                && performPublicKeyAuthentication(matchedUser, encodedPublicKey)) {
+            return createUserIdentity(matchedUser);
+        }
+        log.warn("SSH public-key authentication as '{}' failed.", userName);
+        return AuthenticationResult.failure("authentication failed");
+    }
+
+    @Override
+    public AuthenticationResult authenticateGitSshKey(byte[] encodedPublicKey) {
+        List<AccessControl.User> matchingUsers = new ArrayList<>();
+        AccessControl currentAccessControl = accessControl.get();
+        if (currentAccessControl != null) {
+            for (AccessControl.User user : currentAccessControl.getUsers()) {
+                if (performPublicKeyAuthentication(user, encodedPublicKey)) {
+                    matchingUsers.add(user);
+                }
+            }
+        }
+        if (matchingUsers.size() == 1) {
+            return createUserIdentity(matchingUsers.getFirst());
+        }
+        log.warn("Git SSH public key resolved to {} users.", matchingUsers.size());
         return AuthenticationResult.failure("authentication failed");
     }
 
@@ -424,6 +464,20 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return false;
     }
 
+    private boolean performPublicKeyAuthentication(AccessControl.User user, byte[] encodedPublicKey) {
+        if (user.getCredentials() == null) {
+            return false;
+        }
+        for (AccessControl.Credential credential : user.getCredentials()) {
+            if (credential != null
+                    && credential.getType() == OPENSSH_PUBLIC_KEY
+                    && publicKeysAreEqual(credential.getValue(), encodedPublicKey)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean credentialMatches(AccessControl.User user, AccessControl.Credential credential, byte[] encodedData) {
         if (credential == null) {
             return false;
@@ -511,19 +565,50 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             saveAccessControlAndRequestUpdate(ac, "createOrUpdateUser() " + userUpdate.id(), new UserEmail(userUpdate.id(), userUpdate.email()));
         }
 
-        private void addKeyToUser(String username, String publicKey) {
-            AccessControlDraft draft = accessControl.get().toDraft();
-            AccessControlDraft.User user = findUserById(draft, username);
-            user.addCredential(OPENSSH_PUBLIC_KEY, publicKey);
-            String[] keyParts = publicKey.split("\\s");
-            String postfix = "";
-            if (keyParts.length == 3) {
-                postfix = " " + keyParts[0] + " " + keyParts[2];
-            } else if (keyParts.length == 2) {
-                postfix = " " + keyParts[0];
+        private void addSshKeysToUser(String username, List<String> publicKeys) {
+            List<PublicKey> parsedKeys = parsePublicKeys(publicKeys);
+            boolean changed;
+            UserEmail author;
+            synchronized (reloadLock) {
+                AccessControlDraft draft = accessControl.get().toDraft();
+                AccessControlDraft.User user = findUserById(draft, username);
+                changed = addMissingPublicKeys(user, parsedKeys);
+                author = new UserEmail(username, user.getEmail());
+                if (changed) {
+                    AccessControl updatedAccessControl = draft.toAccessControl();
+                    saveAccessControl(updatedAccessControl, "addSshKeysToUser() to " + username, author);
+                    updateAccessControl(updatedAccessControl);
+                }
             }
-            AccessControl ac = draft.toAccessControl();
-            saveAccessControlAndRequestUpdate(ac, "addKeyToUser() to " + username + postfix, new UserEmail(username, user.getEmail()));
+            if (changed) {
+                requestAclUpdateAndWait(author + " addSshKeysToUser() to " + username);
+            }
+        }
+
+        private List<PublicKey> parsePublicKeys(List<String> publicKeys) {
+            if (publicKeys == null || publicKeys.isEmpty()) {
+                throw new IllegalArgumentException("At least one SSH public key is required");
+            }
+            List<PublicKey> parsedKeys = new ArrayList<>();
+            for (String publicKey : publicKeys) {
+                try {
+                    parsedKeys.add(KeyUtils.readPublicKeyFromString(publicKey));
+                } catch (RuntimeException e) {
+                    throw new IllegalArgumentException("Invalid SSH public key", e);
+                }
+            }
+            return parsedKeys;
+        }
+
+        private boolean addMissingPublicKeys(AccessControlDraft.User user, List<PublicKey> parsedKeys) {
+            boolean changed = false;
+            for (PublicKey parsedKey : parsedKeys) {
+                if (!hasPublicKeyCredential(user, parsedKey)) {
+                    user.addCredential(OPENSSH_PUBLIC_KEY, PublicKeyEntry.toString(parsedKey));
+                    changed = true;
+                }
+            }
+            return changed;
         }
 
         private AccessControlDraft.User findUserById(AccessControlDraft draft, String username) {

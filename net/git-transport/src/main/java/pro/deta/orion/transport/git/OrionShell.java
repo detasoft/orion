@@ -3,7 +3,7 @@ package pro.deta.orion.transport.git;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
-import org.apache.sshd.server.shell.InteractiveProcessShellFactory;
+import org.apache.sshd.server.shell.ShellFactory;
 import pro.deta.orion.transport.git.ssh.CloseOnDestroyCommand;
 
 import java.io.IOException;
@@ -11,17 +11,13 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 
-import static pro.deta.orion.transport.git.ssh.SshCommandFactory.SET_KEY;
 import static pro.deta.orion.transport.git.ssh.SshCommandFactory.ISSUE_TOKEN;
 import static pro.deta.orion.transport.git.ssh.SshCommandFactory.STATE;
 
-public class OrionShell extends InteractiveProcessShellFactory {
+public class OrionShell implements ShellFactory {
     @Override
     public Command createShell(ChannelSession channel) {
-        if ("git".equalsIgnoreCase(channel.getSession().getUsername())) {
-            return new SendMessage(channel);
-        } else
-            return super.createShell(channel);
+        return new SendMessage(channel);
     }
 
     private static class SendMessage extends CloseOnDestroyCommand {
@@ -60,15 +56,6 @@ public class OrionShell extends InteractiveProcessShellFactory {
 
             msg.append("   git clone ");
             msg.append(formatUrl(hostname, port, username));
-            msg.append(nl);
-
-            msg.append(b2);
-            msg.append(nl);
-
-            msg.append(" You may upload an SSH public key with the following syntax:");
-            msg.append(nl);
-
-            msg.append(String.format("   cat ~/.ssh/id_rsa.pub | ssh -l %s -p %d %s " + SET_KEY, username, port, hostname));
             msg.append(nl);
 
             msg.append(b2);

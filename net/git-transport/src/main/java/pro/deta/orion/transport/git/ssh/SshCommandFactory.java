@@ -39,22 +39,16 @@ import pro.deta.orion.util.stream.*;
 
 import jakarta.inject.Named;
 import java.io.*;
-import java.nio.ByteBuffer;
-import java.nio.channels.Channels;
-import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Slf4j
 public class SshCommandFactory implements CommandFactory {
-    public static final String SET_KEY = "set-key";
     public static final String SHUTDOWN = "shutdown";
     private static final GitPktLineWriter PKT_LINE_WRITER =
             new GitPktLineWriter();
@@ -70,7 +64,6 @@ public class SshCommandFactory implements CommandFactory {
     private final NativeGitRepositoryProvider repositoryProvider;
     private final GitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
-    private final long setKeyReadTimeoutMillis;
 
     @Inject
     public SshCommandFactory(
@@ -81,9 +74,13 @@ public class SshCommandFactory implements CommandFactory {
             NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig) {
-        this(orionExecutor, orionProvider, accessControlService,
-                runtimeStateMachine, 30_000, repositoryProvider, repositoryService,
-                gitTransportConfig);
+        this.orionExecutor = orionExecutor;
+        this.orionProvider = orionProvider;
+        this.accessControlService = accessControlService;
+        this.runtimeStateMachine = runtimeStateMachine;
+        this.repositoryProvider = repositoryProvider;
+        this.repositoryService = repositoryService;
+        this.gitTransportConfig = gitTransportConfig;
     }
 
     public SshCommandFactory(
@@ -96,43 +93,9 @@ public class SshCommandFactory implements CommandFactory {
                 orionProvider,
                 accessControlService,
                 runtimeStateMachine,
-                30_000);
-    }
-
-    SshCommandFactory(
-            OrionExecutor orionExecutor,
-            OrionProvider orionProvider,
-            OrionAccessControlService accessControlService,
-            AggregateStateMachine runtimeStateMachine,
-            long setKeyReadTimeoutMillis) {
-        this(
-                orionExecutor,
-                orionProvider,
-                accessControlService,
-                runtimeStateMachine,
-                setKeyReadTimeoutMillis,
                 null,
                 null,
                 null);
-    }
-
-    SshCommandFactory(
-            OrionExecutor orionExecutor,
-            OrionProvider orionProvider,
-            OrionAccessControlService accessControlService,
-            AggregateStateMachine runtimeStateMachine,
-            long setKeyReadTimeoutMillis,
-            NativeGitRepositoryProvider repositoryProvider,
-            GitNativeRepositoryService repositoryService,
-            GitTransportConfig gitTransportConfig) {
-        this.orionExecutor = orionExecutor;
-        this.orionProvider = orionProvider;
-        this.accessControlService = accessControlService;
-        this.runtimeStateMachine = runtimeStateMachine;
-        this.repositoryProvider = repositoryProvider;
-        this.repositoryService = repositoryService;
-        this.gitTransportConfig = gitTransportConfig;
-        this.setKeyReadTimeoutMillis = setKeyReadTimeoutMillis;
     }
 
     @Override
@@ -160,16 +123,7 @@ public class SshCommandFactory implements CommandFactory {
                         List<String> arguments = commandArguments(commandLine);
                         String command = arguments.getFirst();
 
-                        if (SET_KEY.equalsIgnoreCase(command)) {
-                            try {
-                                String username = channel.getSession().getUsername();
-                                String publicKey = readKey(inputStream);
-                                orionExecutor.submit(() -> accessControlService.addKeyToUser(username, publicKey));
-                                outputStream.write(("Public: " + publicKey + " added successfully as authentication method for user " + username).getBytes(StandardCharsets.UTF_8));
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                        } else if (SHUTDOWN.equalsIgnoreCase(command)) {
+                        if (SHUTDOWN.equalsIgnoreCase(command)) {
                             accessEnforcer().require(
                                     securityContext,
                                     ApplicationShutdownResource.applicationShutdown(),
@@ -347,25 +301,6 @@ public class SshCommandFactory implements CommandFactory {
             }
         }
 
-    }
-
-    String readKey(InputStream inputStream) throws IOException {
-        ByteBuffer bb = ByteBuffer.allocate(256);
-        StringBuilder builder = new StringBuilder();
-        Thread readingThread = Thread.currentThread();
-        ScheduledFuture<?> watchdog = orionExecutor.schedule(
-                readingThread::interrupt, setKeyReadTimeoutMillis, TimeUnit.MILLISECONDS);
-        try (ReadableByteChannel rbc = Channels.newChannel(inputStream)) {
-            // for US_ASCII 1-byte encoding we can decode by parts.
-            while (rbc.read(bb.rewind()) >= 0) {
-                builder.append(StandardCharsets.US_ASCII.decode(bb.flip()));
-            }
-        } finally {
-            watchdog.cancel(false);
-            // clear interrupt flag set by watchdog before thread returns to pool
-            Thread.interrupted();
-        }
-        return builder.toString();
     }
 
     static void writeGitProtocolException(

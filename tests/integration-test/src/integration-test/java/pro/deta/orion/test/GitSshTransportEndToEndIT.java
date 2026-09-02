@@ -2,9 +2,12 @@ package pro.deta.orion.test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.sshd.client.SshClient;
+import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
+import org.apache.sshd.client.auth.keyboard.UserInteraction;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.channel.ClientChannelEvent;
 import org.apache.sshd.client.session.ClientSession;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.TransportException;
@@ -27,15 +30,18 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.util.FileUtils;
 import pro.deta.orion.util.KeyUtils;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -470,7 +476,6 @@ class GitSshTransportEndToEndIT {
         assertThat(httpState).isEqualTo(sshState.stripTrailing());
         assertThat(sshState).contains("orion: RUNNING");
         assertThat(sshState).contains("executor: RUNNING");
-        assertThat(sshState).contains("jgit-runtime: RUNNING");
         assertThat(sshState).contains("event-manager: RUNNING");
         assertThat(sshState).contains("access-control: RUNNING");
         assertThat(sshState).contains("transports: RUNNING");
@@ -497,7 +502,6 @@ class GitSshTransportEndToEndIT {
         String state = executeStateOverSsh(startedOrion, serverIdentityKey);
         assertThat(state).contains("orion: RUNNING");
         assertThat(state).contains("executor: RUNNING");
-        assertThat(state).contains("jgit-runtime: RUNNING");
         assertThat(state).contains("event-manager: RUNNING");
         assertThat(state).contains("access-control: RUNNING");
         assertThat(state).contains("transports: RUNNING");
@@ -553,6 +557,30 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void enrolledRootSshKeySurvivesServerRestart() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        KeyPair enrolledKey = KeyUtils.generateRSAKeyPair()
+                .valueOrFailure("Enrollment SSH key should be generated");
+        ByteArrayOutputStream startupOutput = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        try {
+            System.setOut(new PrintStream(startupOutput, true, StandardCharsets.UTF_8));
+            startedOrion = startFreshOrion(orionRoot);
+        } finally {
+            System.setOut(originalOut);
+        }
+        String enrollmentToken = startupToken(startupOutput);
+
+        enrollKeyOverSsh(startedOrion, "root", enrollmentToken, enrolledKey.getPublic());
+
+        startedOrion.stop();
+        startedOrion = null;
+        startedOrion = startExistingOrion(orionRoot);
+
+        assertThat(executeStateOverSsh(startedOrion, enrolledKey)).contains("orion: RUNNING");
+    }
+
+    @Test
     void preseededAclSshScenarioCanRunTwiceInSameJvm() throws Exception {
         startedOrion = startOrion(tempDir.resolve("first-orion-root"), TRUSTED_USER_KEY);
         pushCloneAndFetchThroughSsh(
@@ -598,6 +626,7 @@ class GitSshTransportEndToEndIT {
     private StartedOrion startOrion(OrionConfiguration configuration) {
         OrionComponent component = DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .build();
         OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
@@ -660,6 +689,54 @@ class GitSshTransportEndToEndIT {
                 .as(command + " stderr: %s", result.error())
                 .isEqualTo(0);
         return result.output();
+    }
+
+    private static void enrollKeyOverSsh(
+            StartedOrion orion,
+            String username,
+            String enrollmentToken,
+            PublicKey publicKey) throws Exception {
+        SshClient client = SshClient.setUpDefaultClient();
+        client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
+        client.setUserAuthFactories(List.of(UserAuthKeyboardInteractiveFactory.INSTANCE));
+        client.setUserInteraction(new UserInteraction() {
+            @Override
+            public String[] interactive(
+                    ClientSession session,
+                    String name,
+                    String instruction,
+                    String lang,
+                    String[] prompt,
+                    boolean[] echo) {
+                return new String[]{enrollmentToken, PublicKeyEntry.toString(publicKey)};
+            }
+
+            @Override
+            public String getUpdatedPassword(ClientSession session, String prompt, String lang) {
+                return null;
+            }
+        });
+        client.start();
+        try (ClientSession session = client.connect(
+                        username,
+                        orion.configuration().getTransport().getSsh().getAddress(),
+                        orion.configuration().getTransport().getSsh().getPort())
+                .verify(10, TimeUnit.SECONDS)
+                .getSession()) {
+            assertThatThrownBy(() -> session.auth().verify(10, TimeUnit.SECONDS))
+                    .isInstanceOf(IOException.class);
+        } finally {
+            client.stop();
+        }
+    }
+
+    private static String startupToken(ByteArrayOutputStream startupOutput) {
+        String prefix = "SSH enrollment token: ";
+        return startupOutput.toString(StandardCharsets.UTF_8).lines()
+                .filter(line -> line.startsWith(prefix))
+                .map(line -> line.substring(prefix.length()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Enrollment token was not printed at startup"));
     }
 
     private static SshCommandResult executeCommandOverSsh(
@@ -735,6 +812,7 @@ class GitSshTransportEndToEndIT {
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
 
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
+        configuration.getBootstrap().getAccessControl().setRef("refs/heads/" + BRANCH);
 
         TestPorts.nextBatch().configure(configuration);
         configuration.getTransport().getGit().setEnabled(false);
@@ -869,38 +947,19 @@ class GitSshTransportEndToEndIT {
 
     private static void seedAclRepository(Path orionRoot, AccessControl accessControl) throws Exception {
         /*
-         * ACL storage reads ACL from a normal Orion repository named "orion".
-         * This helper creates that bare repository, writes orion.xml in a temporary worktree, commits it,
-         * and pushes master into the bare repo. Orion then loads the ACL through the same storage path it
-         * uses in production startup.
+         * ACL storage reads ACL from a native Orion repository named "orion". Seed it through the native
+         * provider so the test writes the same on-disk format that production startup reads.
          */
-        Path bareAclRepository = orionRoot.resolve("repos").resolve("orion");
-        Files.createDirectories(bareAclRepository);
-
-        try (Git ignored = Git.init()
-                .setBare(true)
-                .setGitDir(bareAclRepository.toFile())
-                .setInitialBranch(BRANCH)
-                .call()) {
-            // Repository is intentionally created empty before seeding it from a normal worktree.
-        }
-
-        Path seedWorktree = orionRoot.resolve("acl-seed-worktree");
-        try (Git seed = initRepository(seedWorktree)) {
-            try (var output = Files.newOutputStream(seedWorktree.resolve("orion.xml"))) {
-                new XmlService().serialize(accessControl, output);
-            }
-            seed.add().addFilepattern("orion.xml").call();
-            seed.commit()
-                    .setAuthor("E2E Test", "e2e@example.test")
-                    .setCommitter("E2E Test", "e2e@example.test")
-                    .setMessage("seed e2e access control")
-                    .call();
-            seed.push()
-                    .setRemote(bareAclRepository.toUri().toString())
-                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
-                    .call();
-        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        new XmlService().serialize(accessControl, output);
+        new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
+                .create("orion")
+                .valueOrFailure("ACL repository should be created")
+                .saveFiles(
+                        "refs/heads/" + BRANCH,
+                        Map.of("orion.xml", output.toByteArray()),
+                        "seed e2e access control",
+                        new GitCommitAuthor("E2E Test", "e2e@example.test"));
     }
 
     private static AccessControl accessControlFor(PublicKey userPublicKey) {
@@ -967,30 +1026,14 @@ class GitSshTransportEndToEndIT {
     }
 
     private static void seedProjectRepository(Path orionRoot, String repositoryName, String content) throws Exception {
-        Path bareRepository = orionRoot.resolve("repos").resolve(repositoryName);
-        Files.createDirectories(bareRepository);
-        try (Git ignored = Git.init()
-                .setBare(true)
-                .setGitDir(bareRepository.toFile())
-                .setInitialBranch(BRANCH)
-                .call()) {
-            // Repository is intentionally created empty before seeding it from a normal worktree.
-        }
-
-        Path seedWorktree = orionRoot.resolve(repositoryName + "-seed-worktree");
-        try (Git seed = initRepository(seedWorktree)) {
-            Files.writeString(seedWorktree.resolve("README.md"), content);
-            seed.add().addFilepattern("README.md").call();
-            seed.commit()
-                    .setAuthor("E2E Test", "e2e@example.test")
-                    .setCommitter("E2E Test", "e2e@example.test")
-                    .setMessage("seed " + repositoryName)
-                    .call();
-            seed.push()
-                    .setRemote(bareRepository.toUri().toString())
-                    .setRefSpecs(new RefSpec("refs/heads/" + BRANCH + ":refs/heads/" + BRANCH))
-                    .call();
-        }
+        new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"))
+                .create(repositoryName)
+                .valueOrFailure("Project repository should be created")
+                .saveFiles(
+                        "refs/heads/" + BRANCH,
+                        Map.of("README.md", content.getBytes(StandardCharsets.UTF_8)),
+                        "seed " + repositoryName,
+                        new GitCommitAuthor("E2E Test", "e2e@example.test"));
     }
 
     private static Git initRepository(Path directory) throws Exception {
@@ -1079,7 +1122,7 @@ class GitSshTransportEndToEndIT {
                                 OrionAccessControlServiceImpl accessControlService) {
         private String sshUrl(String repository) {
             return "ssh://%s@%s:%d/%s".formatted(
-                    USERNAME,
+                    "git",
                     configuration.getTransport().getSsh().getAddress(),
                     configuration.getTransport().getSsh().getPort(),
                     repository);

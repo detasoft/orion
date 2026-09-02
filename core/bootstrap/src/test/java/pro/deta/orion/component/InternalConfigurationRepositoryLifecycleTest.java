@@ -2,7 +2,9 @@ package pro.deta.orion.component;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
@@ -18,12 +20,16 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.util.KeyUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -151,6 +157,84 @@ class InternalConfigurationRepositoryLifecycleTest {
         }
     }
 
+    @Test
+    void enrollsSshKeysAtomicallyAndRetainsThemOnRestart() throws Exception {
+        OrionConfiguration configuration = configuration();
+        KeyPair firstKey = keyPair();
+        KeyPair secondKey = keyPair();
+        String firstOpenSshKey = PublicKeyEntry.toString(firstKey.getPublic());
+        String secondOpenSshKey = PublicKeyEntry.toString(secondKey.getPublic());
+
+        OrionComponent first = component(configuration);
+        OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
+        try {
+            assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
+            first.orionAccessControlService().createOrUpdateUser(user("alice"));
+
+            assertThatThrownBy(() -> first.orionAccessControlService().addSshKeysToUser(
+                    "alice",
+                    List.of(firstOpenSshKey, "not a public key")))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertSshAuthenticationFailed(first, "alice", firstKey);
+
+            first.orionAccessControlService().addSshKeysToUser(
+                    "alice",
+                    List.of(
+                            firstOpenSshKey + " alice@first",
+                            KeyUtils.publicKeyToString(firstKey.getPublic()),
+                            secondOpenSshKey));
+
+            assertThat(first.orionAccessControlService().userExists("alice")).isTrue();
+            assertThat(first.orionAccessControlService().userExists("missing")).isFalse();
+            assertSshAuthenticated(first, "alice", firstKey);
+            assertSshAuthenticated(first, "alice", secondKey);
+            assertGitSshIdentity(first, firstKey, "alice");
+            assertGitSshIdentity(first, secondKey, "alice");
+            assertEnrolledKeys(first, "alice", firstOpenSshKey, secondOpenSshKey);
+        } finally {
+            assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        OrionComponent restarted = component(configuration);
+        OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
+        try {
+            assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertSshAuthenticated(restarted, "alice", firstKey);
+            assertSshAuthenticated(restarted, "alice", secondKey);
+            assertGitSshIdentity(restarted, firstKey, "alice");
+            assertEnrolledKeys(restarted, "alice", firstOpenSshKey, secondOpenSshKey);
+        } finally {
+            assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+    }
+
+    @Test
+    void rejectsUnknownUsersAndAmbiguousGitSshKeyOwnership() throws Exception {
+        KeyPair sharedKey = keyPair();
+        OrionComponent component = component(configuration());
+        OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
+        try {
+            assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+            component.orionAccessControlService().createOrUpdateUser(user("alice"));
+            component.orionAccessControlService().createOrUpdateUser(user("bob"));
+            component.orionAccessControlService().addSshKeysToUser(
+                    "alice",
+                    List.of(PublicKeyEntry.toString(sharedKey.getPublic())));
+            component.orionAccessControlService().addSshKeysToUser(
+                    "bob",
+                    List.of(PublicKeyEntry.toString(sharedKey.getPublic())));
+
+            assertSshAuthenticated(component, "alice", sharedKey);
+            assertSshAuthenticated(component, "bob", sharedKey);
+            assertSshAuthenticationFailed(component, "missing", sharedKey);
+            assertThat(component.orionAccessControlService().authenticateGitSshKey(
+                    sharedKey.getPublic().getEncoded()))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+        } finally {
+            assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+    }
+
     private OrionConfiguration configuration() {
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.resolve("runtime").toString());
@@ -168,6 +252,7 @@ class InternalConfigurationRepositoryLifecycleTest {
     private static OrionComponent component(OrionConfiguration configuration) {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .build();
     }
 
@@ -221,6 +306,58 @@ class InternalConfigurationRepositoryLifecycleTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         new XmlService().serialize(draft.toAccessControl(), output);
         return output.toByteArray();
+    }
+
+    private static AccessControlUserUpdate user(String userId) {
+        return new AccessControlUserUpdate(userId, userId + "@example.test", List.of(), List.of());
+    }
+
+    private static KeyPair keyPair() throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        return generator.generateKeyPair();
+    }
+
+    private static void assertSshAuthenticated(OrionComponent component, String userId, KeyPair keyPair) {
+        assertThat(component.orionAccessControlService().authenticateSshUser(
+                userId,
+                keyPair.getPublic().getEncoded()))
+                .isInstanceOfSatisfying(AuthenticationResult.Success.class, success ->
+                        assertThat(success.userIdentity().getUserId()).isEqualTo(userId));
+    }
+
+    private static void assertSshAuthenticationFailed(
+            OrionComponent component,
+            String userId,
+            KeyPair keyPair) {
+        assertThat(component.orionAccessControlService().authenticateSshUser(
+                userId,
+                keyPair.getPublic().getEncoded()))
+                .isInstanceOf(AuthenticationResult.Failure.class);
+    }
+
+    private static void assertGitSshIdentity(OrionComponent component, KeyPair keyPair, String expectedUserId) {
+        assertThat(component.orionAccessControlService()
+                .authenticateGitSshKey(keyPair.getPublic().getEncoded()))
+                .isInstanceOfSatisfying(AuthenticationResult.Success.class, success ->
+                        assertThat(success.userIdentity().getUserId()).isEqualTo(expectedUserId));
+    }
+
+    private static void assertEnrolledKeys(
+            OrionComponent component,
+            String userId,
+            String... expectedKeys) throws Exception {
+        AccessControl accessControl = new XmlService().deserialize(new ByteArrayInputStream(
+                component.orionAccessControlService().accessControlConfigurationFile()));
+        AccessControl.User user = accessControl.getUsers().stream()
+                .filter(candidate -> userId.equals(candidate.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(user.getCredentials())
+                .filteredOn(credential ->
+                        credential.getType() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
+                .extracting(AccessControl.Credential::getValue)
+                .containsExactlyInAnyOrder(expectedKeys);
     }
 
     private static void assertAuthenticated(OrionComponent component, String userId, String password) {

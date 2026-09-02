@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
+
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -12,6 +14,7 @@ record AppOptions(
         Command command,
         String configurationLocation,
         boolean helpRequested,
+        boolean regenerateSshEnrollmentToken,
         List<String> applicationArguments,
         Path verificationArtifact,
         Path releasePublicKey,
@@ -52,7 +55,7 @@ record AppOptions(
                 return parseServiceCommand(Command.STATUS, args, 1);
             }
             if ("help".equals(args[0])) {
-                return commandOptions(Command.RUN, null, true);
+                return commandOptions(Command.RUN, null, true, false);
             }
         }
 
@@ -73,6 +76,8 @@ record AppOptions(
 
                 Options for run, start, and restart:
                   -c, --config <location>  Read configuration from a file path or classpath:// resource.
+                  --regenerate-ssh-enrollment-token
+                                           Replace the one-time SSH enrollment token on restart.
                   -h, --help               Show this help.
 
                 Use "orion verify --help" for signature verification options.
@@ -109,11 +114,19 @@ record AppOptions(
     private static AppOptions parseRun(Command command, String[] args, int startIndex) {
         String configurationLocation = null;
         boolean helpRequested = false;
+        boolean regenerateSshEnrollmentToken = false;
 
         for (int i = startIndex; i < args.length; i++) {
             String arg = args[i];
             switch (arg) {
                 case "--help", "-h" -> helpRequested = true;
+                case "--regenerate-ssh-enrollment-token" -> {
+                    if (command == Command.START) {
+                        throw new IllegalArgumentException(
+                                "--regenerate-ssh-enrollment-token is only valid for restart or run");
+                    }
+                    regenerateSshEnrollmentToken = true;
+                }
                 case "--config", "-c" -> {
                     i++;
                     if (i >= args.length) {
@@ -133,7 +146,11 @@ record AppOptions(
             }
         }
 
-        return commandOptions(command, configurationLocation, helpRequested);
+        return commandOptions(
+                command,
+                configurationLocation,
+                helpRequested,
+                regenerateSshEnrollmentToken);
     }
 
     private static AppOptions parseServiceCommand(Command command, String[] args, int startIndex) {
@@ -147,7 +164,7 @@ record AppOptions(
             }
         }
 
-        return commandOptions(command, null, helpRequested);
+        return commandOptions(command, null, helpRequested, false);
     }
 
     private static AppOptions parseVerify(String[] args, int startIndex, Map<String, String> environment) {
@@ -179,6 +196,7 @@ record AppOptions(
                 Command.VERIFY,
                 null,
                 helpRequested,
+                false,
                 List.of(),
                 artifact,
                 publicKey,
@@ -190,12 +208,21 @@ record AppOptions(
         );
     }
 
-    private static AppOptions commandOptions(Command command, String configurationLocation, boolean helpRequested) {
+    OrionRuntimeOptions runtimeOptions() {
+        return new OrionRuntimeOptions(regenerateSshEnrollmentToken);
+    }
+
+    private static AppOptions commandOptions(
+            Command command,
+            String configurationLocation,
+            boolean helpRequested,
+            boolean regenerateSshEnrollmentToken) {
         return new AppOptions(
                 command,
                 configurationLocation,
                 helpRequested,
-                applicationArguments(configurationLocation),
+                regenerateSshEnrollmentToken,
+                applicationArguments(configurationLocation, regenerateSshEnrollmentToken),
                 null,
                 null,
                 null,
@@ -206,14 +233,17 @@ record AppOptions(
         );
     }
 
-    private static List<String> applicationArguments(String configurationLocation) {
-        if (configurationLocation == null) {
-            return List.of();
-        }
-
+    private static List<String> applicationArguments(
+            String configurationLocation,
+            boolean regenerateSshEnrollmentToken) {
         List<String> arguments = new ArrayList<>();
-        arguments.add("--config");
-        arguments.add(configurationLocation);
+        if (configurationLocation != null) {
+            arguments.add("--config");
+            arguments.add(configurationLocation);
+        }
+        if (regenerateSshEnrollmentToken) {
+            arguments.add("--regenerate-ssh-enrollment-token");
+        }
         return List.copyOf(arguments);
     }
 

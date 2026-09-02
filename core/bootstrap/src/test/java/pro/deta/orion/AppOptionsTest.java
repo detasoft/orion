@@ -74,6 +74,38 @@ class AppOptionsTest {
     }
 
     @Test
+    void restartCanRequestSshEnrollmentTokenRegeneration() {
+        AppOptions options = AppOptions.parse(new String[]{
+                "restart",
+                "--config=config.yml",
+                "--regenerate-ssh-enrollment-token"
+        });
+
+        assertTrue(options.regenerateSshEnrollmentToken());
+        assertEquals(
+                java.util.List.of("--config", "config.yml", "--regenerate-ssh-enrollment-token"),
+                options.applicationArguments());
+    }
+
+    @Test
+    void runAcceptsForwardedSshEnrollmentTokenRegeneration() {
+        AppOptions options = AppOptions.parse(new String[]{"run", "--regenerate-ssh-enrollment-token"});
+
+        assertTrue(options.regenerateSshEnrollmentToken());
+    }
+
+    @Test
+    void startCannotRegenerateSshEnrollmentToken() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> AppOptions.parse(new String[]{"start", "--regenerate-ssh-enrollment-token"}));
+
+        assertEquals(
+                "--regenerate-ssh-enrollment-token is only valid for restart or run",
+                error.getMessage());
+    }
+
+    @Test
     void parsesStopCommand() {
         AppOptions options = AppOptions.parse(new String[]{"stop"});
 
@@ -156,6 +188,7 @@ class AppOptionsTest {
         assertTrue(usage.contains("run"));
         assertTrue(usage.contains("start"));
         assertTrue(usage.contains("restart"));
+        assertTrue(usage.contains("--regenerate-ssh-enrollment-token"));
         assertTrue(usage.contains("verify"));
         assertFalse(usage.contains("Usage: orion verify [options]"));
     }
