@@ -28,5 +28,6 @@ commands, and survives independently of `agentd`.
 - [ ] [Harden Linux process-tree control](linux-process-tree-control/TASK.md)
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
 - [ ] [Make control-to-journal delivery idempotent](control-journal-idempotency/TASK.md)
+- [ ] [Reduce metadata to a session manifest](metadata-manifest/TASK.md)
 - [ ] [Implement the Windows ConPTY host](windows-host/TASK.md)
 - [ ] [Package targets and verify end-to-end acceptance](release-and-acceptance/TASK.md)
