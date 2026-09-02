@@ -25,7 +25,6 @@ of the connection is Orion.
 
 ## Child Tasks
 
-- [ ] [Define the interoperability harness and repository state model](harness-and-state-model/TASK.md)
 - [ ] [Add canonical Git and JGit engine adapters](reference-engine-adapters/TASK.md)
 - [ ] [Add Orion client and server adapters](orion-engine-adapters/TASK.md)
 - [ ] [Add the shared Git workflow scenario catalog](workflow-scenarios/TASK.md)

@@ -13,9 +13,9 @@ import java.util.TimeZone;
 
 final class JGitWorkflowClient implements GitClient {
     private static final PersonIdent PARITY_IDENTITY = new PersonIdent(
-            "Parity",
-            "parity@example.test",
-            new Date(0),
+            GitScenarioContext.IDENTITY_NAME,
+            GitScenarioContext.IDENTITY_EMAIL,
+            Date.from(GitScenarioContext.COMMIT_TIME),
             TimeZone.getTimeZone("UTC"));
 
     private final String name;
@@ -38,7 +38,7 @@ final class JGitWorkflowClient implements GitClient {
     public GitWorkTree init(Path directory) throws Exception {
         Git git = Git.init()
                 .setDirectory(directory.toFile())
-                .setInitialBranch("main")
+                .setInitialBranch(GitScenarioContext.DEFAULT_BRANCH)
                 .call();
         return new JGitWorkTree(this, directory, git);
     }

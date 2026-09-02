@@ -13,12 +13,12 @@ import java.util.concurrent.TimeUnit;
 final class NativeGitWorkflowClient implements GitClient {
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(30);
     private static final Map<String, String> COMMIT_ENVIRONMENT = Map.of(
-            "GIT_AUTHOR_NAME", "Parity",
-            "GIT_AUTHOR_EMAIL", "parity@example.test",
-            "GIT_AUTHOR_DATE", "1970-01-01T00:00:00+0000",
-            "GIT_COMMITTER_NAME", "Parity",
-            "GIT_COMMITTER_EMAIL", "parity@example.test",
-            "GIT_COMMITTER_DATE", "1970-01-01T00:00:00+0000");
+            "GIT_AUTHOR_NAME", GitScenarioContext.IDENTITY_NAME,
+            "GIT_AUTHOR_EMAIL", GitScenarioContext.IDENTITY_EMAIL,
+            "GIT_AUTHOR_DATE", GitScenarioContext.COMMIT_TIME.toString(),
+            "GIT_COMMITTER_NAME", GitScenarioContext.IDENTITY_NAME,
+            "GIT_COMMITTER_EMAIL", GitScenarioContext.IDENTITY_EMAIL,
+            "GIT_COMMITTER_DATE", GitScenarioContext.COMMIT_TIME.toString());
 
     private final String name;
     private final String executable;
@@ -45,7 +45,7 @@ final class NativeGitWorkflowClient implements GitClient {
 
     @Override
     public GitWorkTree init(Path directory) throws Exception {
-        command(null, "init", "--initial-branch=main", directory.toString());
+        command(null, "init", "--initial-branch=" + GitScenarioContext.DEFAULT_BRANCH, directory.toString());
         return new NativeGitWorkTree(this, directory);
     }
 

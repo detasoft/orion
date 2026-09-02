@@ -1,9 +1,18 @@
 package pro.deta.orion.git.workflow;
 
 import java.nio.file.Path;
+import java.util.Set;
 
 public interface GitClient {
     String name();
+
+    default GitEngine engine() {
+        return new GitEngine(name());
+    }
+
+    default Set<GitCapability> capabilities() {
+        return GitCapability.all();
+    }
 
     boolean available();
 

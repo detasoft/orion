@@ -43,7 +43,7 @@ public interface GitWorkTree extends AutoCloseable {
     }
 
     default RepositorySnapshot snapshot() throws Exception {
-        return RepositorySnapshot.capture(directory(), head());
+        return RepositorySnapshot.capture(directory());
     }
 
     @Override
