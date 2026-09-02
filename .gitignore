@@ -5,6 +5,7 @@ build
 # Ignore Gradle project-specific cache directory
 .gradle
 /orion
+.orion-cache/
 .DS_Store
 .test-durations/
 .worktrees/

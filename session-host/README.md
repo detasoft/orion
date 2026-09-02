@@ -54,7 +54,7 @@ above is accepted.
 ## Build
 
 The Maven module downloads a minimal Rust 1.97.0 toolchain into
-`target/rust-toolchains` when one is not already present. It does not use a
+`.orion-cache/rust-toolchains` when one is not already present. It does not use a
 globally installed `rustc` or Cargo. The Makefile bootstraps it with the pinned
 Rustup 1.29.1 archive for the current host and verifies its checked-in SHA-256
 before the bootstrap executable receives permission to run.
