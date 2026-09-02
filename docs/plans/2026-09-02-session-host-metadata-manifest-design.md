@@ -13,16 +13,17 @@ and still cannot make the journal append and metadata replacement atomic.
 
 ## Decision
 
-Treat `metadata` as a session manifest with a small lifecycle and terminal-size
-snapshot. It is not a journal index and is never authoritative for journal
-identity, segment discovery, retention bounds, or the latest record.
+Treat `metadata` as a session manifest with a small terminal-size snapshot. It
+is not a journal index or lifecycle record and is never authoritative for
+journal identity, segment discovery, retention bounds, or the latest record.
 
 Remove these fields from metadata:
 
 - `journalId`;
 - `activeSegment`;
 - `oldestAvailableTimestamp`;
-- `latestTimestamp`.
+- `latestTimestamp`;
+- `state`.
 
 Journal readers obtain the journal identifier and record ranges from segment
 contents. They discover active and historical segments from the session
@@ -36,7 +37,6 @@ Metadata continues to contain:
 - creation and start times;
 - command, working directory, and terminal environment;
 - host and child process identifiers;
-- lifecycle state;
 - initial terminal dimensions and the last successfully applied dimensions;
 - effective sandbox description;
 - control endpoint description.
@@ -44,14 +44,13 @@ Metadata continues to contain:
 The existing internal-only metadata v1 fixture is updated in place. No legacy
 reader or migration path is retained.
 
-## Write Lifecycle
+## Write Points
 
-Write the complete metadata snapshot only at meaningful state changes:
+Write the complete metadata snapshot only when its remaining facts change:
 
-1. Create the session in `starting` state.
-2. Record the child process and `running` state after successful launch.
+1. Create the session manifest.
+2. Record the root process identity after successful launch.
 3. Record dimensions after a successful resize.
-4. Record the final `exited` or `failed` lifecycle state.
 
 Do not rewrite metadata for PTY output, input, signals, harness events, journal
 timestamp advancement, or journal flushes. Segment rotation and retention also
@@ -60,21 +59,23 @@ do not update metadata because segment state is discovered from journal files.
 ## Consistency and Failure Semantics
 
 The journal remains authoritative after a crash. Metadata may contain the
-previous lifecycle or resize snapshot when failure occurs between a journal
-append, an external side effect, and metadata replacement. Readers that need
-the exact event order or final dimensions reconstruct them from the journal.
+previous resize snapshot when failure occurs between a journal append, an
+external side effect, and metadata replacement. Readers that need the exact
+event order or final dimensions reconstruct them from the journal.
 
-An inability to update metadata at one of the defined lifecycle checkpoints is
+An inability to update metadata at one of the defined write points is
 reported as a host error. Metadata I/O is no longer on the PTY output or
 ordinary control-event path, so a snapshot replacement failure cannot reject an
 otherwise successful output, input, signal, or harness append.
 
 ## Status
 
-The live `STATUS` response preserves exact journal bounds without reading them
-from metadata. `JournalWriter` owns the in-memory first and latest timestamp for
-the journal it is currently writing. This state is a cache of the writer's own
-append position, not a second durable source of truth.
+A successful control response already proves that `session-host` is live, so
+`STATUS` does not need a persisted lifecycle state or a host-live flag. If the
+response retains journal bounds, it obtains them without reading metadata.
+`JournalWriter` owns the in-memory first and latest timestamp for the journal it
+is currently writing. This state is a cache of the writer's own append position,
+not a second durable source of truth.
 
 ## Verification
 
@@ -82,9 +83,8 @@ Tests must cover:
 
 - metadata fixture encoding and decoding without journal-derived fields;
 - metadata remaining byte-for-byte unchanged across output, input, and signal
-  journal appends while the lifecycle and terminal dimensions are unchanged;
+  journal appends while terminal dimensions are unchanged;
 - metadata dimensions changing after a successful resize;
 - live status reporting current journal bounds from writer state;
 - journal reading and validation obtaining identity and bounds without
-  metadata;
-- final lifecycle metadata after normal exit and an applicable failure path.
+  metadata.

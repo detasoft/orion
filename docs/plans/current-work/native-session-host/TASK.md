@@ -26,6 +26,7 @@ commands, and survives independently of `agentd`.
 - [ ] [Add journal segmentation, compression, and retention](journal-retention/TASK.md)
 - [ ] [Enforce the Linux Landlock sandbox](linux-sandbox/TASK.md)
 - [ ] [Harden Linux process-tree control](linux-process-tree-control/TASK.md)
+- [ ] [Expose process control and PTY closure](process-control-and-pty-closure/TASK.md)
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
 - [ ] [Make control-to-journal delivery idempotent](control-journal-idempotency/TASK.md)
 - [ ] [Reduce metadata to a session manifest](metadata-manifest/TASK.md)
