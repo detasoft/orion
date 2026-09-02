@@ -25,8 +25,18 @@ ORION_CHECK_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORIO
 ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -i $(ORION_SERVER_IDENTITY_KEY) -p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
 .PHONY: run-server issue-token issue-token-raw
-.PHONY: ssh-state ssh-status clone-repository clone-repo admin-acl admin-acl-with-token
+.PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
+.PHONY: admin-acl admin-acl-with-token
 .PHONY: check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
+
+ifneq ($(filter clone-http-repo,$(MAKECMDGOALS)),)
+CLONE_HTTP_REPO_ARGS := $(filter-out clone-http-repo,$(MAKECMDGOALS))
+ifneq ($(strip $(CLONE_HTTP_REPO_ARGS)),)
+.PHONY: $(CLONE_HTTP_REPO_ARGS)
+$(CLONE_HTTP_REPO_ARGS):
+	@:
+endif
+endif
 
 run-server:
 	$(MAVEN) -pl core/bootstrap -am -Prun-server process-classes
@@ -53,12 +63,30 @@ ssh-state:
 
 ssh-status: ssh-state
 
+# List native repositories through the Orion SSH admin command:
+#   make list-repos
+list-repos:
+	@ssh $(ORION_SSH_OPTIONS) -i $(ORION_SSH_KEY) -p $(ORION_SSH_PORT) \
+		-l $(ORION_SSH_USER) $(ORION_SSH_HOST) repositories
+
 # Clone a repository over Orion SSH:
 #   make clone-repository ORION_GIT_USER=e2e ORION_GIT_KEY=/path/to/id_rsa ORION_REPOSITORY=project.git ORION_CLONE_DIR=target/project
 clone-repository:
 	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' git clone $(ORION_GIT_URL) $(ORION_CLONE_DIR)
 
 clone-repo: clone-repository
+
+# Clone a repository over Orion HTTP with an ephemeral bearer token:
+#   make clone-http-repo project
+clone-http-repo:
+	@if [ "$(words $(CLONE_HTTP_REPO_ARGS))" -ne 1 ]; then \
+		echo 'Usage: make clone-http-repo <repository>' >&2; \
+		exit 2; \
+	fi
+	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
+	ORION_AUTH_HEADER="Authorization: Bearer $$token" \
+		git --config-env=http.extraHeader=ORION_AUTH_HEADER clone \
+		"http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(firstword $(CLONE_HTTP_REPO_ARGS))"
 
 admin-acl:
 	@test -n "$$ORION_TOKEN" || (echo 'ORION_TOKEN is required. Run: eval "$$(make -s issue-token)"' >&2; exit 1)

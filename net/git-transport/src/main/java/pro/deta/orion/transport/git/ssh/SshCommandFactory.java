@@ -16,6 +16,7 @@ import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriBuilder;
@@ -61,10 +62,12 @@ public class SshCommandFactory implements CommandFactory {
     public static final String TOKEN = "token";
     public static final String STATE = "state";
     public static final String STATUS = "status";
+    public static final String REPOSITORIES = "repositories";
     private final OrionExecutor orionExecutor;
     private final OrionProvider orionProvider;
     private final OrionAccessControlService accessControlService;
     private final AggregateStateMachine runtimeStateMachine;
+    private final NativeGitRepositoryProvider repositoryProvider;
     private final GitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
     private final long setKeyReadTimeoutMillis;
@@ -75,10 +78,11 @@ public class SshCommandFactory implements CommandFactory {
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
             @Named("runtime") AggregateStateMachine runtimeStateMachine,
+            NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig) {
         this(orionExecutor, orionProvider, accessControlService,
-                runtimeStateMachine, 30_000, repositoryService,
+                runtimeStateMachine, 30_000, repositoryProvider, repositoryService,
                 gitTransportConfig);
     }
 
@@ -108,6 +112,7 @@ public class SshCommandFactory implements CommandFactory {
                 runtimeStateMachine,
                 setKeyReadTimeoutMillis,
                 null,
+                null,
                 null);
     }
 
@@ -117,12 +122,14 @@ public class SshCommandFactory implements CommandFactory {
             OrionAccessControlService accessControlService,
             AggregateStateMachine runtimeStateMachine,
             long setKeyReadTimeoutMillis,
+            NativeGitRepositoryProvider repositoryProvider,
             GitNativeRepositoryService repositoryService,
             GitTransportConfig gitTransportConfig) {
         this.orionExecutor = orionExecutor;
         this.orionProvider = orionProvider;
         this.accessControlService = accessControlService;
         this.runtimeStateMachine = runtimeStateMachine;
+        this.repositoryProvider = repositoryProvider;
         this.repositoryService = repositoryService;
         this.gitTransportConfig = gitTransportConfig;
         this.setKeyReadTimeoutMillis = setKeyReadTimeoutMillis;
@@ -172,6 +179,8 @@ public class SshCommandFactory implements CommandFactory {
                             issueToken(securityContext, arguments);
                         } else if (STATE.equalsIgnoreCase(command) || STATUS.equalsIgnoreCase(command)) {
                             writeLifecycleStatus(securityContext);
+                        } else if (REPOSITORIES.equalsIgnoreCase(command)) {
+                            writeRepositories(securityContext, arguments);
                         } else {
                             log.warn("SSH Transport Unknown command: {}", commandLine);
                             outputStream.write("Unknown command".getBytes(StandardCharsets.UTF_8));
@@ -244,6 +253,20 @@ public class SshCommandFactory implements CommandFactory {
                     ApplicationAccessRules.admin());
             outputStream.write((runtimeStateMachine.describeStatus() + System.lineSeparator())
                     .getBytes(StandardCharsets.UTF_8));
+        }
+
+        private void writeRepositories(SecurityContext securityContext, List<String> arguments)
+                throws IOException, OrionSecurityException {
+            if (arguments.size() != 1) {
+                throw new IllegalArgumentException("Usage: " + REPOSITORIES);
+            }
+            accessEnforcer().require(
+                    securityContext,
+                    ApplicationAdminResource.applicationAdmin(),
+                    ApplicationAccessRules.admin());
+            for (String repository : repositoryProvider.repositoryNames()) {
+                outputStream.write((repository + System.lineSeparator()).getBytes(StandardCharsets.UTF_8));
+            }
         }
     }
 

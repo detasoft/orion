@@ -420,6 +420,42 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void rootCanListRepositoriesOverSsh() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+        startedOrion.gitRepositoryProvider().create("zeta").valueOrFailure("create zeta");
+        startedOrion.gitRepositoryProvider().create("team/repository").valueOrFailure("create team repository");
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(
+                orionRoot.resolve("server-identity").resolve("signing-rsa.pem")
+        ).valueOrFailure("Server identity key should be available after startup");
+
+        String repositories = executeRootCommandOverSsh(startedOrion, serverIdentityKey, "repositories");
+
+        assertThat(repositories.lines()).containsExactly("orion", "team/repository", "zeta");
+    }
+
+    @Test
+    void regularUserCannotListRepositoriesOverSsh() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(
+                orionRoot.resolve("server-identity").resolve("signing-rsa.pem")
+        ).valueOrFailure("Server identity key should be available after startup");
+        String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
+        createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, "project");
+
+        SshCommandResult result = executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                TRUSTED_USER_KEY,
+                "repositories"
+        );
+
+        assertThat(result.exitStatus()).isEqualTo(10);
+        assertThat(result.output()).isEmpty();
+    }
+
+    @Test
     void rootSeesSameLifecycleStateOverSshAndHttp() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
@@ -619,11 +655,23 @@ class GitSshTransportEndToEndIT {
     }
 
     private static String executeRootCommandOverSsh(StartedOrion orion, KeyPair keyPair, String command) throws Exception {
+        SshCommandResult result = executeCommandOverSsh(orion, "root", keyPair, command);
+        assertThat(result.exitStatus())
+                .as(command + " stderr: %s", result.error())
+                .isEqualTo(0);
+        return result.output();
+    }
+
+    private static SshCommandResult executeCommandOverSsh(
+            StartedOrion orion,
+            String username,
+            KeyPair keyPair,
+            String command) throws Exception {
         SshClient client = SshClient.setUpDefaultClient();
         client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
         client.start();
         try (ClientSession session = client.connect(
-                        "root",
+                        username,
                         orion.configuration().getTransport().getSsh().getAddress(),
                         orion.configuration().getTransport().getSsh().getPort())
                 .verify(10, TimeUnit.SECONDS)
@@ -638,12 +686,12 @@ class GitSshTransportEndToEndIT {
                 channel.setErr(error);
                 channel.open().verify(10, TimeUnit.SECONDS);
                 channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(10));
-
-                assertThat(channel.getExitStatus())
-                        .as(command + " stderr: %s", new String(error.toByteArray(), StandardCharsets.UTF_8))
-                        .isEqualTo(0);
+                return new SshCommandResult(
+                        channel.getExitStatus(),
+                        new String(output.toByteArray(), StandardCharsets.UTF_8),
+                        new String(error.toByteArray(), StandardCharsets.UTF_8)
+                );
             }
-            return new String(output.toByteArray(), StandardCharsets.UTF_8);
         } finally {
             client.stop();
         }
@@ -1021,6 +1069,9 @@ class GitSshTransportEndToEndIT {
     }
 
     private record HttpResponse(int status, String contentType) {
+    }
+
+    private record SshCommandResult(int exitStatus, String output, String error) {
     }
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
