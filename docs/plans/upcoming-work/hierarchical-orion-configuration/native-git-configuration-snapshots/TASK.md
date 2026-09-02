@@ -1,8 +1,7 @@
 # Load and Activate Native Git Configuration Snapshots
 
 Status: todo
-Depends on: ../xml-schema-v2/TASK.md,
-../../unified-key-material-bootstrap/contracts-and-bootstrap-order/TASK.md
+Depends on: ../xml-schema-v2/TASK.md
 
 Load `orion.xml` directly from the configured commit in local native Git and
 publish it as one immutable, revisioned desired-state snapshot.

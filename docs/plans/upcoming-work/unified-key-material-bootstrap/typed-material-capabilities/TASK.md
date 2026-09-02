@@ -1,7 +1,6 @@
 # Introduce Typed Material Capabilities
 
 Status: todo
-Depends on: ../contracts-and-bootstrap-order/TASK.md
 
 Replace unrestricted string-alias access at runtime with typed, purpose-scoped
 capabilities while retaining one internal keystore owner.

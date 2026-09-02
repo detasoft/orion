@@ -1,7 +1,6 @@
 # Harden the PKCS12 Content Store
 
 Status: todo
-Depends on: ../contracts-and-bootstrap-order/TASK.md
 
 Turn the current local PKCS12 implementation into a production bootstrap store.
 

@@ -15,7 +15,6 @@ dependency injection.
 
 ## Child Tasks
 
-- [ ] [Define material roles and bootstrap ordering](contracts-and-bootstrap-order/TASK.md)
 - [ ] [Harden the PKCS12 content store](hardened-pkcs12-store/TASK.md)
 - [ ] [Introduce typed material capabilities](typed-material-capabilities/TASK.md)
 - [ ] [Add configuration secret cryptography](configuration-secret-cryptography/TASK.md)
