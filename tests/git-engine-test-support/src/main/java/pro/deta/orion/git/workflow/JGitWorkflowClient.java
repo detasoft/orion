@@ -1,8 +1,13 @@
 package pro.deta.orion.git.workflow;
 
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.MergeCommand.FastForwardMode;
 import org.eclipse.jgit.api.PullResult;
 import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.RefUpdate;
+import org.eclipse.jgit.lib.StoredConfig;
+import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteRefUpdate;
 import org.eclipse.jgit.transport.URIish;
 
@@ -35,21 +40,49 @@ final class JGitWorkflowClient implements GitClient {
     }
 
     @Override
+    public String diagnostics() {
+        return JGitDiagnostics.version();
+    }
+
+    @Override
     public GitWorkTree init(Path directory) throws Exception {
         Git git = Git.init()
                 .setDirectory(directory.toFile())
                 .setInitialBranch(GitScenarioContext.DEFAULT_BRANCH)
                 .call();
+        configure(git);
         return new JGitWorkTree(this, directory, git);
     }
 
     @Override
     public GitWorkTree clone(String remoteUri, Path directory) throws Exception {
-        Git git = Git.cloneRepository()
-                .setURI(remoteUri)
-                .setDirectory(directory.toFile())
-                .call();
-        return new JGitWorkTree(this, directory, git);
+        Git git = null;
+        try {
+            git = Git.cloneRepository()
+                    .setURI(remoteUri)
+                    .setDirectory(directory.toFile())
+                    .setNoCheckout(true)
+                    .call();
+            configure(git);
+            git.reset()
+                    .setMode(org.eclipse.jgit.api.ResetCommand.ResetType.HARD)
+                    .setRef("refs/heads/" + GitScenarioContext.DEFAULT_BRANCH)
+                    .call();
+            return new JGitWorkTree(this, directory, git);
+        } catch (Exception | Error failure) {
+            if (git != null) {
+                git.close();
+            }
+            throw failure;
+        }
+    }
+
+    private static void configure(Git git) throws Exception {
+        StoredConfig config = git.getRepository().getConfig();
+        config.setBoolean("commit", null, "gpgSign", false);
+        config.setBoolean("core", null, "autocrlf", false);
+        config.setBoolean("core", null, "fileMode", false);
+        config.save();
     }
 
     private static final class JGitWorkTree implements GitWorkTree {
@@ -83,7 +116,7 @@ final class JGitWorkflowClient implements GitClient {
         @Override
         public void commit(String message) throws Exception {
             git.commit()
-                    .setMessage(message)
+                    .setMessage(message.stripTrailing() + "\n")
                     .setAuthor(PARITY_IDENTITY)
                     .setCommitter(PARITY_IDENTITY)
                     .call();
@@ -99,14 +132,38 @@ final class JGitWorkflowClient implements GitClient {
 
         @Override
         public void push(String remote, String branch) throws Exception {
-            var results = git.push()
-                    .setRemote(remote)
-                    .add("refs/heads/" + branch)
-                    .call();
+            pushRefs(remote, "refs/heads/" + branch + ":refs/heads/" + branch);
+        }
+
+        @Override
+        public void pushRefs(String remote, String... refSpecs) throws Exception {
+            RefSpec[] specs = new RefSpec[refSpecs.length];
+            for (int index = 0; index < refSpecs.length; index++) {
+                specs[index] = new RefSpec(refSpecs[index]);
+            }
+            var results = git.push().setRemote(remote).setRefSpecs(specs).call();
             for (var result : results) {
                 for (RemoteRefUpdate update : result.getRemoteUpdates()) {
                     requireAcceptedPush(update);
                 }
+            }
+        }
+
+        @Override
+        public void updateRef(String refName, String target) throws Exception {
+            ObjectId objectId = git.getRepository().resolve(target);
+            if (objectId == null) {
+                throw new IllegalArgumentException("Cannot resolve Git ref target: " + target);
+            }
+            RefUpdate update = git.getRepository().updateRef(refName);
+            update.setNewObjectId(objectId);
+            update.setForceUpdate(true);
+            RefUpdate.Result result = update.update();
+            if (result != RefUpdate.Result.NEW
+                    && result != RefUpdate.Result.FAST_FORWARD
+                    && result != RefUpdate.Result.FORCED
+                    && result != RefUpdate.Result.NO_CHANGE) {
+                throw new IllegalStateException("JGit ref update failed for " + refName + ": " + result);
             }
         }
 
@@ -120,6 +177,8 @@ final class JGitWorkflowClient implements GitClient {
             PullResult result = git.pull()
                     .setRemote(remote)
                     .setRemoteBranchName(branch)
+                    .setRebase(false)
+                    .setFastForward(FastForwardMode.FF_ONLY)
                     .call();
             if (!result.isSuccessful()) {
                 throw new IllegalStateException("JGit pull failed: " + result);

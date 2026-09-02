@@ -8,7 +8,7 @@ public final class GitClients {
         return new JGitWorkflowClient("jgit");
     }
 
-    public static GitClient nativeGit() {
-        return new NativeGitWorkflowClient("native-git", "git");
+    public static GitClient git() {
+        return new GitCliWorkflowClient("git", "git");
     }
 }

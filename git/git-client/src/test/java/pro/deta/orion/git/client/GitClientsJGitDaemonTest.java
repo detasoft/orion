@@ -8,9 +8,13 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.workflow.GitRemoteRepository;
+import pro.deta.orion.git.workflow.GitServer;
+import pro.deta.orion.git.workflow.GitServers;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,18 +27,21 @@ class GitClientsJGitDaemonTest {
     @Test
     void fetchesAndPushesAgainstJGitDaemonOnOsAssignedPort(
             @TempDir Path temporaryDirectory) throws Exception {
-        TestRepository testRepository = createRepository(temporaryDirectory);
         ObjectId updatedCommit;
-        try (JGitDaemonTestServer server = JGitDaemonTestServer.start(
-                testRepository.path())) {
-            assertThat(server.repositoryUri().getPort()).isPositive();
+        GitRemoteRepository remote;
+        TestRepository testRepository;
+        try (GitServer server = GitServers.jgit()) {
+            remote = server.createRemoteRepository(temporaryDirectory, "test.git");
+            testRepository = createRepository(temporaryDirectory, remote);
+            URI repositoryUri = URI.create(remote.uri());
+            assertThat(repositoryUri.getPort()).isPositive();
             GitClientOptions options = GitClientOptions.defaults();
 
             ByteArrayOutputStream pack = new ByteArrayOutputStream();
             GitClientTransport transport = new GitTcpClientTransport();
             GitClientResult<GitUploadPackResult> fetch =
                     new GitUploadPackClient(transport).fetch(
-                            server.repositoryUri(),
+                            repositoryUri,
                             options,
                             GitUploadPackRequest.of(
                                     testRepository.commitId(),
@@ -50,7 +57,7 @@ class GitClientsJGitDaemonTest {
                     "Create branch through receive-pack\n");
             GitClientResult<GitReceivePackResult> createPush =
                     new GitReceivePackClient(transport).push(
-                            server.repositoryUri(), options, receiveRequest(
+                            repositoryUri, options, receiveRequest(
                                     GitClientValidation.NULL_ID,
                                     createdCommit.name(),
                                     "refs/heads/pushed-with-pack",
@@ -71,7 +78,7 @@ class GitClientsJGitDaemonTest {
                     pack(testRepository.sourcePath(), updatedCommit, createdCommit));
             GitClientResult<GitReceivePackResult> push =
                     new GitReceivePackClient(transport).push(
-                            server.repositoryUri(), options, updateBranch);
+                            repositoryUri, options, updateBranch);
 
             assertThat(push).isInstanceOf(GitClientResult.Success.class);
             assertThat(success(push).accepted()).isTrue();
@@ -91,7 +98,9 @@ class GitClientsJGitDaemonTest {
         return ((GitClientResult.Success<T>) result).value();
     }
 
-    private static TestRepository createRepository(Path temporaryDirectory)
+    private static TestRepository createRepository(
+            Path temporaryDirectory,
+            GitRemoteRepository remote)
             throws Exception {
         Path seedDirectory = temporaryDirectory.resolve("seed");
         ObjectId commitId;
@@ -108,16 +117,12 @@ class GitClientsJGitDaemonTest {
                     .setAuthor("Orion Test", "orion@example.invalid")
                     .setCommitter("Orion Test", "orion@example.invalid")
                     .call();
+            seed.push()
+                    .setRemote(remote.directory().toUri().toString())
+                    .add("refs/heads/main:refs/heads/main")
+                    .call();
         }
-
-        Path bareRepository = temporaryDirectory.resolve("test.git");
-        try (Git remote = Git.cloneRepository()
-                .setURI(seedDirectory.toUri().toString())
-                .setDirectory(bareRepository.toFile())
-                .setBare(true)
-                .call()) {
-        }
-        return new TestRepository(seedDirectory, bareRepository, commitId.name());
+        return new TestRepository(seedDirectory, remote.directory(), commitId.name());
     }
 
     private static ObjectId commit(Path sourcePath, String contents)

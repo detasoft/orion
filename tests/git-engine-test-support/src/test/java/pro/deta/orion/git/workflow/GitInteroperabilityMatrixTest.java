@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,6 +47,174 @@ class GitInteroperabilityMatrixTest extends GitInteroperabilityMatrixRunner {
             throw new IOException("connection failed before the operation reached the server");
         })).isInstanceOf(IOException.class)
                 .hasMessage("connection failed before the operation reached the server");
+    }
+
+    @Test
+    void attachesBothEngineVersionsToScenarioFailures() {
+        GitScenario failing = new GitScenario() {
+            @Override
+            public String name() {
+                return "failing";
+            }
+
+            @Override
+            public Set<GitCapability> requiredCapabilities() {
+                return Set.of();
+            }
+
+            @Override
+            public void run(GitScenarioContext context) throws IOException {
+                throw new IOException("scenario failed");
+            }
+        };
+        GitClient client = new TestClient("client") {
+            @Override
+            public String diagnostics() {
+                return "JGit/7.test";
+            }
+        };
+        GitServer server = new TestServer("server") {
+            @Override
+            public String diagnostics() {
+                return "git version 2.test";
+            }
+        };
+
+        assertThatThrownBy(() -> GitInteroperabilityHarness.run(failing, client, server))
+                .isInstanceOf(IOException.class)
+                .hasMessage("scenario failed")
+                .satisfies(error -> assertThat(error.getSuppressed())
+                        .singleElement()
+                        .extracting(Throwable::getMessage)
+                        .isEqualTo("Git engine diagnostics: client=JGit/7.test; server=git version 2.test"));
+    }
+
+    @Test
+    void closesStartedServerWhenClientPrerequisiteFails() {
+        AtomicBoolean closed = new AtomicBoolean();
+        GitClient unavailable = new TestClient("unavailable") {
+            @Override
+            public void requireAvailable() {
+                throw new IllegalStateException("missing client");
+            }
+
+            @Override
+            public String diagnostics() {
+                return "missing client version";
+            }
+        };
+        GitServer server = new TestServer("started-server") {
+            @Override
+            public String diagnostics() {
+                return "server version";
+            }
+
+            @Override
+            public void close() {
+                closed.set(true);
+            }
+        };
+
+        assertThatThrownBy(() -> GitInteroperabilityHarness.run(scenario("unused"), unavailable, server))
+                .hasMessage("missing client")
+                .satisfies(error -> assertDiagnostics(error, "missing client version", "server version"));
+        assertThat(closed).isTrue();
+    }
+
+    @Test
+    void attachesDiagnosticsToProvisioningAndAssertionFailures() {
+        GitClient client = diagnosticClient();
+        GitServer provisioningFailure = new TestServer("server") {
+            @Override
+            public String diagnostics() {
+                return "server version";
+            }
+
+            @Override
+            public GitRemoteRepository createRemoteRepository(Path directory, String repositoryName)
+                    throws IOException {
+                throw new IOException("provisioning failed");
+            }
+        };
+
+        assertThatThrownBy(() -> GitInteroperabilityHarness.run(
+                scenario("unused"), client, provisioningFailure))
+                .isInstanceOf(IOException.class)
+                .hasMessage("provisioning failed")
+                .satisfies(error -> assertDiagnostics(error, "client version", "server version"));
+
+        GitScenario assertionFailure = new GitScenario() {
+            @Override
+            public String name() {
+                return "assertion";
+            }
+
+            @Override
+            public Set<GitCapability> requiredCapabilities() {
+                return Set.of();
+            }
+
+            @Override
+            public void run(GitScenarioContext context) {
+                throw new AssertionError("scenario assertion");
+            }
+        };
+        assertThatThrownBy(() -> GitInteroperabilityHarness.run(
+                assertionFailure, client, new TestServer("server") {
+                    @Override
+                    public String diagnostics() {
+                        return "server version";
+                    }
+                }))
+                .isInstanceOf(AssertionError.class)
+                .hasMessage("scenario assertion")
+                .satisfies(error -> assertDiagnostics(error, "client version", "server version"));
+    }
+
+    @Test
+    void attachesDiagnosticsToServerCloseFailures() {
+        GitServer server = new TestServer("server") {
+            @Override
+            public String diagnostics() {
+                return "server version";
+            }
+
+            @Override
+            public void close() throws IOException {
+                throw new IOException("close failed");
+            }
+        };
+
+        assertThatThrownBy(() -> GitInteroperabilityHarness.run(
+                noOpScenario("close"), diagnosticClient(), server))
+                .isInstanceOf(IOException.class)
+                .hasMessage("close failed")
+                .satisfies(error -> assertDiagnostics(error, "client version", "server version"));
+    }
+
+    @Test
+    void removesInvocationDirectoryAfterServerShutdown() throws Exception {
+        AtomicReference<Path> invocationDirectory = new AtomicReference<>();
+        GitScenario scenario = new GitScenario() {
+            @Override
+            public String name() {
+                return "cleanup";
+            }
+
+            @Override
+            public Set<GitCapability> requiredCapabilities() {
+                return Set.of();
+            }
+
+            @Override
+            public void run(GitScenarioContext context) throws IOException {
+                invocationDirectory.set(context.workTreeDirectory("client").getParent());
+            }
+        };
+
+        GitInteroperabilityHarness.run(scenario, diagnosticClient(), new TestServer("server"));
+
+        assertThat(invocationDirectory.get()).doesNotExist();
     }
 
     @Test
@@ -129,6 +299,21 @@ class GitInteroperabilityMatrixTest extends GitInteroperabilityMatrixRunner {
                 "refs/heads/main", Map.of("refs/heads/main", "commit-id"), Map.of("commit-id", commit));
     }
 
+    private static GitClient diagnosticClient() {
+        return new TestClient("client") {
+            @Override
+            public String diagnostics() {
+                return "client version";
+            }
+        };
+    }
+
+    private static void assertDiagnostics(Throwable error, String client, String server) {
+        assertThat(error.getSuppressed())
+                .anySatisfy(suppressed -> assertThat(suppressed.getMessage())
+                        .isEqualTo("Git engine diagnostics: client=" + client + "; server=" + server));
+    }
+
     private static GitScenario scenario(String name) {
         return new GitScenario() {
             @Override
@@ -153,7 +338,36 @@ class GitInteroperabilityMatrixTest extends GitInteroperabilityMatrixRunner {
         };
     }
 
-    private record TestClient(String name) implements GitClient {
+    private static GitScenario noOpScenario(String name) {
+        return new GitScenario() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public Set<GitCapability> requiredCapabilities() {
+                return Set.of();
+            }
+
+            @Override
+            public void run(GitScenarioContext context) {
+            }
+        };
+    }
+
+    private static class TestClient implements GitClient {
+        private final String name;
+
+        private TestClient(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
         @Override
         public boolean available() {
             return true;
@@ -170,7 +384,18 @@ class GitInteroperabilityMatrixTest extends GitInteroperabilityMatrixRunner {
         }
     }
 
-    private record TestServer(String name) implements GitServer {
+    private static class TestServer implements GitServer {
+        private final String name;
+
+        private TestServer(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
         @Override
         public Set<GitCapability> capabilities() {
             return GitCapability.all();

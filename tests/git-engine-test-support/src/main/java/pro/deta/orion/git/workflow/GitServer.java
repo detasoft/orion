@@ -12,6 +12,10 @@ public interface GitServer extends AutoCloseable {
 
     Set<GitCapability> capabilities();
 
+    default String diagnostics() {
+        return name();
+    }
+
     GitRemoteRepository createRemoteRepository(Path directory, String repositoryName) throws Exception;
 
     default RepositorySnapshot snapshot(GitRemoteRepository remote) throws Exception {

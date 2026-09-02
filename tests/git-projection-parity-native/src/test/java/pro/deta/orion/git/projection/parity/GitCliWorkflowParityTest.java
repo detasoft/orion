@@ -14,35 +14,35 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-class NativeGitClientWorkflowParityTest extends BaseOrionTest {
+class GitCliWorkflowParityTest extends BaseOrionTest {
     @Test
-    void nativeGitPushesAndJGitClonesSameRepositoryState() throws Exception {
-        comparePushThenClone(nativeGit(), GitClients.jgit());
+    void canonicalGitPushesAndJGitClonesSameRepositoryState() throws Exception {
+        comparePushThenClone(gitCli(), GitClients.jgit());
     }
 
     @Test
-    void jGitPushesAndNativeGitClonesSameRepositoryState() throws Exception {
-        comparePushThenClone(GitClients.jgit(), nativeGit());
+    void jGitPushesAndCanonicalGitClonesSameRepositoryState() throws Exception {
+        comparePushThenClone(GitClients.jgit(), gitCli());
     }
 
     @Test
-    void nativeGitPushesUpdateAndJGitPullsSameRepositoryState() throws Exception {
-        comparePushThenPull(nativeGit(), GitClients.jgit());
+    void canonicalGitPushesUpdateAndJGitPullsSameRepositoryState() throws Exception {
+        comparePushThenPull(gitCli(), GitClients.jgit());
     }
 
     @Test
-    void jGitPushesUpdateAndNativeGitPullsSameRepositoryState() throws Exception {
-        comparePushThenPull(GitClients.jgit(), nativeGit());
+    void jGitPushesUpdateAndCanonicalGitPullsSameRepositoryState() throws Exception {
+        comparePushThenPull(GitClients.jgit(), gitCli());
     }
 
-    @Disabled("TODO: compare explicit fetch + checkout workflow after native fetch-side scenarios are stable.")
+    @Disabled("TODO: compare explicit fetch + checkout workflow after Git CLI fetch scenarios are stable.")
     @Test
-    void nativeGitPushesAndJGitFetchesSameRepositoryState() {
+    void canonicalGitPushesAndJGitFetchesSameRepositoryState() {
     }
 
-    @Disabled("TODO: compare two-client round trip: native pushes, JGit pulls and pushes, native pulls back.")
+    @Disabled("TODO: compare two-client round trip: Git CLI pushes, JGit pulls and pushes, Git CLI pulls back.")
     @Test
-    void nativeGitAndJGitRoundTripPushPullMatches() {
+    void canonicalGitAndJGitRoundTripPushPullMatches() {
     }
 
     private void comparePushThenClone(GitClient producerClient, GitClient consumerClient) throws Exception {
@@ -113,9 +113,9 @@ class NativeGitClientWorkflowParityTest extends BaseOrionTest {
                 .isEqualTo(expectedSnapshot.bytes());
     }
 
-    private static GitClient nativeGit() {
-        GitClient client = GitClients.nativeGit();
-        assumeTrue(client.available(), "native git executable is not available");
+    private static GitClient gitCli() {
+        GitClient client = GitClients.git();
+        assumeTrue(client.available(), "canonical Git executable is not available");
         return client;
     }
 }

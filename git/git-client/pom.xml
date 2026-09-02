@@ -28,5 +28,10 @@
             <version>${jgit.version}</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.tests</groupId>
+            <artifactId>git-engine-test-support</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

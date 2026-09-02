@@ -16,6 +16,16 @@ public interface GitClient {
 
     boolean available();
 
+    default void requireAvailable() {
+        if (!available()) {
+            throw new IllegalStateException("Git client prerequisite is unavailable: " + name());
+        }
+    }
+
+    default String diagnostics() {
+        return name();
+    }
+
     GitWorkTree init(Path directory) throws Exception;
 
     GitWorkTree clone(String remoteUri, Path directory) throws Exception;

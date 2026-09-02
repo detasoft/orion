@@ -25,7 +25,6 @@ of the connection is Orion.
 
 ## Child Tasks
 
-- [ ] [Add canonical Git and JGit engine adapters](reference-engine-adapters/TASK.md)
 - [ ] [Add Orion client and server adapters](orion-engine-adapters/TASK.md)
 - [ ] [Add the shared Git workflow scenario catalog](workflow-scenarios/TASK.md)
 - [ ] [Run the Orion-facing matrix in Maven and CI](matrix-ci-integration/TASK.md)

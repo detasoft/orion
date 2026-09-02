@@ -19,6 +19,10 @@ public interface GitWorkTree extends AutoCloseable {
 
     void push(String remote, String branch) throws Exception;
 
+    void pushRefs(String remote, String... refSpecs) throws Exception;
+
+    void updateRef(String refName, String target) throws Exception;
+
     void fetch(String remote) throws Exception;
 
     void pull(String remote, String branch) throws Exception;
