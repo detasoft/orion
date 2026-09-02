@@ -1,6 +1,7 @@
 # Define the Server Agent Protocol Contracts
 
 Status: todo
+Owner: codex, session c11ec44a, started 2026-09-02 05:16 Europe/Amsterdam.
 Journal contract: ../../../2026-09-02-session-journal-cbor-sequence.md
 
 Define the shared control and session-stream contracts before transport and
