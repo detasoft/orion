@@ -105,10 +105,10 @@ Timestamp zero is not written. It represents the cursor before the first
 record. A read cursor means records with `timestamp > cursor`. The writer must
 reject timestamp exhaustion instead of wrapping.
 
-Unknown event types are skipped by reading and validating their declared
-payload length and checksum. A known type with an unknown payload-schema
-version is surfaced as an opaque unknown event. It does not terminate journal
-iteration.
+An unknown event type, or a known type with an unknown payload-schema version,
+is surfaced as an opaque event after validating its declared payload length and
+checksum. The reader preserves its framing fields and payload and continues
+journal iteration; a consumer may skip semantic interpretation of the event.
 
 ## Event Type Allocation
 

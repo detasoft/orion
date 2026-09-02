@@ -158,9 +158,10 @@ Future records may append fields:
 
 The minimum record length is three. Readers must interpret the first three
 positions, ignore unknown trailing positions, and preserve record boundaries.
-Readers that do not need to interpret an unknown `eventType` must skip its
-payload and continue with later records. New fields may only be appended; the
-meaning of existing positions cannot change.
+Readers must surface an unknown `eventType` and its payload as an opaque record
+and continue with later records. Consumers may skip semantic interpretation of
+that opaque record. New fields may only be appended; the meaning of existing
+positions cannot change.
 
 ## Replication
 

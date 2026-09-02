@@ -66,7 +66,8 @@ The journal contract includes:
   events;
 - MVP payload schemas for `PTY_OUTPUT`, `PTY_INPUT`, `PTY_RESIZE`,
   `PROCESS_STARTED`, `PROCESS_EXITED`, and `SIGNAL`;
-- skippable unknown event types and versioned schemas for structured payloads;
+- opaque unknown event types and versioned schemas that consumers may leave
+  uninterpreted without stopping journal iteration;
 - raw binary payloads for terminal output and an input ID in `PTY_INPUT`;
 - detection of partial records and blocks, with an unfinished tail ignored;
 - cursor and gap semantics based on record timestamps.

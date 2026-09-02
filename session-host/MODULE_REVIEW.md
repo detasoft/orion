@@ -172,8 +172,8 @@ from TOML adds a small amount of build parsing, so simply making the Make variab
 
 ## Smaller contract inconsistencies
 
-- The protocol first says unknown event types are skipped, then says they are exposed as opaque events. The code
-  returns them as opaque events. The document should state one rule consistently.
+- Resolved: the protocol and journal plans now consistently require readers to expose structurally valid unknown
+  event types as opaque records while allowing consumers to skip their semantic interpretation.
 - `APPEND_EVENT` is documented as a v1 control request, but the host always returns
   `ERROR_UNSUPPORTED_MESSAGE`. If the number is only allocated for future use, document it as reserved rather
   than supported.
