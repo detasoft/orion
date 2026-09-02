@@ -1,7 +1,8 @@
 SESSION_HOST_RUST_VERSION ?= 1.97.0
 SESSION_HOST_RUSTUP_VERSION ?= 1.29.1
-SESSION_HOST_TOOLCHAIN_CACHE ?= $(CURDIR)/target/rust-toolchains
-SESSION_HOST_CARGO_TARGET ?= $(CURDIR)/session-host/target/cargo
+ORION_CACHE_ROOT ?= $(CURDIR)/.orion-cache
+SESSION_HOST_TOOLCHAIN_CACHE ?= $(ORION_CACHE_ROOT)/rust-toolchains
+SESSION_HOST_CARGO_TARGET ?= $(ORION_CACHE_ROOT)/session-host-cargo
 SESSION_HOST_NATIVE_RESOURCES ?= $(CURDIR)/session-host/target/native-resources
 SESSION_HOST_KERNEL := $(shell uname -s)
 SESSION_HOST_MACHINE := $(shell uname -m)
