@@ -22,7 +22,6 @@ the AgentD lifecycle.
 
 ## Child Tasks
 
-- [ ] [Discover and recover local sessions](session-discovery/TASK.md)
 - [ ] [Launch and control session hosts](session-runtime-and-control/TASK.md)
 - [ ] [Read session journals](journal-reader/TASK.md)
 - [ ] [Synchronize and resume journal events](journal-sync/TASK.md)
