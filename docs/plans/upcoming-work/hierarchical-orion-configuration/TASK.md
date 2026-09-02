@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on for encrypted secret activation:
-../unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md
+../../current-work/unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md
 
 Turn the versioned `orion.xml` stored in Orion into the desired-state model for
 organizations, teams, repositories, organization-local users, roles, grants,

@@ -21,13 +21,14 @@ import java.util.Optional;
 /**
  * @AiRule All public methods in this class must be synchronized.
  */
-public class KeyMaterialService {
+public class KeyMaterialService implements AutoCloseable {
     private final KeyMaterialContentStore store;
     private final KeyMaterialOptions options;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
     private final KeyStore keyStore;
     private final Map<String, KeyMaterialSigningKeyConfig> signingKeys;
     private String version;
+    private boolean closed;
 
     private KeyMaterialService(
             KeyMaterialContentStore store,
@@ -44,7 +45,9 @@ public class KeyMaterialService {
         this.signingKeys = new LinkedHashMap<>(signingKeys);
     }
 
-    public static synchronized KeyMaterialService open(KeyMaterialContentStore store, KeyMaterialOptions options)
+    public static synchronized KeyMaterialService open(
+            KeyMaterialContentStore store,
+            KeyMaterialOptions options)
             throws IOException, GeneralSecurityException {
         return open(store, options, new KeyMaterialStorageCertificateFactory(), Map.of());
     }
@@ -81,37 +84,56 @@ public class KeyMaterialService {
             throw new IllegalArgumentException("Storage certificate factory must not be null");
         }
         Map<String, KeyMaterialSigningKeyConfig> signingKeysCopy = copySigningKeys(signingKeys);
+        KeyMaterialOptions ownedOptions = options.copy();
 
-        KeyStore keyStore = KeyStore.getInstance(options.type());
-        Optional<KeyMaterialSnapshot> snapshot = store.read();
-        char[] password = options.password();
         try {
-            if (snapshot.isPresent()) {
-                keyStore.load(new ByteArrayInputStream(snapshot.get().bytes()), password);
+            KeyStore keyStore = KeyStore.getInstance(ownedOptions.type());
+            Optional<KeyMaterialSnapshot> snapshot = store.read();
+            char[] password = ownedOptions.password();
+            try {
+                if (snapshot.isPresent()) {
+                    byte[] serialized = snapshot.get().bytes();
+                    try {
+                        keyStore.load(new ByteArrayInputStream(serialized), password);
+                    } finally {
+                        Arrays.fill(serialized, (byte) 0);
+                    }
+                    return new KeyMaterialService(
+                            store,
+                            ownedOptions,
+                            storageCertificateFactory,
+                            keyStore,
+                            snapshot.get().version(),
+                            signingKeysCopy);
+                }
+                if (!ownedOptions.createIfMissing()) {
+                    throw new KeyMaterialStoreNotFoundException("Key material store does not exist");
+                }
+                keyStore.load(null, password);
                 return new KeyMaterialService(
                         store,
-                        options,
+                        ownedOptions,
                         storageCertificateFactory,
                         keyStore,
-                        snapshot.get().version(),
+                        null,
                         signingKeysCopy);
+            } finally {
+                clear(password);
             }
-            if (!options.createIfMissing()) {
-                throw new KeyMaterialStoreNotFoundException("Key material store does not exist");
-            }
-            keyStore.load(null, password);
-            return new KeyMaterialService(store, options, storageCertificateFactory, keyStore, null, signingKeysCopy);
-        } finally {
-            clear(password);
+        } catch (IOException | GeneralSecurityException | RuntimeException e) {
+            ownedOptions.close();
+            throw e;
         }
     }
 
     public synchronized boolean containsAlias(String alias) throws GeneralSecurityException {
+        requireOpen();
         requireAlias(alias);
         return keyStore.containsAlias(alias);
     }
 
     public synchronized KeyPair getKeyPair(String alias) throws GeneralSecurityException {
+        requireOpen();
         PrivateKey privateKey = getPrivateKey(alias);
         Certificate[] chain = getCertificateChain(alias);
         if (chain.length == 0) {
@@ -122,6 +144,7 @@ public class KeyMaterialService {
     }
 
     public synchronized PrivateKey getPrivateKey(String alias) throws GeneralSecurityException {
+        requireOpen();
         requireAlias(alias);
         char[] password = options.password();
         try {
@@ -136,6 +159,7 @@ public class KeyMaterialService {
     }
 
     public synchronized Certificate[] getCertificateChain(String alias) throws GeneralSecurityException {
+        requireOpen();
         requireAlias(alias);
         Certificate[] chain = keyStore.getCertificateChain(alias);
         if (chain == null) {
@@ -145,6 +169,7 @@ public class KeyMaterialService {
     }
 
     public synchronized X509Certificate getTrustedCertificate(String alias) throws GeneralSecurityException {
+        requireOpen();
         requireAlias(alias);
         if (!keyStore.entryInstanceOf(alias, KeyStore.TrustedCertificateEntry.class)) {
             throw new GeneralSecurityException("Trusted certificate alias not found: " + alias);
@@ -157,10 +182,12 @@ public class KeyMaterialService {
     }
 
     public synchronized KeyPair getActiveSigningKey(String purpose) throws GeneralSecurityException {
+        requireOpen();
         return getKeyPair(signingKeyConfig(purpose).activeAlias());
     }
 
     public synchronized List<KeyPair> getVerificationKeys(String purpose) throws GeneralSecurityException {
+        requireOpen();
         List<KeyPair> keys = new ArrayList<>();
         for (String alias : signingKeyConfig(purpose).verificationAliasesIncludingActive()) {
             keys.add(getKeyPair(alias));
@@ -170,6 +197,7 @@ public class KeyMaterialService {
 
     public synchronized void setPrivateKey(String alias, KeyPair keyPair, Certificate[] certificateChain)
             throws GeneralSecurityException {
+        requireOpen();
         requireAlias(alias);
         if (keyPair == null || keyPair.getPrivate() == null || keyPair.getPublic() == null) {
             throw new IllegalArgumentException("Key pair must include public and private keys");
@@ -178,7 +206,8 @@ public class KeyMaterialService {
             throw new IllegalArgumentException("Certificate chain must not be empty");
         }
         if (!publicKeysMatch(keyPair.getPublic(), certificateChain[0].getPublicKey())) {
-            throw new GeneralSecurityException("Certificate public key does not match private key alias: " + alias);
+            throw new GeneralSecurityException(
+                    "Certificate public key does not match private key alias: " + alias);
         }
         char[] password = options.password();
         try {
@@ -188,14 +217,21 @@ public class KeyMaterialService {
         }
     }
 
-    public synchronized X509Certificate setPrivateKeyWithStorageCertificate(String alias, String purpose, KeyPair keyPair)
+    public synchronized X509Certificate setPrivateKeyWithStorageCertificate(
+            String alias,
+            String purpose,
+            KeyPair keyPair)
             throws GeneralSecurityException {
+        requireOpen();
         X509Certificate certificate = storageCertificateFactory.create(alias, purpose, keyPair);
         setPrivateKey(alias, keyPair, new Certificate[]{certificate});
         return certificate;
     }
 
-    public synchronized void setTrustedCertificate(String alias, Certificate certificate) throws GeneralSecurityException {
+    public synchronized void setTrustedCertificate(
+            String alias,
+            Certificate certificate) throws GeneralSecurityException {
+        requireOpen();
         requireAlias(alias);
         if (certificate == null) {
             throw new IllegalArgumentException("Trusted certificate must not be null");
@@ -203,7 +239,10 @@ public class KeyMaterialService {
         keyStore.setCertificateEntry(alias, certificate);
     }
 
-    public synchronized KeyPair generateKeyIfMissing(String alias, KeyMaterialKeySpec spec) throws GeneralSecurityException {
+    public synchronized KeyPair generateKeyIfMissing(
+            String alias,
+            KeyMaterialKeySpec spec) throws GeneralSecurityException {
+        requireOpen();
         requireAlias(alias);
         if (spec == null) {
             throw new IllegalArgumentException("Key spec must not be null");
@@ -221,7 +260,10 @@ public class KeyMaterialService {
         return keyPair;
     }
 
-    public synchronized KeyMaterialSigningKeyConfig rotate(String purpose, String newAlias) throws GeneralSecurityException {
+    public synchronized KeyMaterialSigningKeyConfig rotate(
+            String purpose,
+            String newAlias) throws GeneralSecurityException {
+        requireOpen();
         requirePurpose(purpose);
         requireAlias(newAlias);
         if (!keyStore.entryInstanceOf(newAlias, KeyStore.PrivateKeyEntry.class)) {
@@ -233,15 +275,30 @@ public class KeyMaterialService {
     }
 
     public synchronized String save() throws IOException, GeneralSecurityException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        requireOpen();
         char[] password = options.password();
-        try {
+        try (SensitiveByteArrayOutputStream output = new SensitiveByteArrayOutputStream()) {
             keyStore.store(output, password);
+            byte[] serialized = output.toByteArray();
+            try {
+                version = store.write(serialized, version);
+            } finally {
+                Arrays.fill(serialized, (byte) 0);
+            }
         } finally {
             clear(password);
         }
-        version = store.write(output.toByteArray(), version);
         return version;
+    }
+
+    @Override
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
+        options.close();
+        signingKeys.clear();
+        closed = true;
     }
 
     private static Map<String, KeyMaterialSigningKeyConfig> copySigningKeys(
@@ -288,12 +345,27 @@ public class KeyMaterialService {
         byte[] expectedEncoded = expected.getEncoded();
         byte[] actualEncoded = actual.getEncoded();
         if (expectedEncoded != null && actualEncoded != null) {
-            return expected.getAlgorithm().equals(actual.getAlgorithm()) && Arrays.equals(expectedEncoded, actualEncoded);
+            return expected.getAlgorithm().equals(actual.getAlgorithm())
+                    && Arrays.equals(expectedEncoded, actualEncoded);
         }
         return expected.equals(actual);
     }
 
     private static void clear(char[] value) {
         Arrays.fill(value, '\0');
+    }
+
+    private void requireOpen() {
+        if (closed) {
+            throw new IllegalStateException("Key material service is closed");
+        }
+    }
+
+    private static final class SensitiveByteArrayOutputStream extends ByteArrayOutputStream {
+        @Override
+        public void close() throws IOException {
+            Arrays.fill(buf, (byte) 0);
+            super.close();
+        }
     }
 }

@@ -1,8 +1,7 @@
 # Migrate Server Identity and JWT Signing
 
 Status: todo
-Depends on: ../hardened-pkcs12-store/TASK.md,
-../typed-material-capabilities/TASK.md
+Depends on: ../typed-material-capabilities/TASK.md
 
 Make the unified material store the only owner of Orion server identity and JWT
 signing keys.

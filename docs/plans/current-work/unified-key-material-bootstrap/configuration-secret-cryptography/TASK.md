@@ -1,8 +1,7 @@
 # Add Configuration Secret Cryptography
 
 Status: todo
-Depends on: ../hardened-pkcs12-store/TASK.md,
-../typed-material-capabilities/TASK.md
+Depends on: ../typed-material-capabilities/TASK.md
 
 Provide authenticated envelope encryption for secret payloads stored in the
 versioned `orion.xml` document.

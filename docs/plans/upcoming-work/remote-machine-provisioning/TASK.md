@@ -1,7 +1,7 @@
 # Provision Remote AgentD Machines
 
 Status: todo
-Depends on: ../unified-key-material-bootstrap/TASK.md
+Depends on: ../../current-work/unified-key-material-bootstrap/TASK.md
 Runtime components: ../../current-work/agentd/TASK.md and
 ../../current-work/native-session-host/TASK.md
 

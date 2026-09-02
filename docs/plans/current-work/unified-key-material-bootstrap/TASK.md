@@ -15,7 +15,6 @@ dependency injection.
 
 ## Child Tasks
 
-- [ ] [Harden the PKCS12 content store](hardened-pkcs12-store/TASK.md)
 - [ ] [Introduce typed material capabilities](typed-material-capabilities/TASK.md)
 - [ ] [Add configuration secret cryptography](configuration-secret-cryptography/TASK.md)
 - [ ] [Migrate server identity and JWT signing](server-identity-migration/TASK.md)

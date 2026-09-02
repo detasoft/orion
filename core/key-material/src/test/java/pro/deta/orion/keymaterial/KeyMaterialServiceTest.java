@@ -32,7 +32,8 @@ class KeyMaterialServiceTest {
 
         KeyMaterialService reloaded = KeyMaterialService.open(store, options(false));
         KeyPair loaded = reloaded.getKeyPair(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
-        Certificate[] chain = reloaded.getCertificateChain(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
+        Certificate[] chain = reloaded.getCertificateChain(
+                KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
 
         assertThat(savedVersion).isNotBlank();
         assertThat(reloaded.containsAlias(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS)).isTrue();
@@ -66,7 +67,8 @@ class KeyMaterialServiceTest {
 
         assertThat(Files.size(keyStorePath)).isGreaterThan(0);
         assertThat(keyStore.containsAlias(KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS)).isTrue();
-        assertThat(keyStore.getCertificateChain(KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS)).hasSize(1);
+        assertThat(keyStore.getCertificateChain(
+                KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS)).hasSize(1);
     }
 
     @Test
@@ -76,8 +78,8 @@ class KeyMaterialServiceTest {
         service.generateKeyIfMissing(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.CA_ISSUER_PURPOSE));
-        X509Certificate issuerCertificate =
-                (X509Certificate) service.getCertificateChain(KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS)[0];
+        X509Certificate issuerCertificate = (X509Certificate) service.getCertificateChain(
+                KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS)[0];
         service.setTrustedCertificate(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS, issuerCertificate);
         service.save();
 
@@ -102,7 +104,8 @@ class KeyMaterialServiceTest {
         service.generateKeyIfMissing(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-        Certificate[] mismatchedChain = service.getCertificateChain(KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
+        Certificate[] mismatchedChain = service.getCertificateChain(
+                KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
 
         assertThatThrownBy(() -> service.setPrivateKey(
                 KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS,
@@ -131,7 +134,9 @@ class KeyMaterialServiceTest {
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
 
-        assertThat(service.getActiveSigningKey(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE).getPublic().getEncoded())
+        assertThat(service.getActiveSigningKey(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)
+                .getPublic()
+                .getEncoded())
                 .isEqualTo(active.getPublic().getEncoded());
         assertThat(service.getVerificationKeys(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)).hasSize(2);
 
@@ -143,7 +148,9 @@ class KeyMaterialServiceTest {
         assertThat(rotated.verificationAliases()).containsExactly(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_04_ALIAS);
-        assertThat(service.getActiveSigningKey(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE).getPublic().getEncoded())
+        assertThat(service.getActiveSigningKey(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)
+                .getPublic()
+                .getEncoded())
                 .isEqualTo(next.getPublic().getEncoded());
         assertThat(service.getVerificationKeys(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)).hasSize(3);
     }
@@ -199,6 +206,50 @@ class KeyMaterialServiceTest {
 
         assertThat(readOnly.containsAlias(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).isTrue();
         assertThat(readOnly.getCertificateChain(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).hasSize(1);
+    }
+
+    @Test
+    void serviceOwnsAndClearsItsPasswordLifecycle() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        KeyMaterialOptions callerOptions = options(true);
+        KeyMaterialService service = KeyMaterialService.open(store, callerOptions);
+
+        try {
+            callerOptions.close();
+            service.generateKeyIfMissing(
+                    KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
+                    KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
+            service.save();
+            service.close();
+
+            assertThatThrownBy(callerOptions::password)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("closed");
+            assertThatThrownBy(() -> service.containsAlias(
+                    KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("closed");
+        } finally {
+            service.close();
+            callerOptions.close();
+        }
+    }
+
+    @Test
+    void corruptExistingStoreIsNeverReplacedByCreateIfMissing() throws Exception {
+        Path keyStorePath = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
+        LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
+        byte[] corruptBytes = "not-a-pkcs12-store".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String corruptVersion = store.write(corruptBytes, null);
+
+        try (KeyMaterialOptions options = options(true)) {
+            assertThatThrownBy(() -> KeyMaterialService.open(store, options))
+                    .isInstanceOf(java.io.IOException.class);
+        }
+
+        KeyMaterialSnapshot afterFailure = store.read().orElseThrow();
+        assertThat(afterFailure.version()).isEqualTo(corruptVersion);
+        assertThat(afterFailure.bytes()).isEqualTo(corruptBytes);
     }
 
     private static KeyMaterialOptions options(boolean createIfMissing) {
