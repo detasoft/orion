@@ -12,7 +12,7 @@ the session host.
 
 - Add a generic typed-event control/API command with explicit namespace,
   payload-schema version, payload length, and size limits.
-- Assign timestamps inside the same single-writer path used by PTY and process
+- Assign event IDs inside the same single-writer path used by PTY and process
   events.
 - Reserve forward-compatible types for messages, status, tool calls/results,
   prompts, artifacts, and checkpoints without requiring all schemas in MVP.

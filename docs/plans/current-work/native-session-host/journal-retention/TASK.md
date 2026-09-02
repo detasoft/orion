@@ -1,25 +1,24 @@
 # Add Journal Segmentation, Compression, and Retention
 
 Status: todo
-Detailed plan: ../../../2026-09-01-native-session-host.md
-Depends on: completed journal core
+Detailed plan: ../../../2026-09-02-session-journal-cbor-sequence.md
+Depends on: ../cbor-sequence-journal-format/TASK.md
 
 Bound journal storage without changing the logical event stream or blocking PTY
 output at the retention limit.
 
 ## Scope
 
-- Rotate size-bounded segments and group records into independently recoverable
-  blocks.
-- Select measured defaults within 32-128 MiB per segment and 256 KiB-1 MiB of
-  uncompressed records per block while keeping both configurable.
-- Add block-level Zstandard compression while allowing an uncompressed active
-  tail.
-- Track first/last timestamps, record counts, lengths, codecs, and checksums in
-  block framing.
+- Rotate size-bounded `.cbor` segments only between complete CBOR items.
+- Add Zstandard compression for closed segments while keeping the active
+  segment as an uncompressed `.cbor` file.
+- Preserve the exact logical CBOR Sequence after decompression without adding
+  block framing or segment header records.
 - Enforce configurable maximum storage with `DROP_OLDEST` over closed segments.
-- Maintain oldest/latest available timestamps and report a cursor gap after
-  retained history has been deleted.
-- Test segment and block boundaries, incompressible data, partial compressed
-  blocks, concurrent readers, deletion failures, restart recovery, and a slow
-  consumer falling behind retention.
+- Derive `firstAvailableEventId` from the first record of the oldest retained
+  segment and report an event cursor gap after history has been deleted.
+- Treat any segment-to-first-event index as rebuildable cache rather than
+  journal state.
+- Test segment boundaries, incompressible data, partial active items,
+  compressed-segment recovery, concurrent readers, deletion failures, restart
+  recovery, and a slow consumer falling behind retention.

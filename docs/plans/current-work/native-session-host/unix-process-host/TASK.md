@@ -2,7 +2,8 @@
 
 Status: todo
 Detailed plan: ../../../2026-09-01-native-session-host.md
-Depends on: completed contracts and build, completed journal core
+Depends on: completed contracts and build, completed journal core,
+../cbor-sequence-journal-format/TASK.md
 
 Run and supervise an interactive child through a real PTY on Linux and macOS.
 

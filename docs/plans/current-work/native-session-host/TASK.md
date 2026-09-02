@@ -2,6 +2,7 @@
 
 Status: todo
 Detailed plan: ../../2026-09-01-native-session-host.md
+Journal format: ../../2026-09-02-session-journal-cbor-sequence.md
 
 Create a standalone Rust `session-host` that owns an interactive PTY/ConPTY
 child, persists a durable ordered session journal, accepts local control
@@ -21,6 +22,7 @@ commands, and survives independently of `agentd`.
 
 ## Child Tasks
 
+- [ ] [Replace the session journal with a CBOR Sequence](cbor-sequence-journal-format/TASK.md)
 - [ ] [Implement the Unix PTY process host](unix-process-host/TASK.md)
 - [ ] [Add journal segmentation, compression, and retention](journal-retention/TASK.md)
 - [ ] [Enforce the Linux Landlock sandbox](linux-sandbox/TASK.md)

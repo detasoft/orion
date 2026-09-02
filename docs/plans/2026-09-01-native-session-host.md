@@ -1,5 +1,10 @@
 # Native Session Host
 
+Journal format amendment:
+[`2026-09-02-session-journal-cbor-sequence.md`](2026-09-02-session-journal-cbor-sequence.md)
+supersedes the journal framing, cursor, segmentation, compression, and
+retention requirements in this plan.
+
 ## Context
 
 Orion needs a local execution primitive for interactive agent CLIs such as
