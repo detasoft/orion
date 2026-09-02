@@ -28,8 +28,30 @@ use crate::protocol::{self, control_message, event_type};
 
 const CONTROL_ENDPOINT: &str = "control.sock";
 const CONTROL_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+const DESCENDANT_ABSENCE_CONFIRMATIONS: usize = 3;
 const DESCENDANT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READ_BUFFER_LENGTH: usize = 64 * 1024;
+
+struct DescendantAbsenceConfirmation {
+    consecutive_empty: usize,
+}
+
+impl DescendantAbsenceConfirmation {
+    fn new() -> Self {
+        Self {
+            consecutive_empty: 0,
+        }
+    }
+
+    fn observe(&mut self, live: bool) -> bool {
+        if live {
+            self.consecutive_empty = 0;
+            return false;
+        }
+        self.consecutive_empty += 1;
+        self.consecutive_empty >= DESCENDANT_ABSENCE_CONFIRMATIONS
+    }
+}
 
 pub(super) fn current_platform() -> PlatformKind {
     PlatformKind::Unix
@@ -812,8 +834,10 @@ fn wait_for_child(pid: libc::pid_t) -> Result<libc::c_int, HostError> {
 }
 
 fn wait_for_descendants(descendants: &Arc<Mutex<DescendantTracker>>) -> Result<(), HostError> {
+    let mut absence = DescendantAbsenceConfirmation::new();
     loop {
-        if !lock_descendants(descendants)?.is_live()? {
+        let live = lock_descendants(descendants)?.is_live()?;
+        if absence.observe(live) {
             return Ok(());
         }
         thread::sleep(DESCENDANT_POLL_INTERVAL);
@@ -1262,6 +1286,18 @@ fn epoch_millis() -> Result<u64, HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requires_three_consecutive_empty_descendant_observations() {
+        let mut confirmation = DescendantAbsenceConfirmation::new();
+
+        assert!(!confirmation.observe(false));
+        assert!(!confirmation.observe(false));
+        assert!(!confirmation.observe(true));
+        assert!(!confirmation.observe(false));
+        assert!(!confirmation.observe(false));
+        assert!(confirmation.observe(false));
+    }
 
     #[test]
     fn journal_ids_use_canonical_uuid_text() {

@@ -155,8 +155,15 @@ fn keeps_detached_pty_descendant_controllable_after_its_leader_exits() {
             "/usr/bin/perl",
             "-MPOSIX",
             "-e",
-            "defined(my $pid = fork) or die; exit 0 if $pid; \
-             POSIX::setsid() >= 0 or die; $| = 1; print qq(READY); sleep 30",
+            concat!(
+                "pipe(my $ready_read, my $ready_write) or die; ",
+                "defined(my $pid = fork) or die; ",
+                "if ($pid) { close $ready_write; ",
+                "sysread($ready_read, my $ready, 1) == 1 or die; exit 0; } ",
+                "close $ready_read; POSIX::setsid() >= 0 or die; ",
+                "syswrite($ready_write, q(1), 1) == 1 or die; close $ready_write; ",
+                "$| = 1; print qq(READY); sleep 30",
+            ),
         ],
         "xterm-256color",
         80,
