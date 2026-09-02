@@ -21,7 +21,6 @@ the AgentD lifecycle.
 
 ## Child Tasks
 
-- [ ] [Implement the outbound HTTP/2 transport](http2-transport/TASK.md)
 - [ ] [Persist identity and implement registration](identity-and-registration/TASK.md)
 - [ ] [Discover and recover local sessions](session-discovery/TASK.md)
 - [ ] [Launch and control session hosts](session-runtime-and-control/TASK.md)
