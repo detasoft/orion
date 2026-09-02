@@ -1,7 +1,7 @@
 ---
 name: orion-review-orchestrator
 description: >-
-  Run an Orion task pool sequentially with one gpt-5.6-terra/medium worker in a
+  Run an Orion task pool sequentially with one gpt-5.6-sol/medium worker in a
   dedicated worktree while the primary agent only coordinates and reviews.
   Use when the user asks for review-gated subagent execution over a task
   subtree, an explicit task list, or tasks introduced by a commit.
@@ -71,7 +71,7 @@ report the pool complete or name the exact blocking task.
 
 Spawn a fresh worker for the selected leaf with:
 
-- model `gpt-5.6-terra`;
+- model `gpt-5.6-sol`;
 - reasoning effort `medium`;
 - `fork_turns="none"`, or the smallest supported bounded fork, so the explicit
   model and effort override is applied rather than inherited;
@@ -203,6 +203,6 @@ progress.
 
 After integration, tests, worktree removal, and branch deletion are all
 confirmed, automatically select the next ready leaf from the same pool and
-start a fresh Terra/medium worker. Do not ask for another selection
+start a fresh Sol/medium worker. Do not ask for another selection
 confirmation. Apply the same review and user gate to every leaf until the pool
 is exhausted.
