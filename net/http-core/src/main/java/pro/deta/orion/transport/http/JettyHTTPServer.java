@@ -82,6 +82,14 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         return server != null && server.isStarted();
     }
 
+    public int boundHttpPort() {
+        return boundPort("http");
+    }
+
+    public int boundHttpsPort() {
+        return boundPort("https");
+    }
+
     private Server getNewServer() {
         try {
             QueuedThreadPool threadPool = new QueuedThreadPool(10, 2, 120);
@@ -89,11 +97,17 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             server.setStopTimeout(STOP_TIMEOUT_MILLIS);
             server.setStopAtShutdown(false);
             GzipHandler gzipHandler = new GzipHandler();
-            gzipHandler.setIncludedMimeTypes("text/html", "text/plain", "text/xml", "text/css", "application/json", "text/javascript");
+            gzipHandler.setIncludedMimeTypes(
+                    "text/html",
+                    "text/plain",
+                    "text/xml",
+                    "text/css",
+                    "application/json",
+                    "application/javascript",
+                    "text/javascript");
             ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
             context.setContextPath(ROOT_CONTEXT_PATH);
             context.insertHandler(gzipHandler);
-
 
             context.addServlet(new ServletHolder(rootServlet), "/*");
             if (authorizationFilter != null) {
@@ -147,6 +161,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             ServerConnector httpsConnector = new ServerConnector(server,
                     new SslConnectionFactory(sslContextFactory, "http/1.1"),
                     new HttpConnectionFactory(new HttpConfiguration()));
+            httpsConnector.setName("https");
             httpsConnector.setHost(httpsTransportConfig.getAddress());
             httpsConnector.setPort(httpsTransportConfig.getPort());
             server.addConnector(httpsConnector);
@@ -156,10 +171,24 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     private static void enableHttpIfNeeded(Server server, HttpTransportConfig httpTransportConfig) {
         if (httpTransportConfig != null && httpTransportConfig.isEnabled()) {
             ServerConnector httpConnector = new ServerConnector(server);
+            httpConnector.setName("http");
             httpConnector.setHost(httpTransportConfig.getAddress());
             httpConnector.setPort(httpTransportConfig.getPort());
             server.addConnector(httpConnector);
         }
+    }
+
+    private int boundPort(String name) {
+        Server server = jettyServer.get();
+        if (server == null) {
+            return 0;
+        }
+        for (Connector connector : server.getConnectors()) {
+            if (connector instanceof ServerConnector serverConnector && name.equals(connector.getName())) {
+                return serverConnector.getLocalPort();
+            }
+        }
+        return 0;
     }
 
     private void destroyFailedServer() {

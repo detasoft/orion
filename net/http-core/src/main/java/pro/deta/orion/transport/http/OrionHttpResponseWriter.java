@@ -18,6 +18,13 @@ public final class OrionHttpResponseWriter {
     }
 
     public void write(HttpServletResponse resp, OrionHttpResponse response) throws IOException {
+        write(resp, response, false);
+    }
+
+    public void write(
+            HttpServletResponse resp,
+            OrionHttpResponse response,
+            boolean headersOnly) throws IOException {
         resp.setStatus(response.status());
         for (Map.Entry<String, String> header : response.headers().entrySet()) {
             resp.setHeader(header.getKey(), header.getValue());
@@ -27,17 +34,33 @@ public final class OrionHttpResponseWriter {
             return;
         }
         String contentType = response.contentType();
+        if (body instanceof byte[] bytes) {
+            if (contentType != null) {
+                resp.setContentType(contentType);
+            }
+            resp.setContentLength(bytes.length);
+            if (!headersOnly) {
+                resp.getOutputStream().write(bytes);
+            }
+            return;
+        }
         if (contentType == null) {
             resp.setContentType(OrionHttpResponse.JSON_CONTENT_TYPE);
-            objectMapper.writeValue(resp.getWriter(), body);
+            if (!headersOnly) {
+                objectMapper.writeValue(resp.getWriter(), body);
+            }
             return;
         }
         resp.setContentType(contentType);
         if (isJsonContentType(contentType)) {
-            objectMapper.writeValue(resp.getWriter(), body);
+            if (!headersOnly) {
+                objectMapper.writeValue(resp.getWriter(), body);
+            }
             return;
         }
-        resp.getWriter().write(String.valueOf(body));
+        if (!headersOnly) {
+            resp.getWriter().write(String.valueOf(body));
+        }
     }
 
     private static boolean isJsonContentType(String contentType) {

@@ -29,11 +29,15 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
         }
         String repositoryName = normalizeRepositoryName(request.name());
         Result<NativeGitRepository> created = gitRepositoryProvider.create(repositoryName);
+        boolean repositoryCreated = true;
         if (created instanceof Result.Failure<NativeGitRepository> failure
                 && failure.code() != Result.FailureCode.FILE_ALREADY_EXISTS) {
             failure.valueOrFailure("Cannot create repository " + repositoryName);
+        } else if (created instanceof Result.Failure<NativeGitRepository>) {
+            repositoryCreated = false;
         }
-        return OrionHttpResponse.created(Map.of("status", "ok"));
+        Map<String, Object> body = Map.of("status", "ok", "created", repositoryCreated);
+        return repositoryCreated ? OrionHttpResponse.created(body) : OrionHttpResponse.ok(body);
     }
 
     private static String normalizeRepositoryName(String rawRepositoryName) {

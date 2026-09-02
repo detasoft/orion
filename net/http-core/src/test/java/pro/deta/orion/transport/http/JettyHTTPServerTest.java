@@ -14,6 +14,7 @@ import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -126,6 +127,34 @@ class JettyHTTPServerTest {
         }
     }
 
+    @Test
+    void compressesApplicationJavaScriptResponses() throws Exception {
+        OrionConfiguration configuration = new OrionConfiguration();
+        OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
+        transports.setHttp(new HttpTransportConfig("127.0.0.1", 0));
+        HttpsTransportConfig https = new HttpsTransportConfig("127.0.0.1", 0);
+        https.setEnabled(false);
+        transports.setHttps(https);
+        configuration.setTransport(transports);
+        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(new JavascriptRoute())),
+                new OrionHttpResponseWriter(new com.fasterxml.jackson.databind.ObjectMapper()));
+        JettyHTTPServer server = new JettyHTTPServer(configuration, servlet);
+        server.onStart();
+
+        try {
+            URL url = new URL("http://127.0.0.1:" + server.boundHttpPort() + "/app.js");
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestProperty("Accept-Encoding", "gzip");
+
+            assertThat(connection.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+            assertThat(connection.getHeaderField("Content-Encoding")).isEqualTo("gzip");
+            assertThat(connection.getInputStream().readAllBytes()).startsWith((byte) 0x1f, (byte) 0x8b);
+        } finally {
+            server.onStop();
+        }
+    }
+
     private static void request(URL url) {
         try {
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -143,6 +172,21 @@ class JettyHTTPServerTest {
         @Override
         protected OrionHttpResponse doGet(jakarta.servlet.http.HttpServletRequest req) {
             return OrionHttpResponse.text(HttpURLConnection.HTTP_OK, "OK");
+        }
+    }
+
+    private static final class JavascriptRoute extends AbstractOrionHttpRoute {
+        private JavascriptRoute() {
+            super("/app.js", "GET");
+        }
+
+        @Override
+        protected OrionHttpResponse doGet(jakarta.servlet.http.HttpServletRequest req) {
+            String source = "export const value = 'orion';\n".repeat(100);
+            return OrionHttpResponse.resource(
+                    HttpURLConnection.HTTP_OK,
+                    source.getBytes(StandardCharsets.UTF_8),
+                    "application/javascript; charset=utf-8");
         }
     }
 

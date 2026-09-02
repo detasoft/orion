@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
 
 class GitSshTransportStateMachineTest {
@@ -48,6 +49,18 @@ class GitSshTransportStateMachineTest {
             assertEquals(ERR, machine.currentState());
             assertFalse(service.isRunning());
         }
+    }
+
+    @Test
+    void reportsTheDynamicallyBoundPortOnlyWhileRunning() {
+        service = service(0);
+        service.onStart();
+
+        assertTrue(service.boundPort() > 0);
+
+        service.onStop();
+        assertEquals(0, service.boundPort());
+        service = null;
     }
 
     private GitSshTransportService service(int port) {

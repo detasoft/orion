@@ -57,6 +57,10 @@ public final class OrionHttpResponse {
         return new OrionHttpResponse(status, body, PEM_CONTENT_TYPE, Map.of());
     }
 
+    public static OrionHttpResponse resource(int status, byte[] body, String contentType) {
+        return new OrionHttpResponse(status, body, contentType, Map.of());
+    }
+
     public OrionHttpResponse withHeader(String name, String value) {
         Map<String, String> nextHeaders = new LinkedHashMap<>(headers);
         nextHeaders.put(name, value);

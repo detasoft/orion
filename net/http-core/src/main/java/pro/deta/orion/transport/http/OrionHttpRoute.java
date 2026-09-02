@@ -14,8 +14,11 @@ public interface OrionHttpRoute {
 
     List<String> allowedMethods();
 
-    default void handle(HttpServletRequest req, HttpServletResponse resp, OrionHttpResponseWriter responseWriter) throws IOException, ServletException {
-        responseWriter.write(resp, service(req));
+    default void handle(
+            HttpServletRequest req,
+            HttpServletResponse resp,
+            OrionHttpResponseWriter responseWriter) throws IOException, ServletException {
+        responseWriter.write(resp, service(req), "HEAD".equalsIgnoreCase(req.getMethod()));
     }
 
     default OrionHttpResponse service(HttpServletRequest req) throws IOException, ServletException {

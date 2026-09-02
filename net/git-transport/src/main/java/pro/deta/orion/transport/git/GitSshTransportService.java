@@ -29,6 +29,7 @@ import jakarta.inject.Provider;
 import java.io.*;
 import java.net.BindException;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
@@ -115,6 +116,18 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
 
     public boolean isRunning() {
         return sshd.isStarted();
+    }
+
+    public int boundPort() {
+        if (!isRunning()) {
+            return 0;
+        }
+        for (SocketAddress address : sshd.getBoundAddresses()) {
+            if (address instanceof InetSocketAddress inetAddress) {
+                return inetAddress.getPort();
+            }
+        }
+        return 0;
     }
 
     private SshTransportConfig sshTransportConfig() {

@@ -64,6 +64,12 @@ public class OrionHttpModule {
 
     @Provides
     @IntoSet
+    static OrionHttpRoute transportsRoute(OrionAdminTransportsRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
     static OrionHttpRoute lifecycleStateRoute(OrionAdminLifecycleStateRoute route) {
         return route;
     }
@@ -95,6 +101,12 @@ public class OrionHttpModule {
     @Provides
     @IntoSet
     static OrionHttpRoute sessionHostDownloadRoute(SessionHostDownloadRoute route) {
+        return route;
+    }
+
+    @Provides
+    @IntoSet
+    static OrionHttpRoute frontendRoute(OrionFrontendRoute route) {
         return route;
     }
 

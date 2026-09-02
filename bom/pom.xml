@@ -133,6 +133,11 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.net</groupId>
+                <artifactId>frontend-ui</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>pro.deta.orion.net</groupId>
                 <artifactId>net-core</artifactId>
                 <version>${project.version}</version>
             </dependency>

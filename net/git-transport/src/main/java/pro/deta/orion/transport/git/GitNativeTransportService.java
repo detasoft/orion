@@ -102,7 +102,7 @@ public class GitNativeTransportService implements ServiceLifecycleStateMachineAd
         return listener != null && !listener.isClosed();
     }
 
-    int boundPort() {
+    public int boundPort() {
         ServerSocket listener = serverSocket;
         return listener == null || listener.isClosed()
                 ? 0

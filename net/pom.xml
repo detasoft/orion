@@ -15,6 +15,7 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>frontend/ui</module>
         <module>net-core</module>
         <module>git-transport</module>
         <module>http-core</module>

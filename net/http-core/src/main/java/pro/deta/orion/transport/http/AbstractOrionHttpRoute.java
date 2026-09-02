@@ -53,6 +53,7 @@ public abstract class AbstractOrionHttpRoute implements OrionHttpRoute {
         }
         return switch (method) {
             case "GET" -> doGet(req);
+            case "HEAD" -> doHead(req);
             case "POST" -> doPost(req);
             case "PUT" -> doPut(req);
             case "DELETE" -> doDelete(req);
@@ -67,6 +68,10 @@ public abstract class AbstractOrionHttpRoute implements OrionHttpRoute {
 
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
         return methodNotAllowed();
+    }
+
+    protected OrionHttpResponse doHead(HttpServletRequest req) throws IOException {
+        return doGet(req);
     }
 
     protected OrionHttpResponse doPut(HttpServletRequest req) throws IOException {
