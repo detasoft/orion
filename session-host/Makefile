@@ -1,4 +1,33 @@
-SESSION_HOST_RUST_VERSION ?= 1.97.0
+override SESSION_HOST_RUST_VERSION := $(shell \
+	awk '\
+		/^[[:space:]]*\[/ { \
+			in_toolchain = 0; \
+			if ($$0 ~ /^[[:space:]]*\[toolchain\][[:space:]]*(\#.*)?$$/) { \
+				toolchain_count++; \
+				in_toolchain = 1; \
+			} \
+			next; \
+		} \
+		in_toolchain && /^[[:space:]]*channel[[:space:]]*=/ { \
+			channel_count++; \
+			channel_line = $$0; \
+			if (channel_line ~ \
+					/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"[0-9]+[.][0-9]+[.][0-9]+"[[:space:]]*(\#.*)?$$/) { \
+				sub(/^[^"]*"/, "", channel_line); \
+				sub(/".*$$/, "", channel_line); \
+				channel_value = channel_line; \
+			} \
+		} \
+		END { \
+			if (toolchain_count == 1 && channel_count == 1 && channel_value != "") { \
+				print channel_value; \
+			} \
+		}' \
+		"$(CURDIR)/session-host/rust-toolchain.toml")
+ifeq ($(strip $(SESSION_HOST_RUST_VERSION)),)
+$(error session-host/rust-toolchain.toml must contain exactly one [toolchain] header and one exact \
+double-quoted [toolchain].channel stable version MAJOR.MINOR.PATCH)
+endif
 SESSION_HOST_RUSTUP_VERSION ?= 1.29.1
 ORION_CACHE_ROOT ?= $(CURDIR)/.orion-cache
 SESSION_HOST_TOOLCHAIN_CACHE ?= $(ORION_CACHE_ROOT)/rust-toolchains

@@ -53,11 +53,16 @@ above is accepted.
 
 ## Build
 
-The Maven module downloads a minimal Rust 1.97.0 toolchain into
-`.orion-cache/rust-toolchains` when one is not already present. It does not use a
-globally installed `rustc` or Cargo. The Makefile bootstraps it with the pinned
-Rustup 1.29.1 archive for the current host and verifies its checked-in SHA-256
-before the bootstrap executable receives permission to run.
+The exact hermetic Rust toolchain is pinned in `rust-toolchain.toml`. Direct
+Cargo invocations use that file automatically, and the Makefile reads its
+`channel` for Maven and Make builds. The `rust-version` in `Cargo.toml` is an
+independent compatibility floor, not an exact build pin.
+
+The Maven module downloads the pinned toolchain into
+`.orion-cache/rust-toolchains` when one is not already present. It does not use
+a globally installed `rustc` or Cargo. The Makefile bootstraps it with the
+pinned Rustup 1.29.1 archive for the current host and verifies its checked-in
+SHA-256 before the bootstrap executable receives permission to run.
 
 ```bash
 mvn package -pl session-host

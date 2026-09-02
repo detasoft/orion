@@ -31,6 +31,5 @@ commands, and survives independently of `agentd`.
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
 - [ ] [Make control-to-journal delivery idempotent](control-journal-idempotency/TASK.md)
 - [ ] [Reduce metadata to a session manifest](metadata-manifest/TASK.md)
-- [ ] [Consolidate the session host Rust toolchain pin](rust-toolchain-pin/TASK.md)
 - [ ] [Implement the Windows ConPTY host](windows-host/TASK.md)
 - [ ] [Package targets and verify end-to-end acceptance](release-and-acceptance/TASK.md)

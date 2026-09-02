@@ -15,7 +15,6 @@
     <packaging>jar</packaging>
 
     <properties>
-        <rust.version>1.97.0</rust.version>
         <session-host.toolchain.cache>${maven.multiModuleProjectDirectory}/.orion-cache/rust-toolchains</session-host.toolchain.cache>
         <session-host.cargo.target>${maven.multiModuleProjectDirectory}/.orion-cache/session-host-cargo</session-host.cargo.target>
         <session-host.native.resources>${project.build.directory}/native-resources</session-host.native.resources>
