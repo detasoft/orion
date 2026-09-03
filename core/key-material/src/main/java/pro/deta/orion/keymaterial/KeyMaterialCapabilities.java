@@ -209,6 +209,22 @@ public final class KeyMaterialCapabilities {
         };
     }
 
+    public SshClientKeyCapability sshClientKey(KeyMaterialDescriptor descriptor) {
+        KeyMaterialDescriptor registered = requireRegistered(descriptor, KeyMaterialPurpose.SSH_CLIENT);
+        return new SshClientKeyCapability() {
+            @Override
+            public KeyMaterialDescriptor descriptor() {
+                return registered;
+            }
+
+            @Override
+            public KeyPair keyPair() throws GeneralSecurityException {
+                KeyPair selected = owner.getKeyPair(registered.alias().value());
+                return new KeyPair(selected.getPublic(), selected.getPrivate());
+            }
+        };
+    }
+
     public CertificateAuthorityCapability certificateAuthority(KeyMaterialDescriptor descriptor) {
         KeyMaterialDescriptor registered = requireRegistered(
                 descriptor, KeyMaterialPurpose.CERTIFICATE_AUTHORITY);

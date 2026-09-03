@@ -1,6 +1,9 @@
 package pro.deta.orion.provisioning;
 
 import org.apache.sshd.client.SshClient;
+import org.apache.sshd.client.auth.UserAuthFactory;
+import org.apache.sshd.client.auth.password.PasswordIdentityProvider;
+import org.apache.sshd.client.auth.password.UserAuthPasswordFactory;
 import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.channel.ClientChannelEvent;
@@ -71,28 +74,111 @@ public final class MinaSshOperation implements AutoCloseable {
         if (clientFactory == null) {
             throw new IllegalArgumentException("SSH client factory must not be null");
         }
+        return open(
+                endpoint,
+                options,
+                clientFactory,
+                List.of(UserAuthPublicKeyFactory.INSTANCE),
+                new AuthenticationSetup() {
+                    @Override
+                    public void configure(ClientSession session) {
+                        session.addPublicKeyIdentity(credentials.keyPair());
+                    }
+                });
+    }
+
+    static MinaSshOperation openWithPassword(
+            SshEndpoint endpoint,
+            BootstrapPassword password,
+            ProvisioningOptions options) throws ProvisioningException {
+        return openWithPassword(endpoint, password, options, SshClient::setUpDefaultClient);
+    }
+
+    @TestOnly
+    static MinaSshOperation openWithPassword(
+            SshEndpoint endpoint,
+            BootstrapPassword password,
+            ProvisioningOptions options,
+            Supplier<SshClient> clientFactory) throws ProvisioningException {
+        if (password == null) {
+            throw new IllegalArgumentException("Bootstrap password must not be null");
+        }
+        try {
+            return password.useOnce(value -> open(
+                    endpoint,
+                    options,
+                    clientFactory,
+                    List.of(UserAuthPasswordFactory.INSTANCE),
+                    new AuthenticationSetup() {
+                        @Override
+                        public void configure(SshClient client) {
+                            client.setPasswordIdentityProvider(
+                                    PasswordIdentityProvider.wrapPasswords(value));
+                        }
+
+                        @Override
+                        public void clear(SshClient client, ClientSession session) {
+                            if (session != null) {
+                                session.setPasswordIdentityProvider(
+                                        PasswordIdentityProvider.EMPTY_PASSWORDS_PROVIDER);
+                            }
+                            client.setPasswordIdentityProvider(
+                                    PasswordIdentityProvider.EMPTY_PASSWORDS_PROVIDER);
+                        }
+                    }));
+        } catch (ProvisioningException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new ProvisioningException(
+                    ProvisioningFailure.AUTHENTICATION,
+                    "SSH password authentication failed",
+                    error);
+        }
+    }
+
+    private static MinaSshOperation open(
+            SshEndpoint endpoint,
+            ProvisioningOptions options,
+            Supplier<SshClient> clientFactory,
+            List<UserAuthFactory> userAuthFactories,
+            AuthenticationSetup authentication) throws ProvisioningException {
+        if (endpoint == null || options == null) {
+            throw new IllegalArgumentException("SSH operation arguments must not be null");
+        }
+        if (clientFactory == null || authentication == null) {
+            throw new IllegalArgumentException("SSH operation configuration must not be null");
+        }
         SshClient client = clientFactory.get();
-        client.setHostConfigEntryResolver(HostConfigEntryResolver.EMPTY);
-        client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
-        client.setUserAuthFactories(List.of(UserAuthPublicKeyFactory.INSTANCE));
         AtomicBoolean hostRejected = new AtomicBoolean();
         AtomicBoolean timedOut = new AtomicBoolean();
-        client.setServerKeyVerifier((session, address, key) -> verifyHostKey(
-                endpoint.expectedHostKey(), key, hostRejected));
-        client.start();
         ClientSession session = null;
-        ScheduledFuture<?> watchdog = WATCHDOG.schedule(() -> {
-            timedOut.set(true);
-            client.close(true);
-        }, options.operationTimeout().toMillis(), TimeUnit.MILLISECONDS);
+        ScheduledFuture<?> watchdog = null;
         try {
+            client.setHostConfigEntryResolver(HostConfigEntryResolver.EMPTY);
+            client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
+            client.setPasswordIdentityProvider(PasswordIdentityProvider.EMPTY_PASSWORDS_PROVIDER);
+            client.setUserAuthFactories(userAuthFactories);
+            authentication.configure(client);
+            client.setServerKeyVerifier((activeSession, address, key) -> verifyHostKey(
+                    endpoint.expectedHostKey(), key, hostRejected));
+            client.start();
+            watchdog = WATCHDOG.schedule(() -> {
+                timedOut.set(true);
+                client.close(true);
+            }, options.operationTimeout().toMillis(), TimeUnit.MILLISECONDS);
             ConnectFuture connect = client.connect(endpoint.username(), endpoint.host(), endpoint.port());
             session = connect.verify(options.connectTimeout()).getSession();
-            session.addPublicKeyIdentity(credentials.keyPair());
+            authentication.configure(session);
             session.auth().verify(options.authenticationTimeout());
+            authentication.clear(client, session);
             return new MinaSshOperation(client, session, options, timedOut, watchdog);
         } catch (IOException | RuntimeException error) {
-            watchdog.cancel(false);
+            if (watchdog != null) {
+                watchdog.cancel(false);
+            }
+            clearAuthentication(authentication, client, session, error);
             closeAfterFailure(session, client, error);
             if (timedOut.get() || causedByTimeout(error)) {
                 throw new ProvisioningException(
@@ -106,6 +192,18 @@ public final class MinaSshOperation implements AutoCloseable {
                     ? ProvisioningFailure.CONNECTION
                     : ProvisioningFailure.AUTHENTICATION;
             throw new ProvisioningException(failure, message(failure), error);
+        }
+    }
+
+    private static void clearAuthentication(
+            AuthenticationSetup authentication,
+            SshClient client,
+            ClientSession session,
+            Throwable failure) {
+        try {
+            authentication.clear(client, session);
+        } catch (RuntimeException clearError) {
+            failure.addSuppressed(clearError);
         }
     }
 
@@ -231,6 +329,13 @@ public final class MinaSshOperation implements AutoCloseable {
         } catch (RuntimeException closeError) {
             failure.addSuppressed(closeError);
         }
+        if (!client.isClosed()) {
+            try {
+                client.close(true);
+            } catch (RuntimeException closeError) {
+                failure.addSuppressed(closeError);
+            }
+        }
     }
 
     private static final class BoundedOutput extends OutputStream {
@@ -278,6 +383,17 @@ public final class MinaSshOperation implements AutoCloseable {
             Thread thread = new Thread(runnable, "agent-provisioning-watchdog");
             thread.setDaemon(true);
             return thread;
+        }
+    }
+
+    private interface AuthenticationSetup {
+        default void configure(SshClient client) {
+        }
+
+        default void configure(ClientSession session) {
+        }
+
+        default void clear(SshClient client, ClientSession session) {
         }
     }
 }

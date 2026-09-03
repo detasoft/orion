@@ -4,6 +4,7 @@ public enum KeyMaterialPurpose {
     SERVER_SIGNING("server-signing"),
     TLS_IDENTITY("tls-identity"),
     SSH_HOST("ssh-host"),
+    SSH_CLIENT("ssh-client"),
     CERTIFICATE_AUTHORITY("certificate-authority"),
     CONFIGURATION_CIPHER("configuration-cipher");
 

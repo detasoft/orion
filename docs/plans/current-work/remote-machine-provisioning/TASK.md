@@ -10,7 +10,6 @@ to make them available as AgentD workers.
 
 ## Child Tasks
 
-- [ ] [Enroll Orion SSH keys](ssh-key-enrollment/TASK.md)
 - [ ] [Replace and recover AgentD safely](agent-replacement-and-recovery/TASK.md)
 - [ ] [Add administration and end-to-end acceptance](administration-and-end-to-end-acceptance/TASK.md)
 

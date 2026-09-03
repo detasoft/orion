@@ -62,6 +62,94 @@ class KeyMaterialCapabilitiesTest {
     }
 
     @Test
+    void reloadsSshClientKeyMaterialAndRejectsWrongDescriptorMetadata() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        KeyMaterialDescriptor rsaClient = descriptor(
+                "provisioning-client-v1",
+                KeyMaterialPurpose.SSH_CLIENT,
+                KeyMaterialAlgorithm.RSA,
+                1,
+                NODE);
+        KeyMaterialDescriptor ed25519Client = descriptor(
+                "provisioning-client-ed25519-v1",
+                KeyMaterialPurpose.SSH_CLIENT,
+                KeyMaterialAlgorithm.ED25519,
+                1,
+                NODE);
+        KeyMaterialDescriptor host = descriptor(
+                "provisioning-host-v1",
+                KeyMaterialPurpose.SSH_HOST,
+                KeyMaterialAlgorithm.RSA,
+                1,
+                NODE);
+        KeyPair generatedRsa;
+        KeyPair generatedEd25519;
+        try (KeyMaterialService initial = KeyMaterialService.open(store, options(true))) {
+            generatedRsa = initial.generateKeyIfMissing(rsaClient, 2048);
+            generatedEd25519 = initial.generateKeyIfMissing(ed25519Client, 0);
+            initial.generateKeyIfMissing(host, 2048);
+            initial.save();
+        }
+
+        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options(false))) {
+            KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
+                    reloaded, List.of(rsaClient, ed25519Client, host));
+            KeyPair selectedRsa = capabilities.sshClientKey(rsaClient).keyPair();
+            KeyPair selectedEd25519 = capabilities.sshClientKey(ed25519Client).keyPair();
+
+            assertThat(selectedRsa.getPublic().getEncoded())
+                    .isEqualTo(generatedRsa.getPublic().getEncoded());
+            assertThat(selectedRsa.getPrivate().getEncoded())
+                    .isEqualTo(generatedRsa.getPrivate().getEncoded());
+            assertThat(selectedEd25519.getPublic().getEncoded())
+                    .isEqualTo(generatedEd25519.getPublic().getEncoded());
+            assertThat(selectedEd25519.getPrivate().getEncoded())
+                    .isEqualTo(generatedEd25519.getPrivate().getEncoded());
+
+            KeyMaterialDescriptor wrongPurpose = descriptor(
+                    rsaClient.alias().value(),
+                    KeyMaterialPurpose.SSH_HOST,
+                    rsaClient.algorithm(),
+                    rsaClient.version().value(),
+                    rsaClient.scope());
+            KeyMaterialDescriptor wrongScope = descriptor(
+                    rsaClient.alias().value(),
+                    rsaClient.purpose(),
+                    rsaClient.algorithm(),
+                    rsaClient.version().value(),
+                    CLUSTER);
+            KeyMaterialDescriptor wrongAlgorithm = descriptor(
+                    rsaClient.alias().value(),
+                    rsaClient.purpose(),
+                    KeyMaterialAlgorithm.EC,
+                    rsaClient.version().value(),
+                    rsaClient.scope());
+
+            assertThatThrownBy(() -> capabilities.sshClientKey(wrongPurpose))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("registered");
+            assertThatThrownBy(() -> capabilities.sshClientKey(wrongScope))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("registered");
+            assertThatThrownBy(() -> capabilities.sshClientKey(wrongAlgorithm))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("registered");
+            assertThatThrownBy(() -> capabilities.sshClientKey(host))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("SSH_CLIENT");
+            assertThatThrownBy(() -> descriptor(
+                    "invalid-client-v1",
+                    KeyMaterialPurpose.SSH_CLIENT,
+                    KeyMaterialAlgorithm.AES,
+                    1,
+                    NODE))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("AES")
+                    .hasMessageContaining("configuration ciphers");
+        }
+    }
+
+    @Test
     void validatesExistingEntriesBeforeReuseOrActivation() throws Exception {
         try (KeyMaterialService service = service()) {
             KeyMaterialDescriptor rsa = descriptor(
