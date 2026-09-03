@@ -57,12 +57,8 @@ the current root generation, while a non-root subject does not use that comparis
 Run outside the sandbox:
 
 ```sh
-mvn test -Pdev -T 4 -q -pl core/bootstrap -am \
-  -Dtest=InternalConfigurationRepositoryLifecycleTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
-mvn test -Pdev -T 4 -q -pl core/acl -am \
-  -Dtest=JwtAccessTokenServiceTest,OrionAccessControlServiceImplTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
+make run-test MODULE=core/bootstrap TEST='InternalConfigurationRepositoryLifecycleTest'
+make run-test MODULE=core/acl TEST='JwtAccessTokenServiceTest,OrionAccessControlServiceImplTest'
 ```
 
 Expected: FAIL because reset preserves the old root object and credentials, synchronization restores internal
@@ -152,9 +148,7 @@ success, and any non-recovery root without changing the ACL.
 Run outside the sandbox:
 
 ```sh
-mvn test -Pdev -T 4 -q -pl core/acl -am \
-  -Dtest=OrionAccessControlServiceImplTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
+make run-test MODULE=core/acl TEST='OrionAccessControlServiceImplTest'
 ```
 
 Expected: FAIL because the API and atomic recovery transition do not exist.
@@ -207,9 +201,8 @@ recovery session and a new connection authenticates with the enrolled key.
 Run outside the sandbox:
 
 ```sh
-mvn test -Pdev -T 4 -q -pl net/git-transport -am \
-  -Dtest=OrionSshAuthenticatorTest,SshCommandFactoryTest,OrionShellTest,GitSshTransportStateMachineTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
+make run-test MODULE=net/git-transport \
+  TEST='OrionSshAuthenticatorTest,SshCommandFactoryTest,OrionShellTest,GitSshTransportStateMachineTest'
 ```
 
 Expected: FAIL because key selection mutates ACL during authentication and installs an unrestricted root identity.
@@ -268,9 +261,7 @@ or unregistered admin key fails without prompting.
 Run outside the sandbox:
 
 ```sh
-mvn test -Pdev -T 4 -q -pl tests/test-support -am \
-  -Dtest=ServerMakeTargetsTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
+make run-test MODULE=tests/test-support TEST='ServerMakeTargetsTest'
 ```
 
 Expected: FAIL because enrollment currently requires the password environment variable and uses forced askpass,
@@ -319,10 +310,7 @@ and prove it authorizes. Assert a second recovery enrollment fails and repeat th
 Run outside the sandbox after adding the scenario and before fixture changes, then after implementation adjustments:
 
 ```sh
-mvn verify -Pdev -T 4 -q -pl tests/integration-test -am \
-  -Dit.test=GitSshTransportEndToEndIT \
-  -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dfailsafe.failIfNoSpecifiedTests=false
+make run-test MODULE=tests/integration-test TEST='GitSshTransportEndToEndIT'
 ```
 
 Expected RED: the reset retains root credentials and the enrollment session can run `issue-token`. Expected GREEN:

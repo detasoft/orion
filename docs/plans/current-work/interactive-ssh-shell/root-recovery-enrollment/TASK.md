@@ -1,6 +1,6 @@
 # Make Root Recovery Enrollment One-Time
 
-Status: in progress
+Status: todo
 Detailed design: ../../../2026-09-03-root-recovery-enrollment-design.md
 Implementation plan: ../../../2026-09-03-root-recovery-enrollment.md
 
