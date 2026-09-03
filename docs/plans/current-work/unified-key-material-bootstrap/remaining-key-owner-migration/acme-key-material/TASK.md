@@ -1,7 +1,7 @@
 # Move ACME Keys into the Material Store
 
 Status: todo
-Depends on: [committed ACME test material cleanup](../remove-committed-acme-test-material/TASK.md)
+Prerequisite: committed ACME test material cleanup completed.
 Related plan: ../../../../2026-09-03-acme-key-material-migration.md
 
 Make the protected material store the only runtime owner of ACME account keys,

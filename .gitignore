@@ -9,3 +9,6 @@ build
 .DS_Store
 .test-durations/
 .worktrees/
+/net/http-core/account.keypair
+/net/http-core/domain.keypair
+/net/http-core/domain.crt

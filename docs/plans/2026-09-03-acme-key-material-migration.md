@@ -17,6 +17,8 @@ HTTP can read certificate data but cannot obtain or serialize its private key.
 ## Fixed decisions
 
 - The tracked ACME keys are disclosed test artifacts. Delete them; do not migrate their bytes.
+- Current-tree deletion does not retract the material from Git history. History cleanup and key or certificate
+  rotation remain separate operator security decisions.
 - The material store is opened once. Do not create a second `KeyMaterialService` over the same backing store for
   ACME.
 - ACME account material uses a distinct `ACME_ACCOUNT` purpose. The domain key and its issued certificate chain

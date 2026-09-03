@@ -17,5 +17,4 @@ Stop Orion-owned private keys from being scattered across independent files.
 
 ## Child Tasks
 
-- [ ] [Remove committed ACME test material](remove-committed-acme-test-material/TASK.md)
 - [ ] [Move ACME keys into the material store](acme-key-material/TASK.md)

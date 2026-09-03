@@ -1,11 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
-import org.shredzone.acme4j.util.KeyPairUtils;
 import pro.deta.orion.schema.config.HttpTransportConfig;
 import pro.deta.orion.schema.config.HttpsTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -15,23 +11,15 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
-import java.io.*;
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.security.KeyPair;
-import java.security.Security;
-import java.time.Duration;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@Slf4j
 public class ACMECertificateChallengeTest {
-    private static final String ACCOUNT_KEYPAIR = "account.keypair";
-    private static final String DOMAIN_KEYPAIR = "domain.keypair";
-
     @Test
     public void testChallengeHttp01() throws Exception {
         try (AcmeHttpTestServer server = startHttp()) {
@@ -48,7 +36,9 @@ public class ACMECertificateChallengeTest {
         OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
         transports.setHttp(new HttpTransportConfig("localhost", NetworkUtils.findAvailablePort()));
 
-        HttpsTransportConfig httpsTransportConfig = new HttpsTransportConfig("localhost", NetworkUtils.findAvailablePort());
+        HttpsTransportConfig httpsTransportConfig = new HttpsTransportConfig(
+                "localhost",
+                NetworkUtils.findAvailablePort());
         httpsTransportConfig.setEnabled(false);
         transports.setHttps(httpsTransportConfig);
 
@@ -65,31 +55,6 @@ public class ACMECertificateChallengeTest {
         return new AcmeHttpTestServer(server, challengeService);
     }
 
-    @Test
-    @Disabled("Manual integration test: requires ams.deta.pro to resolve to this machine and public port 80 access")
-    public void createAcmeAccountManually() throws Exception {
-        Security.setProperty("crypto.policy", "unlimited");
-        Security.addProvider(new BouncyCastleProvider());
-
-        try (AcmeHttpTestServer server = startHttp()) {
-            AcmeCertificateIssuer issuer = new AcmeCertificateIssuer(server.challengeService());
-            IssuedAcmeCertificate certificate = issuer.issue(new AcmeCertificateIssueRequest(
-                    "acme://letsencrypt.org/staging",
-                    "tenteaday@gmail.com",
-                    readOrGenerateKeyPair(ACCOUNT_KEYPAIR),
-                    readOrGenerateKeyPair(DOMAIN_KEYPAIR),
-                    List.of("ams.deta.pro"),
-                    "DETA PRO",
-                    Duration.ofSeconds(20),
-                    Duration.ofSeconds(20),
-                    true));
-            try (FileWriter fw = new FileWriter("domain.crt")) {
-                fw.write(certificate.nginxPem());
-            }
-            log.info("Certificate created.");
-        }
-    }
-
     private record AcmeHttpTestServer(
             JettyHTTPServer server,
             AcmeHttpChallengeService challengeService) implements AutoCloseable {
@@ -101,21 +66,6 @@ public class ACMECertificateChallengeTest {
         public void close() {
             server.onStop();
         }
-    }
-
-    private KeyPair readOrGenerateKeyPair(String fileName) throws IOException {
-        File keyFile = new File(fileName);
-        if (keyFile.exists()) {
-            try (FileReader reader = new FileReader(keyFile)) {
-                return KeyPairUtils.readKeyPair(reader);
-            }
-        }
-
-        KeyPair keyPair = KeyPairUtils.createKeyPair();
-        try (FileWriter writer = new FileWriter(keyFile)) {
-            KeyPairUtils.writeKeyPair(keyPair, writer);
-        }
-        return keyPair;
     }
 
     @Test
@@ -136,7 +86,10 @@ public class ACMECertificateChallengeTest {
 
         try {
             SSLContext sslContext = SSLContext.getInstance("TLS");
-            sslContext.init(null, new TrustManager[]{TrustAllX509TrustManager.INSTANCE}, new java.security.SecureRandom());
+            sslContext.init(
+                    null,
+                    new TrustManager[]{TrustAllX509TrustManager.INSTANCE},
+                    new java.security.SecureRandom());
             SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
 
             HttpURLConnection connection = get(server.relativiseHttp("/ok"));
