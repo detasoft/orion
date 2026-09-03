@@ -4,13 +4,25 @@ import jakarta.xml.bind.annotation.XmlRootElement;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.schema.orion.RemoteProvider;
+import pro.deta.orion.schema.orion.RemoteRefMapping;
+import pro.deta.orion.schema.orion.RemoteRole;
+import pro.deta.orion.schema.orion.RemoteTrigger;
+import pro.deta.orion.schema.orion.RemoteUpdatePolicy;
 import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
+import pro.deta.orion.schema.orion.RepositoryRemote;
 import pro.deta.orion.schema.orion.TeamId;
 
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,6 +57,102 @@ class OrionV2MapperTest {
 
         assertThat(dto.getSchemaVersion()).isEqualTo(OrionV2.SchemaVersion.V2);
         assertThat(mapped).isEqualTo(document);
+    }
+
+    @Test
+    void mapsRepositoryPolicyAndPrimaryRemoteBothWays() {
+        RepositoryRemote upstream = remote(
+                "upstream",
+                RemoteRole.PRIMARY,
+                RemoteProvider.GITHUB,
+                List.of(RemoteRefMapping.allBranches()));
+        OrionDocument.Repository repository = new OrionDocument.Repository(
+                new RepositoryId("api"),
+                "API",
+                "refs/heads/trunk",
+                new RepositoryPolicy(true, false, true),
+                List.of(upstream));
+        OrionDocument source = document(new AccessControl(), List.of(
+                organization("acme", List.of(team("platform", List.of(repository))))));
+
+        OrionV2 wire = OrionV2Mapper.fromCurrent(source);
+        OrionDocument restored = OrionV2Mapper.toCurrent(wire);
+
+        assertThat(restored).isEqualTo(source);
+        OrionV2.Repository wireRepository = wire.getOrganizations().getFirst()
+                .getTeams().getFirst().getRepositories().getFirst();
+        OrionV2.Remote remote = wireRepository.getRemotes().getFirst();
+        assertThat(wireRepository.getDefaultBranch()).isEqualTo("refs/heads/trunk");
+        assertThat(wireRepository.getPolicy().isAllowForcePushes()).isTrue();
+        assertThat(remote.getAlias()).isEqualTo("upstream");
+        assertThat(remote.getRole()).isEqualTo(OrionV2.RemoteRole.PRIMARY);
+        assertThat(remote.getCredential().getReference()).isEqualTo("github-token");
+    }
+
+    @Test
+    void suppliesSafeDefaultsForAnOlderMinimalV2Repository() {
+        OrionV2.Repository wireRepository = new OrionV2.Repository();
+        wireRepository.setId("api");
+        OrionV2.Team team = wireTeam("platform");
+        team.setRepositories(List.of(wireRepository));
+        OrionV2.Organization organization = wireOrganization("acme");
+        organization.setTeams(List.of(team));
+
+        OrionDocument.Repository repository = OrionV2Mapper.toCurrent(dto(List.of(organization)))
+                .organizations().getFirst().teams().getFirst().repositories().getFirst();
+
+        assertThat(repository.defaultBranch()).isEqualTo("refs/heads/main");
+        assertThat(repository.policy()).isEqualTo(RepositoryPolicy.safeDefaults());
+        assertThat(repository.remotes()).isEmpty();
+    }
+
+    @Test
+    void sortsRemoteConfigurationForStableOutput() {
+        List<RemoteRefMapping> mappings = List.of(
+                new RemoteRefMapping("refs/heads/z", "refs/heads/z"),
+                new RemoteRefMapping("refs/heads/a", "refs/heads/a"));
+        RepositoryRemote zeta = remote("zeta", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
+        RepositoryRemote alpha = remote("alpha", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
+        OrionDocument.Repository repository = new OrionDocument.Repository(
+                new RepositoryId("api"),
+                null,
+                "refs/heads/main",
+                RepositoryPolicy.safeDefaults(),
+                List.of(zeta, alpha));
+        OrionDocument source = document(new AccessControl(), List.of(
+                organization("acme", List.of(team("platform", List.of(repository))))));
+
+        OrionV2.Repository mapped = OrionV2Mapper.fromCurrent(source).getOrganizations().getFirst()
+                .getTeams().getFirst().getRepositories().getFirst();
+
+        assertThat(mapped.getRemotes()).extracting(OrionV2.Remote::getAlias)
+                .containsExactly("alpha", "zeta");
+        assertThat(mapped.getRemotes().getFirst().getTriggers())
+                .containsExactly(OrionV2.RemoteTrigger.LOCAL_REF_UPDATE, OrionV2.RemoteTrigger.PERIODIC_AUDIT);
+        assertThat(mapped.getRemotes().getFirst().getRefMappings())
+                .extracting(OrionV2.RefMapping::getSource)
+                .containsExactly("refs/heads/a", "refs/heads/z");
+    }
+
+    @Test
+    void roundTripsMultipleRemotesAndMappingsWithoutChangingTheDocumentValue() {
+        List<RemoteRefMapping> mappings = List.of(
+                new RemoteRefMapping("refs/heads/z", "refs/heads/z"),
+                new RemoteRefMapping("refs/heads/a", "refs/heads/a"));
+        RepositoryRemote zeta = remote("zeta", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
+        RepositoryRemote alpha = remote("alpha", RemoteRole.OUTBOUND_ONLY, RemoteProvider.GENERIC, mappings);
+        OrionDocument.Repository repository = new OrionDocument.Repository(
+                new RepositoryId("api"),
+                null,
+                OrionDocument.Repository.DEFAULT_BRANCH,
+                RepositoryPolicy.safeDefaults(),
+                List.of(zeta, alpha));
+        OrionDocument source = document(new AccessControl(), List.of(
+                organization("acme", List.of(team("platform", List.of(repository))))));
+
+        OrionDocument restored = OrionV2Mapper.toCurrent(OrionV2Mapper.fromCurrent(source));
+
+        assertThat(restored).isEqualTo(source);
     }
 
     @Test
@@ -186,7 +294,12 @@ class OrionV2MapperTest {
     }
 
     private static OrionDocument.Repository repository(String id) {
-        return new OrionDocument.Repository(new RepositoryId(id), id + " name");
+        return new OrionDocument.Repository(
+                new RepositoryId(id),
+                id + " name",
+                "refs/heads/main",
+                RepositoryPolicy.safeDefaults(),
+                List.of());
     }
 
     private static AccessControlDraft.User user(String id) {
@@ -218,7 +331,9 @@ class OrionV2MapperTest {
     }
 
     private static OrionV2.Repository wireRepository(String id) {
-        return new OrionV2.Repository(id, null);
+        OrionV2.Repository repository = new OrionV2.Repository();
+        repository.setId(id);
+        return repository;
     }
 
     private static OrionV2.User wireUser(String id) {
@@ -231,5 +346,26 @@ class OrionV2MapperTest {
 
     private static OrionV2.Grant wireGrant(String id) {
         return new OrionV2.Grant(id, List.of());
+    }
+
+    private static RepositoryRemote remote(
+            String alias,
+            RemoteRole role,
+            RemoteProvider provider,
+            List<RemoteRefMapping> mappings) {
+        Set<RemoteTrigger> triggers = new LinkedHashSet<>();
+        triggers.add(RemoteTrigger.PERIODIC_AUDIT);
+        triggers.add(RemoteTrigger.LOCAL_REF_UPDATE);
+        return new RepositoryRemote(
+                new RemoteAlias(alias),
+                role,
+                provider,
+                URI.create("https://github.com/acme/project.git"),
+                new ConfigurationSecretReference(
+                        ConfigurationSecretReference.Scope.REPOSITORY,
+                        "github-token"),
+                triggers,
+                mappings,
+                RemoteUpdatePolicy.fastForwardOnly());
     }
 }

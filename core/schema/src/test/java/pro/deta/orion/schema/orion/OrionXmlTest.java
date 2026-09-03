@@ -7,8 +7,11 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,6 +45,13 @@ class OrionXmlTest {
         assertThat(serialized).contains("<organization id=\"acme\">");
         assertThat(serialized).contains("<team id=\"platform\">");
         assertThat(serialized).contains("<repository id=\"api\">");
+        OrionDocument.Repository repository = document.organizations().getFirst()
+                .teams().getFirst().repositories().getFirst();
+        assertThat(repository.defaultBranch()).isEqualTo("refs/heads/main");
+        assertThat(repository.remotes()).extracting(remote -> remote.alias().value())
+                .containsExactly("upstream");
+        assertThat(serialized).contains("<reference>github-token</reference>");
+        assertThat(serialized).doesNotContain("github-token@");
         assertThat(OrionXml.currentSchemaVersion()).isEqualTo(OrionXmlSchemaVersion.V2);
     }
 
@@ -57,6 +67,18 @@ class OrionXmlTest {
         OrionDocument second = document(
                 new AccessControl(List.of(alpha, zulu), List.of(), List.of()),
                 List.of(alphaOrganization, zuluOrganization));
+
+        assertThat(write(first)).isEqualTo(write(second));
+    }
+
+    @Test
+    void writesEquivalentRemoteConfigurationDeterministically() throws Exception {
+        OrionDocument first = documentWithRemotes(List.of(
+                outboundRemote("zulu", orderedTriggers(false), orderedMappings(false)),
+                outboundRemote("alpha", orderedTriggers(true), orderedMappings(true))));
+        OrionDocument second = documentWithRemotes(List.of(
+                outboundRemote("alpha", orderedTriggers(false), orderedMappings(false)),
+                outboundRemote("zulu", orderedTriggers(true), orderedMappings(true))));
 
         assertThat(write(first)).isEqualTo(write(second));
     }
@@ -130,6 +152,58 @@ class OrionXmlTest {
         assertThat(schema).contains("name=\"organization\"");
         assertThat(schema).contains("name=\"team\"");
         assertThat(schema).contains("name=\"repository\"");
+        assertThat(schema).contains("name=\"defaultBranch\"");
+        assertThat(schema).contains("name=\"policy\"");
+        assertThat(schema).contains("name=\"remotes\"");
+        assertThat(schema).contains("name=\"remote\"");
+        assertThat(schema).contains("name=\"refMappings\"");
+    }
+
+    @Test
+    void suppliesSafeDefaultsWhenRepositoryConfigurationIsOmitted() throws Exception {
+        String xml = minimalV2(
+                """
+                <organization id="acme">
+                  <teams>
+                    <team id="platform">
+                      <repositories><repository id="api"/></repositories>
+                    </team>
+                  </teams>
+                </organization>
+                """,
+                "");
+
+        OrionDocument.Repository repository = read(xml).organizations().getFirst()
+                .teams().getFirst().repositories().getFirst();
+
+        assertThat(repository.defaultBranch()).isEqualTo(OrionDocument.Repository.DEFAULT_BRANCH);
+        assertThat(repository.policy()).isEqualTo(RepositoryPolicy.safeDefaults());
+        assertThat(repository.remotes()).isEmpty();
+    }
+
+    @Test
+    void rejectsInvalidRemoteTopologyOnRead() {
+        String remote = wireRemote("upstream", "PRIMARY", "https://github.com/acme/project.git");
+        String duplicateAliases = documentWithWireRemotes(remote + remote);
+        String nonPrimaryUpstream = documentWithWireRemotes(
+                wireRemote("upstream", "OUTBOUND_ONLY", "https://github.com/acme/project.git"));
+
+        assertThatThrownBy(() -> read(duplicateAliases))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("duplicate remote alias: upstream");
+        assertThatThrownBy(() -> read(nonPrimaryUpstream))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("PRIMARY remote");
+    }
+
+    @Test
+    void rejectsSecretBearingRemoteUrisOnRead() {
+        String xml = documentWithWireRemotes(
+                wireRemote("upstream", "PRIMARY", "https://github-token@github.com/acme/project.git"));
+
+        assertThatThrownBy(() -> read(xml))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("must not contain credentials");
     }
 
     @Test
@@ -234,10 +308,106 @@ class OrionXmlTest {
 
     private static OrionDocument.Organization organization(String id) {
         OrionDocument.Repository repository =
-                new OrionDocument.Repository(new RepositoryId("repository"), null);
+                new OrionDocument.Repository(
+                        new RepositoryId("repository"),
+                        null,
+                        "refs/heads/main",
+                        RepositoryPolicy.safeDefaults(),
+                        List.of());
         OrionDocument.Team team =
                 new OrionDocument.Team(new TeamId("team"), null, List.of(repository));
         return new OrionDocument.Organization(new OrganizationId(id), null, List.of(team));
+    }
+
+    private static OrionDocument documentWithRemotes(List<RepositoryRemote> remotes) {
+        OrionDocument.Repository repository = new OrionDocument.Repository(
+                new RepositoryId("repository"),
+                null,
+                OrionDocument.Repository.DEFAULT_BRANCH,
+                RepositoryPolicy.safeDefaults(),
+                remotes);
+        OrionDocument.Team team = new OrionDocument.Team(
+                new TeamId("team"),
+                null,
+                List.of(repository));
+        OrionDocument.Organization organization = new OrionDocument.Organization(
+                new OrganizationId("organization"),
+                null,
+                List.of(team));
+        return document(new AccessControl(), List.of(organization));
+    }
+
+    private static RepositoryRemote outboundRemote(
+            String alias,
+            Set<RemoteTrigger> triggers,
+            List<RemoteRefMapping> mappings) {
+        return new RepositoryRemote(
+                new RemoteAlias(alias),
+                RemoteRole.OUTBOUND_ONLY,
+                RemoteProvider.GENERIC,
+                URI.create("https://git.example.test/acme/project.git"),
+                new ConfigurationSecretReference(
+                        ConfigurationSecretReference.Scope.REPOSITORY,
+                        "external-token"),
+                triggers,
+                mappings,
+                RemoteUpdatePolicy.fastForwardOnly());
+    }
+
+    private static Set<RemoteTrigger> orderedTriggers(boolean reversed) {
+        if (reversed) {
+            return new LinkedHashSet<>(List.of(
+                    RemoteTrigger.PERIODIC_AUDIT,
+                    RemoteTrigger.LOCAL_REF_UPDATE));
+        }
+        return new LinkedHashSet<>(List.of(
+                RemoteTrigger.LOCAL_REF_UPDATE,
+                RemoteTrigger.PERIODIC_AUDIT));
+    }
+
+    private static List<RemoteRefMapping> orderedMappings(boolean reversed) {
+        RemoteRefMapping alpha = new RemoteRefMapping("refs/heads/a", "refs/heads/a");
+        RemoteRefMapping zulu = new RemoteRefMapping("refs/heads/z", "refs/heads/z");
+        return reversed ? List.of(zulu, alpha) : List.of(alpha, zulu);
+    }
+
+    private static String documentWithWireRemotes(String remotes) {
+        return minimalV2(
+                """
+                <organization id="acme">
+                  <teams>
+                    <team id="platform">
+                      <repositories>
+                        <repository id="api"><remotes>%s</remotes></repository>
+                      </repositories>
+                    </team>
+                  </teams>
+                </organization>
+                """.formatted(remotes),
+                "");
+    }
+
+    private static String wireRemote(String alias, String role, String uri) {
+        return """
+                <remote alias="%s">
+                  <role>%s</role>
+                  <provider>GITHUB</provider>
+                  <uri>%s</uri>
+                  <credential><scope>REPOSITORY</scope><reference>github-token</reference></credential>
+                  <triggers><trigger>LOCAL_REF_UPDATE</trigger></triggers>
+                  <refMappings>
+                    <refMapping>
+                      <source>refs/heads/*</source>
+                      <destination>refs/heads/*</destination>
+                    </refMapping>
+                  </refMappings>
+                  <updatePolicy>
+                    <allowForceUpdates>false</allowForceUpdates>
+                    <allowDeletes>false</allowDeletes>
+                    <allowTagRewrites>false</allowTagRewrites>
+                  </updatePolicy>
+                </remote>
+                """.formatted(alias, role, uri);
     }
 
     private static String minimalV2(String organizations, String users) {

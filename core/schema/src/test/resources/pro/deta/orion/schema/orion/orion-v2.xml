@@ -53,6 +53,39 @@
           <repositories>
             <repository id="api">
               <displayName>API</displayName>
+              <defaultBranch>refs/heads/main</defaultBranch>
+              <policy>
+                <allowForcePushes>false</allowForcePushes>
+                <allowBranchDeletes>false</allowBranchDeletes>
+                <allowTagRewrites>false</allowTagRewrites>
+              </policy>
+              <remotes>
+                <remote alias="upstream">
+                  <role>PRIMARY</role>
+                  <provider>GITHUB</provider>
+                  <uri>https://github.com/acme/api.git</uri>
+                  <credential>
+                    <scope>REPOSITORY</scope>
+                    <reference>github-token</reference>
+                  </credential>
+                  <triggers>
+                    <trigger>STARTUP_RECONCILE</trigger>
+                    <trigger>LOCAL_REF_UPDATE</trigger>
+                    <trigger>PERIODIC_AUDIT</trigger>
+                  </triggers>
+                  <refMappings>
+                    <refMapping>
+                      <source>refs/heads/*</source>
+                      <destination>refs/heads/*</destination>
+                    </refMapping>
+                  </refMappings>
+                  <updatePolicy>
+                    <allowForceUpdates>false</allowForceUpdates>
+                    <allowDeletes>false</allowDeletes>
+                    <allowTagRewrites>false</allowTagRewrites>
+                  </updatePolicy>
+                </remote>
+              </remotes>
             </repository>
           </repositories>
         </team>

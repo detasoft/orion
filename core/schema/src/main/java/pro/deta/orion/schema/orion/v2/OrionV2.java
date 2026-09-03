@@ -74,11 +74,96 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName"})
+    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes"})
     public static final class Repository {
         @XmlAttribute(name = "id", required = true)
         private String id;
         private String displayName;
+        private String defaultBranch;
+        private RepositoryPolicy policy;
+        @XmlElementWrapper(name = "remotes")
+        @XmlElement(name = "remote")
+        private List<Remote> remotes;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"allowForcePushes", "allowBranchDeletes", "allowTagRewrites"})
+    public static final class RepositoryPolicy {
+        private boolean allowForcePushes;
+        private boolean allowBranchDeletes;
+        private boolean allowTagRewrites;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {
+            "role",
+            "provider",
+            "uri",
+            "credential",
+            "triggers",
+            "refMappings",
+            "updatePolicy"
+    })
+    public static final class Remote {
+        @XmlAttribute(name = "alias", required = true)
+        private String alias;
+        @XmlElement(required = true)
+        private RemoteRole role;
+        @XmlElement(required = true)
+        private RemoteProvider provider;
+        @XmlElement(required = true)
+        private String uri;
+        @XmlElement(required = true)
+        private SecretReference credential;
+        @XmlElementWrapper(name = "triggers", required = true)
+        @XmlElement(name = "trigger")
+        private List<RemoteTrigger> triggers;
+        @XmlElementWrapper(name = "refMappings", required = true)
+        @XmlElement(name = "refMapping")
+        private List<RefMapping> refMappings;
+        @XmlElement(required = true)
+        private RemoteUpdatePolicy updatePolicy;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"scope", "reference"})
+    public static final class SecretReference {
+        @XmlElement(required = true)
+        private SecretScope scope;
+        @XmlElement(required = true)
+        private String reference;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"source", "destination"})
+    public static final class RefMapping {
+        @XmlElement(required = true)
+        private String source;
+        @XmlElement(required = true)
+        private String destination;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"allowForceUpdates", "allowDeletes", "allowTagRewrites"})
+    public static final class RemoteUpdatePolicy {
+        private boolean allowForceUpdates;
+        private boolean allowDeletes;
+        private boolean allowTagRewrites;
     }
 
     @Data
@@ -195,6 +280,42 @@ public class OrionV2 {
         NETWORK_PORT,
         SHUTDOWN,
         ADMIN
+    }
+
+    @XmlEnum(String.class)
+    public enum RemoteRole {
+        @XmlEnumValue("PRIMARY")
+        PRIMARY,
+        @XmlEnumValue("OUTBOUND_ONLY")
+        OUTBOUND_ONLY
+    }
+
+    @XmlEnum(String.class)
+    public enum RemoteProvider {
+        @XmlEnumValue("GENERIC")
+        GENERIC,
+        @XmlEnumValue("GITHUB")
+        GITHUB
+    }
+
+    @XmlEnum(String.class)
+    public enum SecretScope {
+        @XmlEnumValue("ORGANIZATION")
+        ORGANIZATION,
+        @XmlEnumValue("REPOSITORY")
+        REPOSITORY
+    }
+
+    @XmlEnum(String.class)
+    public enum RemoteTrigger {
+        @XmlEnumValue("STARTUP_RECONCILE")
+        STARTUP_RECONCILE,
+        @XmlEnumValue("LOCAL_REF_UPDATE")
+        LOCAL_REF_UPDATE,
+        @XmlEnumValue("PERIODIC_AUDIT")
+        PERIODIC_AUDIT,
+        @XmlEnumValue("MANUAL_RETRY")
+        MANUAL_RETRY
     }
 
     @XmlEnum(String.class)

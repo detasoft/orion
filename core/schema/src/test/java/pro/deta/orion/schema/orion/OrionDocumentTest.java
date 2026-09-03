@@ -15,8 +15,7 @@ class OrionDocumentTest {
     @Test
     void modelsRepositoriesInsideTheirTeamAndOrganization() {
         AccessControl accessControl = ACLUtil.generateDefaultAccessControl("root-password-hash");
-        OrionDocument.Repository repository =
-                new OrionDocument.Repository(new RepositoryId("api"), "API");
+        OrionDocument.Repository repository = repository("api", "API");
         OrionDocument.Team team =
                 new OrionDocument.Team(new TeamId("platform"), "Platform", List.of(repository));
         OrionDocument.Organization organization =
@@ -39,7 +38,7 @@ class OrionDocumentTest {
     @Test
     void copiesHierarchyCollections() {
         List<OrionDocument.Repository> repositories = new ArrayList<>();
-        repositories.add(new OrionDocument.Repository(new RepositoryId("api"), "API"));
+        repositories.add(repository("api", "API"));
         OrionDocument.Team team = new OrionDocument.Team(new TeamId("platform"), "Platform", repositories);
         List<OrionDocument.Team> teams = new ArrayList<>(List.of(team));
         OrionDocument.Organization organization =
@@ -62,10 +61,8 @@ class OrionDocumentTest {
 
     @Test
     void keepsStableIdentitySeparateFromDisplayName() {
-        OrionDocument.Repository first =
-                new OrionDocument.Repository(new RepositoryId("api"), "Public API");
-        OrionDocument.Repository renamed =
-                new OrionDocument.Repository(new RepositoryId("api"), "Partner API");
+        OrionDocument.Repository first = repository("api", "Public API");
+        OrionDocument.Repository renamed = repository("api", "Partner API");
 
         assertThat(first.id()).isEqualTo(renamed.id());
         assertThat(first.displayName()).isNotEqualTo(renamed.displayName());
@@ -144,6 +141,15 @@ class OrionDocumentTest {
     }
 
     private static OrionDocument.Repository repository(String id) {
-        return new OrionDocument.Repository(new RepositoryId(id), null);
+        return repository(id, null);
+    }
+
+    private static OrionDocument.Repository repository(String id, String displayName) {
+        return new OrionDocument.Repository(
+                new RepositoryId(id),
+                displayName,
+                "refs/heads/main",
+                RepositoryPolicy.safeDefaults(),
+                List.of());
     }
 }

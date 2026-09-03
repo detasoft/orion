@@ -11,7 +11,6 @@ tasks may be ready at the same time.
 - [ ] [Harden ACL storage contracts](acl-storage-hardening/TASK.md)
 - [ ] [Harden HTTP core contracts](http-core-hardening/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)
-- [ ] [Implement external Git repository synchronization](external-git-repository-sync/TASK.md)
 - [ ] [Review native Git storage architecture](git-native-storage-architecture-review/TASK.md)
 - [ ] [Externalize repository storage](externalized-repository-storage/TASK.md)
 - [ ] [Simplify Git client architecture](git-client-architecture-simplification/TASK.md)

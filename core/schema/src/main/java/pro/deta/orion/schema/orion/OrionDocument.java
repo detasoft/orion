@@ -2,6 +2,8 @@ package pro.deta.orion.schema.orion;
 
 import pro.deta.orion.schema.acl.AccessControl;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -73,9 +75,33 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
         }
     }
 
-    public record Repository(RepositoryId id, String displayName) {
+    public record Repository(
+            RepositoryId id,
+            String displayName,
+            String defaultBranch,
+            RepositoryPolicy policy,
+            List<RepositoryRemote> remotes) {
+        public static final String DEFAULT_BRANCH = "refs/heads/main";
+
         public Repository {
             Objects.requireNonNull(id, "id");
+            defaultBranch = RemoteRefMapping.requireConcreteBranch(defaultBranch, "default branch");
+            Objects.requireNonNull(policy, "repository policy");
+            remotes = copyRemotes(remotes);
+        }
+
+        private static List<RepositoryRemote> copyRemotes(List<RepositoryRemote> source) {
+            Objects.requireNonNull(source, "repository remotes");
+            List<RepositoryRemote> remotes = new ArrayList<>(source);
+            Set<RemoteAlias> aliases = new HashSet<>();
+            for (RepositoryRemote remote : remotes) {
+                Objects.requireNonNull(remote, "repository remote");
+                if (!aliases.add(remote.alias())) {
+                    throw new IllegalArgumentException("duplicate remote alias: " + remote.alias());
+                }
+            }
+            remotes.sort(Comparator.comparing(remote -> remote.alias().value()));
+            return List.copyOf(remotes);
         }
     }
 }

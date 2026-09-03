@@ -1,13 +1,24 @@
 package pro.deta.orion.schema.orion.v2;
 
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.RemoteAlias;
+import pro.deta.orion.schema.orion.RemoteProvider;
+import pro.deta.orion.schema.orion.RemoteRefMapping;
+import pro.deta.orion.schema.orion.RemoteRole;
+import pro.deta.orion.schema.orion.RemoteTrigger;
+import pro.deta.orion.schema.orion.RemoteUpdatePolicy;
 import pro.deta.orion.schema.orion.RepositoryId;
+import pro.deta.orion.schema.orion.RepositoryPolicy;
+import pro.deta.orion.schema.orion.RepositoryRemote;
 import pro.deta.orion.schema.orion.TeamId;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -83,9 +94,82 @@ public final class OrionV2Mapper {
             Objects.requireNonNull(repository, "repository");
             repositories.add(new OrionDocument.Repository(
                     new RepositoryId(repository.getId()),
-                    repository.getDisplayName()));
+                    repository.getDisplayName(),
+                    repository.getDefaultBranch() == null
+                            ? OrionDocument.Repository.DEFAULT_BRANCH
+                            : repository.getDefaultBranch(),
+                    toCurrent(repository.getPolicy()),
+                    toCurrentRemotes(repository.getRemotes())));
         }
         return repositories;
+    }
+
+    private static RepositoryPolicy toCurrent(OrionV2.RepositoryPolicy source) {
+        if (source == null) {
+            return RepositoryPolicy.safeDefaults();
+        }
+        return new RepositoryPolicy(
+                source.isAllowForcePushes(),
+                source.isAllowBranchDeletes(),
+                source.isAllowTagRewrites());
+    }
+
+    private static List<RepositoryRemote> toCurrentRemotes(List<OrionV2.Remote> source) {
+        List<OrionV2.Remote> sortedRemotes = sorted(
+                source,
+                Comparator.comparing(OrionV2.Remote::getAlias, NULL_SAFE_STRINGS));
+        List<RepositoryRemote> remotes = new ArrayList<>();
+        for (OrionV2.Remote remote : sortedRemotes) {
+            Objects.requireNonNull(remote, "repository remote");
+            remotes.add(new RepositoryRemote(
+                    new RemoteAlias(remote.getAlias()),
+                    enumValue(RemoteRole.class, remote.getRole()),
+                    enumValue(RemoteProvider.class, remote.getProvider()),
+                    URI.create(remote.getUri()),
+                    toCurrent(remote.getCredential()),
+                    toCurrentTriggers(remote.getTriggers()),
+                    toCurrentMappings(remote.getRefMappings()),
+                    toCurrent(remote.getUpdatePolicy())));
+        }
+        return remotes;
+    }
+
+    private static ConfigurationSecretReference toCurrent(OrionV2.SecretReference source) {
+        Objects.requireNonNull(source, "remote credential");
+        return new ConfigurationSecretReference(
+                enumValue(ConfigurationSecretReference.Scope.class, source.getScope()),
+                source.getReference());
+    }
+
+    private static Set<RemoteTrigger> toCurrentTriggers(List<OrionV2.RemoteTrigger> source) {
+        EnumSet<RemoteTrigger> triggers = EnumSet.noneOf(RemoteTrigger.class);
+        for (OrionV2.RemoteTrigger trigger : listOrEmpty(source)) {
+            triggers.add(enumValue(RemoteTrigger.class, trigger));
+        }
+        return triggers;
+    }
+
+    private static List<RemoteRefMapping> toCurrentMappings(List<OrionV2.RefMapping> source) {
+        List<OrionV2.RefMapping> sortedMappings = sorted(
+                source,
+                Comparator.comparing(OrionV2.RefMapping::getSource, NULL_SAFE_STRINGS)
+                        .thenComparing(OrionV2.RefMapping::getDestination, NULL_SAFE_STRINGS));
+        List<RemoteRefMapping> mappings = new ArrayList<>();
+        for (OrionV2.RefMapping mapping : sortedMappings) {
+            Objects.requireNonNull(mapping, "remote ref mapping");
+            mappings.add(new RemoteRefMapping(mapping.getSource(), mapping.getDestination()));
+        }
+        return mappings;
+    }
+
+    private static RemoteUpdatePolicy toCurrent(OrionV2.RemoteUpdatePolicy source) {
+        if (source == null) {
+            return RemoteUpdatePolicy.fastForwardOnly();
+        }
+        return new RemoteUpdatePolicy(
+                source.isAllowForceUpdates(),
+                source.isAllowDeletes(),
+                source.isAllowTagRewrites());
     }
 
     private static AccessControl toCurrent(OrionV2.AccessControl source) {
@@ -215,9 +299,74 @@ public final class OrionV2Mapper {
         for (OrionDocument.Repository repository : sorted) {
             repositories.add(new OrionV2.Repository(
                     repository.id().value(),
-                    repository.displayName()));
+                    repository.displayName(),
+                    repository.defaultBranch(),
+                    fromCurrent(repository.policy()),
+                    fromCurrentRemotes(repository.remotes())));
         }
         return repositories;
+    }
+
+    private static OrionV2.RepositoryPolicy fromCurrent(RepositoryPolicy source) {
+        return new OrionV2.RepositoryPolicy(
+                source.allowForcePushes(),
+                source.allowBranchDeletes(),
+                source.allowTagRewrites());
+    }
+
+    private static List<OrionV2.Remote> fromCurrentRemotes(List<RepositoryRemote> source) {
+        List<RepositoryRemote> sortedRemotes = sorted(
+                source,
+                Comparator.comparing(remote -> remote.alias().value()));
+        List<OrionV2.Remote> remotes = new ArrayList<>();
+        for (RepositoryRemote remote : sortedRemotes) {
+            remotes.add(new OrionV2.Remote(
+                    remote.alias().value(),
+                    enumValue(OrionV2.RemoteRole.class, remote.role()),
+                    enumValue(OrionV2.RemoteProvider.class, remote.provider()),
+                    remote.uri().toString(),
+                    fromCurrent(remote.credential()),
+                    fromCurrentTriggers(remote.triggers()),
+                    fromCurrentMappings(remote.refMappings()),
+                    fromCurrent(remote.updatePolicy())));
+        }
+        return remotes;
+    }
+
+    private static OrionV2.SecretReference fromCurrent(ConfigurationSecretReference source) {
+        return new OrionV2.SecretReference(
+                enumValue(OrionV2.SecretScope.class, source.scope()),
+                source.reference());
+    }
+
+    private static List<OrionV2.RemoteTrigger> fromCurrentTriggers(Set<RemoteTrigger> source) {
+        List<RemoteTrigger> sortedTriggers = sorted(
+                new ArrayList<>(source),
+                Comparator.comparing(Enum::name));
+        List<OrionV2.RemoteTrigger> triggers = new ArrayList<>();
+        for (RemoteTrigger trigger : sortedTriggers) {
+            triggers.add(enumValue(OrionV2.RemoteTrigger.class, trigger));
+        }
+        return triggers;
+    }
+
+    private static List<OrionV2.RefMapping> fromCurrentMappings(List<RemoteRefMapping> source) {
+        List<RemoteRefMapping> sortedMappings = sorted(
+                source,
+                Comparator.comparing(RemoteRefMapping::source)
+                        .thenComparing(RemoteRefMapping::destination));
+        List<OrionV2.RefMapping> mappings = new ArrayList<>();
+        for (RemoteRefMapping mapping : sortedMappings) {
+            mappings.add(new OrionV2.RefMapping(mapping.source(), mapping.destination()));
+        }
+        return mappings;
+    }
+
+    private static OrionV2.RemoteUpdatePolicy fromCurrent(RemoteUpdatePolicy source) {
+        return new OrionV2.RemoteUpdatePolicy(
+                source.allowForceUpdates(),
+                source.allowDeletes(),
+                source.allowTagRewrites());
     }
 
     private static OrionV2.AccessControl fromCurrent(AccessControl source) {
