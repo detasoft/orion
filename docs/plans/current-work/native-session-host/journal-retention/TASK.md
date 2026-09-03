@@ -7,6 +7,9 @@ Depends on: ../cbor-sequence-journal-format/TASK.md
 Bound journal storage without changing the logical event stream or blocking PTY
 output at the retention limit.
 
+- [ ] Add journal segmentation, compression, and retention.
+  - Owner: codex, session 32cbac98, started 2026-09-03 19:39 Europe/Amsterdam.
+
 ## Scope
 
 - Rotate size-bounded `.cbor` segments only between complete CBOR items.
