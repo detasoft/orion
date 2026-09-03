@@ -325,9 +325,9 @@ file:env:ORION_CONFIG
   env -> /etc/orion/orion.yml
   result -> file:/etc/orion/orion.yml
 
-s3:env:ORION_ACL
-  env -> s3://bucket/bootstrap/orion.xml
-  result -> s3://bucket/bootstrap/orion.xml
+s3:env:ORION_REPOSITORY
+  env -> s3://bucket/repositories/team/project
+  result -> s3://bucket/repositories/team/project
 
 git+ssh:env:ORION_CONFIG_REPO
   env -> git+ssh://git@example.test/orion/config.git?path=orion.yml
@@ -375,7 +375,7 @@ Safe:
 
 ```text
 file:env:ORION_CONFIG
-s3:env:ORION_ACL
+s3:env:ORION_REPOSITORY
 content:<redacted>
 content:base64,<redacted>
 ```
@@ -424,7 +424,7 @@ Cover at least these cases:
 - `file:env:ORION_CONFIG` fails if the environment variable is missing;
 - `file:env:ORION_CONFIG` fails if the environment value is an incompatible
   `s3:` address;
-- `s3:env:ORION_ACL` resolves when the environment contains an S3 URI;
+- `s3:env:ORION_REPOSITORY` resolves when the environment contains an S3 URI;
 - `git+ssh:env:ORION_CONFIG_REPO` resolves when the environment contains a
   Git URI;
 - nested references obey max depth;

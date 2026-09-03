@@ -24,8 +24,6 @@ public class AccessControlStorageResolver {
             case ResourceScheme.File ignored -> new LocalAccessControlStorage(accessControlConfig);
             case ResourceScheme.Local ignored ->
                     new NativeGitAccessControlStorage(accessControlConfig, repositoryProvider);
-            case ResourceScheme.Other ignored when S3AccessControlStorage.supportsLocation(location) ->
-                    new S3AccessControlStorage(accessControlConfig);
             case ResourceScheme.Other ignored -> throw new IllegalArgumentException("Unsupported ACL location: " + location);
         };
     }

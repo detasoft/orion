@@ -325,10 +325,9 @@ Cover at least these cases:
 - repository storage + `git+ssh:` fails because it does not provide
   `REPOSITORY_STORAGE`;
 - ACL + `local:` resolves versioned internal repository content;
-- ACL + `s3:` resolves non-versioned object content;
+- ACL + `file:` resolves non-versioned local file content;
 - ACL + `git+ssh:` resolves versioned remote Git content;
-- a caller requiring `VERSIONED_CONTENT` fails against plain `file:` or `s3:`
-  unless that backend explicitly provides version checks.
+- a caller requiring `VERSIONED_CONTENT` fails against plain `file:` content.
 
 ## Expected Outcome
 

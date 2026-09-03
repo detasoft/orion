@@ -30,9 +30,5 @@
             <groupId>pro.deta.orion.git</groupId>
             <artifactId>git-native-storage</artifactId>
         </dependency>
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>s3</artifactId>
-        </dependency>
     </dependencies>
 </project>

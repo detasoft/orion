@@ -22,7 +22,6 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
-import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 
 import java.io.ByteArrayInputStream;
@@ -37,7 +36,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -116,39 +114,6 @@ class OrionStartupIT {
         AccessControl savedAcl = deserialize(readFileFromRepository(remoteAclRepository, ACL_FILE));
         assertThat(hasUser(savedAcl, "remote-user")).isFalse();
         assertThat(hasUser(savedAcl, "saved-remote-user")).isTrue();
-    }
-
-    @Test
-    void s3AclIsLoadedAndSavedThroughRuntime() throws Exception {
-        Path orionRoot = tempDir.resolve("orion-s3");
-        Path secretFile = tempDir.resolve("s3-secret.txt");
-        String bucketName = "orion-acl-" + UUID.randomUUID();
-
-        try (MinioS3TestServer s3 = MinioS3TestServer.start(bucketName)) {
-            Files.writeString(secretFile, s3.secretAccessKey());
-            s3.putObject("bootstrap/orion.xml", serialize(accessControlWithUsers("root", "s3-user")));
-            OrionConfiguration configuration = serverConfiguration(orionRoot);
-            configuration.getBootstrap().getAccessControl().setLocation("s3://" + s3.bucketName() + "/bootstrap");
-            configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
-            configuration.getBootstrap().getAccessControl().getAuth().put("endpoint", s3.endpoint());
-            configuration.getBootstrap().getAccessControl().getAuth().put("region", "us-east-1");
-            configuration.getBootstrap().getAccessControl().getAuth().put("accessKeyId", s3.accessKeyId());
-            configuration.getBootstrap().getAccessControl().getAuth().put("secretAccessKey", secretFile.toUri().toString());
-
-            try (StartedOrion orion = startServerWithConfig(configuration)) {
-                AccessControl loadedAcl = deserialize(orion.accessControlService().accessControlConfigurationFile());
-
-                assertThat(hasUser(loadedAcl, "s3-user")).isTrue();
-                assertThat(aclRepository(orionRoot)).doesNotExist();
-
-                orion.accessControlService().saveAccessControlConfigurationFile(
-                        serialize(accessControlWithUsers("root", "saved-s3-user")));
-            }
-
-            AccessControl savedAcl = deserialize(s3.getObject("bootstrap/orion.xml"));
-            assertThat(hasUser(savedAcl, "s3-user")).isFalse();
-            assertThat(hasUser(savedAcl, "saved-s3-user")).isTrue();
-        }
     }
 
     @Test
