@@ -5,6 +5,9 @@ Detailed plan: ../../../2026-09-02-agentd.md
 Depends on: completed AgentD HTTP/2 transport,
 ../session-discovery/TASK.md, ../session-runtime-and-control/TASK.md
 
+- [ ] Route server session commands.
+  - Owner: codex, session command-orchestration-d8e4, started 2026-09-03 19:29 Europe/Amsterdam.
+
 Validate and route server commands to the correct runtime or host and report
 their actual outcome.
 
