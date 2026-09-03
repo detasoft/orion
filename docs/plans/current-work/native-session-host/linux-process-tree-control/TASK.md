@@ -7,6 +7,8 @@ Turn the implemented Linux subreaper and `/proc` descendant tracking into the
 production process-lifecycle boundary. macOS remains a development-only,
 best-effort PTY host and is outside this task.
 
+- Owner: codex, session native-process-control-47c2, started 2026-09-04 01:41 Europe/Amsterdam.
+
 ## Scope
 
 - Verify that `PR_SET_CHILD_SUBREAPER` is active before the PTY child can fork

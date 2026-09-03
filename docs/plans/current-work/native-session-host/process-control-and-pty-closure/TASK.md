@@ -7,6 +7,8 @@ Depends on: completed Unix process host and the
 Keep a live `session-host` as the sole declaration that a session is running,
 while exposing its owned processes for inspection and addressed signalling.
 
+- Owner: codex, session native-process-control-47c2, started 2026-09-04 01:41 Europe/Amsterdam.
+
 ## Scope
 
 - Add a read-only `LIST_PROCESSES` control request returning a current snapshot
