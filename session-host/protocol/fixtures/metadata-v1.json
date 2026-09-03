@@ -19,7 +19,13 @@
     "enforcement": "landlock",
     "unavailablePolicy": "fail",
     "readWritePaths": ["/work/project", "/tmp/019d-session-fixture"],
-    "readOnlyPaths": ["/usr", "/bin", "/lib", "/opt"]
+    "readOnlyPaths": ["/usr", "/bin", "/lib", "/opt"],
+    "policyVersion": 1,
+    "handledRights": 131071,
+    "rules": [
+      {"path": "/bin", "rights": ["execute", "read-file"]},
+      {"path": "/work/project", "rights": ["write-file", "read-file", "truncate"]}
+    ]
   },
   "control": {
     "transport": "unix-domain-socket",

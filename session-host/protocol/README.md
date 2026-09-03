@@ -224,6 +224,13 @@ or `future`), enum `unavailablePolicy` (`fail` or `run-unsandboxed`), and arrays
 `readWritePaths` and `readOnlyPaths` of UTF-8 paths. `control` contains enum
 `transport` (`unix-domain-socket` or `named-pipe`) and its endpoint.
 
+Sandbox metadata may additionally contain `policyVersion`, `handledRights`,
+and ordered `rules`. Each rule has an absolute `path` and a `rights` array using
+the symbolic names from the compiled-policy bit table. These fields describe
+the complete compiled policy; the legacy path arrays contain only rules whose
+mask exactly matches the old read-only or read-write presets. Readers must
+continue to accept metadata written before the granular fields were added.
+
 ## Command-Line Contract
 
 The host accepts:
@@ -255,6 +262,23 @@ target.
 
 Duplicate and unknown options are errors. A requested sandbox defaults to
 fail-closed when unavailable. `--help` and `--version` are standalone actions.
+
+## Compiled Landlock Policy v1
+
+AgentD passes the native host a private canonical-CBOR policy file. The value is
+`[version, handledRights, rules]`; each rule is `[absolutePath, grantedRights]`.
+Version 1 requires `version == 1` and `handledRights == 131071`, handling all
+Landlock filesystem rights from ABI 9 even when no rule grants one. Rules have
+non-zero masks, are unique, and are sorted by the raw UTF-8 bytes of normalized
+absolute paths. Arrays are definite-length, and integers and text lengths use
+their shortest CBOR representation. Trailing data is invalid.
+
+Bits 0 through 16 respectively mean `execute`, `write-file`, `read-file`,
+`read-dir`, `remove-dir`, `remove-file`, `make-char`, `make-dir`, `make-reg`,
+`make-sock`, `make-fifo`, `make-block`, `make-sym`, `refer`, `truncate`,
+`ioctl-dev`, and `resolve-unix`. Decoders limit the file to 1 MiB, paths to
+4096 UTF-8 bytes, and rules to 32768. The shared v1 fixture is
+`fixtures/sandbox-policy-v1.hex`.
 
 ## Compatibility and Failure Rules
 

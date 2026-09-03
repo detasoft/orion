@@ -38,13 +38,38 @@ public record SessionManifest(
             String enforcement,
             String unavailablePolicy,
             List<String> readWritePaths,
-            List<String> readOnlyPaths
+            List<String> readOnlyPaths,
+            OptionalLong policyVersion,
+            OptionalLong handledRights,
+            List<SandboxRule> rules
     ) {
         public Sandbox {
             enforcement = Objects.requireNonNull(enforcement, "enforcement");
             unavailablePolicy = Objects.requireNonNull(unavailablePolicy, "unavailablePolicy");
             readWritePaths = List.copyOf(readWritePaths);
             readOnlyPaths = List.copyOf(readOnlyPaths);
+            policyVersion = Objects.requireNonNull(policyVersion, "policyVersion");
+            handledRights = Objects.requireNonNull(handledRights, "handledRights");
+            rules = List.copyOf(rules);
+        }
+
+        public Sandbox(
+                boolean requested,
+                String enforcement,
+                String unavailablePolicy,
+                List<String> readWritePaths,
+                List<String> readOnlyPaths
+        ) {
+            this(
+                    requested, enforcement, unavailablePolicy, readWritePaths, readOnlyPaths,
+                    OptionalLong.empty(), OptionalLong.empty(), List.of());
+        }
+    }
+
+    public record SandboxRule(String path, List<String> rights) {
+        public SandboxRule {
+            path = Objects.requireNonNull(path, "path");
+            rights = List.copyOf(rights);
         }
     }
 }

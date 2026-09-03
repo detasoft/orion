@@ -2,6 +2,8 @@ package pro.deta.orion.agentd.runtime;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agentd.session.ChildState;
@@ -10,6 +12,7 @@ import pro.deta.orion.agentd.session.HostObservation;
 import pro.deta.orion.agentd.session.JournalObservation;
 import pro.deta.orion.agentd.session.OperationDeadline;
 import pro.deta.orion.agentd.session.SessionManifest;
+import pro.deta.orion.agentd.sandbox.SourcePolicyParser;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -209,6 +212,83 @@ class NativeRuntimeTest {
     }
 
     @Test
+    void compilesSandboxPolicyIntoSessionAndPassesOnlyGeneratedPath() throws IOException {
+        Path source = Files.writeString(temporaryDirectory.resolve("policy.landlock"), """
+                landlock 1
+                ro "%s"
+                """.formatted(temporaryDirectory.toRealPath()));
+        SessionSpec sandboxed = new SessionSpec(
+                spec().sessionId(), spec().command(), spec().workspace(), spec().environment(),
+                spec().columns(), spec().rows(), spec().terminalType(), spec().colorTerminal(),
+                new SessionSpec.Sandbox(Optional.of(source), SessionSpec.Unavailable.FAIL));
+        NativeRuntime runtime = runtime(
+                directory -> manifest(directory, 4242),
+                directory -> JournalObservation.READABLE,
+                (directory, manifest, deadline) -> HostObservation.live(ChildState.LIVE));
+
+        assertThat(runtime.launch(sandboxed)).isInstanceOf(SessionLaunchResult.Started.class);
+
+        Path compiled = sessions.resolve("session-1/sandbox-policy.cbor").toAbsolutePath().normalize();
+        assertThat(compiled).isRegularFile();
+        assertThat(launcher.command).containsSequence("--sandbox-policy", compiled.toString());
+        assertThat(launcher.command).doesNotContain(source.toString());
+    }
+
+    @Test
+    void rejectsMalformedOrInexactPolicyBeforeSessionCreation() throws IOException {
+        Path malformed = Files.writeString(temporaryDirectory.resolve("malformed.landlock"), "ro \"/\"");
+        SessionSpec malformedSpec = withPolicy(malformed);
+        NativeRuntime runtime = runtime(
+                directory -> manifest(directory, 4242),
+                directory -> JournalObservation.READABLE,
+                (directory, manifest, deadline) -> HostObservation.live(ChildState.LIVE));
+
+        assertFailure(runtime.launch(malformedSpec), SessionLaunchResult.FailureKind.INVALID_SPEC);
+        assertThat(sessions.resolve("session-1")).doesNotExist();
+        assertThat(launcher.command).isEmpty();
+
+        Path root = Files.createDirectory(temporaryDirectory.toRealPath().resolve("exactness"));
+        Path denied = Files.createDirectory(root.resolve("denied"));
+        Path inexact = Files.writeString(temporaryDirectory.resolve("inexact.landlock"), """
+                landlock 1
+                read-dir "%s"
+                none "%s"
+                """.formatted(root, denied));
+        assertFailure(runtime.launch(withPolicy(inexact)), SessionLaunchResult.FailureKind.INVALID_SPEC);
+        assertThat(sessions.resolve("session-1")).doesNotExist();
+        assertThat(launcher.command).isEmpty();
+    }
+
+    @Test
+    void rejectsOversizedPolicyBeforeSessionCreation() throws IOException {
+        Path oversized = temporaryDirectory.resolve("oversized.landlock");
+        Files.write(oversized, new byte[SourcePolicyParser.MAX_SOURCE_BYTES + 1]);
+        NativeRuntime runtime = runtime(
+                directory -> manifest(directory, 4242),
+                directory -> JournalObservation.READABLE,
+                (directory, manifest, deadline) -> HostObservation.live(ChildState.LIVE));
+
+        assertFailure(runtime.launch(withPolicy(oversized)), SessionLaunchResult.FailureKind.INVALID_SPEC);
+        assertThat(sessions.resolve("session-1")).doesNotExist();
+        assertThat(launcher.command).isEmpty();
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void rejectsSymbolicLinkPolicyBeforeSessionCreation() throws IOException {
+        Path target = Files.writeString(temporaryDirectory.resolve("target.landlock"), "landlock 1\n");
+        Path link = Files.createSymbolicLink(temporaryDirectory.resolve("linked.landlock"), target);
+        NativeRuntime runtime = runtime(
+                directory -> manifest(directory, 4242),
+                directory -> JournalObservation.READABLE,
+                (directory, manifest, deadline) -> HostObservation.live(ChildState.LIVE));
+
+        assertFailure(runtime.launch(withPolicy(link)), SessionLaunchResult.FailureKind.INVALID_SPEC);
+        assertThat(sessions.resolve("session-1")).doesNotExist();
+        assertThat(launcher.command).isEmpty();
+    }
+
+    @Test
     void rejectsAgentProtocolSessionIdOutsideTheNativeCliSubsetBeforeMutation() {
         SessionSpec invalidNativeId = new SessionSpec(
                 new SessionId("session:1"),
@@ -363,6 +443,13 @@ class NativeRuntimeTest {
                 "xterm-256color",
                 Optional.of("truecolor"),
                 SessionSpec.Sandbox.none());
+    }
+
+    private SessionSpec withPolicy(Path policy) {
+        return new SessionSpec(
+                spec().sessionId(), spec().command(), spec().workspace(), spec().environment(),
+                spec().columns(), spec().rows(), spec().terminalType(), spec().colorTerminal(),
+                new SessionSpec.Sandbox(Optional.of(policy), SessionSpec.Unavailable.FAIL));
     }
 
     private static SessionManifest manifest(Path directory, long hostPid) {

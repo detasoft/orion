@@ -107,6 +107,9 @@ public final class JsonSessionManifestReader implements SessionManifestReader {
         String unavailablePolicy = null;
         List<String> readWritePaths = null;
         List<String> readOnlyPaths = null;
+        OptionalLong policyVersion = OptionalLong.empty();
+        OptionalLong handledRights = OptionalLong.empty();
+        List<SessionManifest.SandboxRule> rules = List.of();
         while (parser.nextToken() != JsonToken.END_OBJECT) {
             requireToken(parser.currentToken(), JsonToken.FIELD_NAME, "sandbox field name is missing");
             String name = parser.currentName();
@@ -117,6 +120,9 @@ public final class JsonSessionManifestReader implements SessionManifestReader {
                 case "unavailablePolicy" -> unavailablePolicy = readText(parser, name, false);
                 case "readWritePaths" -> readWritePaths = readTextArray(parser, name, true);
                 case "readOnlyPaths" -> readOnlyPaths = readTextArray(parser, name, true);
+                case "policyVersion" -> policyVersion = OptionalLong.of(readPositiveLong(parser, name));
+                case "handledRights" -> handledRights = OptionalLong.of(readPositiveLong(parser, name));
+                case "rules" -> rules = readSandboxRules(parser);
                 default -> parser.skipChildren();
             }
         }
@@ -125,7 +131,36 @@ public final class JsonSessionManifestReader implements SessionManifestReader {
             throw invalid("sandbox is missing a required field");
         }
         return new SessionManifest.Sandbox(
-                requested, enforcement, unavailablePolicy, readWritePaths, readOnlyPaths);
+                requested, enforcement, unavailablePolicy, readWritePaths, readOnlyPaths,
+                policyVersion, handledRights, rules);
+    }
+
+    private static List<SessionManifest.SandboxRule> readSandboxRules(JsonParser parser) throws IOException {
+        requireToken(parser.currentToken(), JsonToken.START_ARRAY, "rules must be an array");
+        List<SessionManifest.SandboxRule> rules = new ArrayList<>();
+        while (parser.nextToken() != JsonToken.END_ARRAY) {
+            if (rules.size() == MAX_ARRAY_ITEMS) {
+                throw invalid("rules has too many items");
+            }
+            requireToken(parser.currentToken(), JsonToken.START_OBJECT, "sandbox rule must be an object");
+            String path = null;
+            List<String> rights = null;
+            while (parser.nextToken() != JsonToken.END_OBJECT) {
+                requireToken(parser.currentToken(), JsonToken.FIELD_NAME, "sandbox rule field is missing");
+                String name = parser.currentName();
+                parser.nextToken();
+                switch (name) {
+                    case "path" -> path = readText(parser, name, false);
+                    case "rights" -> rights = readTextArray(parser, name, false);
+                    default -> parser.skipChildren();
+                }
+            }
+            if (path == null || rights == null) {
+                throw invalid("sandbox rule is missing a required field");
+            }
+            rules.add(new SessionManifest.SandboxRule(path, rights));
+        }
+        return List.copyOf(rules);
     }
 
     private static RawControl readControl(JsonParser parser) throws IOException {

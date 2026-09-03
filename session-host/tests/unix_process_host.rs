@@ -2,6 +2,8 @@
 
 use std::fs;
 use std::io;
+#[cfg(target_os = "linux")]
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -17,6 +19,229 @@ use orion_session_host::protocol::{
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn failed_exec_never_crosses_the_successful_launch_boundary() {
+    let directory = DirectoryGuard::new(temporary_directory("failed-exec"));
+    let output = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(base_arguments(
+            directory.path(),
+            "failed-exec",
+            "xterm-256color",
+            80,
+            24,
+        ))
+        .args(["--", "/definitely/missing/orion-command"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(70));
+    let metadata = journal::read_metadata(directory.path()).unwrap();
+    assert_eq!(metadata.child_pid, None);
+    let events = journal::read(directory.path(), 0).unwrap().events;
+    assert!(events.iter().all(|event| event.event_type != event_type::PROCESS_STARTED));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn landlock_restricts_child_and_grandchild_without_restricting_host() {
+    let directory = temporary_directory("landlock-boundary");
+    let workspace = directory.join("workspace");
+    let credentials = directory.join("credentials");
+    let denied_temporary = directory.join("denied-temporary");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&credentials).unwrap();
+    fs::create_dir_all(&denied_temporary).unwrap();
+    fs::write(workspace.join("allowed"), b"allowed\n").unwrap();
+    fs::create_dir(workspace.join("listable")).unwrap();
+    fs::write(workspace.join("listable/entry"), b"hidden contents\n").unwrap();
+    fs::write(workspace.join("writable"), b"before\n").unwrap();
+    fs::create_dir(workspace.join("mutable")).unwrap();
+    fs::write(credentials.join("secret"), b"secret\n").unwrap();
+
+    let mut rules = ["/bin", "/usr", "/lib", "/lib64", "/etc"]
+        .into_iter()
+        .filter_map(|path| fs::canonicalize(path).ok().map(|path| (path, 13_u64)))
+        .collect::<Vec<_>>();
+    if let Ok(device_directory) = fs::canonicalize("/dev") {
+        rules.push((device_directory, 32_782));
+    }
+    rules.extend([
+        (fs::canonicalize(workspace.join("allowed")).unwrap(), 4),
+        (fs::canonicalize(workspace.join("listable")).unwrap(), 8),
+        (fs::canonicalize(workspace.join("writable")).unwrap(), 16_390),
+        (fs::canonicalize(workspace.join("mutable")).unwrap(), 298),
+    ]);
+    rules.sort_by(|left, right| {
+        left.0
+            .as_os_str()
+            .as_bytes()
+            .cmp(right.0.as_os_str().as_bytes())
+    });
+    rules.dedup_by(|left, right| left.0 == right.0);
+    let policy = directory.join("policy.cbor");
+    fs::write(&policy, encode_policy(&rules)).unwrap();
+
+    if current_landlock_abi() < 9 {
+        assert_unsupported_landlock_modes(&directory, &policy);
+        return;
+    }
+
+    let script = concat!(
+        "IFS= read -r direct < \"$1/allowed\" && test \"$direct\" = allowed || exit 91; ",
+        "for listed in \"$1/listable\"/*; do test \"$listed\" = \"$1/listable/entry\" || exit 92; done; ",
+        "printf updated > \"$1/writable\" || exit 93; ",
+        "printf created > \"$1/mutable/new\" || exit 94; ",
+        "rm \"$1/mutable/new\" || exit 95; ",
+        "if IFS= read -r denied < \"$2/secret\"; then exit 96; fi; ",
+        "if printf denied > \"$3/new\"; then exit 97; fi; ",
+        "/bin/sh -c '",
+        "IFS= read -r nested < \"$1/allowed\" && test \"$nested\" = allowed || exit 98; ",
+        "if IFS= read -r denied < \"$2/secret\"; then exit 99; fi; ",
+        "if printf denied > \"$3/new\"; then exit 100; fi",
+        "' nested \"$1\" \"$2\" \"$3\" || exit $?; printf READY; sleep 30",
+    );
+    let mut host = HostGuard::spawn_with_policy(
+        directory,
+        &policy,
+        &[
+            "/bin/sh",
+            "-c",
+            script,
+            "boundary",
+            workspace.to_str().unwrap(),
+            credentials.to_str().unwrap(),
+            denied_temporary.to_str().unwrap(),
+        ],
+    );
+    wait_for_output(host.directory(), b"READY");
+    assert_eq!(fs::read(workspace.join("writable")).unwrap(), b"updated");
+    assert!(!workspace.join("mutable/new").exists());
+    assert!(!denied_temporary.join("new").exists());
+
+    let metadata = journal::read_metadata(host.directory()).unwrap();
+    assert_eq!(
+        metadata.sandbox.enforcement,
+        journal::SandboxEnforcement::Landlock
+    );
+    let mut stream = connect(host.directory());
+    let status = request(&mut stream, control_message::STATUS, 1, &[]);
+    assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
+    let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
+    let terminated = request(&mut stream, control_message::TERMINATE, 2, &terminate);
+    assert_eq!(terminated.message_type, control_message::ACCEPTED);
+    drop(stream);
+    assert!(host.wait().success());
+}
+
+#[test]
+fn invalid_grants_are_fatal_even_with_unsandboxed_fallback() {
+    let directory = DirectoryGuard::new(temporary_directory("landlock-invalid-grant"));
+    fs::create_dir_all(directory.path()).unwrap();
+    let target = directory.path().join("target");
+    let link = directory.path().join("grant-link");
+    fs::write(&target, b"target").unwrap();
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let policy = directory.path().join("policy.cbor");
+    let cases = [
+        (directory.path().join("missing"), 12),
+        (link, 12),
+        (target, 8),
+    ];
+    for (grant, rights) in cases {
+        fs::write(&policy, encode_policy(&[(grant, rights)])).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_session-host"))
+            .args(base_arguments(
+                directory.path(),
+                "landlock-invalid-grant",
+                "xterm-256color",
+                80,
+                24,
+            ))
+            .args([
+                "--sandbox-policy",
+                policy.to_str().unwrap(),
+                "--sandbox-unavailable",
+                "run-unsandboxed",
+                "--",
+                "/bin/sh",
+                "-c",
+                "exit 0",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(70));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn current_landlock_abi() -> i64 {
+    unsafe {
+        libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            std::ptr::null::<libc::c_void>(),
+            0,
+            1,
+        )
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn assert_unsupported_landlock_modes(directory: &Path, policy: &Path) {
+    let base = base_arguments(directory, "landlock-unsupported", "xterm-256color", 80, 24);
+    let failed = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(&base)
+        .args(["--sandbox-policy", policy.to_str().unwrap(), "--", "/bin/sh", "-c", "exit 0"])
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(70));
+    let fallback = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(&base)
+        .args([
+            "--sandbox-policy",
+            policy.to_str().unwrap(),
+            "--sandbox-unavailable",
+            "run-unsandboxed",
+            "--",
+            "/bin/sh",
+            "-c",
+            "exit 0",
+        ])
+        .output()
+        .unwrap();
+    assert!(fallback.status.success(), "{}", String::from_utf8_lossy(&fallback.stderr));
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn requested_landlock_policy_fails_closed_or_uses_explicit_fallback() {
+    let directory = DirectoryGuard::new(temporary_directory("sandbox-unavailable"));
+    fs::create_dir_all(directory.path()).unwrap();
+    let policy = directory.path().join("policy.cbor");
+    fs::write(&policy, encode_policy(&[(directory.path().to_path_buf(), 12)])).unwrap();
+    let base = base_arguments(directory.path(), "sandbox-unavailable", "xterm", 80, 24);
+    let failed = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(&base)
+        .args(["--sandbox-policy", policy.to_str().unwrap(), "--", "/usr/bin/true"])
+        .output()
+        .unwrap();
+    assert_eq!(failed.status.code(), Some(70));
+    let fallback = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(&base)
+        .args([
+            "--sandbox-policy", policy.to_str().unwrap(), "--sandbox-unavailable",
+            "run-unsandboxed", "--", "/usr/bin/true",
+        ])
+        .output()
+        .unwrap();
+    assert!(fallback.status.success(), "{}", String::from_utf8_lossy(&fallback.stderr));
+    let metadata = journal::read_metadata(directory.path()).unwrap();
+    assert_eq!(metadata.sandbox.policy_version, Some(1));
+    assert_eq!(metadata.sandbox.handled_rights, Some(131_071));
+    assert_eq!(metadata.sandbox.rules.len(), 1);
+    assert_eq!(metadata.sandbox.rules[0].path, directory.path().to_str().unwrap());
+    assert_eq!(metadata.sandbox.rules[0].rights, ["read-file", "read-dir"]);
+}
 
 #[test]
 fn hosts_a_real_tty_and_preserves_raw_output() {
@@ -485,6 +710,30 @@ impl HostGuard {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn spawn_with_policy(directory: PathBuf, policy: &Path, child_command: &[&str]) -> Self {
+        let directory = DirectoryGuard::new(directory);
+        let child = Command::new(env!("CARGO_BIN_EXE_session-host"))
+            .args(base_arguments(
+                directory.path(),
+                "landlock-boundary",
+                "xterm-256color",
+                80,
+                24,
+            ))
+            .args(["--sandbox-policy", policy.to_str().unwrap(), "--"])
+            .args(child_command)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        Self {
+            child: Some(child),
+            directory,
+        }
+    }
+
     fn directory(&self) -> &Path {
         self.directory.path()
     }
@@ -582,6 +831,42 @@ fn base_arguments(
         "--term".to_owned(),
         term.to_owned(),
     ]
+}
+
+fn encode_policy(rules: &[(PathBuf, u64)]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    cbor_argument(&mut bytes, 4, 3);
+    cbor_argument(&mut bytes, 0, 1);
+    cbor_argument(&mut bytes, 0, 131_071);
+    cbor_argument(&mut bytes, 4, rules.len() as u64);
+    for (path, rights) in rules {
+        cbor_argument(&mut bytes, 4, 2);
+        let path = path.to_str().unwrap().as_bytes();
+        cbor_argument(&mut bytes, 3, path.len() as u64);
+        bytes.extend_from_slice(path);
+        cbor_argument(&mut bytes, 0, *rights);
+    }
+    bytes
+}
+
+fn cbor_argument(output: &mut Vec<u8>, major: u8, value: u64) {
+    let prefix = major << 5;
+    match value {
+        0..=23 => output.push(prefix | value as u8),
+        24..=0xff => output.extend_from_slice(&[prefix | 24, value as u8]),
+        0x100..=0xffff => {
+            output.push(prefix | 25);
+            output.extend_from_slice(&(value as u16).to_be_bytes());
+        }
+        0x1_0000..=0xffff_ffff => {
+            output.push(prefix | 26);
+            output.extend_from_slice(&(value as u32).to_be_bytes());
+        }
+        _ => {
+            output.push(prefix | 27);
+            output.extend_from_slice(&value.to_be_bytes());
+        }
+    }
 }
 
 fn connect(directory: &Path) -> UnixStream {

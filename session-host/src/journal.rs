@@ -1557,6 +1557,19 @@ pub struct SandboxMetadata {
     pub unavailable_policy: SandboxUnavailablePolicy,
     pub read_write_paths: Vec<String>,
     pub read_only_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handled_rights: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<SandboxRuleMetadata>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxRuleMetadata {
+    pub path: String,
+    pub rights: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -3088,6 +3101,9 @@ mod tests {
                 unavailable_policy: SandboxUnavailablePolicy::Fail,
                 read_write_paths: vec![],
                 read_only_paths: vec![],
+                policy_version: None,
+                handled_rights: None,
+                rules: vec![],
             },
             control: ControlMetadata {
                 transport: ControlTransport::UnixDomainSocket,

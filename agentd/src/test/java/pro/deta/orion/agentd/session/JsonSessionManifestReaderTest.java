@@ -55,6 +55,31 @@ class JsonSessionManifestReaderTest {
     }
 
     @Test
+    void readsGranularLandlockPolicyWhileLegacyFieldsRemainCompatible() throws Exception {
+        Path granular = writeManifest("granular", "");
+        replace(granular, "\"readOnlyPaths\": [\"/usr\"]", """
+                "readOnlyPaths": ["/usr"],
+                    "policyVersion": 1,
+                    "handledRights": 131071,
+                    "rules": [
+                      {"path": "/bin", "rights": ["execute", "read-file"]},
+                      {"path": "/workspace", "rights": ["read-file", "write-file", "truncate"]}
+                    ]
+                """);
+
+        SessionManifest.Sandbox sandbox = reader.read(granular).sandbox();
+
+        assertThat(sandbox.policyVersion()).hasValue(1);
+        assertThat(sandbox.handledRights()).hasValue(131071);
+        assertThat(sandbox.rules()).containsExactly(
+                new SessionManifest.SandboxRule("/bin", java.util.List.of("execute", "read-file")),
+                new SessionManifest.SandboxRule(
+                        "/workspace", java.util.List.of("read-file", "write-file", "truncate")));
+
+        assertThat(reader.read(writeManifest("legacy", "")).sandbox().policyVersion()).isEmpty();
+    }
+
+    @Test
     void rejectsMismatchedIdentityAndUnsafeUnixEndpoint() throws Exception {
         Path mismatched = writeManifest("directory-id", "", "metadata-id", "control.sock");
         Path unsafe = writeManifest("unsafe", "", "unsafe", "../other/control.sock");

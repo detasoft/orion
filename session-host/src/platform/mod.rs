@@ -6,6 +6,8 @@ pub enum PlatformKind {
 
 #[cfg(unix)]
 mod unix;
+#[cfg(unix)]
+mod sandbox;
 #[cfg(windows)]
 mod windows;
 

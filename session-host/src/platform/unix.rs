@@ -15,6 +15,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::PlatformKind;
+use super::sandbox::PreparedSandbox;
 use crate::cli::{SandboxUnavailable, SessionOptions};
 use crate::host::{
     self, ERROR_INVALID_REQUEST, ERROR_INVALID_STATE, ERROR_IO, ERROR_UNSUPPORTED_MESSAGE,
@@ -22,7 +23,7 @@ use crate::host::{
 };
 use crate::journal::{
     self, ControlMetadata, ControlTransport, Durability, JournalConfig, JournalWriter, Metadata,
-    SandboxEnforcement, SandboxMetadata, SandboxUnavailablePolicy,
+    SandboxEnforcement, SandboxMetadata, SandboxRuleMetadata, SandboxUnavailablePolicy,
 };
 use crate::protocol::{self, control_message, event_type};
 
@@ -31,6 +32,11 @@ const CONTROL_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const DESCENDANT_ABSENCE_CONFIRMATIONS: usize = 3;
 const DESCENDANT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READ_BUFFER_LENGTH: usize = 64 * 1024;
+const CHILD_SETUP_SANDBOX: u8 = 1;
+const CHILD_SETUP_CWD: u8 = 2;
+const CHILD_SETUP_TERM: u8 = 3;
+const CHILD_SETUP_COLORTERM: u8 = 4;
+const CHILD_SETUP_EXEC: u8 = 5;
 
 struct DescendantAbsenceConfirmation {
     consecutive_empty: usize,
@@ -59,11 +65,7 @@ pub(super) fn current_platform() -> PlatformKind {
 
 pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     let prepared = PreparedCommand::validate(&options)?;
-    if options.sandbox_policy.is_some() && options.sandbox_unavailable == SandboxUnavailable::Fail {
-        return Err(HostError::Policy(
-            "a requested sandbox cannot be enforced until Landlock support is enabled".to_owned(),
-        ));
-    }
+    let sandbox = PreparedSandbox::prepare(&options)?;
 
     // A launching shell may send SIGHUP as it exits. The PTY child restores the default before
     // exec, while the host deliberately stays independent of the launcher.
@@ -89,10 +91,10 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         },
     )?;
     let started_at = epoch_millis()?;
-    let mut metadata = initial_metadata(&options, started_at)?;
+    let mut metadata = initial_metadata(&options, &sandbox, started_at)?;
     journal::write_metadata(&options.session_dir, &metadata, Durability::Buffered)?;
 
-    let (child_pid, master, descendants) = spawn_pty(&prepared, options.cols, options.rows)?;
+    let (child_pid, master, descendants) = spawn_pty(&prepared, options.cols, options.rows, sandbox)?;
     let child_pid_u64 = u64::try_from(child_pid)
         .map_err(|_| HostError::InvalidOptions("child PID is not representable".to_owned()))?;
     metadata.child_pid = Some(child_pid_u64);
@@ -223,6 +225,7 @@ fn native_c_string(value: &OsStr, description: &str) -> Result<CString, HostErro
 
 fn initial_metadata(
     options: &SessionOptions,
+    prepared_sandbox: &PreparedSandbox,
     started_at: u64,
 ) -> Result<Metadata, HostError> {
     let command = options
@@ -242,6 +245,21 @@ fn initial_metadata(
             HostError::InvalidOptions("working directory is not valid UTF-8".to_owned())
         })?
         .to_owned();
+    let policy = prepared_sandbox.policy();
+    let rules = policy
+        .map(|policy| {
+            policy
+                .rules
+                .iter()
+                .map(|rule| SandboxRuleMetadata {
+                    path: rule.path.to_string_lossy().into_owned(),
+                    rights: right_names(rule.rights),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let read_write_paths = policy_paths(policy, 16_390);
+    let read_only_paths = policy_paths(policy, 4);
     Ok(Metadata {
         metadata_version: 1,
         journal_format_version: protocol::JOURNAL_VERSION,
@@ -259,14 +277,21 @@ fn initial_metadata(
         current_rows: options.rows,
         term: options.term.clone(),
         sandbox: SandboxMetadata {
-            requested: options.sandbox_policy.is_some(),
-            enforcement: SandboxEnforcement::None,
+            requested: prepared_sandbox.requested(),
+            enforcement: if prepared_sandbox.enforced() {
+                SandboxEnforcement::Landlock
+            } else {
+                SandboxEnforcement::None
+            },
             unavailable_policy: match options.sandbox_unavailable {
                 SandboxUnavailable::Fail => SandboxUnavailablePolicy::Fail,
                 SandboxUnavailable::RunUnsandboxed => SandboxUnavailablePolicy::RunUnsandboxed,
             },
-            read_write_paths: Vec::new(),
-            read_only_paths: Vec::new(),
+            read_write_paths,
+            read_only_paths,
+            policy_version: policy.map(|policy| policy.version),
+            handled_rights: policy.map(|policy| policy.handled_rights),
+            rules,
         },
         control: ControlMetadata {
             transport: ControlTransport::UnixDomainSocket,
@@ -275,15 +300,53 @@ fn initial_metadata(
     })
 }
 
+fn policy_paths(policy: Option<&crate::sandbox::CompiledPolicy>, rights: u64) -> Vec<String> {
+    policy
+        .map(|policy| {
+            policy.rules.iter().filter(|rule| rule.rights == rights)
+                .map(|rule| rule.path.to_string_lossy().into_owned()).collect()
+        })
+        .unwrap_or_default()
+}
+
+fn right_names(mask: u64) -> Vec<String> {
+    const NAMES: [&str; 17] = [
+        "execute", "write-file", "read-file", "read-dir", "remove-dir", "remove-file",
+        "make-char", "make-dir", "make-reg", "make-sock", "make-fifo", "make-block",
+        "make-sym", "refer", "truncate", "ioctl-dev", "resolve-unix",
+    ];
+    NAMES.iter().enumerate().filter(|(bit, _)| mask & (1 << bit) != 0)
+        .map(|(_, name)| (*name).to_owned()).collect()
+}
+
 fn spawn_pty(
     command: &PreparedCommand,
     cols: u16,
     rows: u16,
+    sandbox: PreparedSandbox,
 ) -> Result<(libc::pid_t, File, DescendantTracker), HostError> {
     prepare_descendant_tracking()?;
     let mut start_pipe = [-1; 2];
     if unsafe { libc::pipe(start_pipe.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error().into());
+    }
+    let mut setup_pipe = [-1; 2];
+    if unsafe { libc::pipe(setup_pipe.as_mut_ptr()) } != 0 {
+        unsafe {
+            libc::close(start_pipe[0]);
+            libc::close(start_pipe[1]);
+        }
+        return Err(io::Error::last_os_error().into());
+    }
+    if unsafe { libc::fcntl(setup_pipe[1], libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+        let error = io::Error::last_os_error();
+        unsafe {
+            libc::close(start_pipe[0]);
+            libc::close(start_pipe[1]);
+            libc::close(setup_pipe[0]);
+            libc::close(setup_pipe[1]);
+        }
+        return Err(error.into());
     }
     let mut master = -1;
     let mut dimensions = libc::winsize {
@@ -310,11 +373,14 @@ fn spawn_pty(
         unsafe {
             libc::close(start_pipe[0]);
             libc::close(start_pipe[1]);
+            libc::close(setup_pipe[0]);
+            libc::close(setup_pipe[1]);
         }
         return Err(io::Error::last_os_error().into());
     }
     if pid == 0 {
         unsafe {
+            libc::close(setup_pipe[0]);
             libc::close(start_pipe[1]);
             let mut release = 0_u8;
             loop {
@@ -331,16 +397,21 @@ fn spawn_pty(
             }
             libc::close(start_pipe[0]);
         }
-        exec_child(command, &argument_pointers);
+        if sandbox.restrict_child().is_err() {
+            unsafe { child_exec_failed(setup_pipe[1], CHILD_SETUP_SANDBOX, b"") }
+        }
+        exec_child(command, &argument_pointers, setup_pipe[1]);
     }
     unsafe {
         libc::close(start_pipe[0]);
+        libc::close(setup_pipe[1]);
     }
     let pty = match pty_slave_identity(master) {
         Ok(pty) => pty,
         Err(error) => {
             unsafe {
                 libc::close(start_pipe[1]);
+                libc::close(setup_pipe[0]);
                 libc::close(master);
                 libc::kill(pid, libc::SIGKILL);
             }
@@ -353,6 +424,7 @@ fn spawn_pty(
         Err(error) => {
             unsafe {
                 libc::close(start_pipe[1]);
+                libc::close(setup_pipe[0]);
                 libc::close(master);
                 libc::kill(pid, libc::SIGKILL);
             }
@@ -369,10 +441,36 @@ fn spawn_pty(
         let error = io::Error::last_os_error();
         unsafe {
             libc::close(master);
+            libc::close(setup_pipe[0]);
             libc::kill(pid, libc::SIGKILL);
         }
         let _ = wait_for_child(pid);
         return Err(error.into());
+    }
+    let mut setup = 0_u8;
+    let setup_result = loop {
+        let result = unsafe { libc::read(setup_pipe[0], (&mut setup as *mut u8).cast(), 1) };
+        if result >= 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            break result;
+        }
+    };
+    unsafe { libc::close(setup_pipe[0]); }
+    if setup_result < 0 {
+        let error = io::Error::last_os_error();
+        unsafe {
+            libc::close(master);
+            libc::kill(pid, libc::SIGKILL);
+        }
+        let _ = wait_for_child(pid);
+        return Err(error.into());
+    }
+    if setup_result == 1 {
+        unsafe {
+            libc::close(master);
+            libc::kill(pid, libc::SIGKILL);
+        }
+        let _ = wait_for_child(pid);
+        return Err(child_setup_error(setup));
     }
     let master = unsafe { File::from_raw_fd(master) };
     Ok((pid, master, descendants))
@@ -399,31 +497,62 @@ fn pty_slave_identity(master: libc::c_int) -> io::Result<PtySlaveIdentity> {
     })
 }
 
-fn exec_child(command: &PreparedCommand, arguments: &[*const libc::c_char]) -> ! {
+fn exec_child(
+    command: &PreparedCommand,
+    arguments: &[*const libc::c_char],
+    setup_fd: libc::c_int,
+) -> ! {
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_DFL);
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
         if libc::chdir(command.cwd.as_ptr()) != 0 {
-            child_exec_failed(b"session-host: cannot change child working directory\r\n");
+            child_exec_failed(
+                setup_fd,
+                CHILD_SETUP_CWD,
+                b"session-host: cannot change child working directory\r\n",
+            );
         }
         if libc::setenv(c"TERM".as_ptr(), command.term.as_ptr(), 1) != 0 {
-            child_exec_failed(b"session-host: cannot set TERM\r\n");
+            child_exec_failed(setup_fd, CHILD_SETUP_TERM, b"session-host: cannot set TERM\r\n");
         }
         if let Some(colorterm) = &command.colorterm
             && libc::setenv(c"COLORTERM".as_ptr(), colorterm.as_ptr(), 1) != 0
         {
-            child_exec_failed(b"session-host: cannot set COLORTERM\r\n");
+            child_exec_failed(
+                setup_fd,
+                CHILD_SETUP_COLORTERM,
+                b"session-host: cannot set COLORTERM\r\n",
+            );
         }
         libc::execvp(arguments[0], arguments.as_ptr());
-        child_exec_failed(b"session-host: cannot execute child command\r\n");
+        child_exec_failed(
+            setup_fd,
+            CHILD_SETUP_EXEC,
+            b"session-host: cannot execute child command\r\n",
+        );
     }
 }
 
-unsafe fn child_exec_failed(message: &[u8]) -> ! {
+unsafe fn child_exec_failed(setup_fd: libc::c_int, code: u8, message: &[u8]) -> ! {
     unsafe {
+        while libc::write(setup_fd, (&code as *const u8).cast(), 1) < 0
+            && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+        {}
         libc::write(libc::STDERR_FILENO, message.as_ptr().cast(), message.len());
         libc::_exit(127);
     }
+}
+
+fn child_setup_error(code: u8) -> HostError {
+    let detail = match code {
+        CHILD_SETUP_SANDBOX => return HostError::Policy("child failed to apply Landlock policy".to_owned()),
+        CHILD_SETUP_CWD => "child failed to change working directory",
+        CHILD_SETUP_TERM => "child failed to set TERM",
+        CHILD_SETUP_COLORTERM => "child failed to set COLORTERM",
+        CHILD_SETUP_EXEC => "child command exec failed",
+        _ => "child reported an unknown pre-exec failure",
+    };
+    HostError::Io(io::Error::other(detail))
 }
 
 struct SharedState {

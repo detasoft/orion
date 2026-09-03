@@ -10,12 +10,20 @@ import pro.deta.orion.agentd.session.OperationDeadline;
 import pro.deta.orion.agentd.session.SessionControlClient;
 import pro.deta.orion.agentd.session.SessionManifest;
 import pro.deta.orion.agentd.session.SessionManifestReader;
+import pro.deta.orion.agentd.sandbox.CompiledPolicy;
+import pro.deta.orion.agentd.sandbox.CompiledPolicyWriter;
+import pro.deta.orion.agentd.sandbox.LandlockPolicyCompiler;
+import pro.deta.orion.agentd.sandbox.PolicyException;
+import pro.deta.orion.agentd.sandbox.SourcePolicyParser;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -23,6 +31,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.LongSupplier;
 
 public final class NativeRuntime implements SessionRuntime {
@@ -128,6 +137,12 @@ public final class NativeRuntime implements SessionRuntime {
             return SessionLaunchResult.failed(failed.kind(), failed.detail());
         }
         Path workingDirectory = ((WorkspaceResolver.Resolution.Resolved) resolution).workingDirectory();
+        CompiledPolicy compiledPolicy;
+        try {
+            compiledPolicy = compilePolicy(spec);
+        } catch (IOException | PolicyException error) {
+            return invalid(detail(error));
+        }
         Path sessionDirectory = sessionsDirectory.resolve(spec.sessionId().value()).normalize();
         if (!sessionDirectory.startsWith(sessionsDirectory) || sessionDirectory.equals(sessionsDirectory)) {
             return SessionLaunchResult.failed(
@@ -144,14 +159,45 @@ public final class NativeRuntime implements SessionRuntime {
                     SessionLaunchResult.FailureKind.LAUNCH_FAILED, error.getMessage());
         }
 
+        Optional<Path> compiledPolicyPath = Optional.empty();
+        if (compiledPolicy != null) {
+            try {
+                compiledPolicyPath = Optional.of(
+                        new CompiledPolicyWriter().write(sessionDirectory, compiledPolicy));
+            } catch (IOException | RuntimeException error) {
+                return cleanupWithoutProcess(sessionDirectory, error);
+            }
+        }
+
         DetachedProcessLauncher.TentativeProcess process;
         try {
-            process = launcher.launch(command(spec, workingDirectory, sessionDirectory),
+            process = launcher.launch(command(spec, workingDirectory, sessionDirectory, compiledPolicyPath),
                     sessionDirectory.resolve("session-host.log"));
         } catch (IOException | RuntimeException error) {
             return cleanupWithoutProcess(sessionDirectory, error);
         }
         return awaitHandoff(spec, sessionDirectory, process);
+    }
+
+    private static CompiledPolicy compilePolicy(SessionSpec spec) throws IOException {
+        if (spec.sandbox().policy().isEmpty()) {
+            return null;
+        }
+        Path source = spec.sandbox().policy().orElseThrow();
+        BasicFileAttributes attributes = Files.readAttributes(
+                source, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isRegularFile()) {
+            throw new PolicyException("sandbox policy is not a regular file");
+        }
+        byte[] bytes;
+        try (InputStream input = Files.newInputStream(source, LinkOption.NOFOLLOW_LINKS)) {
+            bytes = input.readNBytes(SourcePolicyParser.MAX_SOURCE_BYTES + 1);
+        }
+        if (bytes.length > SourcePolicyParser.MAX_SOURCE_BYTES) {
+            throw new PolicyException("sandbox policy exceeds the size limit");
+        }
+        String text = StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString();
+        return new LandlockPolicyCompiler().compile(new SourcePolicyParser().parse(text));
     }
 
     private SessionLaunchResult awaitHandoff(
@@ -244,7 +290,12 @@ public final class NativeRuntime implements SessionRuntime {
         return null;
     }
 
-    private List<String> command(SessionSpec spec, Path workingDirectory, Path sessionDirectory) {
+    private List<String> command(
+            SessionSpec spec,
+            Path workingDirectory,
+            Path sessionDirectory,
+            Optional<Path> compiledPolicy
+    ) {
         List<String> command = new ArrayList<>();
         command.add(executable.toString());
         option(command, "--session-id", spec.sessionId().value());
@@ -254,8 +305,8 @@ public final class NativeRuntime implements SessionRuntime {
         option(command, "--rows", Integer.toString(spec.rows()));
         option(command, "--term", spec.terminalType());
         spec.colorTerminal().ifPresent(value -> option(command, "--colorterm", value));
-        spec.sandbox().policy().ifPresent(policy -> option(command, "--sandbox-policy", policy.toString()));
-        if (spec.sandbox().policy().isPresent()) {
+        compiledPolicy.ifPresent(policy -> option(command, "--sandbox-policy", policy.toString()));
+        if (compiledPolicy.isPresent()) {
             String unavailable = spec.sandbox().unavailable() == SessionSpec.Unavailable.FAIL
                     ? "fail"
                     : "run-unsandboxed";
