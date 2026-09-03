@@ -12,4 +12,3 @@ fatal.
   native host CLI.
 - [ ] Preserve fail-closed handling after Landlock compatibility succeeds.
 - [ ] Cover unsupported-machine fallback and policy failures on Linux.
-  - Owner: codex, session landlock-fallback-0904, started 2026-09-04 01:19 Europe/Amsterdam.
