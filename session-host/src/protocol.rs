@@ -354,11 +354,26 @@ mod tests {
     }
 
     #[test]
-    fn metadata_fixture_declares_event_id_bounds() {
+    fn metadata_fixture_contains_only_session_manifest_fields() {
         let metadata = include_str!("../protocol/fixtures/metadata-v1.json");
-        assert!(metadata.contains("\"oldestAvailableEventId\": 1"));
-        assert!(metadata.contains("\"latestEventId\": 4"));
-        assert!(!metadata.contains("Timestamp"));
+        for required in [
+            "\"sessionId\"",
+            "\"childPid\"",
+            "\"currentCols\"",
+            "\"sandbox\"",
+            "\"control\"",
+        ] {
+            assert!(metadata.contains(required), "metadata fixture lacks {required}");
+        }
+        for removed in [
+            "journalId",
+            "state",
+            "activeSegment",
+            "oldestAvailableEventId",
+            "latestEventId",
+        ] {
+            assert!(!metadata.contains(removed), "metadata fixture contains {removed}");
+        }
     }
 
     #[test]

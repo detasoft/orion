@@ -200,17 +200,24 @@ The status payload is:
 `metadata` is UTF-8 JSON with `metadataVersion: 1`. Writers create a complete
 temporary file in the session directory, apply the configured durability
 policy, and atomically replace `metadata`. Readers ignore unknown object
-fields. Its version-1 journal-bound fields are named
-`oldestAvailableEventId` and `latestEventId`; both are nonzero `u64` values or
-both are null. They are snapshots for discovery and status, not required
-journal indexes. `activeSegment` is a nonzero segment number. The checked-in
-`metadata-v1.json` is the canonical field and formatting example.
+fields. The checked-in `metadata-v1.json` is the canonical field and formatting
+example.
 
-Metadata also contains session and journal identity, wall-clock creation and
-start times, command, working directory, host/child process identity,
-lifecycle state, terminal dimensions and type, sandbox description, and the
-control endpoint. The dedicated metadata-manifest task owns further reduction
-of those fields and per-event metadata writes.
+Metadata is a session manifest, not a journal index or lifecycle record. It
+contains compatibility versions, session identity, wall-clock creation and
+start times, command, working directory, host and child process identity,
+initial and latest successfully applied terminal dimensions, terminal type,
+sandbox description, and the control endpoint. Writers persist the manifest
+when the session directory is created, after publishing the child process
+identity, and after a successful resize. Output, input, signals, process exit,
+journal appends, rotation, and retention do not rewrite it.
+
+Journal identity, segment discovery, retained event bounds, and exact lifecycle
+history come from journal files. A live `STATUS` response derives its lifecycle
+observation from current host state and its oldest/latest event IDs from the
+active journal writer; it does not read those facts from metadata. The removed
+`journalId`, `state`, `activeSegment`, `oldestAvailableEventId`, and
+`latestEventId` fields are not part of the metadata v1 manifest contract.
 
 `sandbox` contains boolean `requested`, enum `enforcement` (`none`, `landlock`,
 or `future`), enum `unavailablePolicy` (`fail` or `run-unsandboxed`), and arrays

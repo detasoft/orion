@@ -3,14 +3,12 @@
   "journalFormatVersion": 1,
   "controlProtocolVersion": 1,
   "sessionId": "019d-session-fixture",
-  "journalId": "00010203-0405-0607-0809-0a0b0c0d0e0f",
   "createdAtEpochMillis": 1750000000000,
   "sessionStartEpochMillis": 1750000000123,
   "command": ["bash", "-l"],
   "cwd": "/work/project",
   "hostPid": 4242,
   "childPid": 4243,
-  "state": "running",
   "initialCols": 160,
   "initialRows": 50,
   "currentCols": 180,
@@ -26,8 +24,5 @@
   "control": {
     "transport": "unix-domain-socket",
     "endpoint": "control.sock"
-  },
-  "activeSegment": 1,
-  "oldestAvailableEventId": 1,
-  "latestEventId": 4
+  }
 }

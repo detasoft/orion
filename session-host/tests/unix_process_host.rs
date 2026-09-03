@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use orion_session_host::host::{self, OwnedControlFrame};
-use orion_session_host::journal::{self, Metadata, SessionState};
+use orion_session_host::journal::{self, Metadata};
 use orion_session_host::protocol::{
     self, MAX_PAYLOAD_LENGTH, control_message, event_type,
 };
@@ -58,7 +58,6 @@ fn hosts_a_real_tty_and_preserves_raw_output() {
     );
 
     let metadata = journal::read_metadata(host.directory()).unwrap();
-    assert_eq!(metadata.state, SessionState::Exited);
     assert_eq!(metadata.current_cols, 80);
     assert_eq!(metadata.current_rows, 24);
 }
@@ -97,8 +96,6 @@ fn bounds_compresses_and_replays_the_session_journal() {
         event_type::PROCESS_EXITED
     );
 
-    let metadata = journal::read_metadata(host.directory()).unwrap();
-    assert_eq!(metadata.active_segment, active_segments[0]);
 }
 
 #[test]
@@ -121,10 +118,19 @@ fn orders_control_commands_and_deduplicates_input_after_reconnect() {
     let mut first = connect(host.directory());
     let status = request(&mut first, control_message::STATUS, 1, &[]);
     assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
+    let journal_at_status = journal::read(host.directory(), 0).unwrap();
     assert_eq!(u16_at(&status.payload[0..2]), 2);
     assert_eq!(u16_at(&status.payload[2..4]) & 3, 3);
     assert_eq!(u32_at(&status.payload[4..8]), 80);
     assert_eq!(u32_at(&status.payload[8..12]), 24);
+    assert_eq!(
+        u64_at(&status.payload[28..36]),
+        journal_at_status.events.first().unwrap().event_id
+    );
+    assert_eq!(
+        u64_at(&status.payload[36..44]),
+        journal_at_status.events.last().unwrap().event_id
+    );
 
     let resize = protocol::pty_resize_payload(101, 37);
     let resized = request(&mut first, control_message::RESIZE, 2, &resize);
@@ -182,6 +188,48 @@ fn orders_control_commands_and_deduplicates_input_after_reconnect() {
     let metadata = journal::read_metadata(host.directory()).unwrap();
     assert_eq!(metadata.current_cols, 101);
     assert_eq!(metadata.current_rows, 37);
+}
+
+#[test]
+fn leaves_metadata_unchanged_across_output_input_and_signal_events() {
+    let directory = temporary_directory("stable-metadata");
+    let mut host = HostGuard::spawn(
+        directory,
+        &[
+            "/bin/sh",
+            "-c",
+            "stty -echo; printf READY; IFS= read -r line; printf 'GOT:%s\\n' \"$line\"; sleep 30",
+        ],
+        "xterm-256color",
+        80,
+        24,
+    );
+    wait_for_output(host.directory(), b"READY");
+
+    let mut stream = connect(host.directory());
+    let status = request(&mut stream, control_message::STATUS, 1, &[]);
+    assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
+    let metadata_before = fs::read(host.directory().join("metadata")).unwrap();
+
+    let input = protocol::pty_input_payload([0x6d; 16], b"hello\n").unwrap();
+    let accepted = request(&mut stream, control_message::INPUT, 2, &input);
+    assert_eq!(accepted.message_type, control_message::ACCEPTED);
+    wait_for_output(host.directory(), b"GOT:hello");
+
+    let signal = host::signal_payload(1, -1);
+    let signalled = request(&mut stream, control_message::SIGNAL, 3, &signal);
+    assert_eq!(signalled.message_type, control_message::ACCEPTED);
+    drop(stream);
+
+    let process_status = host.wait_with_timeout(Duration::from_secs(2));
+    assert!(process_status.success(), "session-host exited with {process_status}");
+    let metadata_after = fs::read(host.directory().join("metadata")).unwrap();
+    assert_eq!(metadata_after, metadata_before);
+
+    let result = journal::read(host.directory(), 0).unwrap();
+    assert!(result.events.iter().any(|event| event.event_type == event_type::PTY_INPUT));
+    assert!(result.events.iter().any(|event| event.event_type == event_type::PTY_OUTPUT));
+    assert!(result.events.iter().any(|event| event.event_type == event_type::SIGNAL));
 }
 
 #[test]
@@ -349,7 +397,7 @@ fn remains_available_after_the_launching_process_exits() {
     assert_eq!(response.message_type, control_message::ACCEPTED);
     drop(stream);
 
-    wait_for_state(directory.path(), SessionState::Exited);
+    wait_for_event(directory.path(), event_type::PROCESS_EXITED);
     let result = journal::read(directory.path(), 0).unwrap();
     assert!(contains(&terminal_output(&result.events), b"SURVIVED:yes"));
     wait_for_process_exit(host_pid);
@@ -603,22 +651,6 @@ fn wait_for_event(directory: &Path, expected: u16) {
         assert!(
             Instant::now() < deadline,
             "timed out waiting for journal event {expected:#06x}"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
-fn wait_for_state(directory: &Path, expected: SessionState) {
-    let deadline = Instant::now() + TIMEOUT;
-    loop {
-        if let Ok(metadata) = journal::read_metadata(directory)
-            && metadata.state == expected
-        {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for metadata state"
         );
         thread::sleep(Duration::from_millis(10));
     }

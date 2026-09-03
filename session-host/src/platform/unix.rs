@@ -22,7 +22,7 @@ use crate::host::{
 };
 use crate::journal::{
     self, ControlMetadata, ControlTransport, Durability, JournalConfig, JournalWriter, Metadata,
-    SandboxEnforcement, SandboxMetadata, SandboxUnavailablePolicy, SessionState,
+    SandboxEnforcement, SandboxMetadata, SandboxUnavailablePolicy,
 };
 use crate::protocol::{self, control_message, event_type};
 
@@ -89,14 +89,13 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         },
     )?;
     let started_at = epoch_millis()?;
-    let mut metadata = initial_metadata(&options, journal_id, started_at)?;
+    let mut metadata = initial_metadata(&options, started_at)?;
     journal::write_metadata(&options.session_dir, &metadata, Durability::Buffered)?;
 
     let (child_pid, master, descendants) = spawn_pty(&prepared, options.cols, options.rows)?;
     let child_pid_u64 = u64::try_from(child_pid)
         .map_err(|_| HostError::InvalidOptions("child PID is not representable".to_owned()))?;
     metadata.child_pid = Some(child_pid_u64);
-    metadata.state = SessionState::Running;
 
     let state = Arc::new(Mutex::new(SharedState {
         journal,
@@ -153,8 +152,6 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         state.exit_signal = exit_signal;
         let payload = protocol::process_exited_payload(exit_code, exit_signal);
         state.append(event_type::PROCESS_EXITED, &payload)?;
-        state.metadata.state = SessionState::Exited;
-        state.persist_metadata()?;
         state.journal.flush()?;
     }
 
@@ -226,7 +223,6 @@ fn native_c_string(value: &OsStr, description: &str) -> Result<CString, HostErro
 
 fn initial_metadata(
     options: &SessionOptions,
-    journal_id: [u8; 16],
     started_at: u64,
 ) -> Result<Metadata, HostError> {
     let command = options
@@ -251,14 +247,12 @@ fn initial_metadata(
         journal_format_version: protocol::JOURNAL_VERSION,
         control_protocol_version: protocol::CONTROL_VERSION,
         session_id: options.session_id.clone(),
-        journal_id: format_journal_id(journal_id),
         created_at_epoch_millis: started_at,
         session_start_epoch_millis: started_at,
         command,
         cwd,
         host_pid: u64::from(std::process::id()),
         child_pid: None,
-        state: SessionState::Starting,
         initial_cols: options.cols,
         initial_rows: options.rows,
         current_cols: options.cols,
@@ -278,9 +272,6 @@ fn initial_metadata(
             transport: ControlTransport::UnixDomainSocket,
             endpoint: CONTROL_ENDPOINT.to_owned(),
         },
-        active_segment: 1,
-        oldest_available_event_id: None,
-        latest_event_id: None,
     })
 }
 
@@ -451,13 +442,6 @@ impl SharedState {
     fn append(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
         let event_id = self.journal.append(event, 1, 0, payload)?;
         self.journal.flush()?;
-        self.metadata.oldest_available_event_id = Some(
-            self.metadata
-                .oldest_available_event_id
-                .unwrap_or(event_id),
-        );
-        self.metadata.latest_event_id = Some(event_id);
-        self.metadata.active_segment = self.journal.active_segment_number();
         Ok(event_id)
     }
 
@@ -479,7 +463,6 @@ fn copy_pty_output(mut master: File, state: Arc<Mutex<SharedState>>) -> Result<(
             Ok(length) => {
                 let mut state = lock_state(&state)?;
                 state.append(event_type::PTY_OUTPUT, &buffer[..length])?;
-                state.persist_metadata()?;
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) if error.raw_os_error() == Some(libc::EIO) => return Ok(()),
@@ -595,9 +578,6 @@ fn handle_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8
         Ok(master) => master,
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
-    if let Err(error) = state.persist_metadata() {
-        return response_error(ERROR_IO, &error.to_string());
-    }
     drop(state);
     if let Err(error) = master.write_all(&payload[16..]) {
         return response_error(ERROR_IO, &error.to_string());
@@ -695,12 +675,7 @@ fn handle_status(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
     let mut payload = vec![0_u8; 64];
-    let state_code: u16 = match state.metadata.state {
-        SessionState::Starting => 1,
-        SessionState::Running => 2,
-        SessionState::Exited => 3,
-        SessionState::Failed => 4,
-    };
+    let state_code: u16 = if state.child_live { 2 } else { 3 };
     payload[0..2].copy_from_slice(&state_code.to_le_bytes());
     let flags = 1_u16 | if state.child_live { 2 } else { 0 };
     payload[2..4].copy_from_slice(&flags.to_le_bytes());
@@ -708,20 +683,10 @@ fn handle_status(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u
     payload[8..12].copy_from_slice(&u32::from(state.metadata.current_rows).to_le_bytes());
     payload[12..20].copy_from_slice(&state.metadata.host_pid.to_le_bytes());
     payload[20..28].copy_from_slice(&state.metadata.child_pid.unwrap_or(u64::MAX).to_le_bytes());
-    payload[28..36].copy_from_slice(
-        &state
-            .metadata
-            .oldest_available_event_id
-            .unwrap_or(u64::MAX)
-            .to_le_bytes(),
-    );
-    payload[36..44].copy_from_slice(
-        &state
-            .metadata
-            .latest_event_id
-            .unwrap_or(u64::MAX)
-            .to_le_bytes(),
-    );
+    payload[28..36]
+        .copy_from_slice(&state.journal.first_event_id().unwrap_or(u64::MAX).to_le_bytes());
+    payload[36..44]
+        .copy_from_slice(&state.journal.latest_event_id().unwrap_or(u64::MAX).to_le_bytes());
     payload[44..48].copy_from_slice(&state.exit_code.to_le_bytes());
     payload[48..52].copy_from_slice(&state.exit_signal.to_le_bytes());
     payload[52..54].copy_from_slice(&protocol::JOURNAL_VERSION.to_le_bytes());
@@ -749,9 +714,6 @@ fn apply_foreground_signal(
     let foreground_group = unsafe { libc::tcgetpgrp(state.master.as_raw_fd()) };
     if foreground_group < 0 {
         return response_error(ERROR_IO, &io::Error::last_os_error().to_string());
-    }
-    if let Err(error) = state.persist_metadata() {
-        return response_error(ERROR_IO, &error.to_string());
     }
     drop(state);
     if unsafe { libc::kill(-foreground_group, signal) } != 0 {
@@ -781,9 +743,6 @@ fn apply_descendant_signal(
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
     let descendants = Arc::clone(&state.descendants);
-    if let Err(error) = state.persist_metadata() {
-        return response_error(ERROR_IO, &error.to_string());
-    }
     drop(state);
     if let Err(error) = lock_descendants(&descendants).and_then(|mut tracker| tracker.signal(signal)) {
         return response_error(ERROR_IO, &error.to_string());
@@ -1265,18 +1224,6 @@ fn random_journal_id() -> Result<[u8; 16], HostError> {
     Ok(value)
 }
 
-fn format_journal_id(value: [u8; 16]) -> String {
-    let mut result = String::with_capacity(36);
-    for (index, byte) in value.iter().enumerate() {
-        if matches!(index, 4 | 6 | 8 | 10) {
-            result.push('-');
-        }
-        use std::fmt::Write as _;
-        write!(&mut result, "{byte:02x}").unwrap();
-    }
-    result
-}
-
 fn epoch_millis() -> Result<u64, HostError> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1301,17 +1248,6 @@ mod tests {
         assert!(!confirmation.observe(false));
         assert!(!confirmation.observe(false));
         assert!(confirmation.observe(false));
-    }
-
-    #[test]
-    fn journal_ids_use_canonical_uuid_text() {
-        assert_eq!(
-            format_journal_id([
-                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x46, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
-                0xee, 0xff,
-            ]),
-            "00112233-4455-4677-8899-aabbccddeeff"
-        );
     }
 
     #[test]

@@ -1534,14 +1534,12 @@ pub struct Metadata {
     pub journal_format_version: u16,
     pub control_protocol_version: u16,
     pub session_id: String,
-    pub journal_id: String,
     pub created_at_epoch_millis: u64,
     pub session_start_epoch_millis: u64,
     pub command: Vec<String>,
     pub cwd: String,
     pub host_pid: u64,
     pub child_pid: Option<u64>,
-    pub state: SessionState,
     pub initial_cols: u16,
     pub initial_rows: u16,
     pub current_cols: u16,
@@ -1549,18 +1547,6 @@ pub struct Metadata {
     pub term: String,
     pub sandbox: SandboxMetadata,
     pub control: ControlMetadata,
-    pub active_segment: u64,
-    pub oldest_available_event_id: Option<u64>,
-    pub latest_event_id: Option<u64>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SessionState {
-    Starting,
-    Running,
-    Exited,
-    Failed,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1670,7 +1656,6 @@ fn validate_metadata(metadata: &Metadata) -> Result<(), JournalError> {
         || metadata.journal_format_version != protocol::JOURNAL_VERSION
         || metadata.control_protocol_version != protocol::CONTROL_VERSION
         || !valid_session_id(&metadata.session_id)
-        || !valid_journal_id(&metadata.journal_id)
         || metadata.command.is_empty()
         || metadata.cwd.is_empty()
         || metadata.host_pid == 0
@@ -1679,16 +1664,11 @@ fn validate_metadata(metadata: &Metadata) -> Result<(), JournalError> {
         || !valid_dimensions(metadata.current_cols, metadata.current_rows)
         || metadata.term.is_empty()
         || metadata.term.len() > 128
-        || metadata.active_segment == 0
         || metadata.control.endpoint.is_empty()
     {
         return Err(JournalError::Format("metadata has invalid required fields".to_owned()));
     }
-    match (metadata.oldest_available_event_id, metadata.latest_event_id) {
-        (None, None) => Ok(()),
-        (Some(oldest), Some(latest)) if oldest != 0 && oldest <= latest => Ok(()),
-        _ => Err(JournalError::Format("metadata event IDs are invalid".to_owned())),
-    }
+    Ok(())
 }
 
 fn valid_session_id(value: &str) -> bool {
@@ -1698,17 +1678,6 @@ fn valid_session_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-fn valid_journal_id(value: &str) -> bool {
-    value.len() == 36
-        && value.bytes().enumerate().all(|(index, byte)| {
-            if matches!(index, 8 | 13 | 18 | 23) {
-                byte == b'-'
-            } else {
-                byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
-            }
-        })
 }
 
 fn valid_dimensions(cols: u16, rows: u16) -> bool {
@@ -3095,21 +3064,19 @@ mod tests {
     }
 
     #[test]
-    fn metadata_round_trips_event_id_bounds() {
+    fn metadata_round_trips_only_manifest_fields() {
         let directory = temporary_directory("metadata");
         let metadata = Metadata {
             metadata_version: 1,
             journal_format_version: 1,
             control_protocol_version: 1,
             session_id: "session-1".to_owned(),
-            journal_id: "00010203-0405-0607-0809-0a0b0c0d0e0f".to_owned(),
             created_at_epoch_millis: 1,
             session_start_epoch_millis: 2,
             command: vec!["bash".to_owned(), String::new()],
             cwd: "/work".to_owned(),
             host_pid: 10,
             child_pid: None,
-            state: SessionState::Starting,
             initial_cols: 160,
             initial_rows: 50,
             current_cols: 160,
@@ -3126,11 +3093,18 @@ mod tests {
                 transport: ControlTransport::UnixDomainSocket,
                 endpoint: "control.sock".to_owned(),
             },
-            active_segment: 1,
-            oldest_available_event_id: Some(7),
-            latest_event_id: Some(9),
         };
         write_metadata(&directory, &metadata, Durability::EveryRecord).unwrap();
+        let encoded = fs::read_to_string(directory.join(METADATA_NAME)).unwrap();
+        for removed in [
+            "journalId",
+            "state",
+            "activeSegment",
+            "oldestAvailableEventId",
+            "latestEventId",
+        ] {
+            assert!(!encoded.contains(removed), "metadata contains {removed}");
+        }
         assert_eq!(read_metadata(&directory).unwrap(), metadata);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -3148,7 +3122,7 @@ mod tests {
             .insert("futureField".to_owned(), serde_json::json!(true));
         fs::write(directory.join(METADATA_NAME), serde_json::to_vec(&value).unwrap()).unwrap();
 
-        assert_eq!(read_metadata(&directory).unwrap().state, SessionState::Running);
+        assert_eq!(read_metadata(&directory).unwrap().session_id, "019d-session-fixture");
         fs::remove_dir_all(directory).unwrap();
     }
 }
