@@ -7,6 +7,9 @@ Journal contract: ../../../2026-09-02-session-journal-cbor-sequence.md
 Store the authoritative replicated prefix of each raw session journal and make
 the committed prefix the only source of resume cursors.
 
+- [ ] Implement durable session journal storage.
+  - Owner: codex, session journal-storage-3f6a, started 2026-09-03 11:32 Europe/Amsterdam.
+
 ## Scope
 
 - Define `SessionJournalStorage` operations for first and last event IDs,
