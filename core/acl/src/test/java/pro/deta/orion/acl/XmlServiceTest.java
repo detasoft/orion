@@ -14,11 +14,17 @@ class XmlServiceTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
-    void serializesCollectionItemsWithSingularElementNames() throws Exception {
+    void serializesVersionTwoWithSingularCollectionItemNames() throws Exception {
         String xml = serialize(ACLUtil.generateDefaultAccessControl("root-password-hash"));
 
+        assertThat(xml).contains("<orion schemaVersion=\"2\">");
+        assertThat(xml).contains("<system>");
+        assertThat(xml).contains("<accessControl>");
+        assertThat(xml).contains("<organizations/>");
+        assertThat(xml).doesNotContain("<AccessControl");
+
         assertThat(xml).contains("<users>");
-        assertThat(xml).contains("<user>");
+        assertThat(xml).contains("<user id=\"root\">");
         assertThat(xml).doesNotContain("<users>\n    <users>");
 
         assertThat(xml).contains("<roles>");
@@ -28,7 +34,7 @@ class XmlServiceTest {
         assertThat(xml).doesNotContain("<grantReferences>\n        <grantReferences>");
 
         assertThat(xml).contains("<grants>");
-        assertThat(xml).contains("<grant>");
+        assertThat(xml).contains("<grant id=\"ALL_REPOSITORY\">");
         assertThat(xml).doesNotContain("<grants>\n    <grants>");
 
         assertThat(xml).contains("<credentials>");
@@ -38,6 +44,36 @@ class XmlServiceTest {
         assertThat(xml).contains("<info>");
         assertThat(xml).contains("<expression>");
         assertThat(xml).doesNotContain("<info>\n        <info>");
+    }
+
+    @Test
+    void readsVersionTwoAndProjectsTheSystemAccessControl() throws Exception {
+        String xml = """
+                <orion schemaVersion="2">
+                  <system>
+                    <accessControl>
+                      <users>
+                        <user id="root">
+                          <credentials/>
+                          <roles/>
+                          <grants/>
+                        </user>
+                      </users>
+                      <roles/>
+                      <grants/>
+                    </accessControl>
+                  </system>
+                  <organizations>
+                    <organization id="acme"><teams/></organization>
+                  </organizations>
+                </orion>
+                """;
+
+        AccessControl accessControl = xmlService.deserialize(
+                new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(accessControl.getUsers()).extracting(AccessControl.User::getId)
+                .containsExactly("root");
     }
 
     @Test
@@ -83,7 +119,8 @@ class XmlServiceTest {
                 </AccessControl>
                 """;
 
-        AccessControl acl = xmlService.deserialize(new ByteArrayInputStream(legacyXml.getBytes(StandardCharsets.UTF_8)));
+        AccessControl acl = xmlService.deserialize(
+                new ByteArrayInputStream(legacyXml.getBytes(StandardCharsets.UTF_8)));
 
         assertThat(acl.getUsers()).hasSize(1);
         assertThat(acl.getUsers().getFirst().getId()).isEqualTo("root");

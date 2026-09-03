@@ -2,7 +2,7 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.schema.acl.AccessControlXmlSchema;
+import pro.deta.orion.schema.orion.OrionXmlSchema;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -13,14 +13,14 @@ import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 public class OrionAccessControlSchemaRoute extends AbstractOrionHttpRoute {
     public static final String URL_PATTERN = "/schemas/orion-admin-acl.xsd";
 
-    private final AccessControlXmlSchema accessControlXmlSchema;
+    private final OrionXmlSchema orionXmlSchema;
     private final String schema;
 
     @Inject
     public OrionAccessControlSchemaRoute() {
         super(URL_PATTERN, "GET", "POST");
-        accessControlXmlSchema = new AccessControlXmlSchema();
-        schema = accessControlXmlSchema.document();
+        orionXmlSchema = new OrionXmlSchema();
+        schema = orionXmlSchema.document();
     }
 
     @Override
@@ -30,7 +30,7 @@ public class OrionAccessControlSchemaRoute extends AbstractOrionHttpRoute {
 
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
-        AccessControlXmlSchema.ValidationResult result = accessControlXmlSchema.validate(req.getInputStream());
+        OrionXmlSchema.ValidationResult result = orionXmlSchema.validate(req.getInputStream());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("valid", result.valid());
         if (!result.valid()) {

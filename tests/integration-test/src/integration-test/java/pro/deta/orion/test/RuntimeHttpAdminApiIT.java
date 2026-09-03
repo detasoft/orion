@@ -42,7 +42,7 @@ class RuntimeHttpAdminApiIT {
                     TestBearerTokens.bearer(token));
             assertThat(aclWithToken.status()).isEqualTo(HttpURLConnection.HTTP_OK);
             assertThat(aclWithToken.contentType()).startsWith("application/xml");
-            assertThat(aclWithToken.body()).contains("AccessControl");
+            assertThat(aclWithToken.body()).contains("<orion schemaVersion=\"2\">");
 
             RuntimeHttpTestSupport.HttpResponse routes = RuntimeHttpTestSupport.request(
                     "GET",

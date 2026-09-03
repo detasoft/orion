@@ -1,8 +1,8 @@
 package pro.deta.orion.acl;
 
-import jakarta.xml.bind.JAXBException;
 import pro.deta.orion.schema.acl.AccessControl;
-import pro.deta.orion.schema.acl.AccessControlXml;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionXml;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -10,19 +10,10 @@ import java.io.OutputStream;
 
 public class XmlService {
     public void serialize(AccessControl acl, OutputStream output) throws IOException {
-        try {
-            AccessControlXml.write(acl, output);
-        } catch (JAXBException e) {
-            throw new IOException("Cannot serialize ACL XML", e);
-        }
+        OrionXml.write(OrionDocument.withAccessControl(acl), output);
     }
 
     public AccessControl deserialize(InputStream inputStream) throws IOException {
-        try {
-            return AccessControlXml.read(inputStream);
-        } catch (JAXBException e) {
-            throw new IOException("Cannot deserialize ACL XML", e);
-        }
+        return OrionXml.read(inputStream).system().accessControl();
     }
-
 }

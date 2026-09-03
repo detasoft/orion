@@ -37,4 +37,3 @@ connector- and transport-specific string checks.
 ## Coordination
 
 - [Parser/storage boundary](../../git-wire-architecture-simplification/parser-storage-boundary/TASK.md)
-- [Hierarchy and identifiers](../../../current-work/hierarchical-orion-configuration/hierarchy-and-identifiers/TASK.md)

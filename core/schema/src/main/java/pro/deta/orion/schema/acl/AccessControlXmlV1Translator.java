@@ -2,7 +2,6 @@ package pro.deta.orion.schema.acl;
 
 import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.JAXBException;
-import jakarta.xml.bind.Marshaller;
 import jakarta.xml.bind.Unmarshaller;
 import jakarta.xml.bind.annotation.XmlElement;
 import jakarta.xml.bind.annotation.XmlElementWrapper;
@@ -18,9 +17,7 @@ import javax.xml.transform.stream.StreamResult;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.lang.reflect.Field;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -39,24 +36,11 @@ final class AccessControlXmlV1Translator implements AccessControlXmlTranslator {
     }
 
     @Override
-    public JAXBContext jaxbContext() {
-        return JAXB_CONTEXT;
-    }
-
-    @Override
     public AccessControl read(byte[] content) throws JAXBException, IOException {
         Unmarshaller unmarshaller = JAXB_CONTEXT.createUnmarshaller();
         AccessControlV1 dto = (AccessControlV1) unmarshaller.unmarshal(
                 new ByteArrayInputStream(normalizeLegacyXml(content)));
         return AccessControlV1Mapper.toCurrent(dto);
-    }
-
-    @Override
-    public void write(AccessControl accessControl, OutputStream output) throws JAXBException {
-        Marshaller marshaller = JAXB_CONTEXT.createMarshaller();
-        marshaller.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, true);
-        marshaller.setProperty(Marshaller.JAXB_ENCODING, StandardCharsets.UTF_8.name());
-        marshaller.marshal(AccessControlV1Mapper.fromCurrent(accessControl), output);
     }
 
     private static byte[] normalizeLegacyXml(byte[] content) throws IOException {

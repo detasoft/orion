@@ -13,8 +13,6 @@ queues, leases, observations, and last-run state remain outside this document.
 
 ## Child Tasks
 
-- [ ] [Define hierarchy and stable identifiers](hierarchy-and-identifiers/TASK.md)
-- [ ] [Introduce the versioned Orion XML schema](xml-schema-v2/TASK.md)
 - [ ] [Model organization-local users](organization-users/TASK.md)
 - [ ] [Add scoped roles and grants](scoped-roles-and-grants/TASK.md)
 - [ ] [Implement hierarchical authorization](hierarchical-authorization/TASK.md)

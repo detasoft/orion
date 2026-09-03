@@ -1,8 +1,6 @@
 # Add Scoped Roles and Grants
 
 Status: todo
-Depends on: ../hierarchy-and-identifiers/TASK.md,
-../xml-schema-v2/TASK.md
 
 Allow organizations, teams, and repositories to define local roles and grants
 without relying on one global ACL namespace.

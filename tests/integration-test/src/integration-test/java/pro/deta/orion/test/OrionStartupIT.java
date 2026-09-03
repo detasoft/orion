@@ -11,17 +11,18 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.auth.AccessControlUserUpdate;
+import pro.deta.orion.component.DaggerOrionComponent;
+import pro.deta.orion.component.OrionComponent;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
-import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.component.DaggerOrionComponent;
-import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
-import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 
 import java.io.ByteArrayInputStream;
@@ -32,6 +33,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -79,13 +81,13 @@ class OrionStartupIT {
     }
 
     @Test
-    void createdAccessControlConfigurationMatchesPublishedSchema() throws Exception {
+    void createdOrionConfigurationMatchesPublishedSchema() throws Exception {
         Path orionRoot = tempDir.resolve("orion");
 
         try (StartedOrion orion = startServerWithConfig(serverConfiguration(orionRoot))) {
             byte[] aclContent = readFileFromAclRepository(orionRoot);
 
-            Map<String, Object> validation = validateAccessControlXml(orion, aclContent);
+            Map<String, Object> validation = validateOrionXml(orion, aclContent);
 
             assertThat(validation).containsEntry("valid", true);
             assertThat(validation).doesNotContainKey("message");
@@ -102,7 +104,8 @@ class OrionStartupIT {
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
-            AccessControl loadedAcl = deserialize(orion.accessControlService().accessControlConfigurationFile());
+            AccessControl loadedAcl = deserialize(
+                    orion.accessControlService().accessControlConfigurationFile());
 
             assertThat(hasUser(loadedAcl, "remote-user")).isTrue();
             assertThat(aclRepository(orionRoot)).doesNotExist();
@@ -114,6 +117,56 @@ class OrionStartupIT {
         AccessControl savedAcl = deserialize(readFileFromRepository(remoteAclRepository, ACL_FILE));
         assertThat(hasUser(savedAcl, "remote-user")).isFalse();
         assertThat(hasUser(savedAcl, "saved-remote-user")).isTrue();
+    }
+
+    @Test
+    void startsWithVersionOneAclAndMigratesItOnFirstChange() throws Exception {
+        Path orionRoot = tempDir.resolve("orion");
+        Path legacyAclDirectory = tempDir.resolve("legacy-acl");
+        Path legacyAclFile = legacyAclDirectory.resolve(ACL_FILE);
+        byte[] legacyAcl = """
+                <AccessControl schemaVersion="1">
+                  <users>
+                    <user>
+                      <id>root</id>
+                      <email>root@example.test</email>
+                      <credentials/>
+                      <roles/>
+                      <grants/>
+                    </user>
+                    <user>
+                      <id>legacy-user</id>
+                      <email>legacy@example.test</email>
+                      <credentials/>
+                      <roles/>
+                      <grants/>
+                    </user>
+                  </users>
+                  <roles/>
+                  <grants/>
+                </AccessControl>
+                """.getBytes(StandardCharsets.UTF_8);
+        Files.createDirectories(legacyAclDirectory);
+        Files.write(legacyAclFile, legacyAcl);
+        OrionConfiguration configuration = serverConfiguration(orionRoot);
+        configuration.getBootstrap().getAccessControl().setLocation(legacyAclDirectory.toUri().toString());
+        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+
+        try (StartedOrion orion = startServerWithConfig(configuration)) {
+            assertThat(orion.accessControlService().userExists("legacy-user")).isTrue();
+            assertThat(Files.readAllBytes(legacyAclFile)).isEqualTo(legacyAcl);
+
+            orion.accessControlService().createOrUpdateUser(
+                    new AccessControlUserUpdate("new-user", "new@example.test", List.of(), List.of()));
+        }
+
+        byte[] migratedAcl = Files.readAllBytes(legacyAclFile);
+        assertThat(new String(migratedAcl, StandardCharsets.UTF_8))
+                .contains("<orion schemaVersion=\"2\">")
+                .doesNotContain("<AccessControl");
+        AccessControl accessControl = deserialize(migratedAcl);
+        assertThat(hasUser(accessControl, "legacy-user")).isTrue();
+        assertThat(hasUser(accessControl, "new-user")).isTrue();
     }
 
     @Test
@@ -191,7 +244,8 @@ class OrionStartupIT {
         Path orionRoot = tempDir.resolve("orion-acl-failure");
         Path missingRemoteAclRepository = tempDir.resolve("missing-acl.git");
         OrionConfiguration configuration = serverConfiguration(orionRoot);
-        configuration.getBootstrap().getAccessControl().setLocation("git+" + missingRemoteAclRepository.toUri());
+        configuration.getBootstrap().getAccessControl()
+                .setLocation("git+" + missingRemoteAclRepository.toUri());
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
@@ -268,7 +322,9 @@ class OrionStartupIT {
         }
     }
 
-    private static void seedRemoteAclRepository(Path bareRepository, AccessControl accessControl) throws Exception {
+    private static void seedRemoteAclRepository(
+            Path bareRepository,
+            AccessControl accessControl) throws Exception {
         try (Git ignored = Git.init()
                 .setBare(true)
                 .setGitDir(bareRepository.toFile())
@@ -317,8 +373,9 @@ class OrionStartupIT {
         return draft.toAccessControl();
     }
 
-    private static Map<String, Object> validateAccessControlXml(StartedOrion orion, byte[] content) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) orion.httpUrl(OrionAccessControlSchemaRoute.URL_PATTERN)
+    private static Map<String, Object> validateOrionXml(StartedOrion orion, byte[] content) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) orion
+                .httpUrl(OrionAccessControlSchemaRoute.URL_PATTERN)
                 .openConnection();
         connection.setRequestMethod("POST");
         connection.setDoOutput(true);
@@ -329,7 +386,7 @@ class OrionStartupIT {
         }
 
         assertThat(connection.getResponseCode())
-                .as("ACL schema validation endpoint")
+                .as("Orion schema validation endpoint")
                 .isEqualTo(HttpURLConnection.HTTP_OK);
         assertThat(connection.getContentType()).startsWith("application/json");
 

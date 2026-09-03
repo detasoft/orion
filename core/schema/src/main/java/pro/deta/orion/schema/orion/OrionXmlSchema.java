@@ -1,4 +1,4 @@
-package pro.deta.orion.schema.acl;
+package pro.deta.orion.schema.orion;
 
 import jakarta.xml.bind.SchemaOutputResolver;
 import org.xml.sax.SAXException;
@@ -14,11 +14,11 @@ import java.io.InputStream;
 import java.io.StringReader;
 import java.io.StringWriter;
 
-public final class AccessControlXmlSchema {
+public final class OrionXmlSchema {
     private final String document;
     private final Schema schema;
 
-    public AccessControlXmlSchema() {
+    public OrionXmlSchema() {
         document = generateDocument();
         schema = compileSchema(document);
     }
@@ -39,10 +39,14 @@ public final class AccessControlXmlSchema {
         }
     }
 
+    Schema compiledSchema() {
+        return schema;
+    }
+
     private static String generateDocument() {
         try {
             StringWriter document = new StringWriter();
-            AccessControlXml.jaxbContext().generateSchema(new SchemaOutputResolver() {
+            OrionXmlV2Translator.jaxbContext().generateSchema(new SchemaOutputResolver() {
                 @Override
                 public Result createOutput(String namespaceUri, String suggestedFileName) {
                     StreamResult result = new StreamResult(document);
@@ -52,7 +56,7 @@ public final class AccessControlXmlSchema {
             });
             return document.toString();
         } catch (IOException e) {
-            throw new IllegalStateException("Cannot generate ACL XML schema", e);
+            throw new IllegalStateException("Cannot generate Orion XML v2 schema", e);
         }
     }
 
@@ -63,10 +67,10 @@ public final class AccessControlXmlSchema {
             schemaFactory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
             schemaFactory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
             StreamSource source = new StreamSource(new StringReader(document));
-            source.setSystemId("orion-admin-acl.xsd");
+            source.setSystemId("orion-v2.xsd");
             return schemaFactory.newSchema(source);
         } catch (SAXException e) {
-            throw new IllegalStateException("Cannot compile ACL XML schema", e);
+            throw new IllegalStateException("Cannot compile Orion XML v2 schema", e);
         }
     }
 

@@ -1,8 +1,7 @@
 # Add Repository and Mirror Configuration
 
 Status: todo
-Depends on: ../xml-schema-v2/TASK.md,
-../../unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md
+Depends on: ../../unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md
 
 Represent repository desired state, including external Git synchronization,
 inside the owning team in `orion.xml`.

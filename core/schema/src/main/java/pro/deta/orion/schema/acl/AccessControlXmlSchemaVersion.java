@@ -11,7 +11,6 @@ import java.io.IOException;
 public enum AccessControlXmlSchemaVersion {
     V1("1");
 
-    public static final AccessControlXmlSchemaVersion LATEST = V1;
     private static final String SCHEMA_VERSION_ATTRIBUTE = "schemaVersion";
 
     private final String value;

@@ -1,8 +1,6 @@
 # Model Organization-Local Users
 
 Status: todo
-Depends on: ../hierarchy-and-identifiers/TASK.md,
-../xml-schema-v2/TASK.md
 
 Move ordinary user ownership into organizations while retaining a separate
 system administration and recovery scope.

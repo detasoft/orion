@@ -305,12 +305,20 @@ class InternalConfigurationRepositoryLifecycleTest {
             for (AccessControl.Role expected : canonical.getRoles()) {
                 assertThat(recovered.getRoles())
                         .filteredOn(role -> expected.getId().equals(role.getId()))
-                        .containsExactly(expected);
+                        .singleElement()
+                        .satisfies(actual -> assertThat(actual)
+                                .usingRecursiveComparison()
+                                .ignoringCollectionOrder()
+                                .isEqualTo(expected));
             }
             for (AccessControl.Grant expected : canonical.getGrants()) {
                 assertThat(recovered.getGrants())
                         .filteredOn(grant -> expected.getId().equals(grant.getId()))
-                        .containsExactly(expected);
+                        .singleElement()
+                        .satisfies(actual -> assertThat(actual)
+                                .usingRecursiveComparison()
+                                .ignoringCollectionOrder()
+                                .isEqualTo(expected));
             }
             assertThat(recovered.getRoles())
                     .extracting(AccessControl.Role::getId)
@@ -420,7 +428,11 @@ class InternalConfigurationRepositoryLifecycleTest {
         String versionBeforeReset;
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
-            first.orionAccessControlService().saveAccessControlConfigurationFile(duplicateRootAclBytes());
+            repository(first).saveFiles(
+                    CONFIGURATION_REF,
+                    Map.of(ACL_PATH, duplicateRootAclBytes()),
+                    "seed ambiguous root ACL",
+                    GitCommitAuthor.EMPTY);
             versionBeforeReset = repository(first)
                     .loadFiles(CONFIGURATION_REF, List.of(ACL_PATH))
                     .version()
@@ -728,12 +740,33 @@ class InternalConfigurationRepositoryLifecycleTest {
     }
 
     private static byte[] duplicateRootAclBytes() throws Exception {
-        AccessControlDraft draft = new AccessControlDraft();
-        draft.getUsers().add(ACLUtil.createUser("root", "first-root@example.test")
-                .addCredential(AccessControl.CredentialType.SHA1, "first-hash"));
-        draft.getUsers().add(ACLUtil.createUser("ROOT", "second-root@example.test")
-                .addCredential(AccessControl.CredentialType.SHA1, "second-hash"));
-        return accessControlBytes(draft.toAccessControl());
+        String xml = """
+                <AccessControl schemaVersion="1">
+                  <users>
+                    <user>
+                      <id>root</id>
+                      <email>first-root@example.test</email>
+                      <credentials>
+                        <credential>
+                          <type>SHA1</type>
+                          <value>first-hash</value>
+                        </credential>
+                      </credentials>
+                    </user>
+                    <user>
+                      <id>ROOT</id>
+                      <email>second-root@example.test</email>
+                      <credentials>
+                        <credential>
+                          <type>SHA1</type>
+                          <value>second-hash</value>
+                        </credential>
+                      </credentials>
+                    </user>
+                  </users>
+                </AccessControl>
+                """;
+        return xml.getBytes(StandardCharsets.UTF_8);
     }
 
     private static byte[] defaultAclBytes(String password) throws Exception {

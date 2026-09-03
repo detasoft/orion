@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<orion schemaVersion="2">
+  <system>
+    <accessControl>
+      <users>
+        <user id="root">
+          <first>Root</first>
+          <last>User</last>
+          <email>root@orion.pro</email>
+          <credentials>
+            <credential>
+              <type>ARGON2</type>
+              <keyId>root-password</keyId>
+              <value>root-password-hash</value>
+            </credential>
+          </credentials>
+          <roles>
+            <role>ROOT</role>
+          </roles>
+          <grants/>
+        </user>
+      </users>
+      <roles>
+        <role id="ROOT">
+          <grants/>
+          <grantReferences>
+            <grantReference>ALL_REPOSITORY</grantReference>
+          </grantReferences>
+        </role>
+      </roles>
+      <grants>
+        <grant id="ALL_REPOSITORY">
+          <info>
+            <expression>
+              <key>REPOSITORY</key>
+              <value>*</value>
+            </expression>
+            <expression>
+              <key>READ</key>
+              <value>true</value>
+            </expression>
+          </info>
+        </grant>
+      </grants>
+    </accessControl>
+  </system>
+  <organizations>
+    <organization id="acme">
+      <displayName>Acme</displayName>
+      <teams>
+        <team id="platform">
+          <displayName>Platform</displayName>
+          <repositories>
+            <repository id="api">
+              <displayName>API</displayName>
+            </repository>
+          </repositories>
+        </team>
+      </teams>
+    </organization>
+  </organizations>
+</orion>
