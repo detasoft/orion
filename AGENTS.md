@@ -5,15 +5,17 @@
   change only Markdown files such as task `TASK.md` files and files under
   `docs/`.
 - Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
-- Use `make test` for routine full-project tests and the commit workflow. For focused checks, use the `dev` Maven profile, for example `mvn test -Pdev -T 4 -q -pl ...`.
-- When running focused Maven tests for a module that needs reactor dependencies,
-  include `-am`; when also passing `-Dtest=...`, include
-  `-Dsurefire.failIfNoSpecifiedTests=false` so helper modules without the
-  selected test do not fail the build.
+- Use `make test` for routine full-project tests and the commit workflow.
+- For focused Maven tests, always use
+  `make run-test MODULE=<module> TEST='<test-locator>'`. The target supplies the
+  `dev` profile, reactor dependencies, parallelism, and the Surefire setting
+  needed for helper modules without the selected test.
 - Do not run integration tests automatically after every commit; `make test` is enough for the commit workflow.
 - Use `mvn verify -Pdev -T 4` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
 - The project allows running `mvn verify` from the repository root without asking for additional confirmation when it is explicitly needed.
-- The project allows running `make test` and `mvn test` with any Maven parameters without asking for additional confirmation.
+- The project allows running `make test`, `make run-test` with any module and
+  test locator, and `mvn test` with any Maven parameters without asking for
+  additional confirmation.
 - Always run test commands outside the sandbox, because local tests may need to bind loopback sockets and sandboxed runs can fail with `Operation not permitted`.
 - When requesting approval for Maven commands, put the Maven phase immediately after `mvn`, then pass the remaining arguments, for example `mvn test -q -pl ...`.
 - After committing, run `make test`. If it fails and the failure is fixed, create the follow-up fix commit with the exact same commit message as the original commit so the commits can be squashed later.

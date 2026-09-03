@@ -34,9 +34,10 @@ mvn test -Pdev -T 4 -q -pl <module> -am \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-The positional arguments are registered as no-op Make goals only while
-`run-test` is the first requested goal. This keeps ordinary unknown-goal errors
-intact outside the shortcut.
+The positional form enables a fallback no-op rule only while `run-test` is the
+first requested goal. Positional values that match another top-level Make goal
+are rejected as ambiguous and must use the named form. This keeps ordinary
+unknown-goal errors intact outside the shortcut.
 
 ## Agent Guidance
 
