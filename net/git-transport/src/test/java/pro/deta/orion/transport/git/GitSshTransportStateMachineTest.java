@@ -212,7 +212,8 @@ class GitSshTransportStateMachineTest {
                 dispatcher,
                 new PlainCommandRenderer(),
                 null,
-                null);
+                null,
+                accessControlService);
         executor = new OrionExecutor(2, new OrionThreadFactory());
         OrionShell shell = new OrionShell(
                 dispatcher,

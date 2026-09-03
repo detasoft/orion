@@ -10,6 +10,7 @@ import org.apache.sshd.client.channel.ClientChannelEvent;
 import org.apache.sshd.client.channel.ChannelShell;
 import org.apache.sshd.client.session.ClientSession;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
+import org.apache.sshd.common.keyprovider.KeyIdentityProvider;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.TransportConfigCallback;
 import org.eclipse.jgit.api.errors.TransportException;
@@ -632,16 +633,53 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
-    void enrolledRootSshKeySurvivesServerRestart() throws Exception {
+    void recoveredRootRequiresDedicatedOneTimeEnrollmentAndNewKeyConnection() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         KeyPair enrolledKey = KeyUtils.generateRSAKeyPair()
                 .valueOrFailure("Enrollment SSH key should be generated");
         startedOrion = startFreshOrion(orionRoot);
+        KeyPair oldRootKey = startedOrion.serverIdentityKey();
+        String oldRootToken = issueTokenOverSsh(startedOrion, oldRootKey, 600);
+        createManagedUser(startedOrion, oldRootToken, TRUSTED_USER_KEY, "project");
+        SshCommandResult nonRootTokenIssue = executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "issue-token 600");
+        assertThat(nonRootTokenIssue.exitStatus()).isZero();
+        String nonRootToken = nonRootTokenIssue.output().trim();
+        startedOrion.stop();
+        startedOrion = null;
+        startedOrion = startOrion(e2eConfiguration(orionRoot), new OrionRuntimeOptions(true));
         char[] rootPassword = startedOrion.accessControlService()
                 .plainRootToken(PlainRootTokenAccessForTests.create());
         try {
-            assertThat(enrollKeyAndExecuteOverSsh(startedOrion, "root", rootPassword, enrolledKey, "state"))
-                    .contains("orion: RUNNING");
+            assertThat(startedOrion.accessControlService().authenticateToken(
+                    oldRootToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Failure.class);
+            assertThat(startedOrion.accessControlService().authenticateToken(
+                    nonRootToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+            assertThat(executeCommandOverSsh(
+                    startedOrion, USERNAME, TRUSTED_USER_KEY, "issue-token 600").exitStatus())
+                    .isZero();
+            assertThatThrownBy(() -> executeStateOverSsh(startedOrion, oldRootKey))
+                    .isInstanceOf(IOException.class);
+            assertThat(enrollKeyAndExecuteOverSsh(
+                    startedOrion,
+                    "root",
+                    rootPassword,
+                    enrolledKey,
+                    "enroll-key"))
+                    .contains("Root SSH key enrolled");
+            assertThat(executeStateOverSsh(startedOrion, enrolledKey)).contains("orion: RUNNING");
+            String newRootToken = issueTokenOverSsh(startedOrion, enrolledKey, 600);
+            assertThat(startedOrion.accessControlService().authenticateToken(
+                    newRootToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+            assertThatThrownBy(() -> attemptPasswordOnlyEnrollment(
+                    startedOrion,
+                    "root",
+                    rootPassword,
+                    KeyUtils.generateRSAKeyPair().valueOrFailure("second key")))
+                    .isInstanceOf(IOException.class);
         } finally {
             Arrays.fill(rootPassword, '\0');
         }
@@ -697,11 +735,17 @@ class GitSshTransportEndToEndIT {
     }
 
     private StartedOrion startOrion(OrionConfiguration configuration) {
+        return startOrion(configuration, OrionRuntimeOptions.defaults());
+    }
+
+    private StartedOrion startOrion(
+            OrionConfiguration configuration,
+            OrionRuntimeOptions runtimeOptions) {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
             OrionComponent component = DaggerOrionComponent.builder()
                     .configurationProvider(() -> configuration)
-                    .runtimeOptions(OrionRuntimeOptions.defaults())
+                    .runtimeOptions(runtimeOptions)
                     .serverIdentityCapability(identity.capability())
                     .build();
             OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
@@ -778,6 +822,8 @@ class GitSshTransportEndToEndIT {
             KeyPair keyPair,
             String command) throws Exception {
         SshClient client = SshClient.setUpDefaultClient();
+        client.setAgentFactory(null);
+        client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
         client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
         client.setUserAuthFactories(List.of(
                 UserAuthPublicKeyFactory.INSTANCE,
@@ -826,6 +872,53 @@ class GitSshTransportEndToEndIT {
                         .isEqualTo(0);
                 return output.toString(StandardCharsets.UTF_8);
             }
+        } finally {
+            client.stop();
+        }
+    }
+
+    private static void attemptPasswordOnlyEnrollment(
+            StartedOrion orion,
+            String username,
+            char[] password,
+            KeyPair keyPair) throws Exception {
+        SshClient client = SshClient.setUpDefaultClient();
+        client.setAgentFactory(null);
+        client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
+        client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
+        client.setUserAuthFactories(List.of(UserAuthKeyboardInteractiveFactory.INSTANCE));
+        client.setUserInteraction(new UserInteraction() {
+            @Override
+            public String[] interactive(
+                    ClientSession session,
+                    String name,
+                    String instruction,
+                    String lang,
+                    String[] prompt,
+                    boolean[] echo) {
+                if (prompt.length == 1 && "Orion password: ".equals(prompt[0]) && !echo[0]) {
+                    return new String[]{new String(password)};
+                }
+                if (prompt.length == 1 && prompt[0].startsWith("Keys (`all`")) {
+                    return new String[]{PublicKeyEntry.toString(keyPair.getPublic())};
+                }
+                throw new AssertionError("Unexpected SSH enrollment prompt: " + List.of(prompt));
+            }
+
+            @Override
+            public String getUpdatedPassword(ClientSession session, String prompt, String lang) {
+                return null;
+            }
+        });
+        client.start();
+        try (ClientSession session = client.connect(
+                        username,
+                        orion.configuration().getTransport().getSsh().getAddress(),
+                        orion.configuration().getTransport().getSsh().getPort())
+                .verify(10, TimeUnit.SECONDS)
+                .getSession()) {
+            session.auth().verify(10, TimeUnit.SECONDS);
+            throw new AssertionError("Consumed recovery password authenticated a new SSH session");
         } finally {
             client.stop();
         }

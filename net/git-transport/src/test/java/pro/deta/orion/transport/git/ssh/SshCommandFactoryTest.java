@@ -9,6 +9,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandRequest;
@@ -18,6 +20,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -230,6 +233,57 @@ class SshCommandFactoryTest {
     }
 
     @Test
+    void recoverySessionRejectsNormalCommandsAndCompletesExactEnrollmentCommand() throws Exception {
+        AtomicInteger dispatches = new AtomicInteger();
+        AtomicInteger enrollments = new AtomicInteger();
+        OrionAccessControlService accessControl = (OrionAccessControlService) Proxy.newProxyInstance(
+                OrionAccessControlService.class.getClassLoader(),
+                new Class<?>[]{OrionAccessControlService.class},
+                (proxy, method, args) -> {
+                    if ("completeRootSshKeyEnrollment".equals(method.getName())) {
+                        enrollments.incrementAndGet();
+                        assertEquals("generation-1", args[0]);
+                        assertEquals(List.of("ssh-rsa candidate"), args[1]);
+                        return SshKeyEnrollmentResult.success();
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+        SshCommandFactory factory = factory(request -> {
+            dispatches.incrementAndGet();
+            return new CommandResult.Message("wrong route");
+        }, accessControl);
+        TestChannelSession channel = channel(true);
+        RootSshKeyEnrollmentSession.begin(
+                channel.getSession(),
+                "generation-1",
+                List.of("ssh-rsa candidate"));
+
+        ExitOutcome rejected = run(
+                factory,
+                channel,
+                "issue-token",
+                new ByteArrayOutputStream(),
+                new ByteArrayOutputStream());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ExitOutcome enrolled = run(factory, channel, "enroll-key", output, new ByteArrayOutputStream());
+        ExitOutcome sameConnectionTokenIssue = run(
+                factory,
+                channel,
+                "issue-token 600",
+                new ByteArrayOutputStream(),
+                new ByteArrayOutputStream());
+
+        assertEquals(1, rejected.code());
+        assertEquals(0, enrolled.code());
+        assertEquals(1, sameConnectionTokenIssue.code());
+        assertEquals("Root SSH key enrolled. Reconnect with the enrolled key.\n", output.toString(StandardCharsets.UTF_8));
+        assertEquals(0, dispatches.get());
+        assertEquals(1, enrollments.get());
+        assertFalse(RootSshKeyEnrollmentSession.isPending(channel.getSession()));
+        assertTrue(RootSshKeyEnrollmentSession.isRestricted(channel.getSession()));
+    }
+
+    @Test
     void nativeInitialRequestDataParsesQuotedRepositoryAndProtocol() {
         InitialRequestData data = SshCommandFactory.initialRequestData(
                 "git-upload-pack '/team/project.git'",
@@ -334,6 +388,12 @@ class SshCommandFactoryTest {
     }
 
     private SshCommandFactory factory(CommandDispatcher dispatcher) {
+        return factory(dispatcher, null);
+    }
+
+    private SshCommandFactory factory(
+            CommandDispatcher dispatcher,
+            OrionAccessControlService accessControlService) {
         OrionExecutor executor = new OrionExecutor(2, new OrionThreadFactory());
         executors.add(executor);
         return new SshCommandFactory(
@@ -341,7 +401,8 @@ class SshCommandFactoryTest {
                 dispatcher,
                 new PlainCommandRenderer(),
                 null,
-                null);
+                null,
+                accessControlService);
     }
 
     private static ExitOutcome run(
@@ -391,6 +452,9 @@ class SshCommandFactoryTest {
                 new Class<?>[]{ServerSession.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getAttribute" -> attributes.get(args[0]);
+                    case "setAttribute" -> attributes.put(
+                            (AttributeRepository.AttributeKey<?>) args[0], args[1]);
+                    case "removeAttribute" -> attributes.remove(args[0]);
                     case "getRemoteAddress" -> new InetSocketAddress("192.0.2.10", 2222);
                     case "toString" -> "test-session";
                     case "hashCode" -> System.identityHashCode(proxy);

@@ -4,6 +4,8 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
+import pro.deta.orion.auth.SshKeyEnrollmentResult;
 
 import java.util.List;
 
@@ -17,6 +19,18 @@ public interface OrionAccessControlService {
     boolean userExists(String userName);
 
     AuthenticationResult authenticateUser(String userName, byte[] credential);
+
+    default SshKeyEnrollmentAuthentication authenticateSshKeyEnrollment(
+            String userName,
+            byte[] credential) {
+        return SshKeyEnrollmentAuthentication.failure("authentication failed");
+    }
+
+    default SshKeyEnrollmentResult completeRootSshKeyEnrollment(
+            String expectedGeneration,
+            List<String> publicKeys) {
+        return SshKeyEnrollmentResult.failure("key enrollment failed");
+    }
 
     AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey);
 

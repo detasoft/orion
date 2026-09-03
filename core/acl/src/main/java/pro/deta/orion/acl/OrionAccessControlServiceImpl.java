@@ -17,6 +17,8 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
+import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
+import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -51,6 +53,7 @@ import static pro.deta.orion.util.Result.Failure.generalFailure;
 @Singleton
 public class OrionAccessControlServiceImpl implements OrionAccessControlService, ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private static final String ROOT_USER_ID = "root";
+    private static final String ROOT_AUTH_GENERATION_PREFIX = "root-auth-generation:";
 
     private final XmlService xmlService = new XmlService();
     private final AccessControlStorage accessControlStorage;
@@ -102,7 +105,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                         if (!configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing()) {
                             throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
                         }
-                        createDefaultAccessControlAndRequestUpdate();
+                        if (runtimeOptions.resetRootPassword()) {
+                            resetRootPassword(AccessControlSnapshot.singleFile(
+                                    accessControlStorage.primaryPath(),
+                                    serializeAccessControlConfiguration(new AccessControlDraft().toAccessControl())));
+                        } else {
+                            createDefaultAccessControlAndRequestUpdate();
+                        }
                     } else {
                         log.error("Error while preparing configuration repository.", f.throwable());
                         throw new IllegalStateException("Configuration repository not initialized.", f.throwable());
@@ -192,11 +201,101 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public AuthenticationResult authenticateUser(String userName, byte[] encodedData) {
         Result<AccessControl.User> user = findSingleUser(userName);
         if (user instanceof Result.Success<AccessControl.User>(var u)) {
+            if (rootRecoveryGeneration(u) != null) {
+                log.warn("Attempt to use the root recovery password outside SSH key enrollment.");
+                return AuthenticationResult.failure("authentication failed");
+            }
             if (performAuthentication(u, encodedData))
                 return createUserIdentity(u);
         }
         log.warn("Attempt to authenticate as '{}' failed.", userName);
         return AuthenticationResult.failure("authentication failed");
+    }
+
+    @Override
+    public SshKeyEnrollmentAuthentication authenticateSshKeyEnrollment(
+            String userName,
+            byte[] credential) {
+        Result<AccessControl.User> user = findSingleUser(userName);
+        if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
+                && performPasswordAuthentication(matchedUser, credential)) {
+            String recoveryGeneration = rootRecoveryGeneration(matchedUser);
+            if (isGenerationAwareRoot(matchedUser) && recoveryGeneration == null) {
+                return SshKeyEnrollmentAuthentication.failure("authentication failed");
+            }
+            return switch (createUserIdentity(matchedUser)) {
+                case AuthenticationResult.Success(var identity) -> SshKeyEnrollmentAuthentication.success(
+                        identity,
+                        recoveryGeneration);
+                case AuthenticationResult.Failure(var reason, var throwable) ->
+                        SshKeyEnrollmentAuthentication.failure(reason, throwable);
+            };
+        }
+        log.warn("SSH key enrollment authentication as '{}' failed.", userName);
+        return SshKeyEnrollmentAuthentication.failure("authentication failed");
+    }
+
+    @Override
+    public SshKeyEnrollmentResult completeRootSshKeyEnrollment(
+            String expectedGeneration,
+            List<String> publicKeys) {
+        if (expectedGeneration == null || expectedGeneration.isBlank()) {
+            return SshKeyEnrollmentResult.failure("key enrollment failed");
+        }
+        List<PublicKey> parsedKeys;
+        try {
+            parsedKeys = parseAndDeduplicatePublicKeys(publicKeys);
+        } catch (IllegalArgumentException e) {
+            return SshKeyEnrollmentResult.failure("key enrollment failed", e);
+        }
+
+        synchronized (reloadLock) {
+            return switch (accessControlStorage.load()) {
+                case Result.Failure<AccessControlSnapshot> failure ->
+                        SshKeyEnrollmentResult.failure("key enrollment failed", failure.throwable());
+                case Result.Success<AccessControlSnapshot>(var snapshot) -> completeRootSshKeyEnrollment(
+                        snapshot,
+                        expectedGeneration,
+                        parsedKeys);
+            };
+        }
+    }
+
+    private SshKeyEnrollmentResult completeRootSshKeyEnrollment(
+            AccessControlSnapshot snapshot,
+            String expectedGeneration,
+            List<PublicKey> publicKeys) {
+        try {
+            Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
+            List<RootLocation> roots = rootLocations(drafts);
+            if (roots.size() != 1) {
+                return SshKeyEnrollmentResult.failure("key enrollment failed");
+            }
+            RootLocation location = roots.getFirst();
+            AccessControl.User currentRoot = location.user().toAccessControl();
+            if (!expectedGeneration.equals(rootRecoveryGeneration(currentRoot))) {
+                return SshKeyEnrollmentResult.failure("key enrollment failed");
+            }
+
+            location.user().getCredentials().clear();
+            for (PublicKey publicKey : publicKeys) {
+                location.user().addCredential(
+                        OPENSSH_PUBLIC_KEY,
+                        generationKeyId(expectedGeneration),
+                        PublicKeyEntry.toString(publicKey));
+            }
+            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
+            updatedFiles.put(
+                    location.path(),
+                    serializeAccessControlConfiguration(location.draft().toAccessControl()));
+            saveAccessControlSnapshotAndReload(
+                    new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                    "complete root SSH key enrollment",
+                    new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(location.user().getEmail(), "root@orion.pro")));
+            return SshKeyEnrollmentResult.success();
+        } catch (RuntimeException e) {
+            return SshKeyEnrollmentResult.failure("key enrollment failed", e);
+        }
     }
 
     @Override
@@ -234,9 +333,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return switch (jwtAccessTokenService.verify(tokenValue)) {
             case JwtAccessTokenService.VerificationResult.Failure(var reason) ->
                     AuthenticationResult.failure(reason);
-            case JwtAccessTokenService.VerificationResult.Success(var subject) -> {
+            case JwtAccessTokenService.VerificationResult.Success(var subject, var authenticationGeneration) -> {
                 Result<AccessControl.User> user = findSingleUser(subject);
                 if (user instanceof Result.Success<AccessControl.User>(var u)) {
+                    String currentGeneration = rootAuthenticationGeneration(u);
+                    if (isGenerationAwareRoot(u)
+                            && (currentGeneration == null || !currentGeneration.equals(authenticationGeneration))) {
+                        yield AuthenticationResult.failure("authentication failed");
+                    }
                     yield createUserIdentity(u);
                 }
                 yield AuthenticationResult.failure("authentication failed");
@@ -255,17 +359,31 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
-        if (userIdentity == null || userIdentity.isAnonymous() || userIdentity.getUserId() == null || userIdentity.getUserId().isBlank()) {
+        if (userIdentity == null
+                || userIdentity.isAnonymous()
+                || userIdentity.getUserId() == null
+                || userIdentity.getUserId().isBlank()) {
             return TokenIssueResult.failure("authenticated user is required");
         }
         Result<AccessControl.User> user = findSingleUser(userIdentity.getUserId());
         if (user instanceof Result.Failure<AccessControl.User>(var code, var message, var throwable)) {
             return TokenIssueResult.failure("user is not available for token issue", throwable);
         }
+        if (!(user instanceof Result.Success<AccessControl.User>(var currentUser))) {
+            return TokenIssueResult.failure("user is not available for token issue");
+        }
+        String authenticationGeneration = rootAuthenticationGeneration(currentUser);
+        if (isGenerationAwareRoot(currentUser) && authenticationGeneration == null) {
+            return TokenIssueResult.failure("root authentication state is invalid");
+        }
+        if (rootRecoveryGeneration(currentUser) != null) {
+            return TokenIssueResult.failure("root key enrollment is required");
+        }
         try {
             JwtAccessTokenService.IssuedToken token = jwtAccessTokenService.issue(
                     userIdentity.getUserId(),
-                    expiresInSeconds);
+                    expiresInSeconds,
+                    authenticationGeneration);
             return TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
         } catch (GeneralSecurityException | RuntimeException e) {
             return TokenIssueResult.failure("token issue failed", e);
@@ -355,38 +473,21 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         char[] rootPassword = orionPasswordHashingService.generateRandomString(10);
         try {
             String passwordHash = orionPasswordHashingService.calculateHash(ARGON2, rootPassword);
+            String authenticationGeneration = UUID.randomUUID().toString();
             Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
-            List<RootLocation> roots = rootLocations(drafts);
-            if (roots.size() > 1) {
-                throw new IllegalStateException("Expected at most one root user, found " + roots.size());
-            }
-
             Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
-            AccessControlDraft.User root;
-            if (roots.isEmpty()) {
-                AccessControl canonical = createDefaultAccessControl(
-                        passwordHash,
-                        AccessControl.CredentialType.ARGON2);
-                AccessControlDraft primary = primaryDraft(drafts);
-                removeCanonicalRootAuthorization(drafts, canonical, updatedFiles);
-                addCanonicalRootAuthorization(primary, canonical);
-                root = AccessControlDraft.User.from(canonical.getUsers().getFirst());
-                primary.getUsers().add(root);
-                updatedFiles.put(
-                        accessControlStorage.primaryPath(),
-                        serializeAccessControlConfiguration(primary.toAccessControl()));
-            } else {
-                RootLocation rootLocation = roots.getFirst();
-                root = rootLocation.user();
-                root.getCredentials().removeIf(credential ->
-                        credential.getType() == AccessControl.CredentialType.ARGON2
-                                || credential.getType() == AccessControl.CredentialType.SHA1);
-                root.addCredential(AccessControl.CredentialType.ARGON2, passwordHash);
-                synchronizeInternalServerKeysToRoot(rootLocation.draft());
-                updatedFiles.put(
-                        rootLocation.path(),
-                        serializeAccessControlConfiguration(rootLocation.draft().toAccessControl()));
-            }
+            AccessControl canonical = ACLUtil.generateDefaultAccessControl(
+                    passwordHash,
+                    AccessControl.CredentialType.ARGON2);
+            AccessControlDraft.User root = AccessControlDraft.User.from(canonical.getUsers().getFirst());
+            root.getCredentials().getFirst().setKeyId(generationKeyId(authenticationGeneration));
+            removeRootAndCanonicalAuthorization(drafts, canonical, updatedFiles);
+            AccessControlDraft primary = primaryDraft(drafts);
+            addCanonicalRootAuthorization(primary, canonical);
+            primary.getUsers().add(root);
+            updatedFiles.put(
+                    accessControlStorage.primaryPath(),
+                    serializeAccessControlConfiguration(primary.toAccessControl()));
             saveAccessControlSnapshotAndReload(
                     new AccessControlSnapshot(updatedFiles, snapshot.version()),
                     "root password reset",
@@ -411,7 +512,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         List<RootLocation> roots = new ArrayList<>();
         for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
             for (AccessControlDraft.User user : entry.getValue().getUsers()) {
-                if (user.getId() != null && ROOT_USER_ID.equalsIgnoreCase(user.getId())) {
+                if (isRoot(user.getId())) {
                     roots.add(new RootLocation(entry.getKey(), entry.getValue(), user));
                 }
             }
@@ -428,13 +529,14 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return primary;
     }
 
-    private void removeCanonicalRootAuthorization(
+    private void removeRootAndCanonicalAuthorization(
             Map<String, AccessControlDraft> drafts,
             AccessControl canonical,
             Map<String, byte[]> updatedFiles) {
         for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
             AccessControlDraft draft = entry.getValue();
-            boolean changed = false;
+            boolean changed = draft.getUsers().removeIf(user ->
+                    user.getId() != null && ROOT_USER_ID.equalsIgnoreCase(user.getId()));
             for (AccessControl.Role canonicalRole : canonical.getRoles()) {
                 changed |= draft.getRoles().removeIf(role -> idsAreEqual(role.getId(), canonicalRole.getId()));
             }
@@ -501,7 +603,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft draft) {
         AccessControlDraft.User rootUser = findRootUser(draft);
-        if (rootUser == null) {
+        if (rootUser == null || isGenerationAwareRoot(rootUser)) {
             return false;
         }
 
@@ -542,6 +644,102 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("Cannot load retained server identity public keys", e);
         }
+    }
+
+    private static String generationKeyId(String generation) {
+        return ROOT_AUTH_GENERATION_PREFIX + generation;
+    }
+
+    private static String generationFromKeyId(String keyId) {
+        if (keyId == null || !keyId.startsWith(ROOT_AUTH_GENERATION_PREFIX)) {
+            return null;
+        }
+        String generation = keyId.substring(ROOT_AUTH_GENERATION_PREFIX.length());
+        return generation.isBlank() ? null : generation;
+    }
+
+    private static String rootRecoveryGeneration(AccessControl.User user) {
+        if (!isRoot(user.getId()) || user.getCredentials().size() != 1) {
+            return null;
+        }
+        AccessControl.Credential credential = user.getCredentials().getFirst();
+        return credential.getType() == AccessControl.CredentialType.ARGON2
+                ? generationFromKeyId(credential.getKeyId())
+                : null;
+    }
+
+    private static String rootAuthenticationGeneration(AccessControl.User user) {
+        if (!isRoot(user.getId()) || user.getCredentials().isEmpty()) {
+            return null;
+        }
+        AccessControl.CredentialType expectedType = user.getCredentials().size() == 1
+                && user.getCredentials().getFirst().getType() == AccessControl.CredentialType.ARGON2
+                ? AccessControl.CredentialType.ARGON2
+                : OPENSSH_PUBLIC_KEY;
+        String generation = null;
+        for (AccessControl.Credential credential : user.getCredentials()) {
+            if (credential.getType() != expectedType) {
+                return null;
+            }
+            String candidate = generationFromKeyId(credential.getKeyId());
+            if (candidate == null || generation != null && !generation.equals(candidate)) {
+                return null;
+            }
+            generation = candidate;
+        }
+        return generation;
+    }
+
+    private static String rootAuthenticationGeneration(AccessControlDraft.User user) {
+        if (!isRoot(user.getId()) || user.getCredentials().isEmpty()) {
+            return null;
+        }
+        AccessControl.CredentialType expectedType = user.getCredentials().size() == 1
+                && user.getCredentials().getFirst().getType() == AccessControl.CredentialType.ARGON2
+                ? AccessControl.CredentialType.ARGON2
+                : OPENSSH_PUBLIC_KEY;
+        String generation = null;
+        for (AccessControlDraft.Credential credential : user.getCredentials()) {
+            if (credential.getType() != expectedType) {
+                return null;
+            }
+            String candidate = generationFromKeyId(credential.getKeyId());
+            if (candidate == null || generation != null && !generation.equals(candidate)) {
+                return null;
+            }
+            generation = candidate;
+        }
+        return generation;
+    }
+
+    private static boolean isGenerationAwareRoot(AccessControl.User user) {
+        if (!isRoot(user.getId())) {
+            return false;
+        }
+        for (AccessControl.Credential credential : user.getCredentials()) {
+            if (credential.getKeyId() != null
+                    && credential.getKeyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isGenerationAwareRoot(AccessControlDraft.User user) {
+        if (!isRoot(user.getId())) {
+            return false;
+        }
+        for (AccessControlDraft.Credential credential : user.getCredentials()) {
+            if (credential.getKeyId() != null
+                    && credential.getKeyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isRoot(String userId) {
+        return userId != null && ROOT_USER_ID.equalsIgnoreCase(userId);
     }
 
     private AccessControlDraft.User findRootUser(AccessControlDraft draft) {
@@ -611,6 +809,35 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             }
         }
         return false;
+    }
+
+    private boolean performPasswordAuthentication(AccessControl.User user, byte[] credential) {
+        for (AccessControl.Credential candidate : user.getCredentials()) {
+            if (candidate != null
+                    && (candidate.getType() == AccessControl.CredentialType.ARGON2
+                    || candidate.getType() == AccessControl.CredentialType.SHA1)
+                    && credentialMatches(user, candidate, credential)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<PublicKey> parseAndDeduplicatePublicKeys(List<String> publicKeys) {
+        if (publicKeys == null || publicKeys.isEmpty()) {
+            throw new IllegalArgumentException("At least one SSH public key is required");
+        }
+        Map<String, PublicKey> parsed = new LinkedHashMap<>();
+        for (String publicKey : publicKeys) {
+            PublicKey key;
+            try {
+                key = KeyUtils.readPublicKeyFromString(publicKey);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException("Invalid SSH public key", e);
+            }
+            parsed.putIfAbsent(Base64.getEncoder().encodeToString(key.getEncoded()), key);
+        }
+        return List.copyOf(parsed.values());
     }
 
     private boolean performPublicKeyAuthentication(AccessControl.User user, byte[] encodedPublicKey) {
@@ -751,9 +978,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
         private boolean addMissingPublicKeys(AccessControlDraft.User user, List<PublicKey> parsedKeys) {
             boolean changed = false;
+            String generation = rootAuthenticationGeneration(user);
             for (PublicKey parsedKey : parsedKeys) {
                 if (!hasPublicKeyCredential(user, parsedKey)) {
-                    user.addCredential(OPENSSH_PUBLIC_KEY, PublicKeyEntry.toString(parsedKey));
+                    String encodedKey = PublicKeyEntry.toString(parsedKey);
+                    if (generation == null) {
+                        user.addCredential(OPENSSH_PUBLIC_KEY, encodedKey);
+                    } else {
+                        user.addCredential(OPENSSH_PUBLIC_KEY, generationKeyId(generation), encodedKey);
+                    }
                     changed = true;
                 }
             }
@@ -907,4 +1140,5 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             AccessControlDraft draft,
             AccessControlDraft.User user) {
     }
+
 }

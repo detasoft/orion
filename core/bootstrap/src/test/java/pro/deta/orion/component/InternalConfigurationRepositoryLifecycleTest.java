@@ -7,6 +7,10 @@ import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
+import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
+import pro.deta.orion.auth.SshKeyEnrollmentResult;
+import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
@@ -34,6 +38,7 @@ import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PublicKey;
+import java.security.Signature;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -43,9 +48,7 @@ import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
-import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class InternalConfigurationRepositoryLifecycleTest {
@@ -106,7 +109,7 @@ class InternalConfigurationRepositoryLifecycleTest {
     }
 
     @Test
-    void resetFlagUsesDefaultCreationWhenTheAclIsMissing() throws Exception {
+    void resetFlagCreatesARecoveryRootWhenTheAclIsMissing() throws Exception {
         OrionConfiguration configuration = configuration();
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
@@ -117,7 +120,13 @@ class InternalConfigurationRepositoryLifecycleTest {
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
             char[] rootPassword = component.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create());
-            assertAuthenticated(component, "root", new String(rootPassword));
+            assertRecoveryPasswordOnly(component, new String(rootPassword));
+            AccessControl acl = new XmlService().deserialize(new ByteArrayInputStream(
+                    component.orionAccessControlService().accessControlConfigurationFile()));
+            assertThat(acl.getUsers().getFirst().getCredentials())
+                    .singleElement()
+                    .satisfies(credential -> assertThat(credential.getKeyId())
+                            .startsWith("root-auth-generation:"));
         } finally {
             System.setOut(originalOut);
             assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -127,15 +136,20 @@ class InternalConfigurationRepositoryLifecycleTest {
     }
 
     @Test
-    void resetsExistingRootPasswordAndPreservesItsAccessAndSshKeys() throws Exception {
+    void recreatesExistingRootAsCanonicalRecoveryIdentity() throws Exception {
         OrionConfiguration configuration = configuration();
         KeyPair rootKey = keyPair();
+        KeyPair recoveredRootKey = keyPair();
+        KeyPair aliceKey = keyPair();
+        TestServerIdentity serverIdentity = new TestServerIdentity(keyPair(), List.of());
         String rootOpenSshKey = PublicKeyEntry.toString(rootKey.getPublic());
         String oldPassword;
+        String oldRootToken;
+        String aliceToken;
         String versionBeforeReset;
         AccessControl beforeReset;
 
-        OrionComponent first = component(configuration);
+        OrionComponent first = component(configuration, serverIdentity);
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
         try {
             assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
@@ -143,6 +157,10 @@ class InternalConfigurationRepositoryLifecycleTest {
                     .plainRootToken(PlainRootTokenAccessForTests.create()));
             first.orionAccessControlService().addKeyToUser("root", rootOpenSshKey);
             first.orionAccessControlService().createOrUpdateUser(user("alice"));
+            first.orionAccessControlService().addKeyToUser(
+                    "alice", PublicKeyEntry.toString(aliceKey.getPublic()));
+            oldRootToken = issueTokenForSshKey(first, "root", rootKey);
+            aliceToken = issueTokenForSshKey(first, "alice", aliceKey);
             AccessControlDraft draft = new XmlService().deserialize(new ByteArrayInputStream(
                     first.orionAccessControlService().accessControlConfigurationFile())).toDraft();
             AccessControlDraft.User root = draft.getUsers().stream()
@@ -178,7 +196,7 @@ class InternalConfigurationRepositoryLifecycleTest {
         ByteArrayOutputStream resetOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         String newPassword;
-        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true), serverIdentity);
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         try {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
@@ -195,8 +213,17 @@ class InternalConfigurationRepositoryLifecycleTest {
                     "root",
                     "legacy-root-password".getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(AuthenticationResult.Failure.class);
-            assertAuthenticated(reset, "root", newPassword);
-            assertSshAuthenticated(reset, "root", rootKey);
+            assertThat(reset.orionAccessControlService().authenticateUser(
+                    "root", newPassword.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertSshAuthenticationFailed(reset, "root", rootKey);
+            assertSshAuthenticated(reset, "alice", aliceKey);
+            assertThat(reset.orionAccessControlService().authenticateToken(
+                    oldRootToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(reset.orionAccessControlService().authenticateToken(
+                    aliceToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Success.class);
             assertThat(reset.orionAccessControlService().userExists("alice")).isTrue();
 
             GitRepositoryFileSnapshot snapshot = repository(reset).loadFiles(
@@ -210,35 +237,72 @@ class InternalConfigurationRepositoryLifecycleTest {
                     .filter(user -> "root".equalsIgnoreCase(user.getId()))
                     .findFirst()
                     .orElseThrow();
-            AccessControl.User rootBeforeReset = beforeReset.getUsers().stream()
-                    .filter(user -> "root".equalsIgnoreCase(user.getId()))
-                    .findFirst()
-                    .orElseThrow();
-            assertThat(root.getFirst()).isEqualTo(rootBeforeReset.getFirst());
-            assertThat(root.getLast()).isEqualTo(rootBeforeReset.getLast());
-            assertThat(root.getEmail()).isEqualTo(rootBeforeReset.getEmail());
+            AccessControl canonical = ACLUtil.generateDefaultAccessControl("unused-password-hash");
+            assertThat(root.getFirst()).isNull();
+            assertThat(root.getLast()).isNull();
+            assertThat(root.getEmail()).isEqualTo("root@orion.pro");
             assertThat(root.getRoles()).containsExactly("ROOT");
-            assertThat(root.getGrants()).containsExactlyElementsOf(rootBeforeReset.getGrants());
-            assertThat(acl.getRoles()).containsExactlyElementsOf(beforeReset.getRoles());
-            assertThat(acl.getGrants()).containsExactlyElementsOf(beforeReset.getGrants());
+            assertThat(root.getGrants()).isEmpty();
+            assertThat(acl.getRoles()).hasSameSizeAs(canonical.getRoles());
+            for (AccessControl.Role expected : canonical.getRoles()) {
+                assertThat(acl.getRoles())
+                        .filteredOn(role -> expected.getId().equals(role.getId()))
+                        .singleElement()
+                        .satisfies(actual -> assertThat(actual)
+                                .usingRecursiveComparison()
+                                .ignoringCollectionOrder()
+                                .isEqualTo(expected));
+            }
+            assertThat(acl.getGrants()).hasSameSizeAs(canonical.getGrants());
+            for (AccessControl.Grant expected : canonical.getGrants()) {
+                assertThat(acl.getGrants())
+                        .filteredOn(grant -> expected.getId().equals(grant.getId()))
+                        .singleElement()
+                        .satisfies(actual -> assertThat(actual)
+                                .usingRecursiveComparison()
+                                .ignoringCollectionOrder()
+                                .isEqualTo(expected));
+            }
             assertThat(root.getCredentials())
                     .filteredOn(credential -> credential.getType() == AccessControl.CredentialType.ARGON2)
-                    .hasSize(1);
-            assertThat(root.getCredentials())
-                    .filteredOn(credential -> credential.getType() == AccessControl.CredentialType.SHA1)
-                    .isEmpty();
-            assertThat(root.getCredentials())
-                    .filteredOn(credential ->
-                            credential.getType() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
-                    .extracting(AccessControl.Credential::getValue)
-                    .containsExactly(rootOpenSshKey);
-            assertThat(root.getCredentials())
-                    .filteredOn(credential ->
-                            credential.getType() == AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY)
-                    .containsExactly(new AccessControl.Credential(
-                            AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY,
-                            "legacy-jwt-key",
-                            "legacy-jwt-public-key"));
+                    .singleElement()
+                    .satisfies(credential -> assertThat(credential.getKeyId())
+                            .startsWith("root-auth-generation:"));
+            assertThat(root.getCredentials()).hasSize(1);
+
+            assertThat(reset.orionAccessControlService().authenticateUserAndIssueToken(
+                    "root", newPassword.getBytes(StandardCharsets.UTF_8), 600))
+                    .isInstanceOf(pro.deta.orion.auth.TokenIssueResult.Failure.class);
+            SshKeyEnrollmentAuthentication enrollment = reset.orionAccessControlService()
+                    .authenticateSshKeyEnrollment(
+                            "root", newPassword.getBytes(StandardCharsets.UTF_8));
+            assertThat(enrollment).isInstanceOf(SshKeyEnrollmentAuthentication.Success.class);
+            String recoveryGeneration = ((SshKeyEnrollmentAuthentication.Success) enrollment)
+                    .rootRecoveryGeneration()
+                    .orElseThrow();
+            assertThat(reset.orionAccessControlService().completeRootSshKeyEnrollment(
+                    recoveryGeneration,
+                    List.of("invalid public key")))
+                    .isInstanceOf(SshKeyEnrollmentResult.Failure.class);
+            assertThat(reset.orionAccessControlService().authenticateSshKeyEnrollment(
+                    "root", newPassword.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(SshKeyEnrollmentAuthentication.Success.class);
+            assertThat(reset.orionAccessControlService().completeRootSshKeyEnrollment(
+                    recoveryGeneration,
+                    List.of(PublicKeyEntry.toString(recoveredRootKey.getPublic()))))
+                    .isInstanceOf(SshKeyEnrollmentResult.Success.class);
+            assertThat(reset.orionAccessControlService().authenticateUser(
+                    "root", newPassword.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertSshAuthenticated(reset, "root", recoveredRootKey);
+            String newRootToken = issueTokenForSshKey(reset, "root", recoveredRootKey);
+            assertThat(reset.orionAccessControlService().authenticateToken(
+                    newRootToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+            assertThat(reset.orionAccessControlService().completeRootSshKeyEnrollment(
+                    "stale-generation",
+                    List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
+                    .isInstanceOf(SshKeyEnrollmentResult.Failure.class);
         } finally {
             System.setOut(originalOut);
             assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -246,12 +310,15 @@ class InternalConfigurationRepositoryLifecycleTest {
 
         assertThat(resetOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
 
-        OrionComponent restarted = component(configuration);
+        OrionComponent restarted = component(configuration, serverIdentity);
         OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
         try {
             assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
-            assertAuthenticated(restarted, "root", newPassword);
-            assertSshAuthenticated(restarted, "root", rootKey);
+            assertThat(restarted.orionAccessControlService().authenticateUser(
+                    "root", newPassword.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertSshAuthenticationFailed(restarted, "root", rootKey);
+            assertSshAuthenticated(restarted, "root", recoveredRootKey);
         } finally {
             assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
@@ -281,7 +348,7 @@ class InternalConfigurationRepositoryLifecycleTest {
             assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
             newPassword = new String(reset.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create()));
-            assertAuthenticated(reset, "root", newPassword);
+            assertRecoveryPasswordOnly(reset, newPassword);
             assertAuthenticated(reset, "alice", "alice-password");
 
             AccessControl recovered = new XmlService().deserialize(new ByteArrayInputStream(
@@ -337,7 +404,7 @@ class InternalConfigurationRepositoryLifecycleTest {
         OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
         try {
             assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
-            assertAuthenticated(restarted, "root", newPassword);
+            assertRecoveryPasswordOnly(restarted, newPassword);
             assertAuthenticated(restarted, "alice", "alice-password");
         } finally {
             assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
@@ -345,7 +412,7 @@ class InternalConfigurationRepositoryLifecycleTest {
     }
 
     @Test
-    void resetsRootInItsConfiguredAclFileWithoutDuplicatingSecondaryEntries() throws Exception {
+    void movesRecoveredRootToPrimaryWithoutDuplicatingSecondaryEntries() throws Exception {
         String secondaryPath = "config/root.xml";
         OrionConfiguration configuration = configuration();
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_PATH, secondaryPath));
@@ -367,7 +434,7 @@ class InternalConfigurationRepositoryLifecycleTest {
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
             newPassword = new String(reset.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create()));
-            assertAuthenticated(reset, "root", newPassword);
+            assertRecoveryPasswordOnly(reset, newPassword);
             assertAuthenticated(reset, "alice", "alice-password");
             assertThat(reset.orionAccessControlService().authenticateUser(
                     "root",
@@ -377,7 +444,13 @@ class InternalConfigurationRepositoryLifecycleTest {
             GitRepositoryFileSnapshot snapshot = repository.loadFiles(
                     CONFIGURATION_REF,
                     List.of(ACL_PATH, secondaryPath));
-            assertThat(snapshot.files().get(ACL_PATH)).isEqualTo(primaryAcl);
+            AccessControl primary = new XmlService().deserialize(
+                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH)));
+            AccessControl secondary = new XmlService().deserialize(
+                    new ByteArrayInputStream(snapshot.files().get(secondaryPath)));
+            assertThat(primary.getUsers()).extracting(AccessControl.User::getId)
+                    .containsExactlyInAnyOrder("alice", "root");
+            assertThat(secondary.getUsers()).isEmpty();
             assertThat(usersAcross(snapshot, ACL_PATH, secondaryPath))
                     .extracting(AccessControl.User::getId)
                     .containsExactlyInAnyOrder("alice", "root");
@@ -401,7 +474,7 @@ class InternalConfigurationRepositoryLifecycleTest {
             assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
             newPassword = new String(reset.orionAccessControlService()
                     .plainRootToken(PlainRootTokenAccessForTests.create()));
-            assertAuthenticated(reset, "root", newPassword);
+            assertRecoveryPasswordOnly(reset, newPassword);
             assertThat(reset.orionAccessControlService().authenticateUser(
                     "root",
                     "old-root-password".getBytes(StandardCharsets.UTF_8)))
@@ -414,14 +487,14 @@ class InternalConfigurationRepositoryLifecycleTest {
         OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
         try {
             assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
-            assertAuthenticated(restarted, "root", newPassword);
+            assertRecoveryPasswordOnly(restarted, newPassword);
         } finally {
             assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
     }
 
     @Test
-    void refusesToResetAmbiguousRootUsersWithoutPersistingOrPrintingPassword() throws Exception {
+    void replacesAllAmbiguousRootUsersWithOneCanonicalRecoveryRoot() throws Exception {
         OrionConfiguration configuration = configuration();
         OrionComponent first = component(configuration);
         OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
@@ -447,17 +520,20 @@ class InternalConfigurationRepositoryLifecycleTest {
         OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
         try {
             System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
-            assertThat(resetLifecycle.runApplication()).isEqualTo(ERR);
-            assertThat(reset.runtimeStateMachine().childStatuses().get("transports").state())
-                    .isEqualTo(NEW);
+            assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
             assertThat(repository(reset).loadFiles(CONFIGURATION_REF, List.of(ACL_PATH)).version())
-                    .contains(versionBeforeReset);
+                    .hasValueSatisfying(version -> assertThat(version).isNotEqualTo(versionBeforeReset));
+            AccessControl recovered = new XmlService().deserialize(new ByteArrayInputStream(
+                    reset.orionAccessControlService().accessControlConfigurationFile()));
+            assertThat(recovered.getUsers())
+                    .filteredOn(user -> "root".equalsIgnoreCase(user.getId()))
+                    .hasSize(1);
         } finally {
             System.setOut(originalOut);
             assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
 
-        assertThat(resetOutput.toString(StandardCharsets.UTF_8)).doesNotContain("---ROOT PASSWORD: ");
+        assertThat(resetOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
     }
 
     @Test
@@ -817,17 +893,27 @@ class InternalConfigurationRepositoryLifecycleTest {
 
         @Override
         public byte[] sign(byte[] payload) throws GeneralSecurityException {
-            throw new GeneralSecurityException("Signing is not used by this test identity");
+            Signature signature = Signature.getInstance("SHA256withRSA");
+            signature.initSign(active.getPrivate());
+            signature.update(payload);
+            return signature.sign();
         }
 
         @Override
         public boolean hasVerificationKey(String keyId) {
-            return false;
+            return "active".equals(keyId);
         }
 
         @Override
-        public boolean verify(String keyId, byte[] payload, byte[] signature) {
-            return false;
+        public boolean verify(String keyId, byte[] payload, byte[] signatureBytes)
+                throws GeneralSecurityException {
+            if (!hasVerificationKey(keyId)) {
+                return false;
+            }
+            Signature signature = Signature.getInstance("SHA256withRSA");
+            signature.initVerify(active.getPublic());
+            signature.update(payload);
+            return signature.verify(signatureBytes);
         }
 
         @Override
@@ -887,10 +973,33 @@ class InternalConfigurationRepositoryLifecycleTest {
                 .containsExactlyInAnyOrder(expectedKeys);
     }
 
+    private static String issueTokenForSshKey(
+            OrionComponent component,
+            String userId,
+            KeyPair keyPair) {
+        AuthenticationResult authentication = component.orionAccessControlService().authenticateSshUser(
+                userId,
+                keyPair.getPublic().getEncoded());
+        assertThat(authentication).isInstanceOf(AuthenticationResult.Success.class);
+        UserIdentity identity = ((AuthenticationResult.Success) authentication).userIdentity();
+        TokenIssueResult issued = component.orionAccessControlService().issueTokenFor(identity, 600);
+        assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
+        return ((TokenIssueResult.Success) issued).token();
+    }
+
     private static void assertAuthenticated(OrionComponent component, String userId, String password) {
         assertThat(component.orionAccessControlService().authenticateUser(
                 userId,
                 password.getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(AuthenticationResult.Success.class);
+    }
+
+    private static void assertRecoveryPasswordOnly(OrionComponent component, String password) {
+        byte[] credential = password.getBytes(StandardCharsets.UTF_8);
+        assertThat(component.orionAccessControlService().authenticateUser("root", credential))
+                .isInstanceOf(AuthenticationResult.Failure.class);
+        assertThat(component.orionAccessControlService().authenticateSshKeyEnrollment("root", credential))
+                .isInstanceOfSatisfying(SshKeyEnrollmentAuthentication.Success.class, success ->
+                        assertThat(success.rootRecoveryGeneration()).isPresent());
     }
 }

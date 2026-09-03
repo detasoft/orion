@@ -13,6 +13,8 @@ final class JwtAccessTokenService {
     private static final String HEADER_ALGORITHM = "RS256";
     private static final String JWT_TYPE = "JWT";
     private static final String ISSUER = "orion";
+    private static final String AUTHENTICATION_GENERATION_CLAIM = "orion_auth_generation";
+    private static final int MAX_AUTHENTICATION_GENERATION_LENGTH = 128;
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder BASE64_URL_DECODER = Base64.getUrlDecoder();
     private static final Pattern STRING_CLAIM = Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
@@ -34,11 +36,23 @@ final class JwtAccessTokenService {
     }
 
     IssuedToken issue(String subject, long expiresInSeconds) throws GeneralSecurityException {
+        return issue(subject, expiresInSeconds, null);
+    }
+
+    IssuedToken issue(
+            String subject,
+            long expiresInSeconds,
+            String authenticationGeneration) throws GeneralSecurityException {
         if (subject == null || subject.isBlank()) {
             throw new IllegalArgumentException("Token subject is required");
         }
         if (expiresInSeconds <= 0) {
             throw new IllegalArgumentException("Token expiration must be positive");
+        }
+        if (authenticationGeneration != null
+                && (authenticationGeneration.isBlank()
+                || authenticationGeneration.length() > MAX_AUTHENTICATION_GENERATION_LENGTH)) {
+            throw new IllegalArgumentException("Authentication generation is invalid");
         }
 
         long issuedAt = clock.instant().getEpochSecond();
@@ -47,11 +61,13 @@ final class JwtAccessTokenService {
                 HEADER_ALGORITHM,
                 JWT_TYPE,
                 jsonString(serverIdentity.activeKeyId()));
-        String payload = "{\"iss\":\"%s\",\"sub\":%s,\"iat\":%d,\"exp\":%d}".formatted(
-                ISSUER,
-                jsonString(subject),
-                issuedAt,
-                expiresAt);
+        String generationClaim = authenticationGeneration == null
+                ? ""
+                : ",\"%s\":%s".formatted(
+                        AUTHENTICATION_GENERATION_CLAIM,
+                        jsonString(authenticationGeneration));
+        String payload = "{\"iss\":\"%s\",\"sub\":%s,\"iat\":%d,\"exp\":%d%s}".formatted(
+                ISSUER, jsonString(subject), issuedAt, expiresAt, generationClaim);
         String signingInput = base64Url(header.getBytes(StandardCharsets.UTF_8))
                 + "."
                 + base64Url(payload.getBytes(StandardCharsets.UTF_8));
@@ -102,6 +118,7 @@ final class JwtAccessTokenService {
         }
         String subject = stringClaim(payload, "sub");
         Long expiresAt = longClaim(payload, "exp");
+        String authenticationGeneration = stringClaim(payload, AUTHENTICATION_GENERATION_CLAIM);
         if (subject == null || subject.isBlank()) {
             return VerificationResult.failure("JWT subject is required");
         }
@@ -111,7 +128,13 @@ final class JwtAccessTokenService {
         if (expiresAt <= clock.instant().getEpochSecond()) {
             return VerificationResult.failure("JWT is expired");
         }
-        return VerificationResult.success(subject);
+        if (containsClaim(payload, AUTHENTICATION_GENERATION_CLAIM)
+                && (authenticationGeneration == null
+                || authenticationGeneration.isBlank()
+                || authenticationGeneration.length() > MAX_AUTHENTICATION_GENERATION_LENGTH)) {
+            return VerificationResult.failure("JWT authentication generation is invalid");
+        }
+        return VerificationResult.success(subject, authenticationGeneration);
     }
 
     private boolean verify(String keyId, String signingInput, byte[] signatureBytes) {
@@ -177,6 +200,12 @@ final class JwtAccessTokenService {
         }
     }
 
+    private boolean containsClaim(String json, String claim) {
+        return Pattern.compile("\\\"%s\\\"\\s*:".formatted(Pattern.quote(claim)))
+                .matcher(json)
+                .find();
+    }
+
     private String unescapeJsonString(String value) {
         StringBuilder result = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
@@ -220,14 +249,18 @@ final class JwtAccessTokenService {
     }
 
     sealed interface VerificationResult permits VerificationResult.Success, VerificationResult.Failure {
-        record Success(String subject) implements VerificationResult {
+        record Success(String subject, String authenticationGeneration) implements VerificationResult {
         }
 
         record Failure(String reason) implements VerificationResult {
         }
 
         static VerificationResult success(String subject) {
-            return new Success(subject);
+            return new Success(subject, null);
+        }
+
+        static VerificationResult success(String subject, String authenticationGeneration) {
+            return new Success(subject, authenticationGeneration);
         }
 
         static VerificationResult failure(String reason) {

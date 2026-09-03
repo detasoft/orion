@@ -8,6 +8,8 @@ import org.apache.sshd.server.channel.ChannelSession;
 import org.apache.sshd.server.command.Command;
 import org.apache.sshd.server.command.CommandFactory;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.OrionAccessControlService;
+import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
 import pro.deta.orion.command.CommandContext;
@@ -37,6 +39,7 @@ import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
+import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.util.stream.*;
 
 import java.io.*;
@@ -54,6 +57,7 @@ import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICA
 @Slf4j
 public class SshCommandFactory implements CommandFactory {
     public static final String ISSUE_TOKEN = "issue-token";
+    public static final String ENROLL_KEY = "enroll-key";
     public static final String STATE = "state";
     private static final GitPktLineWriter PKT_LINE_WRITER =
             new GitPktLineWriter();
@@ -62,6 +66,7 @@ public class SshCommandFactory implements CommandFactory {
     private final PlainCommandRenderer commandRenderer;
     private final GitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
+    private final OrionAccessControlService accessControlService;
 
     @Inject
     public SshCommandFactory(
@@ -69,20 +74,72 @@ public class SshCommandFactory implements CommandFactory {
             CommandDispatcher commandDispatcher,
             PlainCommandRenderer commandRenderer,
             GitNativeRepositoryService repositoryService,
-            GitTransportConfig gitTransportConfig) {
+            GitTransportConfig gitTransportConfig,
+            OrionAccessControlService accessControlService) {
         this.orionExecutor = orionExecutor;
         this.commandDispatcher = commandDispatcher;
         this.commandRenderer = commandRenderer;
         this.repositoryService = repositoryService;
         this.gitTransportConfig = gitTransportConfig;
+        this.accessControlService = accessControlService;
     }
 
     @Override
     public Command createCommand(ChannelSession channelSession, String commandLine) throws IOException {
+        if (RootSshKeyEnrollmentSession.isRestricted(channelSession.getSession())) {
+            return new RootEnrollmentCommand(ENROLL_KEY.equals(commandLine));
+        }
         if (commandLine.startsWith("git-")) {
             return new GitSshCommand(commandLine);
         }
         return new OtherSshCommand(commandLine);
+    }
+
+    @RequiredArgsConstructor
+    private final class RootEnrollmentCommand extends CloseOnDestroyCommand {
+        private final boolean enrollmentRequested;
+
+        @Override
+        public void start(ChannelSession channel, Environment environment) {
+            try {
+                orionExecutor.submit(() -> execute(channel));
+            } catch (RejectedExecutionException e) {
+                finish(1, "Root SSH key enrollment failed.\n", errorStream);
+            }
+        }
+
+        private void execute(ChannelSession channel) {
+            if (!enrollmentRequested || accessControlService == null) {
+                finish(1, "Root recovery permits only enroll-key.\n", errorStream);
+                return;
+            }
+            RootSshKeyEnrollmentSession.PendingEnrollment pending =
+                    RootSshKeyEnrollmentSession.pending(channel.getSession());
+            if (pending == null) {
+                finish(1, "Root SSH key enrollment failed.\n", errorStream);
+                return;
+            }
+            SshKeyEnrollmentResult result = accessControlService.completeRootSshKeyEnrollment(
+                    pending.expectedGeneration(),
+                    pending.publicKeys());
+            if (result instanceof SshKeyEnrollmentResult.Success) {
+                RootSshKeyEnrollmentSession.complete(channel.getSession());
+                finish(0, "Root SSH key enrolled. Reconnect with the enrolled key.\n", outputStream);
+            } else {
+                finish(1, "Root SSH key enrollment failed.\n", errorStream);
+            }
+        }
+
+        private void finish(int exitCode, String message, OutputStream stream) {
+            try {
+                stream.write(message.getBytes(StandardCharsets.UTF_8));
+                stream.flush();
+            } catch (IOException e) {
+                log.warn("Root SSH key enrollment response delivery failed", e);
+                exitCode = 1;
+            }
+            exitCallback.onExit(exitCode);
+        }
     }
 
     @RequiredArgsConstructor

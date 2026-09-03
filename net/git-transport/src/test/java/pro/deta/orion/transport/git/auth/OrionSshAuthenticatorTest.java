@@ -22,6 +22,7 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 
@@ -134,6 +135,23 @@ class OrionSshAuthenticatorTest {
                     .containsOnlyOnce(firstFingerprint)
                     .containsOnlyOnce(secondFingerprint);
             assertThat(fixture.accessControl.keysFor("alice")).hasSize(2);
+        }
+    }
+
+    @Test
+    void recoveredRootAuthenticationDefersAclMutationToTheDedicatedCommand() throws Exception {
+        KeyPair candidate = keyPair();
+        try (Fixture fixture = new Fixture()) {
+            fixture.accessControl.addRecoveryRoot();
+
+            authenticateSuccessfully(
+                    fixture,
+                    "root",
+                    List.of(candidate),
+                    PUBLIC_KEY_AND_INTERACTIVE,
+                    new RecordingInteraction("correct-password", "all"));
+
+            assertThat(fixture.accessControl.keysFor("root")).isEmpty();
         }
     }
 
@@ -397,6 +415,12 @@ class OrionSshAuthenticatorTest {
     private static final class RecordingAccessControlService implements OrionAccessControlService {
         private final Map<String, LinkedHashMap<String, PublicKey>> keysByUser = new LinkedHashMap<>();
         private final List<String> authenticatedUserIds = new ArrayList<>();
+        private boolean recoveryRoot;
+
+        private void addRecoveryRoot() {
+            addUser("root");
+            recoveryRoot = true;
+        }
 
         private void addUser(String username, PublicKey... keys) {
             LinkedHashMap<String, PublicKey> userKeys = keysByUser.computeIfAbsent(
@@ -445,6 +469,20 @@ class OrionSshAuthenticatorTest {
                 return success(userName);
             }
             return AuthenticationResult.failure("authentication failed");
+        }
+
+        @Override
+        public SshKeyEnrollmentAuthentication authenticateSshKeyEnrollment(
+                String userName,
+                byte[] credential) {
+            AuthenticationResult result = authenticateUser(userName, credential);
+            return switch (result) {
+                case AuthenticationResult.Success(var identity) -> SshKeyEnrollmentAuthentication.success(
+                        identity,
+                        recoveryRoot && "root".equalsIgnoreCase(userName) ? "generation-1" : null);
+                case AuthenticationResult.Failure(var reason, var throwable) ->
+                        SshKeyEnrollmentAuthentication.failure(reason, throwable);
+            };
         }
 
         @Override

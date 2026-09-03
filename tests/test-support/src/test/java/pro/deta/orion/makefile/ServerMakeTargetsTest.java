@@ -118,33 +118,28 @@ class ServerMakeTargetsTest {
     }
 
     @Test
-    void enrollsGeneratedAdminIdentityAndVerifiesIt() throws Exception {
+    void enrollsGeneratedAdminIdentityInteractivelyWithoutForwardingPasswordEnvironment() throws Exception {
         Path capture = tempDir.resolve("ssh-enrollment");
         Path bin = Files.createDirectory(tempDir.resolve("ssh-enrollment-bin"));
         Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
         createExecutable(bin.resolve("ssh"), """
                 #!/bin/sh
-                count_file="$CAPTURE_FILE.count"
-                count=0
-                if [ -f "$count_file" ]; then
-                    count=$(cat "$count_file")
-                fi
-                count=$((count + 1))
-                printf '%s\n' "$count" > "$count_file"
                 {
-                    printf 'call=%s\n' "$count"
                     printf 'arg=%s\n' "$@"
-                    printf 'password=%s\n' "$("$SSH_ASKPASS" '(root@localhost) Orion password: ')"
-                    key_prompt='(root@localhost) Keys (`all`, numbers, or OpenSSH key): '
-                    printf 'keys=%s\n' "$("$SSH_ASKPASS" "$key_prompt")"
-                } >> "$CAPTURE_FILE"
-                printf 'orion: RUNNING\n'
+                    printf 'root-password=%s\n' "$ORION_ROOT_PASSWORD"
+                    printf 'display=%s\n' "$DISPLAY"
+                    printf 'askpass=%s\n' "$SSH_ASKPASS"
+                    printf 'askpass-require=%s\n' "$SSH_ASKPASS_REQUIRE"
+                } > "$CAPTURE_FILE"
                 """);
         ProcessBuilder builder = make(
                 "enroll-admin-key",
                 "ORION_SSH_KEY=" + identity);
         configureFakeCommand(builder, bin, capture);
-        builder.environment().put("ORION_ROOT_PASSWORD", "test-root-password");
+        builder.environment().put("ORION_ROOT_PASSWORD", "must-not-forward");
+        builder.environment().put("DISPLAY", "must-not-forward");
+        builder.environment().put("SSH_ASKPASS", "must-not-forward");
+        builder.environment().put("SSH_ASKPASS_REQUIRE", "must-not-forward");
 
         Process process = builder.start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -161,27 +156,40 @@ class ServerMakeTargetsTest {
                         "arg=-o",
                         "arg=IdentityFile=none")
                 .containsSubsequence("arg=-i", "arg=" + identity)
+                .containsSubsequence("arg=-o", "arg=PreferredAuthentications=publickey,keyboard-interactive")
+                .containsSubsequence("arg=-o", "arg=PasswordAuthentication=no")
+                .containsSubsequence("arg=-l", "arg=root", "arg=localhost", "arg=enroll-key")
                 .doesNotContain("arg=~/.ssh/id_rsa");
         assertThat(invocation).filteredOn(line -> line.equals("arg=-i")).hasSize(1);
         assertThat(invocation).filteredOn(line -> line.equals("arg=" + identity)).hasSize(1);
         assertThat(String.join("\n", invocation))
-                .contains("call=1", "password=test-root-password", "keys=all")
-                .doesNotContain("call=2");
+                .contains("root-password=", "display=", "askpass=", "askpass-require=")
+                .doesNotContain("must-not-forward");
     }
 
     @Test
-    void enrollmentRequiresTheOrionRootPassword() throws Exception {
+    void issueTokenUsesPublicKeyOnlyBatchAuthentication() throws Exception {
+        Path capture = tempDir.resolve("ssh-token");
+        Path bin = Files.createDirectory(tempDir.resolve("ssh-token-bin"));
         Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
+        createExecutable(bin.resolve("ssh"), """
+                #!/bin/sh
+                printf 'arg=%s\n' "$@" > "$CAPTURE_FILE"
+                printf 'token\n'
+                """);
 
         ProcessBuilder builder = make(
-                "enroll-admin-key",
+                "issue-token-raw",
                 "ORION_SSH_KEY=" + identity);
-        builder.environment().remove("ORION_ROOT_PASSWORD");
+        configureFakeCommand(builder, bin, capture);
         Process process = builder.start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
-        assertThat(process.waitFor()).isNotZero();
-        assertThat(output).contains("ORION_ROOT_PASSWORD is required");
+        assertThat(process.waitFor()).as(output).isZero();
+        assertThat(Files.readAllLines(capture))
+                .containsSubsequence("arg=-o", "arg=BatchMode=yes")
+                .containsSubsequence("arg=-o", "arg=PreferredAuthentications=publickey")
+                .containsSubsequence("arg=-o", "arg=PasswordAuthentication=no");
     }
 
     @Test

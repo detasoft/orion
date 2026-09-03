@@ -19,6 +19,7 @@ import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.terminal.InteractiveTerminal;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.transport.git.ssh.CloseOnDestroyCommand;
+import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -59,7 +60,17 @@ public final class OrionShell implements ShellFactory {
 
     @Override
     public Command createShell(ChannelSession channel) {
+        if (RootSshKeyEnrollmentSession.isRestricted(channel.getSession())) {
+            return new RecoveryRejectedShell();
+        }
         return new TerminalCommand(channel);
+    }
+
+    private static final class RecoveryRejectedShell extends CloseOnDestroyCommand {
+        @Override
+        public void start(ChannelSession channel, Environment environment) {
+            exitCallback.onExit(1);
+        }
     }
 
     private final class TerminalCommand extends CloseOnDestroyCommand implements AsyncCommandStreamsAware {

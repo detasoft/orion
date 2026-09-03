@@ -79,9 +79,62 @@ class JwtAccessTokenServiceTest {
                         "JWT signing key is unknown"));
     }
 
+    @Test
+    void roundTripsOptionalAuthenticationGeneration() throws Exception {
+        JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single("server-signing-v1"), CLOCK);
+
+        JwtAccessTokenService.IssuedToken token = service.issue("root", 600, "generation-1");
+
+        assertThat(payload(token.value())).contains("\"orion_auth_generation\":\"generation-1\"");
+        assertThat(service.verify(token.value()))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.success("root", "generation-1"));
+    }
+
+    @Test
+    void claimFreeTokensRemainCompatible() throws Exception {
+        JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single("server-signing-v1"), CLOCK);
+
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+
+        assertThat(payload(token.value())).doesNotContain("orion_auth_generation");
+        assertThat(service.verify(token.value()))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.success("alice"));
+    }
+
+    @Test
+    void rejectsMalformedAuthenticationGenerationClaim() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        String malformedToken = signedToken(
+                identity,
+                "{\"iss\":\"orion\",\"sub\":\"root\",\"exp\":1788383400,"
+                        + "\"orion_auth_generation\":42}");
+
+        assertThat(service.verify(malformedToken))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT authentication generation is invalid"));
+    }
+
     private static String header(String token) {
         String encoded = token.substring(0, token.indexOf('.'));
         return new String(Base64.getUrlDecoder().decode(encoded), StandardCharsets.UTF_8);
+    }
+
+    private static String payload(String token) {
+        String[] parts = token.split("\\.");
+        return new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+    }
+
+    private static String signedToken(TestIdentity identity, String payload) throws GeneralSecurityException {
+        Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
+        String header = "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\""
+                + identity.activeKeyId()
+                + "\"}";
+        String signingInput = encoder.encodeToString(header.getBytes(StandardCharsets.UTF_8))
+                + "."
+                + encoder.encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+        return signingInput + "." + encoder.encodeToString(
+                identity.sign(signingInput.getBytes(StandardCharsets.US_ASCII)));
     }
 
     private static Map<String, KeyPair> orderedKeys(

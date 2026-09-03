@@ -74,7 +74,8 @@ public final class PasswordKeyboardInteractiveAuthFactory extends AbstractUserAu
             if (passwordAuthentication == null) {
                 return authenticator.failKeyboardInteractive(getServerSession());
             }
-            if (passwordAuthentication.candidates().isEmpty()) {
+            if (passwordAuthentication.candidates().isEmpty()
+                    && passwordAuthentication.rootRecoveryGeneration() == null) {
                 return authenticator.completePasswordAuthentication(
                         getServerSession(),
                         getUsername(),

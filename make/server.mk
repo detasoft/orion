@@ -24,7 +24,8 @@ ORION_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(OR
 ORION_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_REPOSITORY)
 ORION_CHECK_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_CHECK_REPOSITORY)
 ORION_CHECK_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_CHECK_REPOSITORY)
-ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -i $(ORION_SSH_KEY) \
+ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
+	-o PreferredAuthentications=publickey -o PasswordAuthentication=no -i $(ORION_SSH_KEY) \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
 .PHONY: run-server admin-key enroll-admin-key require-key-material-password issue-token issue-token-raw
@@ -54,14 +55,10 @@ admin-key:
 	fi
 
 enroll-admin-key: admin-key
-	@test -n "$${ORION_ROOT_PASSWORD}" || { \
-		echo 'ORION_ROOT_PASSWORD is required; use the generated Orion root password.' >&2; \
-		exit 2; \
-	}
-	@DISPLAY=orion SSH_ASKPASS="$(CURDIR)/make/ssh-enrollment-askpass.sh" SSH_ASKPASS_REQUIRE=force \
+	@env -u ORION_ROOT_PASSWORD -u DISPLAY -u SSH_ASKPASS -u SSH_ASKPASS_REQUIRE \
 		ssh $(ORION_SSH_OPTIONS) -o PreferredAuthentications=publickey,keyboard-interactive \
 		-o PasswordAuthentication=no -i "$(ORION_SSH_KEY)" -p $(ORION_SSH_PORT) \
-		-l root $(ORION_SSH_HOST) state >/dev/null
+		-l root $(ORION_SSH_HOST) enroll-key
 	@printf 'Admin SSH key enrolled: %s\n' "$(ORION_SSH_KEY)"
 
 run-server: require-key-material-password admin-key

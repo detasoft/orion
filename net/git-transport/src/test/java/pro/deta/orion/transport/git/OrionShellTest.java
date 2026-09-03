@@ -30,6 +30,7 @@ import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
+import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -232,6 +233,19 @@ class OrionShellTest {
         assertThat(failedStartExit.calls.get()).isEqualTo(1);
     }
 
+    @Test
+    void recoverySessionIsRejectedBeforeInteractiveTerminalConstruction() throws Exception {
+        TestChannelSession channel = channel();
+        RootSshKeyEnrollmentSession.begin(
+                channel.getSession(),
+                "generation-1",
+                List.of("ssh-rsa candidate"));
+
+        Command command = shell(ignored -> new CommandResult.Message("wrong route")).createShell(channel);
+
+        assertThat(command).isNotInstanceOf(AsyncCommandStreamsAware.class);
+    }
+
     private OrionShell shell(CommandDispatcher dispatcher) {
         return new OrionShell(
                 dispatcher,
@@ -261,6 +275,9 @@ class OrionShellTest {
                 new Class<?>[]{ServerSession.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getAttribute" -> attributes.get(args[0]);
+                    case "setAttribute" -> attributes.put(
+                            (AttributeRepository.AttributeKey<?>) args[0], args[1]);
+                    case "removeAttribute" -> attributes.remove(args[0]);
                     case "getRemoteAddress" -> new InetSocketAddress("192.0.2.10", 2222);
                     case "getUsername" -> "operator";
                     case "toString" -> "test-session";

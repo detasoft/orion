@@ -8,6 +8,7 @@ import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
 import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.UserIdentity;
 
 import jakarta.inject.Inject;
@@ -99,10 +100,10 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
         }
         byte[] credential = password.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         try {
-            return switch (accessControlService.authenticateUser(username, credential)) {
-                case AuthenticationResult.Success(var identity) ->
-                        new PasswordAuthentication(identity, provedCandidates(session));
-                case AuthenticationResult.Failure ignored -> null;
+            return switch (accessControlService.authenticateSshKeyEnrollment(username, credential)) {
+                case SshKeyEnrollmentAuthentication.Success(var identity, var rootRecoveryGeneration) ->
+                        new PasswordAuthentication(identity, provedCandidates(session), rootRecoveryGeneration.orElse(null));
+                case SshKeyEnrollmentAuthentication.Failure ignored -> null;
             };
         } finally {
             Arrays.fill(credential, (byte) 0);
@@ -126,7 +127,7 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
         if (!allowsKeyboardInteractive(session, username) || authentication == null) {
             return false;
         }
-        if (authentication.candidates().isEmpty()) {
+        if (authentication.candidates().isEmpty() && authentication.rootRecoveryGeneration() == null) {
             session.setAttribute(SSH_AUTHENTICATED_USER, authentication.identity());
             return true;
         }
@@ -134,7 +135,14 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
         if (selectedKeys == null || selectedKeys.isEmpty()) {
             return false;
         }
-        accessControlService.addSshKeysToUser(username, selectedKeys);
+        if (authentication.rootRecoveryGeneration() == null) {
+            accessControlService.addSshKeysToUser(username, selectedKeys);
+        } else {
+            RootSshKeyEnrollmentSession.begin(
+                    session,
+                    authentication.rootRecoveryGeneration(),
+                    selectedKeys);
+        }
         session.removeAttribute(PROVED_PUBLIC_KEYS);
         session.setAttribute(SSH_AUTHENTICATED_USER, authentication.identity());
         return true;
@@ -243,7 +251,10 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
         }
     }
 
-    record PasswordAuthentication(UserIdentity identity, List<PublicKey> candidates) {
+    record PasswordAuthentication(
+            UserIdentity identity,
+            List<PublicKey> candidates,
+            String rootRecoveryGeneration) {
         PasswordAuthentication {
             candidates = List.copyOf(candidates);
         }

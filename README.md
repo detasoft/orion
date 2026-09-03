@@ -57,14 +57,17 @@ Keep the server running and enroll the generated admin identity from another
 terminal:
 
 ```sh
-ORION_ROOT_PASSWORD='<generated-password>' make enroll-admin-key
+make enroll-admin-key
 ```
 
-The enrollment helper proves possession of `admin-identity.pem`, asks Orion to
-verify the root password before displaying candidate keys, enrolls the key,
-and runs an authenticated `state` command on the same SSH connection. Server
-signing keys remain inside the protected material store and are never exported
-as SSH client identities.
+Enter the generated recovery password at the hidden terminal prompt and select
+the proved key. The dedicated `enroll-key` SSH command atomically consumes the
+password and installs the selected key. Reconnect with that key before running
+`make issue-token`; token issue is public-key-only and never falls back to the
+recovery password. A later `--reset-root-pass` immediately invalidates prior
+root SSH credentials and root JWTs without changing other users or their JWTs.
+Server signing keys remain inside the protected material store and are never
+exported as SSH client identities.
 
 Default local listeners:
 
