@@ -24,6 +24,10 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
+            <artifactId>key-material</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
             <artifactId>schema</artifactId>
         </dependency>
     </dependencies>

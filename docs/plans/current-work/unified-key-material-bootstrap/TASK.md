@@ -15,7 +15,6 @@ dependency injection.
 
 ## Child Tasks
 
-- [ ] [Migrate server identity and JWT signing](server-identity-migration/TASK.md)
 - [ ] [Migrate the remaining Orion key owners](remaining-key-owner-migration/TASK.md)
 - [ ] [Support short-lived JWT rotation and refresh](short-lived-jwt-rotation-and-refresh/TASK.md)
 - [ ] [Verify rotation, recovery, and bootstrap acceptance](rotation-recovery-and-acceptance/TASK.md)

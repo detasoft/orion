@@ -29,7 +29,7 @@ public class ConfigurationContext {
         this.baseDir = new LazySupplier<>(() -> {
             Path baseDir = null;
             try {
-                baseDir = calcBaseDirPath(configuration, this.environment);
+                baseDir = baseDirectory(configuration, this.environment);
                 return baseDir;
             } finally {
                 log.info("baseDir: {}", baseDir);
@@ -61,7 +61,9 @@ public class ConfigurationContext {
         return resolveStorageLocation(configuration.getStorage().getLocation());
     }
 
-    private static Path calcBaseDirPath(OrionConfiguration configuration, Map<String, String> environment) {
+    public static Path baseDirectory(
+            OrionConfiguration configuration,
+            Map<String, String> environment) {
         String configuredBaseDir = configuration.getBootstrap().getBaseDir();
         if (OrionUtils.isNullOrEmpty(configuredBaseDir)) {
             return workingDirectory();

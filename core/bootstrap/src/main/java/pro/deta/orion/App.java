@@ -7,9 +7,13 @@ import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.keymaterial.ServerIdentityMaterial;
+import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.io.IOException;
 import java.io.PrintStream;
+import java.security.GeneralSecurityException;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
@@ -66,11 +70,22 @@ public class App {
     }
 
     private static int runApplication(AppOptions options) {
-        OrionComponent orionComponent = DaggerOrionComponent.builder()
-                .configurationProvider(configurationProvider(options))
-                .runtimeOptions(options.runtimeOptions())
-                .build();
-        return run(orionComponent.orionApplicationLifecycle(), true);
+        ConfigurationProvider configurationProvider = configurationProvider(options);
+        try {
+            OrionConfiguration configuration = configurationProvider.readConfiguration();
+            try (ServerIdentityMaterial serverIdentity = ServerIdentityMaterialFactory.open(
+                    configuration, Map.copyOf(System.getenv()))) {
+                OrionComponent orionComponent = DaggerOrionComponent.builder()
+                        .configurationProvider(() -> configuration)
+                        .runtimeOptions(options.runtimeOptions())
+                        .serverIdentityCapability(serverIdentity)
+                        .build();
+                return run(orionComponent.orionApplicationLifecycle(), true);
+            }
+        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
+            log.error("Cannot open configured server identity material", failure);
+            return 1;
+        }
     }
 
     private static String usageFor(String[] args) {

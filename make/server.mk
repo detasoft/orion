@@ -3,9 +3,8 @@ ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
 ORION_HTTP_HOST ?= localhost
 ORION_HTTP_PORT ?= 8000
-ORION_SERVER_IDENTITY_KEY ?= $(ORION_ROOT)/server-identity/signing-rsa.pem
 ORION_SSH_USER ?= root
-ORION_SSH_KEY ?= $(ORION_SERVER_IDENTITY_KEY)
+ORION_SSH_KEY ?= $(ORION_ROOT)/admin-identity.pem
 ORION_SSH_OPTIONS ?= -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 ORION_TOKEN_TTL_SECONDS ?= 3600
 ORION_GIT_USER ?= $(ORION_SSH_USER)
@@ -22,9 +21,10 @@ ORION_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(OR
 ORION_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_REPOSITORY)
 ORION_CHECK_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_CHECK_REPOSITORY)
 ORION_CHECK_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_CHECK_REPOSITORY)
-ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -i $(ORION_SERVER_IDENTITY_KEY) -p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
+ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -i $(ORION_SSH_KEY) \
+	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: run-server issue-token issue-token-raw
+.PHONY: run-server admin-key enroll-admin-key require-key-material-password issue-token issue-token-raw
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
 .PHONY: admin-acl admin-acl-with-token
 .PHONY: check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
@@ -38,12 +38,38 @@ $(CLONE_HTTP_REPO_ARGS):
 endif
 endif
 
-run-server:
+require-key-material-password:
+	@test -n "$${ORION_KEY_MATERIAL_PASSWORD}" || { \
+		echo 'ORION_KEY_MATERIAL_PASSWORD is required for the protected key-material store.' >&2; \
+		exit 2; \
+	}
+
+admin-key:
+	@if [ ! -f "$(ORION_SSH_KEY)" ]; then \
+		mkdir -p "$(dir $(ORION_SSH_KEY))"; \
+		ssh-keygen -q -t ed25519 -N '' -f "$(ORION_SSH_KEY)"; \
+	fi
+
+enroll-admin-key: admin-key
+	@test -n "$${ORION_SSH_ENROLLMENT_TOKEN}" || { \
+		echo 'ORION_SSH_ENROLLMENT_TOKEN is required; copy it from first-start output.' >&2; \
+		exit 2; \
+	}
+	@DISPLAY=orion SSH_ASKPASS="$(CURDIR)/make/ssh-enrollment-askpass.sh" SSH_ASKPASS_REQUIRE=force \
+		ssh $(ORION_SSH_OPTIONS) -o PreferredAuthentications=publickey,keyboard-interactive \
+		-o PasswordAuthentication=no -i "$(ORION_SSH_KEY)" -p $(ORION_SSH_PORT) \
+		-l root $(ORION_SSH_HOST) state >/dev/null 2>&1 || true
+	@ssh $(ORION_SSH_OPTIONS) -i "$(ORION_SSH_KEY)" -p $(ORION_SSH_PORT) \
+		-l root $(ORION_SSH_HOST) state >/dev/null
+	@printf 'Admin SSH key enrolled: %s\n' "$(ORION_SSH_KEY)"
+
+run-server: require-key-material-password admin-key
 	$(MAVEN) -pl core/bootstrap -am -Prun-server process-classes
 
 # Scenario:
-# 1. Start the server: make run-server
-# 2. Issue a temporary admin token and export it into the current shell:
+# 1. Export ORION_KEY_MATERIAL_PASSWORD, then start the server: make run-server
+# 2. Enroll the generated admin key with the token printed on first start.
+# 3. Issue a temporary admin token and export it into the current shell:
 #      eval "$$(make -s issue-token)"
 # 3. Use that token for the HTTP admin API:
 #      make admin-acl

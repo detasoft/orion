@@ -27,24 +27,44 @@ change between revisions.
 Start Orion with the bundled local development configuration:
 
 ```sh
+export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
 make run-server
 ```
 
 The equivalent Maven command is:
 
 ```sh
+export ORION_KEY_MATERIAL_PASSWORD='choose-a-local-development-password'
 mvn -pl core/bootstrap -am -Prun-server process-classes
 ```
 
 By default the server uses `orion_root` as its base directory and
 `orion_root/repos` as repository storage. This directory is outside Maven's
 `target` tree, so `mvn clean` does not remove generated keys or the local ACL.
-On first startup it creates a default ACL in the `orion` repository and prints
-the generated `root` password once to stdout:
+The protected key-material store is created at
+`orion_root/key-material/orion.p12`; its password is read only from
+`ORION_KEY_MATERIAL_PASSWORD`. The Make helper also creates a separate local
+admin SSH identity at `orion_root/admin-identity.pem` when it is missing.
+
+On first startup Orion creates a default ACL in the `orion` repository and
+prints both the generated `root` password and a one-time SSH enrollment token:
 
 ```text
 ---ROOT PASSWORD: <generated-password>
+SSH enrollment token: <enrollment-token>
 ```
+
+Keep the server running and enroll the generated admin identity from another
+terminal:
+
+```sh
+make enroll-admin-key ORION_SSH_ENROLLMENT_TOKEN='<enrollment-token>'
+```
+
+The enrollment helper proves possession of `admin-identity.pem`, consumes the
+one-time token, and verifies the enrolled key with an authenticated `state`
+command. Server signing keys remain inside the protected material store and
+are never exported as SSH client identities.
 
 Default local listeners:
 
@@ -160,7 +180,7 @@ The command fails closed when no expected release key fingerprint is supplied.
 
 Most `/api/admin/*` routes require a bearer token from an application admin
 user. For local development, issue a token through the SSH helper that
-authenticates as `root` with Orion's generated server identity key:
+authenticates as `root` with the enrolled `admin-identity.pem` key:
 
 ```sh
 eval "$(make -s issue-token)"
@@ -197,7 +217,7 @@ The bundled local configuration is equivalent to:
 
 ```yaml
 bootstrap:
-  baseDir: target/orion_root
+  baseDir: orion_root
   workDir: work
   threadPoolSize: 10
   accessControl:
@@ -206,8 +226,19 @@ bootstrap:
     paths:
       - orion.xml
     createDefaultIfMissing: true
+  keyMaterial:
+    location: key-material/orion.p12
+    password: env:ORION_KEY_MATERIAL_PASSWORD
+    createIfMissing: true
+    clusterId: orion
+    serverSigning:
+      algorithm: RSA
+      active:
+        alias: server-signing-v1
+        version: 1
+      verification: []
 storage:
-  location: file:target/orion_root/repos
+  location: repos
   createOnPush: true
 transport:
   defaultAddress: localhost

@@ -11,6 +11,7 @@ import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.acl.storage.NativeGitAccessControlStorage;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.internal.UserEmail;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -25,7 +26,6 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -38,16 +38,6 @@ class OrionRuntimeModuleTest {
     private Path tempDir;
 
     private final XmlService xmlService = new XmlService();
-
-    @Test
-    void runtimePlanDoesNotLoadServerKeysWhenTransportsAreOnlyRegistered() {
-        OrionComponent component = runtimeComponent(runtimeConfigurationWithEnabledTransports());
-
-        component.orionApplicationLifecycle().describeLifecycle();
-
-        assertFalse(tempDir.resolve("server-identity").toFile().exists());
-        assertFalse(tempDir.resolve("ssh-host-keys").toFile().exists());
-    }
 
     @Test
     void fileAclStartsFromLocalDirectory() throws Exception {
@@ -153,19 +143,11 @@ class OrionRuntimeModuleTest {
         return configuration;
     }
 
-    private OrionConfiguration runtimeConfigurationWithEnabledTransports() {
-        OrionConfiguration configuration = defaultRuntimeConfiguration();
-        configuration.getTransport().getGit().setEnabled(true);
-        configuration.getTransport().getSsh().setEnabled(true);
-        configuration.getTransport().getHttp().setEnabled(true);
-        configuration.getTransport().getHttps().setEnabled(true);
-        return configuration;
-    }
-
     private OrionComponent runtimeComponent(OrionConfiguration configuration) {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .runtimeOptions(OrionRuntimeOptions.defaults())
+                .serverIdentityCapability(ServerIdentityCapability.unavailable())
                 .build();
     }
 }

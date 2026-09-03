@@ -23,6 +23,7 @@ public class OrionConfiguration {
         private String workDir = "work";
         private int threadPoolSize = 10;
         private BootstrapAccessControlConfig accessControl = new BootstrapAccessControlConfig();
+        private KeyMaterialConfig keyMaterial = new KeyMaterialConfig();
     }
 
     @Data

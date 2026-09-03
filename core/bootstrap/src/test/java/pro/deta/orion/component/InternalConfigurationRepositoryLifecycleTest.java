@@ -16,6 +16,7 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -28,8 +29,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.PublicKey;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -97,6 +100,34 @@ class InternalConfigurationRepositoryLifecycleTest {
         }
 
         assertThat(processOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
+    }
+
+    @Test
+    void rotationRevokesRetainedServerIdentityFromRootSsh() throws Exception {
+        OrionConfiguration configuration = configuration();
+        KeyPair oldIdentity = keyPair();
+        KeyPair activeIdentity = keyPair();
+
+        OrionComponent first = component(configuration, new TestServerIdentity(oldIdentity, List.of()));
+        OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
+        try {
+            assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertSshAuthenticated(first, "root", oldIdentity);
+        } finally {
+            assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        OrionComponent rotated = component(
+                configuration,
+                new TestServerIdentity(activeIdentity, List.of(oldIdentity)));
+        OrionApplicationLifecycle rotatedLifecycle = rotated.orionApplicationLifecycle();
+        try {
+            assertThat(rotatedLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertSshAuthenticated(rotated, "root", activeIdentity);
+            assertSshAuthenticationFailed(rotated, "root", oldIdentity);
+        } finally {
+            assertThat(rotatedLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
     }
 
     @Test
@@ -250,9 +281,16 @@ class InternalConfigurationRepositoryLifecycleTest {
     }
 
     private static OrionComponent component(OrionConfiguration configuration) {
+        return component(configuration, ServerIdentityCapability.unavailable());
+    }
+
+    private static OrionComponent component(
+            OrionConfiguration configuration,
+            ServerIdentityCapability serverIdentity) {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .runtimeOptions(OrionRuntimeOptions.defaults())
+                .serverIdentityCapability(serverIdentity)
                 .build();
     }
 
@@ -316,6 +354,44 @@ class InternalConfigurationRepositoryLifecycleTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         return generator.generateKeyPair();
+    }
+
+    private record TestServerIdentity(
+            KeyPair active,
+            List<KeyPair> retained) implements ServerIdentityCapability {
+        @Override
+        public String activeKeyId() {
+            return "active";
+        }
+
+        @Override
+        public byte[] sign(byte[] payload) throws GeneralSecurityException {
+            throw new GeneralSecurityException("Signing is not used by this test identity");
+        }
+
+        @Override
+        public boolean hasVerificationKey(String keyId) {
+            return false;
+        }
+
+        @Override
+        public boolean verify(String keyId, byte[] payload, byte[] signature) {
+            return false;
+        }
+
+        @Override
+        public List<PublicKey> publicKeys() {
+            return List.of(active.getPublic());
+        }
+
+        @Override
+        public List<PublicKey> retainedPublicKeys() {
+            List<PublicKey> publicKeys = new java.util.ArrayList<>();
+            for (KeyPair keyPair : retained) {
+                publicKeys.add(keyPair.getPublic());
+            }
+            return List.copyOf(publicKeys);
+        }
     }
 
     private static void assertSshAuthenticated(OrionComponent component, String userId, KeyPair keyPair) {

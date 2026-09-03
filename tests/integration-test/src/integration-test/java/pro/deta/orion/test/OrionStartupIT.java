@@ -21,6 +21,7 @@ import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.test.integration.s3.MinioS3TestServer;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 
@@ -201,6 +202,7 @@ class OrionStartupIT {
             OrionComponent orionComponent = DaggerOrionComponent.builder()
                     .configurationProvider(() -> configuration)
                     .runtimeOptions(OrionRuntimeOptions.defaults())
+                    .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
 
@@ -233,6 +235,7 @@ class OrionStartupIT {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .runtimeOptions(OrionRuntimeOptions.defaults())
+                .serverIdentityCapability(ServerIdentityCapability.unavailable())
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
 
@@ -250,6 +253,7 @@ class OrionStartupIT {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> orionConfiguration)
                 .runtimeOptions(OrionRuntimeOptions.defaults())
+                .serverIdentityCapability(ServerIdentityCapability.unavailable())
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
         assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);

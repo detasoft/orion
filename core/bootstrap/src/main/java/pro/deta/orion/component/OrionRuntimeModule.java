@@ -11,14 +11,8 @@ import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.crypto.PublicKeysProvider;
-import pro.deta.orion.crypto.ServerIdentityKeyService;
-import pro.deta.orion.crypto.ServerKeySigner;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 
-import jakarta.inject.Provider;
-import java.security.PublicKey;
-import java.util.Collection;
 
 
 @Module
@@ -41,28 +35,6 @@ public class OrionRuntimeModule {
             OrionAccessControlServiceImpl orionAccessControlService) {
         return orionAccessControlService;
     };
-
-    @Provides
-    @Singleton
-    PublicKeysProvider publicKeysProvider(Provider<ServerIdentityKeyService> serverIdentityKeyService) {
-        return new PublicKeysProvider() {
-            @Override
-            public Collection<PublicKey> getPublicKeys() {
-                return serverIdentityKeyService.get().getPublicKeys();
-            }
-        };
-    }
-
-    @Provides
-    @Singleton
-    ServerKeySigner serverKeySigner(Provider<ServerIdentityKeyService> serverIdentityKeyService) {
-        return new ServerKeySigner() {
-            @Override
-            public SigningKey rsaSha256SigningKey() {
-                return serverIdentityKeyService.get().rsaSha256SigningKey();
-            }
-        };
-    }
 
     @Provides
     static AccessControlStorage accessControlStorage(

@@ -10,6 +10,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
@@ -34,10 +35,12 @@ public interface OrionComponent {
         OrionComponent build();
         @BindsInstance Builder configurationProvider(ConfigurationProvider configurationProvider);
         @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
+        @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
 
         default Builder defaultConfigurationProvider() {
             return configurationProvider(OrionConfiguration::new)
-                    .runtimeOptions(OrionRuntimeOptions.defaults());
+                    .runtimeOptions(OrionRuntimeOptions.defaults())
+                    .serverIdentityCapability(ServerIdentityCapability.unavailable());
         }
     }
 }

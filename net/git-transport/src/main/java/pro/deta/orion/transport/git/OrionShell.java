@@ -64,7 +64,10 @@ public class OrionShell implements ShellFactory {
             msg.append(" You may issue a bearer token with the following syntax:");
             msg.append(nl);
 
-            msg.append(String.format("   ssh -i /path/to/server-identity/signing-rsa.pem -l root -p %d %s " + ISSUE_TOKEN + " 3600", port, hostname));
+            msg.append(String.format(
+                    "   ssh -i /path/to/admin-identity.pem -l root -p %d %s " + ISSUE_TOKEN + " 3600",
+                    port,
+                    hostname));
             msg.append(nl);
 
             msg.append(b2);
@@ -73,7 +76,10 @@ public class OrionShell implements ShellFactory {
             msg.append(" You may inspect application lifecycle state with the following syntax:");
             msg.append(nl);
 
-            msg.append(String.format("   ssh -i /path/to/server-identity/signing-rsa.pem -l root -p %d %s " + STATE, port, hostname));
+            msg.append(String.format(
+                    "   ssh -i /path/to/admin-identity.pem -l root -p %d %s " + STATE,
+                    port,
+                    hostname));
             msg.append(nl);
 
             msg.append(b2);

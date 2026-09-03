@@ -9,6 +9,20 @@ ref = "refs/heads/main"
 paths = ["orion.xml"]
 createDefaultIfMissing = true
 
+[bootstrap.keyMaterial]
+location = "key-material/orion.p12"
+password = "env:ORION_KEY_MATERIAL_PASSWORD"
+createIfMissing = true
+clusterId = "orion"
+
+[bootstrap.keyMaterial.serverSigning]
+algorithm = "RSA"
+verification = []
+
+[bootstrap.keyMaterial.serverSigning.active]
+alias = "server-signing-v1"
+version = 1
+
 [storage]
 location = "repos"
 createOnPush = true

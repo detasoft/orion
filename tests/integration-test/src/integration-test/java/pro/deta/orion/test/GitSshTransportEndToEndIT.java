@@ -264,8 +264,7 @@ class GitSshTransportEndToEndIT {
         KeyPair clientKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Client SSH key should be generated");
 
         startedOrion = startFreshOrion(orionRoot);
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
-                .valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
         String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
         createManagedUser(startedOrion, rootToken, clientKey, repositoryName);
         createManagedRepository(startedOrion, rootToken, repositoryName);
@@ -315,8 +314,7 @@ class GitSshTransportEndToEndIT {
         String newRepositoryName = "managed-new-project";
 
         startedOrion = startFreshOrion(orionRoot);
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
-                .valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
         String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
 
         createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, oldRepositoryName);
@@ -372,8 +370,7 @@ class GitSshTransportEndToEndIT {
         KeyPair clientKey = KeyUtils.generateRSAKeyPair().valueOrFailure("Client SSH key should be generated");
 
         startedOrion = startFreshOrion(orionRoot);
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
-                .valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
         String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
         createManagedUser(startedOrion, rootToken, clientKey, repositoryName);
 
@@ -412,8 +409,7 @@ class GitSshTransportEndToEndIT {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
 
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
-                .valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
 
         String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
 
@@ -431,9 +427,7 @@ class GitSshTransportEndToEndIT {
         startedOrion = startFreshOrion(orionRoot);
         startedOrion.gitRepositoryProvider().create("zeta").valueOrFailure("create zeta");
         startedOrion.gitRepositoryProvider().create("team/repository").valueOrFailure("create team repository");
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(
-                orionRoot.resolve("server-identity").resolve("signing-rsa.pem")
-        ).valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
 
         String repositories = executeRootCommandOverSsh(startedOrion, serverIdentityKey, "repositories");
 
@@ -464,9 +458,7 @@ class GitSshTransportEndToEndIT {
     void regularUserCannotListRepositoriesOverSsh() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(
-                orionRoot.resolve("server-identity").resolve("signing-rsa.pem")
-        ).valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
         String rootToken = issueTokenOverSsh(startedOrion, serverIdentityKey, 3_600);
         createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, "project");
 
@@ -486,8 +478,7 @@ class GitSshTransportEndToEndIT {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
 
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
-                .valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
 
         String sshState = executeStateOverSsh(startedOrion, serverIdentityKey);
         String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
@@ -516,8 +507,7 @@ class GitSshTransportEndToEndIT {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
 
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
-                .valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
 
         String state = executeStateOverSsh(startedOrion, serverIdentityKey);
         assertThat(state).contains("orion: RUNNING");
@@ -543,8 +533,7 @@ class GitSshTransportEndToEndIT {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
 
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(orionRoot.resolve("server-identity").resolve("signing-rsa.pem"))
-                .valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
 
         long startedAtNanos = System.nanoTime();
         int exitStatus = executeShutdownOverSsh(startedOrion, serverIdentityKey);
@@ -644,19 +633,26 @@ class GitSshTransportEndToEndIT {
     }
 
     private StartedOrion startOrion(OrionConfiguration configuration) {
-        OrionComponent component = DaggerOrionComponent.builder()
-                .configurationProvider(() -> configuration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
-                .build();
-        OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
-        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
-        lifecycle.waitForStarting();
+        try {
+            TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
+            OrionComponent component = DaggerOrionComponent.builder()
+                    .configurationProvider(() -> configuration)
+                    .runtimeOptions(OrionRuntimeOptions.defaults())
+                    .serverIdentityCapability(identity.capability())
+                    .build();
+            OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
+            assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+            lifecycle.waitForStarting();
 
-        return new StartedOrion(
-                configuration,
-                lifecycle,
-                nativeRepositoryProvider(configuration),
-                component.orionAccessControlService());
+            return new StartedOrion(
+                    configuration,
+                    lifecycle,
+                    nativeRepositoryProvider(configuration),
+                    component.orionAccessControlService(),
+                    identity);
+        } catch (Exception failure) {
+            throw new IllegalStateException("Cannot open test server identity", failure);
+        }
     }
 
     private static void createManagedUser(StartedOrion orion, String rootToken, KeyPair clientKey, String repositoryName) throws Exception {
@@ -1139,7 +1135,12 @@ class GitSshTransportEndToEndIT {
 
     private record StartedOrion(OrionConfiguration configuration, OrionApplicationLifecycle lifecycle,
                                 NativeGitRepositoryProvider gitRepositoryProvider,
-                                OrionAccessControlServiceImpl accessControlService) {
+                                OrionAccessControlServiceImpl accessControlService,
+                                TestServerIdentityMaterial identity) {
+        private KeyPair serverIdentityKey() {
+            return identity.keyPair();
+        }
+
         private String sshUrl(String repository) {
             return "ssh://%s@%s:%d/%s".formatted(
                     "git",
@@ -1161,12 +1162,20 @@ class GitSshTransportEndToEndIT {
         }
 
         private void stopSynchronously() {
-            assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+            try {
+                assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+            } finally {
+                identity.close();
+            }
         }
 
         private void stop() {
-            lifecycle.beginShutdown();
-            lifecycle.waitForShutdown();
+            try {
+                lifecycle.beginShutdown();
+                lifecycle.waitForShutdown();
+            } finally {
+                identity.close();
+            }
         }
     }
 }

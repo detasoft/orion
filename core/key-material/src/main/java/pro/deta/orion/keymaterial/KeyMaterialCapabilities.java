@@ -67,6 +67,70 @@ public final class KeyMaterialCapabilities {
         };
     }
 
+    public ServerIdentityCapability serverIdentity(SigningMaterialSet material) {
+        if (material == null) {
+            throw new IllegalArgumentException("Server signing material must not be null");
+        }
+        if (material.active().algorithm() != KeyMaterialAlgorithm.RSA) {
+            throw new IllegalArgumentException("JWT server identity material must use RSA");
+        }
+        KeyMaterialDescriptor active = requireRegistered(
+                material.active(), KeyMaterialPurpose.SERVER_SIGNING);
+        Map<String, KeyMaterialDescriptor> verification = new LinkedHashMap<>();
+        for (KeyMaterialDescriptor descriptor : material.verificationIncludingActive()) {
+            KeyMaterialDescriptor registered = requireRegistered(
+                    descriptor, KeyMaterialPurpose.SERVER_SIGNING);
+            verification.put(registered.alias().value(), registered);
+        }
+        Map<String, KeyMaterialDescriptor> immutable = Map.copyOf(verification);
+        return new ServerIdentityCapability() {
+            @Override
+            public String activeKeyId() {
+                return active.alias().value();
+            }
+
+            @Override
+            public byte[] sign(byte[] payload) throws GeneralSecurityException {
+                return signWith(active, payload);
+            }
+
+            @Override
+            public boolean hasVerificationKey(String keyId) {
+                return keyId != null && immutable.containsKey(keyId);
+            }
+
+            @Override
+            public boolean verify(
+                    String keyId,
+                    byte[] payload,
+                    byte[] signature) throws GeneralSecurityException {
+                if (keyId == null || keyId.isBlank()) {
+                    return false;
+                }
+                KeyMaterialDescriptor descriptor = immutable.get(keyId);
+                if (descriptor == null) {
+                    return false;
+                }
+                return KeyMaterialCapabilities.this.verification(List.of(descriptor))
+                        .verify(payload, signature);
+            }
+
+            @Override
+            public List<java.security.PublicKey> publicKeys() throws GeneralSecurityException {
+                return List.of(owner.getKeyPair(active.alias().value()).getPublic());
+            }
+
+            @Override
+            public List<java.security.PublicKey> retainedPublicKeys() throws GeneralSecurityException {
+                List<java.security.PublicKey> keys = new ArrayList<>();
+                for (KeyMaterialDescriptor descriptor : material.verification()) {
+                    keys.add(owner.getKeyPair(descriptor.alias().value()).getPublic());
+                }
+                return List.copyOf(keys);
+            }
+        };
+    }
+
     public VerificationCapability verification(List<KeyMaterialDescriptor> requested) {
         if (requested == null || requested.isEmpty()) {
             throw new IllegalArgumentException("Verification material must not be empty");

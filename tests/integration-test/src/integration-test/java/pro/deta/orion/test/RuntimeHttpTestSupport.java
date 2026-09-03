@@ -42,14 +42,24 @@ final class RuntimeHttpTestSupport {
     }
 
     static StartedOrion start(OrionConfiguration orionConfiguration) {
-        OrionComponent orionComponent = DaggerOrionComponent.builder()
-                .configurationProvider(() -> orionConfiguration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
-                .build();
-        OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
-        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
-        lifecycle.waitForStarting();
-        return new StartedOrion(orionConfiguration, lifecycle, orionComponent.orionAccessControlService());
+        try {
+            TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(orionConfiguration);
+            OrionComponent orionComponent = DaggerOrionComponent.builder()
+                    .configurationProvider(() -> orionConfiguration)
+                    .runtimeOptions(OrionRuntimeOptions.defaults())
+                    .serverIdentityCapability(identity.capability())
+                    .build();
+            OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
+            assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+            lifecycle.waitForStarting();
+            return new StartedOrion(
+                    orionConfiguration,
+                    lifecycle,
+                    orionComponent.orionAccessControlService(),
+                    identity);
+        } catch (Exception failure) {
+            throw new IllegalStateException("Cannot open test server identity", failure);
+        }
     }
 
     static HttpResponse request(String method, URL url, String authorization) throws IOException {
@@ -105,7 +115,8 @@ final class RuntimeHttpTestSupport {
     record StartedOrion(
             OrionConfiguration configuration,
             OrionApplicationLifecycle lifecycle,
-            OrionAccessControlServiceImpl accessControlService)
+            OrionAccessControlServiceImpl accessControlService,
+            TestServerIdentityMaterial identity)
             implements AutoCloseable {
         URL httpUrl(String path) throws IOException {
             return new URL(
@@ -117,8 +128,12 @@ final class RuntimeHttpTestSupport {
 
         @Override
         public void close() {
-            lifecycle.shutdownApplication();
-            lifecycle.waitForShutdown();
+            try {
+                lifecycle.shutdownApplication();
+                lifecycle.waitForShutdown();
+            } finally {
+                identity.close();
+            }
         }
     }
 }

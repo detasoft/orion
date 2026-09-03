@@ -22,8 +22,7 @@ import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
-import pro.deta.orion.crypto.PublicKeysProvider;
-import pro.deta.orion.crypto.ServerKeySigner;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
@@ -36,6 +35,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.PublicKey;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -56,7 +56,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
     private final OrionConfiguration configuration;
-    private final PublicKeysProvider publicKeysProvider;
+    private final ServerIdentityCapability serverIdentity;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
     private final AtomicReference<char[]> plainRootToken = new AtomicReference<>();
@@ -69,14 +69,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             OrionPasswordHashingService orionPasswordHashingService,
             OrionProvider orionProvider,
             OrionConfiguration configuration,
-            PublicKeysProvider publicKeysProvider,
-            ServerKeySigner serverKeySigner) {
+            ServerIdentityCapability serverIdentity) {
         this.accessControlStorage = accessControlStorage;
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.orionProvider = orionProvider;
         this.configuration = configuration;
-        this.publicKeysProvider = publicKeysProvider;
-        this.jwtAccessTokenService = new JwtAccessTokenService(serverKeySigner, publicKeysProvider);
+        this.serverIdentity = serverIdentity;
+        this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
     }
 
     private void loadAccessControlOnStart() {
@@ -257,7 +256,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                     userIdentity.getUserId(),
                     expiresInSeconds);
             return TokenIssueResult.success(token.value(), token.expiresAtEpochSecond());
-        } catch (RuntimeException e) {
+        } catch (GeneralSecurityException | RuntimeException e) {
             return TokenIssueResult.failure("token issue failed", e);
         }
     }
@@ -337,7 +336,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String passwordHash,
             AccessControl.CredentialType passwordCredentialType) {
         AccessControlDraft draft = ACLUtil.generateDefaultAccessControl(passwordHash, passwordCredentialType).toDraft();
-        addInternalServerKeysToRoot(draft);
+        synchronizeInternalServerKeysToRoot(draft);
         return draft.toAccessControl();
     }
 
@@ -372,27 +371,56 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private void prepareAndUpdateAccessControl(AccessControl ac) {
         AccessControl preparedAccessControl = ac;
         AccessControlDraft draft = ac.toDraft();
-        if (addInternalServerKeysToRoot(draft)) {
+        if (synchronizeInternalServerKeysToRoot(draft)) {
             preparedAccessControl = draft.toAccessControl();
             saveAccessControl(preparedAccessControl, "add internal server keys to root", UserEmail.EMPTY);
         }
         updateAccessControl(preparedAccessControl);
     }
 
-    private boolean addInternalServerKeysToRoot(AccessControlDraft draft) {
+    private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft draft) {
         AccessControlDraft.User rootUser = findRootUser(draft);
         if (rootUser == null) {
             return false;
         }
 
-        boolean changed = false;
-        for (PublicKey publicKey : publicKeysProvider.getPublicKeys()) {
+        boolean changed = removeRetainedServerKeys(rootUser);
+        for (PublicKey publicKey : serverPublicKeys()) {
             if (!hasPublicKeyCredential(rootUser, publicKey)) {
                 rootUser.addCredential(OPENSSH_PUBLIC_KEY, KeyUtils.publicKeyToString(publicKey));
                 changed = true;
             }
         }
         return changed;
+    }
+
+    private boolean removeRetainedServerKeys(AccessControlDraft.User rootUser) {
+        Set<String> retained = new HashSet<>();
+        for (PublicKey publicKey : retainedServerPublicKeys()) {
+            retained.add(KeyUtils.publicKeyToString(publicKey));
+        }
+        if (retained.isEmpty()) {
+            return false;
+        }
+        return rootUser.getCredentials().removeIf(credential ->
+                credential.getType() == OPENSSH_PUBLIC_KEY
+                        && retained.contains(credential.getValue()));
+    }
+
+    private List<PublicKey> serverPublicKeys() {
+        try {
+            return serverIdentity.publicKeys();
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Cannot load server identity public keys", e);
+        }
+    }
+
+    private List<PublicKey> retainedServerPublicKeys() {
+        try {
+            return serverIdentity.retainedPublicKeys();
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("Cannot load retained server identity public keys", e);
+        }
     }
 
     private AccessControlDraft.User findRootUser(AccessControlDraft draft) {

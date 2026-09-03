@@ -140,6 +140,11 @@ public class KeyMaterialService implements AutoCloseable {
         return keyStore.containsAlias(alias);
     }
 
+    synchronized boolean hasDurableSnapshot() {
+        requireOpen();
+        return version != null;
+    }
+
     public synchronized KeyPair getKeyPair(String alias) throws GeneralSecurityException {
         requireOpen();
         PrivateKey privateKey = getPrivateKey(alias);

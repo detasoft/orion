@@ -31,6 +31,19 @@ class OrionConfigurationBootstrapShapeTest {
                     createDefaultIfMissing: false
                     auth:
                       username: acl
+                  keyMaterial:
+                    location: security/orion.p12
+                    password: env:ORION_KEY_MATERIAL_PASSWORD
+                    createIfMissing: false
+                    clusterId: orion-cluster
+                    serverSigning:
+                      algorithm: RSA
+                      active:
+                        alias: server-signing-v2
+                        version: 2
+                      verification:
+                        - alias: server-signing-v1
+                          version: 1
                 storage:
                   location: file:/tmp/orion/repositories/
                   createOnPush: false
@@ -82,6 +95,26 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals("acl/orion.xml", configuration.getBootstrap().getAccessControl().primaryPath());
         assertFalse(configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         assertEquals("acl", configuration.getBootstrap().getAccessControl().getAuth().get("username"));
+        assertEquals("security/orion.p12", configuration.getBootstrap().getKeyMaterial().getLocation());
+        assertEquals(
+                "env:ORION_KEY_MATERIAL_PASSWORD",
+                configuration.getBootstrap().getKeyMaterial().getPassword());
+        assertFalse(configuration.getBootstrap().getKeyMaterial().isCreateIfMissing());
+        assertEquals("orion-cluster", configuration.getBootstrap().getKeyMaterial().getClusterId());
+        assertEquals(
+                "server-signing-v2",
+                configuration.getBootstrap().getKeyMaterial().getServerSigning().getActive().getAlias());
+        assertEquals(
+                2,
+                configuration.getBootstrap().getKeyMaterial().getServerSigning().getActive().getVersion());
+        assertEquals(
+                "server-signing-v1",
+                configuration.getBootstrap()
+                        .getKeyMaterial()
+                        .getServerSigning()
+                        .getVerification()
+                        .getFirst()
+                        .getAlias());
         assertEquals("file:/tmp/orion/repositories/", configuration.getStorage().getLocation());
         assertFalse(configuration.getStorage().isCreateOnPush());
         assertEquals(8000, configuration.getTransport().getHttp().getPort());
