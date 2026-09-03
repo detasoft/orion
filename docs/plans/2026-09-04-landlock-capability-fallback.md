@@ -183,14 +183,16 @@ git commit -m "Fall back when Landlock is unavailable"
 
 **Step 1: Write the failing AgentD assertion**
 
-Simplify sandbox fixtures to construct `new SessionSpec.Sandbox(Optional.of(policy))`, then extend
+Keep the existing two-argument sandbox fixtures and extend
 `compilesSandboxPolicyIntoSessionAndPassesOnlyGeneratedPath`:
 
 ```java
 assertThat(launcher.command).doesNotContain("--sandbox-unavailable");
 ```
 
-Run this before modifying `NativeRuntime`; it must fail because the current command contains the option.
+Run this before modifying `SessionSpec` or `NativeRuntime`; it must compile and then fail because the current command
+contains the option. Changing fixture constructors before the RED run would test a Java compilation error rather
+than the obsolete command behavior.
 
 **Step 2: Run the focused Java test to verify RED**
 
@@ -219,7 +221,8 @@ public record Sandbox(Optional<Path> policy) {
 ```
 
 Delete `SessionSpec.Unavailable`. In `NativeRuntime.command`, keep `--sandbox-policy` but remove the entire block that
-adds `--sandbox-unavailable`.
+adds `--sandbox-unavailable`. In the same production step, simplify every `NativeRuntimeTest` sandbox fixture to
+construct `new SessionSpec.Sandbox(Optional.of(policy))` so the source tree remains compilable.
 
 **Step 4: Run the focused Java test to verify GREEN**
 
