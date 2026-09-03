@@ -2,10 +2,10 @@
 
 ## Goal
 
-Reconcile one remotely provisioned AgentD process safely: identify and stop only
-the recorded AgentD, preserve its native session-host descendants, recover from
-partial launch/version commits, and bound offline detection, startup, termination,
-and retry delays.
+Reconcile one remotely provisioned AgentD process safely on Linux: identify and
+stop only the recorded AgentD, preserve its native session-host descendants,
+recover from partial launch/version commits, and bound offline detection, startup,
+termination, and retry delays.
 
 This leaf extends `agent-provisioning`. Durable machine configuration, permit and
 generation revocation, `orion.xml`, administration UI, and the concrete control-plane
@@ -19,6 +19,13 @@ source of fresh launch attempts, and an injectable clock/sleeper. It waits for a
 sustained offline interval, reconciles remote process state, and waits for the exact
 new launch to become online. Failed startup attempts use fresh launch IDs and permits
 and bounded exponential backoff.
+
+Safe replacement is Linux-only in this leaf. macOS provisioning remains available,
+but replacement recovery fails closed before adopting, signalling, or launching a
+process. Supporting macOS replacement requires a separately shipped native inspector
+that can prove high-resolution process birth identity, exact executable identity, and
+ownership of the AgentD advisory lock without relying on optional or privileged host
+tools.
 
 The alternatives are less suitable:
 
@@ -44,9 +51,8 @@ identity record below the install root. It contains:
 
 The record is written through a mode-`0600` temporary regular file and renamed into
 place. Its directory must be an owner-only, non-symbolic directory. The launcher
-obtains the start token from `/proc/<pid>/stat` on Linux and the widest stable process
-start representation available from `ps` on macOS. The token is opaque to Java and
-is compared byte-for-byte on every later probe. `ProcessHandle` epoch time remains
+obtains the start token from `/proc/<pid>/stat` on Linux. The token is opaque to Java
+and is compared byte-for-byte on every later probe. `ProcessHandle` epoch time remains
 diagnostic corroboration, not the native identity token.
 
 Before trusting a record, reconciliation checks that the state directory, lock file,
@@ -147,9 +153,10 @@ Contract and state-machine tests cover positive durations, capped exponential
 backoff, sustained-offline behavior, delayed ONLINE without duplicate launch, fresh
 attempts after startup timeout, and retry exhaustion.
 
-Live SSH/POSIX tests cover successful replacement and atomic version transition,
+Linux live SSH/POSIX tests cover successful replacement and atomic version transition,
 adoption after crashes before and after the `current` switch, identity mismatch with
 no signal, malformed/unsafe/symbolic identity state, permission denial, PID reuse
 before `KILL`, termination timeout preventing launch, and a session-host sentinel that
-survives replacement. Existing tests continue to prove host-key verification,
-integrity checking, detached launch, permit redaction, and shared-watchdog timeouts.
+survives replacement. macOS tests verify that replacement fails closed. Existing tests
+continue to prove host-key verification, integrity checking, detached launch, permit
+redaction, and shared-watchdog timeouts.

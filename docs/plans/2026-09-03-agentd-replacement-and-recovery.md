@@ -2,11 +2,16 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Safely replace one remotely provisioned AgentD, adopt recoverable partial launches, preserve session-host processes, and bound offline/startup retry behavior.
+**Goal:** Safely replace one remotely provisioned AgentD on Linux, adopt recoverable partial launches, preserve session-host processes, and bound offline/startup retry behavior.
 
 **Architecture:** Extend the existing `agent-provisioning` SSH transaction with strict process metadata and generation-scoped native identity records. A remote reconciler performs fail-closed inspect/signal/adopt/launch transitions, while a transport-independent recovery loop owns sustained-offline and startup waits plus capped retry backoff.
 
 **Tech Stack:** Java 21, Maven, Apache MINA sshd, JUnit 5, AssertJ, POSIX shell fixtures.
+
+**Platform boundary:** Safe replacement and recovery are Linux-only in this plan.
+macOS must fail closed until a separately shipped native inspector can prove exact
+process birth, executable, and kernel-lock ownership. Ordinary provisioning may still
+select macOS runtime bundles.
 
 ---
 
@@ -111,9 +116,10 @@ make test
 **Step 1: Write failing record and inspection tests**
 
 Cover strict bounded parsing, missing/duplicate/extra/control fields, owner-only
-regular non-symlink requirements, Linux and macOS start-token/executable probes,
-record publication through a `0600` temporary file plus rename, exact lock/record/live
-agreement, and unsafe or malformed state mapping to typed diagnostics.
+regular non-symlink requirements, Linux start-token/executable probes, explicit
+fail-closed macOS behavior, record publication through a `0600` temporary file plus
+rename, exact lock/record/live agreement, and unsafe or malformed state mapping to
+typed diagnostics.
 
 **Step 2: Run the focused tests and confirm RED**
 

@@ -20,3 +20,4 @@ tasks may be ready at the same time.
 - [ ] [Move Jetty and SSH Git transports to virtual threads](virtual-thread-jetty-ssh-git-transport/TASK.md)
 - [ ] [Review the Agent session control plane](agent-session-control-plane-architecture-review/TASK.md)
 - [ ] [Review the Orion runtime composition root](runtime-composition-root-architecture-review/TASK.md)
+- [ ] [Add safe macOS AgentD process inspection](macos-agentd-process-inspector/TASK.md)
