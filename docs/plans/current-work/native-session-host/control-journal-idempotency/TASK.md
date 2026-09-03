@@ -17,13 +17,18 @@ envelope byte-for-byte in the journal.
   AgentD and session-host delivery logic.
 - Prevent repeated journal appends and external side effects with an accepted
   operation high-water mark and a bounded unacknowledged-operation table.
-- Add `ACK_JOURNAL` with a monotonic journal-timestamp watermark; discard
-  acknowledged table entries without lowering the accepted-operation high-water
-  mark.
+- Add a non-journaled `ACK_JOURNAL` with a monotonic journal-timestamp
+  watermark. Apply repeated watermarks idempotently to retention and checkpoint
+  state, reply `ACCEPTED` only after that application is durable, and discard
+  acknowledged table entries without lowering the accepted-operation
+  high-water mark.
+- Keep the host watermark local to retention; it is not AgentD replication
+  authority and is not session metadata state.
 - Reject stale operations and reuse of one `operationSequence` for different
   command bytes; never silently execute them as new operations.
-- Cover gaps, retries before acknowledgement, acknowledgement cleanup, stale
-  retries, and unchanged client envelopes for every retryable command type.
+- Cover gaps, retries before acknowledgement, durable acknowledgement cleanup,
+  repeated and stale watermarks, and unchanged client envelopes for every
+  retryable command type.
 
 ## Boundary
 

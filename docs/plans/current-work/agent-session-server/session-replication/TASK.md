@@ -14,11 +14,16 @@ from the durable server journal after every reconnect.
   or `null` for a new session.
 - Incrementally append the following raw CBOR Sequence records without adding
   a second event DTO or requiring knowledge of every event type.
-- Derive resume exclusively from storage, require no separate acknowledgement
-  state, and safely accept records resent after an interrupted append.
+- Derive the authoritative resume cursor exclusively from durable storage and
+  safely accept records resent after an interrupted append.
+- Acknowledge each committed batch with a monotonic journal-timestamp watermark
+  only after its records are durably stored; keep no independent cursor that
+  can advance ahead of storage.
 - Detect missing retained history from the advertised first available event,
-  record session gap metadata, and continue synchronization from that event.
+  record an explicit integrity gap, and decide how synchronization proceeds
+  before requesting any replacement history.
 - Use HTTP/2 flow control for storage backpressure and allow fair concurrent
   catch-up of live and completed sessions with disposable physical streams.
-- Test disconnect at multiple persistence boundaries, reconnect resume,
-  duplicate and conflicting records, gaps, unknown events, and server restart.
+- Test disconnect at multiple persistence boundaries, acknowledgement timing,
+  reconnect resume, duplicate and conflicting records, gaps, unknown events,
+  and server restart.
