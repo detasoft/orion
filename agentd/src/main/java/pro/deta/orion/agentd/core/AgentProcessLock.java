@@ -18,8 +18,8 @@ import java.util.Set;
 
 public final class AgentProcessLock implements AgentService {
     private static final Set<PosixFilePermission> OWNER_FILE = PosixFilePermissions.fromString("rw-------");
-    private static final Set<PosixFilePermission> UNSAFE_WRITE = Set.of(
-            PosixFilePermission.GROUP_WRITE, PosixFilePermission.OTHERS_WRITE);
+    private static final Set<PosixFilePermission> OWNER_DIRECTORY =
+            PosixFilePermissions.fromString("rwx------");
 
     private final Path path;
     private final AgentProcessMetadata metadata;
@@ -44,7 +44,15 @@ public final class AgentProcessLock implements AgentService {
         if (parent == null) {
             throw new IOException("AgentD lock path requires a parent directory");
         }
-        Files.createDirectories(parent);
+        if (!Files.exists(parent, LinkOption.NOFOLLOW_LINKS)) {
+            Path grandparent = parent.getParent();
+            boolean supportsPosix = grandparent != null && Files.getFileStore(grandparent)
+                    .supportsFileAttributeView(PosixFileAttributeView.class);
+            Files.createDirectories(parent, directoryCreationAttributes(supportsPosix));
+        }
+        if (Files.isSymbolicLink(parent) || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("AgentD state directory must be a non-symbolic directory");
+        }
         rejectUnsafeDirectory(parent);
         if (Files.isSymbolicLink(path)) {
             throw new IOException("AgentD lock path must not be symbolic");
@@ -112,11 +120,12 @@ public final class AgentProcessLock implements AgentService {
     }
 
     private void writeMetadata(FileChannel output) throws IOException {
-        String value = "version=1\n"
+        String value = "version=2\n"
                 + "pid=" + metadata.pid() + "\n"
                 + "startEpochMillis=" + metadata.startEpochMillis() + "\n"
                 + "launchId=" + metadata.launchId().value() + "\n"
-                + "generation=" + metadata.generation().value() + "\n";
+                + "generation=" + metadata.generation().value() + "\n"
+                + "executable=" + metadata.executable() + "\n";
         ByteBuffer bytes = StandardCharsets.US_ASCII.encode(value);
         output.truncate(0);
         output.position(0);
@@ -129,31 +138,33 @@ public final class AgentProcessLock implements AgentService {
     private static void rejectUnsafeDirectory(Path directory) throws IOException {
         PosixFileAttributeView view = Files.getFileAttributeView(
                 directory, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
-        if (view != null && hasUnsafeWrite(view.readAttributes().permissions())) {
-            throw new IOException("AgentD state directory is writable by another user class");
+        if (view != null && hasNonOwnerAccess(view.readAttributes().permissions())) {
+            throw new IOException("AgentD state directory is accessible by another user class");
         }
     }
 
     private static void rejectUnsafeFile(Path file) throws IOException {
         PosixFileAttributeView view = Files.getFileAttributeView(
                 file, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
-        if (view != null && hasUnsafeWrite(view.readAttributes().permissions())) {
-            throw new IOException("AgentD lock file is writable by another user class");
+        if (view != null && hasNonOwnerAccess(view.readAttributes().permissions())) {
+            throw new IOException("AgentD lock file is accessible by another user class");
         }
     }
 
-    private static boolean hasUnsafeWrite(Set<PosixFilePermission> permissions) {
-        for (PosixFilePermission permission : UNSAFE_WRITE) {
-            if (permissions.contains(permission)) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean hasNonOwnerAccess(Set<PosixFilePermission> permissions) {
+        return !OWNER_FILE.containsAll(permissions) && !OWNER_DIRECTORY.containsAll(permissions);
     }
 
     static FileAttribute<?>[] creationAttributes(boolean supportsPosix) {
         if (supportsPosix) {
             return new FileAttribute<?>[]{PosixFilePermissions.asFileAttribute(OWNER_FILE)};
+        }
+        return new FileAttribute<?>[0];
+    }
+
+    private static FileAttribute<?>[] directoryCreationAttributes(boolean supportsPosix) {
+        if (supportsPosix) {
+            return new FileAttribute<?>[]{PosixFilePermissions.asFileAttribute(OWNER_DIRECTORY)};
         }
         return new FileAttribute<?>[0];
     }

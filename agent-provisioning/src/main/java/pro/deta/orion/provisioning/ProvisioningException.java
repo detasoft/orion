@@ -1,6 +1,6 @@
 package pro.deta.orion.provisioning;
 
-public final class ProvisioningException extends Exception {
+public class ProvisioningException extends Exception {
     private final ProvisioningFailure failure;
 
     ProvisioningException(ProvisioningFailure failure, String message) {

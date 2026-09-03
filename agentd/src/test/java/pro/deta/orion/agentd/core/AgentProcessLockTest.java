@@ -29,11 +29,12 @@ class AgentProcessLockTest {
         try (AgentProcessLock first = new AgentProcessLock(lockFile, FIRST)) {
             first.start();
             assertThat(Files.readString(lockFile)).isEqualTo("""
-                    version=1
+                    version=2
                     pid=101
                     startEpochMillis=1000
                     launchId=10010203-0405-0607-0809-0a0b0c0d0e0f
                     generation=1
+                    executable=/opt/orion/releases/1/agentd
                     """);
 
             AgentProcessLock second = new AgentProcessLock(lockFile, SECOND);
@@ -53,8 +54,14 @@ class AgentProcessLockTest {
     void ignoresStaleMetadataButRejectsSymbolicLink() throws Exception {
         Path state = temporaryDirectory.resolve("state");
         Files.createDirectories(state);
+        if (Files.getFileAttributeView(state, PosixFileAttributeView.class) != null) {
+            Files.setPosixFilePermissions(state, PosixFilePermissions.fromString("rwx------"));
+        }
         Path lockFile = state.resolve("agentd.lock");
         Files.writeString(lockFile, "stale");
+        if (Files.getFileAttributeView(lockFile, PosixFileAttributeView.class) != null) {
+            Files.setPosixFilePermissions(lockFile, PosixFilePermissions.fromString("rw-------"));
+        }
 
         try (AgentProcessLock lock = new AgentProcessLock(lockFile, FIRST)) {
             lock.start();
@@ -76,7 +83,24 @@ class AgentProcessLockTest {
         Files.setPosixFilePermissions(lockFile, PosixFilePermissions.fromString("rw-rw-rw-"));
 
         assertThatIOException().isThrownBy(() -> new AgentProcessLock(lockFile, FIRST).start())
-                .withMessageContaining("writable");
+                .withMessageContaining("accessible");
+    }
+
+    @Test
+    void rejectsStateAndLockMetadataAccessibleByOtherUsers() throws Exception {
+        Path state = Files.createDirectories(temporaryDirectory.resolve("shared-state"));
+        assumeTrue(Files.getFileAttributeView(state, PosixFileAttributeView.class) != null);
+        Files.setPosixFilePermissions(state, PosixFilePermissions.fromString("rwxr-x---"));
+
+        assertThatIOException().isThrownBy(() ->
+                        new AgentProcessLock(state.resolve("agentd.lock"), FIRST).start())
+                .withMessageContaining("accessible");
+
+        Files.setPosixFilePermissions(state, PosixFilePermissions.fromString("rwx------"));
+        Path lock = Files.writeString(state.resolve("agentd.lock"), "stale");
+        Files.setPosixFilePermissions(lock, PosixFilePermissions.fromString("rw-r-----"));
+        assertThatIOException().isThrownBy(() -> new AgentProcessLock(lock, FIRST).start())
+                .withMessageContaining("accessible");
     }
 
     @Test
@@ -90,11 +114,26 @@ class AgentProcessLockTest {
                 });
     }
 
+    @Test
+    void processMetadataRejectsAnInexactExecutable() {
+        assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() ->
+                new AgentProcessMetadata(
+                        101, 1_000,
+                        new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
+                        new AgentGeneration(1), "relative/agentd"));
+        assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() ->
+                new AgentProcessMetadata(
+                        101, 1_000,
+                        new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
+                        new AgentGeneration(1), "/opt/orion/agentd\nforged"));
+    }
+
     private static AgentProcessMetadata metadata(long pid, long start, long generation) {
         return new AgentProcessMetadata(
                 pid,
                 start,
                 new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
-                new AgentGeneration(generation));
+                new AgentGeneration(generation),
+                "/opt/orion/releases/1/agentd");
     }
 }

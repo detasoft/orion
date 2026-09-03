@@ -29,7 +29,7 @@ class AgentAssemblyTest {
         AgentLaunchContext context = AgentLaunchContext.create(configuration, new LaunchPermit(new byte[32]));
         RecordingTransport transport = new RecordingTransport();
         AgentProcessMetadata holderMetadata = new AgentProcessMetadata(
-                44, 55, configuration.launchId(), configuration.generation());
+                44, 55, configuration.launchId(), configuration.generation(), "/opt/orion/agentd");
 
         try (AgentProcessLock holder = new AgentProcessLock(configuration.processLockFile(), holderMetadata);
              Agent agent = Agent.create(configuration, context, transport,

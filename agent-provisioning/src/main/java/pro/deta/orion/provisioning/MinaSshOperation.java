@@ -30,7 +30,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-public final class MinaSshOperation implements AutoCloseable {
+public final class MinaSshOperation implements RemoteCommandExecutor, AutoCloseable {
     private static final int OUTPUT_LIMIT = 16 * 1024;
     private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(
             new WatchdogThreadFactory());
@@ -213,6 +213,7 @@ public final class MinaSshOperation implements AutoCloseable {
         }
     }
 
+    @Override
     public synchronized RemoteCommandResult execute(
             String command,
             InputStream input) throws ProvisioningException {

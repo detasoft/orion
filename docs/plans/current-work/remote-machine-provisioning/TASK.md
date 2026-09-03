@@ -10,7 +10,6 @@ to make them available as AgentD workers.
 
 ## Child Tasks
 
-- [ ] [Replace and recover AgentD safely](agent-replacement-and-recovery/TASK.md)
 - [ ] [Add administration and end-to-end acceptance](administration-and-end-to-end-acceptance/TASK.md)
 - [ ] [Fix the stalled SSH operation watchdog baseline](stalled-operation-watchdog-baseline/TASK.md)
 
