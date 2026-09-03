@@ -26,6 +26,7 @@ transports.
 
 ## Child Tasks
 
+- [ ] [Add configurable branch filtering](branch-filtering/TASK.md).
 - [ ] Define external remote configuration, credential references, and refspec
   validation.
 - [ ] Add SSH and HTTPS Git client authentication support for sync workers.
