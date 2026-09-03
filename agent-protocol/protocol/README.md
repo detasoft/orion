@@ -5,6 +5,13 @@ logical HTTP/2 streams. A DATA frame may split a CBOR item at any byte, and one
 DATA frame may contain several items. There is no frame header or length prefix
 outside CBOR.
 
+DATA frame boundaries have no protocol meaning. A structurally complete item
+that fails semantic decoding is skipped with a diagnostic, and decoding
+continues at the next item boundary. If an item boundary cannot be established,
+the structural failure is terminal for that control or session response stream;
+any valid prefix is still delivered first. Receivers do not scan for a
+plausible later item or rely on an outer length marker to resynchronize.
+
 HTTP/2 stream IDs are transport details. `AgentId`, `AgentInstanceId`,
 `SessionId`, `EventId`, and `CommandId` are the stable logical identities used
 after reconnects and server restarts.
@@ -24,7 +31,8 @@ binary, and nesting limits, and reject duplicate map keys.
 
 Unknown control message IDs are returned with the original encoded CBOR item.
 Unsupported Agent protocol or journal format versions fail negotiation without
-changing any local session.
+changing any local session. That negotiation policy is applied after sequence
+decoding and is distinct from semantic recovery within the sequence decoder.
 
 ## Control Messages
 

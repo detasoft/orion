@@ -45,12 +45,11 @@ class AgentControlServiceTest {
     }
 
     @Test
-    void rejectsMalformedUnexpectedAndUnauthenticatedFirstMessages() throws Exception {
-        assertStartupFails(new byte[]{(byte) 0xff});
-        assertStartupFails(CODEC.encode(new AgentMessage.RequestSessionList()));
-        assertStartupFails(CODEC.encode(new AgentMessage.Welcome(
+    void rejectsUnexpectedAndUnauthenticatedFirstMessages() {
+        assertStartupFails(new AgentMessage.RequestSessionList());
+        assertStartupFails(new AgentMessage.Welcome(
                 AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
-                new ConnectionId("connection-1"), Map.of())));
+                new ConnectionId("connection-1"), Map.of()));
     }
 
     @Test
@@ -88,9 +87,9 @@ class AgentControlServiceTest {
         assertThat(transport.closed).isTrue();
     }
 
-    private static void assertStartupFails(byte[] reply) {
+    private static void assertStartupFails(AgentMessage reply) {
         FakeTransport transport = new FakeTransport();
-        transport.rawReply = reply;
+        transport.reply = reply;
         AgentControlService service = service(
                 transport, AgentHandshakeTest.context(), Duration.ofSeconds(1));
         assertThatExceptionOfType(HandshakeException.class).isThrownBy(service::start);
@@ -114,10 +113,9 @@ class AgentControlServiceTest {
 
     private static final class FakeTransport implements AgentTransport {
         private final List<byte[]> controls = new ArrayList<>();
-        private Consumer<byte[]> controlReceiver;
+        private Consumer<AgentMessage> controlReceiver;
         private Consumer<TransportSignal> signalReceiver;
-        private AgentMessage.Welcome reply;
-        private byte[] rawReply;
+        private AgentMessage reply;
         private RuntimeException connectFailure;
         private AtomicLong nanoTime;
         private long connectElapsedNanos;
@@ -138,16 +136,10 @@ class AgentControlServiceTest {
         public CompletionStage<Void> sendControlCbor(byte[] item) {
             controls.add(item.clone());
             advance(sendElapsedNanos);
-            try {
-                if (reply != null) {
-                    controlReceiver.accept(CODEC.encode(reply));
-                } else if (rawReply != null) {
-                    controlReceiver.accept(rawReply.clone());
-                }
-                return CompletableFuture.completedFuture(null);
-            } catch (Exception failure) {
-                return CompletableFuture.failedFuture(failure);
+            if (reply != null) {
+                controlReceiver.accept(reply);
             }
+            return CompletableFuture.completedFuture(null);
         }
 
         @Override
@@ -161,12 +153,12 @@ class AgentControlServiceTest {
         }
 
         @Override
-        public void onControlCbor(Consumer<byte[]> receiver) {
+        public void onControlMessage(Consumer<AgentMessage> receiver) {
             controlReceiver = receiver;
         }
 
         @Override
-        public void onSessionCbor(BiConsumer<SessionId, byte[]> receiver) {
+        public void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver) {
         }
 
         @Override

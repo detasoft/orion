@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HexFormat;
@@ -59,7 +60,7 @@ class AgentProtocolFixtureTest {
 
         assertThat(concatenate(records)).containsExactly(fixture);
         SessionEventDecoder decoder = new SessionEventDecoder(LIMITS);
-        assertThat(decoder.accept(fixture)).hasSize(4);
+        assertThat(decoder.accept(ByteBuffer.wrap(fixture)).outcomes()).hasSize(4);
     }
 
     @Test

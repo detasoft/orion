@@ -8,21 +8,30 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 final class CborReader {
     private static final BigInteger NEGATIVE_ONE = BigInteger.valueOf(-1);
     private final byte[] bytes;
     private final AgentProtocolLimits limits;
+    private final int end;
     private int position;
 
     CborReader(byte[] bytes, AgentProtocolLimits limits) {
-        this.bytes = bytes;
-        this.limits = limits;
+        this(bytes, 0, bytes.length, limits);
+    }
+
+    CborReader(byte[] bytes, int from, int to, AgentProtocolLimits limits) {
+        this.bytes = Objects.requireNonNull(bytes, "bytes");
+        Objects.checkFromToIndex(from, to, bytes.length);
+        this.limits = Objects.requireNonNull(limits, "limits");
+        position = from;
+        end = to;
     }
 
     Value readRoot() throws AgentProtocolException {
         Value value = readValue(0);
-        if (position != bytes.length) {
+        if (position != end) {
             throw malformed("CBOR item has trailing bytes");
         }
         return value;
@@ -133,7 +142,7 @@ final class CborReader {
     }
 
     private Header readHeader() throws AgentProtocolException {
-        if (position >= bytes.length) {
+        if (position >= end) {
             throw malformed("Incomplete CBOR item");
         }
         int initial = bytes[position++] & 0xff;
@@ -157,7 +166,7 @@ final class CborReader {
     }
 
     private boolean consumeBreak() {
-        if (position < bytes.length && (bytes[position] & 0xff) == 0xff) {
+        if (position < end && (bytes[position] & 0xff) == 0xff) {
             position++;
             return true;
         }
@@ -165,7 +174,7 @@ final class CborReader {
     }
 
     private byte[] readBytes(int length) throws AgentProtocolException {
-        if (bytes.length - position < length) {
+        if (end - position < length) {
             throw malformed("Incomplete CBOR item");
         }
         byte[] result = java.util.Arrays.copyOfRange(bytes, position, position + length);

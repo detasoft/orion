@@ -90,11 +90,11 @@ class AgentAssemblyTest {
         }
 
         @Override
-        public void onControlCbor(Consumer<byte[]> receiver) {
+        public void onControlMessage(Consumer<AgentMessage> receiver) {
         }
 
         @Override
-        public void onSessionCbor(BiConsumer<SessionId, byte[]> receiver) {
+        public void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver) {
         }
 
         @Override

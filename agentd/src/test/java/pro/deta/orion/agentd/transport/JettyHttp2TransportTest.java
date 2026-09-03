@@ -8,11 +8,23 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.Test;
 
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.SessionId;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHttp2TransportTest {
+    @Test
+    void registersTypedInboundCallbacks() {
+        JettyHttp2Transport transport = transport(1, 1);
+        try {
+            transport.onControlMessage(message -> assertThatMessageIsTyped(message));
+            transport.onSessionMessage((sessionId, message) -> assertThatMessageIsTyped(message));
+        } finally {
+            transport.close();
+        }
+    }
+
     @Test
     void keepsControlCapacityWhenOfflineSessionCapacityIsExhausted() {
         JettyHttp2Transport transport = transport(1, 1);
@@ -81,6 +93,12 @@ class JettyHttp2TransportTest {
     private JettyHttp2Transport transport(int controlCapacity, int sessionCapacity) {
         return new JettyHttp2Transport(URI.create("https://localhost"), new SslContextFactory.Client(),
                 AgentProtocolLimits.defaults(), controlCapacity, sessionCapacity);
+    }
+
+    private static void assertThatMessageIsTyped(AgentMessage message) {
+        if (message == null) {
+            throw new AssertionError("typed message must not be null");
+        }
     }
 
 }

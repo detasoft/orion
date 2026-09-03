@@ -3,6 +3,7 @@ package pro.deta.orion.agent.protocol;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -55,6 +56,20 @@ class SessionEventCodecTest {
     }
 
     @Test
+    void decodesUnknownPayloadAndFutureTailFromBoundedRange() throws Exception {
+        byte[] encoded = Hex.parse("8405197ffe44deadbeef66667574757265");
+        byte[] surrounded = new byte[encoded.length + 4];
+        java.util.Arrays.fill(surrounded, (byte) 0xff);
+        System.arraycopy(encoded, 0, surrounded, 2, encoded.length);
+
+        SessionEventRecord record = CODEC.decode(surrounded, 2, 2 + encoded.length);
+
+        assertThat(record.encodedPayload().toByteArray()).containsExactly(Hex.parse("44deadbeef"));
+        assertThat(record.encodedRecord().toByteArray()).containsExactly(encoded);
+        assertThat(record.trailingFieldCount()).isOne();
+    }
+
+    @Test
     void ignoresFutureFieldsInsideKnownPayloadAndPreservesOuterTail() throws Exception {
         byte[] encoded = Hex.parse("840619010283185018186a7061796c6f61642d7631697265636f72642d7631");
 
@@ -93,7 +108,7 @@ class SessionEventCodecTest {
         int chunkIndex = 0;
         while (position < sequence.length) {
             int size = Math.min(chunkSizes[chunkIndex++ % chunkSizes.length], sequence.length - position);
-            events.addAll(decoder.accept(java.util.Arrays.copyOfRange(sequence, position, position + size)));
+            addDecoded(events, decoder.accept(ByteBuffer.wrap(sequence, position, size)));
             position += size;
         }
 
@@ -111,13 +126,14 @@ class SessionEventCodecTest {
                 new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{1, 2, 3})));
         SessionEventDecoder decoder = new SessionEventDecoder(LIMITS);
 
-        assertThat(decoder.accept(java.util.Arrays.copyOf(event, event.length - 1))).isEmpty();
+        assertThat(decoder.accept(ByteBuffer.wrap(java.util.Arrays.copyOf(event, event.length - 1))).outcomes())
+                .isEmpty();
         assertThat(decoder.pendingBytes()).isEqualTo(event.length - 1);
-        assertThat(decoder.accept(new byte[]{event[event.length - 1]})).hasSize(1);
+        assertThat(decoder.accept(ByteBuffer.wrap(new byte[]{event[event.length - 1]})).outcomes()).hasSize(1);
 
-        assertThatExceptionOfType(AgentProtocolException.class)
-                .isThrownBy(() -> decoder.accept(new byte[]{(byte) 0xff}))
-                .extracting(AgentProtocolException::reason)
+        assertThat(decoder.accept(ByteBuffer.wrap(new byte[]{(byte) 0xff})).terminalIssue())
+                .get()
+                .extracting(issue -> issue.exception().reason())
                 .isEqualTo(AgentProtocolException.Reason.MALFORMED_CBOR);
     }
 
@@ -149,5 +165,16 @@ class SessionEventCodecTest {
             output.writeBytes(item);
         }
         return output.toByteArray();
+    }
+
+    private static void addDecoded(
+            List<SessionEventRecord> events,
+            SequenceDecodeResult<SessionEventRecord> result
+    ) {
+        for (SequenceDecodeResult.Outcome<SessionEventRecord> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Decoded<SessionEventRecord> decoded) {
+                events.add(decoded.value());
+            }
+        }
     }
 }

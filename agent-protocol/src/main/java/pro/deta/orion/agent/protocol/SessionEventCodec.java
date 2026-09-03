@@ -76,14 +76,20 @@ public final class SessionEventCodec {
 
     public SessionEventRecord decode(byte[] encoded) throws AgentProtocolException {
         Objects.requireNonNull(encoded, "encoded");
-        if (encoded.length > limits.maxMessageBytes()) {
+        return decode(encoded, 0, encoded.length);
+    }
+
+    SessionEventRecord decode(byte[] encoded, int from, int to) throws AgentProtocolException {
+        Objects.requireNonNull(encoded, "encoded");
+        Objects.checkFromToIndex(from, to, encoded.length);
+        if (to - from > limits.maxMessageBytes()) {
             throw new AgentProtocolException(LIMIT_EXCEEDED, "Session event exceeds configured limit");
         }
-        int itemLength = CborItemScanner.itemLength(encoded, 0, limits);
-        if (itemLength < 0 || itemLength != encoded.length) {
+        int itemLength = CborItemScanner.itemLength(encoded, from, to, limits);
+        if (itemLength < 0 || itemLength != to - from) {
             throw new AgentProtocolException(MALFORMED_CBOR, "Session event must be one complete CBOR item");
         }
-        List<CborArrayItems.Slice> items = CborArrayItems.parse(encoded, limits);
+        List<CborArrayItems.Slice> items = CborArrayItems.parse(encoded, from, to, limits);
         if (items.size() < 3) {
             throw new AgentProtocolException(INVALID_FIELD, "Session event must contain at least three fields");
         }
@@ -94,7 +100,7 @@ public final class SessionEventCodec {
                 eventId,
                 eventType,
                 ProtocolBytes.copyOf(encoded, payload.from(), payload.to()),
-                ProtocolBytes.copyOf(encoded),
+                ProtocolBytes.copyOf(encoded, from, to),
                 items.size() - 3);
     }
 
@@ -149,8 +155,7 @@ public final class SessionEventCodec {
     }
 
     private CborReader.Value read(CborArrayItems.Slice slice, byte[] encoded) throws AgentProtocolException {
-        byte[] item = java.util.Arrays.copyOfRange(encoded, slice.from(), slice.to());
-        return new CborReader(item, limits).readRoot();
+        return new CborReader(encoded, slice.from(), slice.to(), limits).readRoot();
     }
 
     private static EventId eventId(CborReader.Value value, String name) throws AgentProtocolException {

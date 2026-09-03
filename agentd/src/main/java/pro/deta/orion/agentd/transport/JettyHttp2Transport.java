@@ -31,11 +31,16 @@ import org.eclipse.jetty.http2.frames.HeadersFrame;
 import org.eclipse.jetty.http2.frames.ResetFrame;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
+import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentProtocolDecoder;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.SequenceDecodeIssue;
+import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionId;
 
 /** Jetty low-level HTTP/2 TLS transport with reusable generation-scoped connections. */
 public final class JettyHttp2Transport implements AgentTransport {
+    private static final System.Logger LOGGER = System.getLogger(JettyHttp2Transport.class.getName());
     private final URI endpoint;
     private final SslContextFactory.Client tls;
     private final HTTP2Client client;
@@ -46,8 +51,8 @@ public final class JettyHttp2Transport implements AgentTransport {
         thread.setDaemon(true);
         return thread;
     });
-    private final List<Consumer<byte[]>> controlReceivers = new CopyOnWriteArrayList<>();
-    private final List<BiConsumer<SessionId, byte[]>> sessionReceivers = new CopyOnWriteArrayList<>();
+    private final List<Consumer<AgentMessage>> controlReceivers = new CopyOnWriteArrayList<>();
+    private final List<BiConsumer<SessionId, AgentMessage>> sessionReceivers = new CopyOnWriteArrayList<>();
     private final List<Consumer<TransportSignal>> signals = new CopyOnWriteArrayList<>();
     private final Map<SessionId, Pending> activeSessions = new ConcurrentHashMap<>();
     private Generation current;
@@ -87,7 +92,7 @@ public final class JettyHttp2Transport implements AgentTransport {
             previous = current;
             if (previous != null) {
                 current = null;
-                previous.cbor.reset();
+                previous.decoder.reset();
                 previous.ready.completeExceptionally(replacement);
                 clearSessions(previous, replacement);
                 failActive(replacement);
@@ -159,12 +164,12 @@ public final class JettyHttp2Transport implements AgentTransport {
     }
 
     @Override
-    public void onControlCbor(Consumer<byte[]> receiver) {
+    public void onControlMessage(Consumer<AgentMessage> receiver) {
         controlReceivers.add(Objects.requireNonNull(receiver, "receiver"));
     }
 
     @Override
-    public void onSessionCbor(BiConsumer<SessionId, byte[]> receiver) {
+    public void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver) {
         sessionReceivers.add(Objects.requireNonNull(receiver, "receiver"));
     }
 
@@ -185,7 +190,7 @@ public final class JettyHttp2Transport implements AgentTransport {
             generation = current;
             current = null;
             if (generation != null) {
-                generation.cbor.reset();
+                generation.decoder.reset();
                 generation.ready.completeExceptionally(failure);
                 clearSessions(generation, failure);
             }
@@ -366,7 +371,7 @@ public final class JettyHttp2Transport implements AgentTransport {
                 return;
             }
             current = null;
-            generation.cbor.reset();
+            generation.decoder.reset();
             generation.ready.completeExceptionally(cause);
             clearSessions(generation, cause);
             failActive(cause);
@@ -387,7 +392,7 @@ public final class JettyHttp2Transport implements AgentTransport {
                 return;
             }
             generation.sessions.remove(id, state);
-            state.cbor.reset();
+            state.decoder.reset();
             activeSession = activeSessions.remove(id);
             queued = outbound.drainSession(id);
         }
@@ -405,7 +410,7 @@ public final class JettyHttp2Transport implements AgentTransport {
 
     private void clearSessions(Generation generation, Throwable failure) {
         for (SessionState state : generation.sessions.values()) {
-            state.cbor.reset();
+            state.decoder.reset();
             state.ready.completeExceptionally(failure);
         }
         generation.sessions.clear();
@@ -434,46 +439,117 @@ public final class JettyHttp2Transport implements AgentTransport {
         return new HeadersFrame(request, null, false);
     }
 
-    private void receiveControl(Generation generation, ByteBuffer data) {
-        if (!current(generation)) {
+    private void receiveControl(Generation generation, ByteBuffer data, boolean endStream) {
+        if (!current(generation) || generation.terminalAccepted) {
             return;
         }
-        try {
-            for (byte[] item : generation.cbor.accept(data)) {
-                executeCallback(() -> {
-                    if (!current(generation)) {
-                        return;
-                    }
-                    for (Consumer<byte[]> receiver : controlReceivers) {
-                        receiver.accept(item);
-                    }
-                });
-            }
-        } catch (IllegalArgumentException failure) {
-            failed(generation, TransportSignal.Kind.DISCONNECTED, failure);
+        SequenceDecodeResult<AgentMessage> result = generation.decoder.accept(data);
+        SequenceDecodeIssue.Terminal terminal = result.terminalIssue().orElse(null);
+        if (terminal == null && endStream) {
+            terminal = generation.decoder.finish().terminalIssue().orElse(null);
         }
+        Throwable endFailure = terminal == null && endStream
+                ? new IllegalStateException("control stream ended")
+                : terminal == null ? null : terminal.exception();
+        if (endFailure != null) {
+            generation.terminalAccepted = true;
+        }
+        executeCallback(() -> deliverControl(generation, result, endFailure));
     }
 
     private void receiveSession(Generation generation, SessionId id, SessionState state,
-                                Stream stream, ByteBuffer data) {
-        if (!sessionCurrent(generation, id, state)) {
+                                Stream stream, ByteBuffer data, boolean endStream) {
+        if (!sessionCurrent(generation, id, state) || state.terminalAccepted) {
             return;
         }
-        try {
-            for (byte[] item : state.cbor.accept(data)) {
-                executeCallback(() -> {
-                    if (!sessionCurrent(generation, id, state)) {
-                        return;
-                    }
-                    for (BiConsumer<SessionId, byte[]> receiver : sessionReceivers) {
-                        receiver.accept(id, item);
-                    }
-                });
-            }
-        } catch (IllegalArgumentException failure) {
-            stream.reset(new ResetFrame(stream.getId(), ErrorCode.PROTOCOL_ERROR.code), Callback.NOOP);
-            sessionFailed(generation, id, state, stream, TransportSignal.Kind.DISCONNECTED, failure);
+        SequenceDecodeResult<AgentMessage> result = state.decoder.accept(data);
+        SequenceDecodeIssue.Terminal terminal = result.terminalIssue().orElse(null);
+        if (terminal == null && endStream) {
+            terminal = state.decoder.finish().terminalIssue().orElse(null);
         }
+        Throwable endFailure = terminal == null && endStream
+                ? new IllegalStateException("session stream ended")
+                : terminal == null ? null : terminal.exception();
+        if (endFailure != null) {
+            state.terminalAccepted = true;
+        }
+        SequenceDecodeIssue.Terminal finalTerminal = terminal;
+        executeCallback(() -> deliverSession(
+                generation, id, state, stream, result, finalTerminal, endFailure));
+    }
+
+    private void deliverControl(
+            Generation generation,
+            SequenceDecodeResult<AgentMessage> result,
+            Throwable endFailure
+    ) {
+        if (!generationDeliveryCurrent(generation)) {
+            return;
+        }
+        for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
+                for (Consumer<AgentMessage> receiver : controlReceivers) {
+                    receiver.accept(decoded.value());
+                }
+                if (!generationDeliveryCurrent(generation)) {
+                    return;
+                }
+            } else if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
+                logRecoverable("control", null, rejected.issue());
+            }
+        }
+        if (endFailure != null) {
+            failed(generation, TransportSignal.Kind.DISCONNECTED, endFailure);
+        }
+    }
+
+    private void deliverSession(
+            Generation generation,
+            SessionId id,
+            SessionState state,
+            Stream stream,
+            SequenceDecodeResult<AgentMessage> result,
+            SequenceDecodeIssue.Terminal terminal,
+            Throwable endFailure
+    ) {
+        if (!sessionDeliveryCurrent(generation, id, state)) {
+            return;
+        }
+        for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
+                for (BiConsumer<SessionId, AgentMessage> receiver : sessionReceivers) {
+                    receiver.accept(id, decoded.value());
+                }
+                if (!sessionDeliveryCurrent(generation, id, state)) {
+                    return;
+                }
+            } else if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
+                logRecoverable("session", id, rejected.issue());
+            }
+        }
+        if (endFailure != null) {
+            if (terminal != null) {
+                stream.reset(new ResetFrame(stream.getId(), ErrorCode.PROTOCOL_ERROR.code), Callback.NOOP);
+            }
+            sessionFailed(
+                    generation, id, state, stream, TransportSignal.Kind.DISCONNECTED, endFailure);
+        }
+    }
+
+    private static void logRecoverable(
+            String streamKind,
+            SessionId sessionId,
+            SequenceDecodeIssue.Recoverable issue
+    ) {
+        String context = sessionId == null
+                ? "stream=control"
+                : "stream=" + streamKind + ", sessionId=" + sessionId.value();
+        LOGGER.log(
+                System.Logger.Level.ERROR,
+                "Rejected Agent protocol item: {0}, reason={1}, itemLength={2}",
+                context,
+                issue.exception().reason(),
+                issue.encodedLength());
     }
 
     private synchronized boolean current(Generation generation) {
@@ -482,6 +558,22 @@ public final class JettyHttp2Transport implements AgentTransport {
 
     private synchronized boolean sessionCurrent(Generation generation, SessionId id, SessionState state) {
         return current == generation && generation.sessions.get(id) == state;
+    }
+
+    private synchronized boolean generationDeliveryCurrent(Generation generation) {
+        return !closed && generation.id == sequence;
+    }
+
+    private synchronized boolean sessionDeliveryCurrent(
+            Generation generation,
+            SessionId id,
+            SessionState state
+    ) {
+        if (closed || generation.id != sequence) {
+            return false;
+        }
+        SessionState active = generation.sessions.get(id);
+        return active == null || active == state;
     }
 
     private void emit(TransportSignal signal) {
@@ -569,19 +661,15 @@ public final class JettyHttp2Transport implements AgentTransport {
             Stream.Data data;
             while ((data = stream.readData()) != null) {
                 try {
-                    receiveControl(generation, data.frame().getByteBuffer());
-                    if (data.frame().isEndStream()) {
-                        generation.cbor.finish();
-                        failed(generation, TransportSignal.Kind.DISCONNECTED,
-                                new IllegalStateException("control stream ended"));
-                    }
-                } catch (IllegalArgumentException failure) {
-                    failed(generation, TransportSignal.Kind.DISCONNECTED, failure);
+                    receiveControl(generation, data.frame().getByteBuffer(), data.frame().isEndStream());
                 } finally {
                     data.release();
                 }
+                if (generation.terminalAccepted) {
+                    break;
+                }
             }
-            if (current(generation)) {
+            if (current(generation) && !generation.terminalAccepted) {
                 stream.demand();
             }
         }
@@ -662,20 +750,23 @@ public final class JettyHttp2Transport implements AgentTransport {
             Stream.Data data;
             while ((data = stream.readData()) != null) {
                 try {
-                    receiveSession(generation, sessionId, state, stream, data.frame().getByteBuffer());
-                    if (data.frame().isEndStream()) {
-                        state.cbor.finish();
-                        sessionFailed(generation, sessionId, state, stream, TransportSignal.Kind.DISCONNECTED,
-                                new IllegalStateException("session stream ended"));
-                    }
-                } catch (IllegalArgumentException failure) {
-                    sessionFailed(generation, sessionId, state, stream,
-                            TransportSignal.Kind.DISCONNECTED, failure);
+                    receiveSession(
+                            generation,
+                            sessionId,
+                            state,
+                            stream,
+                            data.frame().getByteBuffer(),
+                            data.frame().isEndStream());
                 } finally {
                     data.release();
                 }
+                if (state.terminalAccepted) {
+                    break;
+                }
             }
-            if (current(generation) && generation.sessions.get(sessionId) == state) {
+            if (current(generation)
+                    && generation.sessions.get(sessionId) == state
+                    && !state.terminalAccepted) {
                 stream.demand();
             }
         }
@@ -719,27 +810,29 @@ public final class JettyHttp2Transport implements AgentTransport {
 
     private static final class Generation {
         private final long id;
-        private final CborSequenceDecoder cbor;
+        private final AgentProtocolDecoder decoder;
         private final CompletableFuture<Void> ready = new CompletableFuture<>();
         private final Map<SessionId, SessionState> sessions = new ConcurrentHashMap<>();
         private volatile Session session;
         private volatile Stream stream;
         private volatile boolean accepted;
+        private volatile boolean terminalAccepted;
 
         private Generation(long id, AgentProtocolLimits limits) {
             this.id = id;
-            cbor = new CborSequenceDecoder(limits.maxMessageBytes(), limits.maxNestingDepth());
+            decoder = new AgentProtocolDecoder(limits);
         }
     }
 
     private static final class SessionState {
-        private final CborSequenceDecoder cbor;
+        private final AgentProtocolDecoder decoder;
         private final CompletableFuture<Void> ready = new CompletableFuture<>();
         private volatile Stream stream;
         private volatile boolean accepted;
+        private volatile boolean terminalAccepted;
 
         private SessionState(AgentProtocolLimits limits) {
-            cbor = new CborSequenceDecoder(limits.maxMessageBytes(), limits.maxNestingDepth());
+            decoder = new AgentProtocolDecoder(limits);
         }
     }
 

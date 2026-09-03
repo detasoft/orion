@@ -85,7 +85,7 @@ public final class AgentControlService implements AgentService {
 
     @Override
     public void start() throws HandshakeException {
-        transport.onControlCbor(this::receiveControl);
+        transport.onControlMessage(this::receiveControl);
         transport.onSignal(this::receiveSignal);
         long deadline = nanoTime.getAsLong() + timeout.toNanos();
         try {
@@ -118,12 +118,11 @@ public final class AgentControlService implements AgentService {
         transport.close();
     }
 
-    private void receiveControl(byte[] item) {
+    private void receiveControl(AgentMessage message) {
         if (negotiated.isDone()) {
             return;
         }
         try {
-            AgentMessage message = codec.decode(item);
             if (!(message instanceof AgentMessage.Welcome welcome)) {
                 throw new HandshakeException("First server control message is not WELCOME");
             }

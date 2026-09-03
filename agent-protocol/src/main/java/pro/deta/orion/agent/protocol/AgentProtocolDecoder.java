@@ -1,26 +1,27 @@
 package pro.deta.orion.agent.protocol;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 public final class AgentProtocolDecoder {
-    private final AgentProtocolCodec codec;
-    private final CborSequenceBuffer sequence;
+    private final CborSequenceParser<AgentMessage> sequence;
 
     public AgentProtocolDecoder(AgentProtocolLimits limits) {
         Objects.requireNonNull(limits, "limits");
-        codec = new AgentProtocolCodec(limits);
-        sequence = new CborSequenceBuffer(limits);
+        AgentProtocolCodec codec = new AgentProtocolCodec(limits);
+        sequence = new CborSequenceParser<>(limits, codec::decode);
     }
 
-    public List<AgentMessage> accept(byte[] data) throws AgentProtocolException {
-        List<byte[]> items = sequence.accept(data);
-        List<AgentMessage> messages = new ArrayList<>(items.size());
-        for (byte[] item : items) {
-            messages.add(codec.decode(item));
-        }
-        return List.copyOf(messages);
+    public SequenceDecodeResult<AgentMessage> accept(ByteBuffer data) {
+        return sequence.accept(data);
+    }
+
+    public SequenceDecodeResult<AgentMessage> finish() {
+        return sequence.finish();
+    }
+
+    public void reset() {
+        sequence.reset();
     }
 
     public int pendingBytes() {

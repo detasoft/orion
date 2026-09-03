@@ -36,7 +36,7 @@ class AgentControlLivePeerTest {
     void negotiatesAuthenticatedHandshakeAcrossRealHttp2Transport() throws Exception {
         AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
         CompletableFuture<AgentMessage.Hello> received = new CompletableFuture<>();
-        try (Peer peer = new Peer(codec, received)) {
+        try (Peer peer = new Peer(codec, received, false)) {
             AgentLaunchContext context = AgentHandshakeTest.context();
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), context, "1.0.0",
@@ -54,6 +54,23 @@ class AgentControlLivePeerTest {
         }
     }
 
+    @Test
+    void negotiatesAfterAFragmentedSemanticFailure() throws Exception {
+        AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+        CompletableFuture<AgentMessage.Hello> received = new CompletableFuture<>();
+        try (Peer peer = new Peer(codec, received, true)) {
+            AgentControlService service = new AgentControlService(
+                    peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of());
+
+            service.start();
+
+            assertThat(received.get(5, TimeUnit.SECONDS)).isNotNull();
+            assertThat(service.connection()).isPresent();
+            service.close();
+        }
+    }
+
     private static final class Peer implements AutoCloseable {
         private final Server server = new Server();
         private final KeyStore keys = keys();
@@ -61,11 +78,17 @@ class AgentControlLivePeerTest {
         private final ServerConnector connector;
         private final AgentProtocolCodec codec;
         private final CompletableFuture<AgentMessage.Hello> received;
+        private final boolean prependSemanticFailure;
         private MetaData.Request request;
 
-        private Peer(AgentProtocolCodec codec, CompletableFuture<AgentMessage.Hello> received) throws Exception {
+        private Peer(
+                AgentProtocolCodec codec,
+                CompletableFuture<AgentMessage.Hello> received,
+                boolean prependSemanticFailure
+        ) throws Exception {
             this.codec = codec;
             this.received = received;
+            this.prependSemanticFailure = prependSemanticFailure;
             HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory() {
                 @Override
                 protected ServerSessionListener newSessionListener(Connector ignored, EndPoint endPoint) {
@@ -75,7 +98,8 @@ class AgentControlLivePeerTest {
                             request = (MetaData.Request) frame.getMetaData();
                             MetaData.Response response = new MetaData.Response(
                                     200, null, HttpVersion.HTTP_2, HttpFields.EMPTY);
-                            stream.headers(new HeadersFrame(stream.getId(), response, null, false), Callback.NOOP);
+                            stream.headers(
+                                    new HeadersFrame(stream.getId(), response, null, false), Callback.NOOP);
                             stream.demand();
                             return new ControlListener(stream);
                         }
@@ -125,7 +149,15 @@ class AgentControlLivePeerTest {
                         received.complete((AgentMessage.Hello) codec.decode(item));
                         AgentMessage.Welcome welcome = AgentHandshakeTest.welcome("connection-live", (byte) 9);
                         byte[] encoded = codec.encode(welcome);
-                        stream.data(new DataFrame(stream.getId(), ByteBuffer.wrap(encoded), false), Callback.NOOP);
+                        if (prependSemanticFailure) {
+                            byte[] invalidWelcome = {(byte) 0x81, 0x19, (byte) 0x80, 0x01};
+                            stream.data(new DataFrame(stream.getId(), ByteBuffer.wrap(invalidWelcome), false),
+                                    Callback.from(() -> stream.data(new DataFrame(
+                                            stream.getId(), ByteBuffer.wrap(encoded), false), Callback.NOOP)));
+                        } else {
+                            stream.data(
+                                    new DataFrame(stream.getId(), ByteBuffer.wrap(encoded), false), Callback.NOOP);
+                        }
                     } catch (Exception failure) {
                         received.completeExceptionally(failure);
                     } finally {

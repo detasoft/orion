@@ -4,7 +4,9 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -14,7 +16,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.http.HttpFields;
@@ -39,6 +45,8 @@ import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.Test;
 
+import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.util.CertUtils;
@@ -48,22 +56,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHttp2LivePeerTest {
     private static final long TIMEOUT_SECONDS = 5;
-    private static final byte[] FIRST_RECORD = {(byte) 0x82, 1, 2};
-    private static final byte[] SECOND_RECORD = {(byte) 0x43, 9, 8, 7};
-    private static final byte[] THIRD_RECORD = {(byte) 0xa1, 1, 2};
+    private static final AgentProtocolCodec CODEC = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+    private static final AgentMessage FIRST_MESSAGE = new AgentMessage.RequestSessionList();
+    private static final AgentMessage SECOND_MESSAGE = new AgentMessage.SessionSync(
+            new SessionId("second"), java.util.Optional.empty());
+    private static final AgentMessage THIRD_MESSAGE = new AgentMessage.SessionSync(
+            new SessionId("third"), java.util.Optional.of(new pro.deta.orion.agent.protocol.EventId(3)));
+    private static final byte[] FIRST_RECORD = encode(FIRST_MESSAGE);
+    private static final byte[] SECOND_RECORD = encode(SECOND_MESSAGE);
+    private static final byte[] THIRD_RECORD = encode(THIRD_MESSAGE);
 
     @Test
     void opensBidirectionalPostAndReassemblesFragmentedAndCoalescedCbor() throws Exception {
         try (Peer peer = new Peer((server, stream, request, count) -> {
             respond(stream, 200, false, () -> {
-                stream.data(data(stream, new byte[]{(byte) 0x82, 1}), Callback.from(() ->
-                        stream.data(data(stream, new byte[]{2, (byte) 0x43, 9, 8, 7}), Callback.NOOP)));
+                stream.data(data(stream, java.util.Arrays.copyOf(FIRST_RECORD, 2)), Callback.from(() ->
+                        stream.data(data(stream, sequence(
+                                java.util.Arrays.copyOfRange(FIRST_RECORD, 2, FIRST_RECORD.length),
+                                SECOND_RECORD)), Callback.NOOP)));
             });
             return Stream.Listener.AUTO_DISCARD;
         })) {
             JettyHttp2Transport transport = peer.transport(true);
-            LinkedBlockingQueue<byte[]> received = new LinkedBlockingQueue<>();
-            transport.onControlCbor(received::add);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            transport.onControlMessage(received::add);
 
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
@@ -71,8 +87,132 @@ class JettyHttp2LivePeerTest {
             assertThat(request).isNotNull();
             assertThat(request.getMethod()).isEqualTo("POST");
             assertThat(request.getHttpURI().getPath()).isEqualTo("/agent/control");
-            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).containsExactly(FIRST_RECORD);
-            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).containsExactly(SECOND_RECORD);
+            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
+            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(SECOND_MESSAGE);
+        }
+    }
+
+    @Test
+    void skipsOneSemanticControlFailureAndDeliversLaterMessages() throws Exception {
+        byte[] invalidWelcome = HexFormat.of().parseHex(
+                "8519800101016163a27163726564656e7469616c2d7365637265746178"
+                        + "7163726564656e7469616c2d7365637265746179");
+        try (LogCapture logs = new LogCapture();
+             Peer peer = new Peer((server, stream, request, count) -> {
+                 respond(stream, 200, false, () -> stream.data(
+                         data(stream, sequence(FIRST_RECORD, invalidWelcome, SECOND_RECORD)), Callback.NOOP));
+                 return Stream.Listener.AUTO_DISCARD;
+             })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            LinkedBlockingQueue<TransportSignal> signals = new LinkedBlockingQueue<>();
+            transport.onControlMessage(received::add);
+            transport.onSignal(signals::add);
+
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
+            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(SECOND_MESSAGE);
+            assertThat(signals.stream()).noneMatch(
+                    signal -> signal.kind() == TransportSignal.Kind.DISCONNECTED);
+            assertThat(logs.messages()).singleElement().asString()
+                    .contains("stream=control", "reason=INVALID_FIELD", "itemLength=49")
+                    .doesNotContain("credential-secret", HexFormat.of().formatHex(invalidWelcome));
+        }
+    }
+
+    @Test
+    void deliversControlPrefixBeforeStructuralFailureWithoutResynchronizing() throws Exception {
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            respond(stream, 200, false, () -> stream.data(
+                    data(stream, sequence(FIRST_RECORD, new byte[]{(byte) 0xff}, SECOND_RECORD)),
+                    Callback.NOOP));
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            LinkedBlockingQueue<TransportSignal> signals = new LinkedBlockingQueue<>();
+            transport.onControlMessage(received::add);
+            transport.onSignal(signals::add);
+
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
+            assertThat(await(signals, TransportSignal.Kind.DISCONNECTED).sessionId()).isNull();
+            assertThat(received.poll(300, TimeUnit.MILLISECONDS)).isNull();
+        }
+    }
+
+    @Test
+    void keepsAcceptedControlPrefixWhenResetInvalidatesGenerationBeforeDelivery() throws Exception {
+        CountDownLatch receiverEntered = new CountDownLatch(1);
+        CountDownLatch releaseReceiver = new CountDownLatch(1);
+        CompletableFuture<Stream> serverStream = new CompletableFuture<>();
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            serverStream.complete(stream);
+            respond(stream, 200, false, () -> { });
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            transport.onControlMessage(message -> {
+                if (message.equals(FIRST_MESSAGE)) {
+                    receiverEntered.countDown();
+                    await(releaseReceiver);
+                } else {
+                    received.add(message);
+                }
+            });
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Stream stream = serverStream.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            stream.data(data(stream, FIRST_RECORD), Callback.NOOP);
+            assertThat(receiverEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+
+            CompletableFuture<Void> resetWritten = resetAfter(
+                    stream, sequence(SECOND_RECORD, new byte[]{(byte) 0xff}));
+            resetWritten.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            awaitCondition(() -> currentGeneration(transport) == null);
+            releaseReceiver.countDown();
+
+            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(SECOND_MESSAGE);
+        } finally {
+            releaseReceiver.countDown();
+        }
+    }
+
+    @Test
+    void dropsAcceptedControlBatchAfterExplicitCloseBeforeDelivery() throws Exception {
+        CountDownLatch receiverEntered = new CountDownLatch(1);
+        CountDownLatch releaseReceiver = new CountDownLatch(1);
+        CompletableFuture<Stream> serverStream = new CompletableFuture<>();
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            serverStream.complete(stream);
+            respond(stream, 200, false, () -> { });
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            transport.onControlMessage(message -> {
+                if (message.equals(FIRST_MESSAGE)) {
+                    receiverEntered.countDown();
+                    await(releaseReceiver);
+                } else {
+                    received.add(message);
+                }
+            });
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Stream stream = serverStream.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            stream.data(data(stream, FIRST_RECORD), Callback.NOOP);
+            assertThat(receiverEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+            stream.data(data(stream, sequence(SECOND_RECORD, new byte[]{(byte) 0xff})), Callback.NOOP);
+            awaitCondition(() -> controlTerminalAccepted(transport));
+
+            transport.close();
+            releaseReceiver.countDown();
+
+            assertThat(received.poll(300, TimeUnit.MILLISECONDS)).isNull();
+        } finally {
+            releaseReceiver.countDown();
         }
     }
 
@@ -249,11 +389,11 @@ class JettyHttp2LivePeerTest {
             return Stream.Listener.AUTO_DISCARD;
         })) {
             JettyHttp2Transport transport = peer.transport(true);
-            LinkedBlockingQueue<byte[]> received = new LinkedBlockingQueue<>();
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
             CountDownLatch firstEntered = new CountDownLatch(1);
             CountDownLatch releaseFirst = new CountDownLatch(1);
             AtomicBoolean first = new AtomicBoolean(true);
-            transport.onControlCbor(item -> {
+            transport.onControlMessage(item -> {
                 received.add(item);
                 if (first.getAndSet(false)) {
                     firstEntered.countDown();
@@ -267,7 +407,7 @@ class JettyHttp2LivePeerTest {
                 transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 releaseFirst.countDown();
 
-                assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).containsExactly(FIRST_RECORD);
+                assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
                 assertThat(received.poll(500, TimeUnit.MILLISECONDS)).isNull();
             } finally {
                 releaseFirst.countDown();
@@ -343,7 +483,7 @@ class JettyHttp2LivePeerTest {
             CountDownLatch firstEntered = new CountDownLatch(1);
             CountDownLatch releaseFirst = new CountDownLatch(1);
             AtomicBoolean first = new AtomicBoolean(true);
-            transport.onSessionCbor((id, item) -> {
+            transport.onSessionMessage((id, item) -> {
                 received.add(new SessionItem(id, item));
                 if (first.getAndSet(false)) {
                     firstEntered.countDown();
@@ -366,9 +506,9 @@ class JettyHttp2LivePeerTest {
                 assertThat(firstItem).isNotNull();
                 assertThat(currentItem).isNotNull();
                 assertThat(firstItem.sessionId).isEqualTo(sessionId);
-                assertThat(firstItem.cbor).containsExactly(FIRST_RECORD);
+                assertThat(firstItem.message).isEqualTo(FIRST_MESSAGE);
                 assertThat(currentItem.sessionId).isEqualTo(sessionId);
-                assertThat(currentItem.cbor).containsExactly(THIRD_RECORD);
+                assertThat(currentItem.message).isEqualTo(THIRD_MESSAGE);
                 assertThat(received.poll(500, TimeUnit.MILLISECONDS)).isNull();
             } finally {
                 releaseFirst.countDown();
@@ -456,19 +596,20 @@ class JettyHttp2LivePeerTest {
     }
 
     @Test
-    void receivesIndependentRawSessionCborAndRecreatesStreamsAfterReconnect() throws Exception {
+    void receivesIndependentTypedSessionMessagesAndRecreatesStreamsAfterReconnect() throws Exception {
         SessionId first = new SessionId("first");
         SessionId second = new SessionId("second");
         try (Peer peer = new Peer((server, stream, request, count) -> {
             String path = request.getHttpURI().getPath();
             if (path.equals(sessionPath(first))) {
                 respond(stream, 200, false, () -> {
-                    stream.data(data(stream, new byte[]{(byte) 0x82, 1}), Callback.from(() ->
-                            stream.data(data(stream, new byte[]{2}), Callback.NOOP)));
+                    stream.data(data(stream, java.util.Arrays.copyOf(FIRST_RECORD, 2)), Callback.from(() ->
+                            stream.data(data(stream, java.util.Arrays.copyOfRange(
+                                    FIRST_RECORD, 2, FIRST_RECORD.length)), Callback.NOOP)));
                 });
             } else if (path.equals(sessionPath(second))) {
                 respond(stream, 200, false, () -> stream.data(
-                        data(stream, new byte[]{(byte) 0x43, 9, 8, 7, (byte) 0x82, 1, 2}), Callback.NOOP));
+                        data(stream, sequence(SECOND_RECORD, FIRST_RECORD)), Callback.NOOP));
             } else {
                 respond(stream, 200, false, () -> { });
             }
@@ -476,7 +617,7 @@ class JettyHttp2LivePeerTest {
         })) {
             JettyHttp2Transport transport = peer.transport(true);
             LinkedBlockingQueue<SessionItem> received = new LinkedBlockingQueue<>();
-            transport.onSessionCbor((id, item) -> received.add(new SessionItem(id, item)));
+            transport.onSessionMessage((id, item) -> received.add(new SessionItem(id, item)));
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             transport.openSession(first, JettyHttp2LivePeerTest::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -486,13 +627,13 @@ class JettyHttp2LivePeerTest {
             List<SessionItem> initial = take(received, 3);
             assertThat(initial).anySatisfy(item -> {
                 assertThat(item.sessionId).isEqualTo(first);
-                assertThat(item.cbor).containsExactly(FIRST_RECORD);
+                assertThat(item.message).isEqualTo(FIRST_MESSAGE);
             }).anySatisfy(item -> {
                 assertThat(item.sessionId).isEqualTo(second);
-                assertThat(item.cbor).containsExactly(SECOND_RECORD);
+                assertThat(item.message).isEqualTo(SECOND_MESSAGE);
             }).anySatisfy(item -> {
                 assertThat(item.sessionId).isEqualTo(second);
-                assertThat(item.cbor).containsExactly(FIRST_RECORD);
+                assertThat(item.message).isEqualTo(FIRST_MESSAGE);
             });
 
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -504,6 +645,165 @@ class JettyHttp2LivePeerTest {
             assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS).sessionId).isEqualTo(first);
             transport.sendSessionCbor(first, FIRST_RECORD).toCompletableFuture()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void skipsSemanticSessionFailureAndKeepsThatStreamUsable() throws Exception {
+        SessionId sessionId = new SessionId("semantic-recovery");
+        byte[] invalidKnown = {(byte) 0x81, 0x19, (byte) 0x80, 0x01};
+        try (LogCapture logs = new LogCapture();
+             Peer peer = new Peer((server, stream, request, count) -> {
+                 respond(stream, 200, false, () -> {
+                     if (request.getHttpURI().getPath().equals(sessionPath(sessionId))) {
+                         byte[] rest = sequence(invalidKnown, SECOND_RECORD);
+                         stream.data(data(stream, java.util.Arrays.copyOf(FIRST_RECORD, 2)), Callback.from(() ->
+                                 stream.data(data(stream, sequence(
+                                         java.util.Arrays.copyOfRange(FIRST_RECORD, 2, FIRST_RECORD.length),
+                                         rest)), Callback.NOOP)));
+                     }
+                 });
+                 return Stream.Listener.AUTO_DISCARD;
+             })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<SessionItem> received = new LinkedBlockingQueue<>();
+            LinkedBlockingQueue<TransportSignal> signals = new LinkedBlockingQueue<>();
+            transport.onSessionMessage((id, message) -> received.add(new SessionItem(id, message)));
+            transport.onSignal(signals::add);
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                    .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            assertThat(take(received, 2)).extracting(SessionItem::message)
+                    .containsExactly(FIRST_MESSAGE, SECOND_MESSAGE);
+            assertThat(signals.stream()).noneMatch(signal -> signal.sessionId() != null);
+            assertThat(logs.messages()).singleElement().asString()
+                    .contains("stream=session", "sessionId=semantic-recovery", "itemLength=4");
+        }
+    }
+
+    @Test
+    void structuralSessionFailureDeliversPrefixAndLeavesOtherSessionUsable() throws Exception {
+        SessionId damaged = new SessionId("damaged");
+        SessionId healthy = new SessionId("healthy-structural");
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            respond(stream, 200, false, () -> {
+                String path = request.getHttpURI().getPath();
+                if (path.equals(sessionPath(damaged))) {
+                    stream.data(data(stream, sequence(
+                            FIRST_RECORD, new byte[]{(byte) 0xff}, SECOND_RECORD)), Callback.NOOP);
+                } else if (path.equals(sessionPath(healthy))) {
+                    stream.data(data(stream, THIRD_RECORD), Callback.NOOP);
+                }
+            });
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<SessionItem> received = new LinkedBlockingQueue<>();
+            LinkedBlockingQueue<TransportSignal> signals = new LinkedBlockingQueue<>();
+            transport.onSessionMessage((id, message) -> received.add(new SessionItem(id, message)));
+            transport.onSignal(signals::add);
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transport.openSession(damaged, JettyHttp2LivePeerTest::sessionHeaders)
+                    .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transport.openSession(healthy, JettyHttp2LivePeerTest::sessionHeaders)
+                    .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            List<SessionItem> items = take(received, 2);
+            assertThat(items).anySatisfy(item -> {
+                assertThat(item.sessionId()).isEqualTo(damaged);
+                assertThat(item.message()).isEqualTo(FIRST_MESSAGE);
+            }).anySatisfy(item -> {
+                assertThat(item.sessionId()).isEqualTo(healthy);
+                assertThat(item.message()).isEqualTo(THIRD_MESSAGE);
+            });
+            assertThat(await(signals, TransportSignal.Kind.DISCONNECTED).sessionId()).isEqualTo(damaged);
+            assertThat(received.poll(300, TimeUnit.MILLISECONDS)).isNull();
+            transport.sendSessionCbor(healthy, FIRST_RECORD).toCompletableFuture()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void keepsAcceptedSessionPrefixWhenResetInvalidatesStreamBeforeDelivery() throws Exception {
+        SessionId sessionId = new SessionId("queued-prefix");
+        CountDownLatch receiverEntered = new CountDownLatch(1);
+        CountDownLatch releaseReceiver = new CountDownLatch(1);
+        CompletableFuture<Stream> serverStream = new CompletableFuture<>();
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            respond(stream, 200, false, () -> { });
+            if (request.getHttpURI().getPath().equals(sessionPath(sessionId))) {
+                serverStream.complete(stream);
+            }
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            transport.onSessionMessage((id, message) -> {
+                if (message.equals(FIRST_MESSAGE)) {
+                    receiverEntered.countDown();
+                    await(releaseReceiver);
+                } else {
+                    received.add(message);
+                }
+            });
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                    .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Stream stream = serverStream.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            stream.data(data(stream, FIRST_RECORD), Callback.NOOP);
+            assertThat(receiverEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+
+            CompletableFuture<Void> resetWritten = resetAfter(
+                    stream, sequence(SECOND_RECORD, new byte[]{(byte) 0xff}));
+            resetWritten.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            awaitCondition(() -> !sessionIsCurrent(transport, sessionId));
+            releaseReceiver.countDown();
+
+            assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(SECOND_MESSAGE);
+        } finally {
+            releaseReceiver.countDown();
+        }
+    }
+
+    @Test
+    void dropsAcceptedSessionBatchAfterExplicitCloseBeforeDelivery() throws Exception {
+        SessionId sessionId = new SessionId("closed-prefix");
+        CountDownLatch receiverEntered = new CountDownLatch(1);
+        CountDownLatch releaseReceiver = new CountDownLatch(1);
+        CompletableFuture<Stream> serverStream = new CompletableFuture<>();
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            respond(stream, 200, false, () -> { });
+            if (request.getHttpURI().getPath().equals(sessionPath(sessionId))) {
+                serverStream.complete(stream);
+            }
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            transport.onSessionMessage((id, message) -> {
+                if (message.equals(FIRST_MESSAGE)) {
+                    receiverEntered.countDown();
+                    await(releaseReceiver);
+                } else {
+                    received.add(message);
+                }
+            });
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                    .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Stream stream = serverStream.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            stream.data(data(stream, FIRST_RECORD), Callback.NOOP);
+            assertThat(receiverEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+            stream.data(data(stream, sequence(SECOND_RECORD, new byte[]{(byte) 0xff})), Callback.NOOP);
+            awaitCondition(() -> sessionTerminalAccepted(transport, sessionId));
+
+            transport.close();
+            releaseReceiver.countDown();
+
+            assertThat(received.poll(300, TimeUnit.MILLISECONDS)).isNull();
+        } finally {
+            releaseReceiver.countDown();
         }
     }
 
@@ -569,6 +869,66 @@ class JettyHttp2LivePeerTest {
         }
     }
 
+    private static CompletableFuture<Void> resetAfter(Stream stream, byte[] bytes) {
+        CompletableFuture<Void> reset = new CompletableFuture<>();
+        stream.data(data(stream, bytes), Callback.from(
+                () -> stream.reset(
+                        new ResetFrame(stream.getId(), ErrorCode.PROTOCOL_ERROR.code),
+                        Callback.from(() -> reset.complete(null), reset::completeExceptionally)),
+                reset::completeExceptionally));
+        return reset;
+    }
+
+    private static void awaitCondition(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(condition.getAsBoolean()).isTrue();
+    }
+
+    private static Object currentGeneration(JettyHttp2Transport transport) {
+        synchronized (transport) {
+            return field(JettyHttp2Transport.class, "current", transport);
+        }
+    }
+
+    private static boolean sessionIsCurrent(JettyHttp2Transport transport, SessionId sessionId) {
+        Object generation = currentGeneration(transport);
+        if (generation == null) {
+            return false;
+        }
+        @SuppressWarnings("unchecked")
+        Map<SessionId, ?> sessions = (Map<SessionId, ?>) field(generation.getClass(), "sessions", generation);
+        return sessions.containsKey(sessionId);
+    }
+
+    private static boolean controlTerminalAccepted(JettyHttp2Transport transport) {
+        Object generation = currentGeneration(transport);
+        return generation != null && (boolean) field(generation.getClass(), "terminalAccepted", generation);
+    }
+
+    private static boolean sessionTerminalAccepted(JettyHttp2Transport transport, SessionId sessionId) {
+        Object generation = currentGeneration(transport);
+        if (generation == null) {
+            return false;
+        }
+        @SuppressWarnings("unchecked")
+        Map<SessionId, ?> sessions = (Map<SessionId, ?>) field(generation.getClass(), "sessions", generation);
+        Object state = sessions.get(sessionId);
+        return state != null && (boolean) field(state.getClass(), "terminalAccepted", state);
+    }
+
+    private static Object field(Class<?> owner, String name, Object target) {
+        try {
+            java.lang.reflect.Field field = owner.getDeclaredField(name);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("could not inspect transport state", failure);
+        }
+    }
+
     private static TransportSignal await(LinkedBlockingQueue<TransportSignal> signals,
                                          TransportSignal.Kind kind) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS);
@@ -611,10 +971,17 @@ class JettyHttp2LivePeerTest {
         return new DataFrame(stream.getId(), ByteBuffer.wrap(bytes), false);
     }
 
-    private static byte[] sequence(byte[] first, byte[] second) {
-        byte[] result = new byte[first.length + second.length];
-        System.arraycopy(first, 0, result, 0, first.length);
-        System.arraycopy(second, 0, result, first.length, second.length);
+    private static byte[] sequence(byte[]... items) {
+        int length = 0;
+        for (byte[] item : items) {
+            length += item.length;
+        }
+        byte[] result = new byte[length];
+        int position = 0;
+        for (byte[] item : items) {
+            System.arraycopy(item, 0, result, position, item.length);
+            position += item.length;
+        }
         return result;
     }
 
@@ -640,7 +1007,42 @@ class JettyHttp2LivePeerTest {
         }
     }
 
-    private record SessionItem(SessionId sessionId, byte[] cbor) { }
+    private static byte[] encode(AgentMessage message) {
+        try {
+            return CODEC.encode(message);
+        } catch (Exception failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
+    }
+
+    private record SessionItem(SessionId sessionId, AgentMessage message) { }
+
+    private static final class LogCapture extends Handler implements AutoCloseable {
+        private final Logger logger = Logger.getLogger(JettyHttp2Transport.class.getName());
+        private final List<String> messages = new CopyOnWriteArrayList<>();
+
+        private LogCapture() {
+            logger.addHandler(this);
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            messages.add(java.text.MessageFormat.format(record.getMessage(), record.getParameters()));
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+            logger.removeHandler(this);
+        }
+
+        private List<String> messages() {
+            return List.copyOf(messages);
+        }
+    }
 
     private static final class Peer implements AutoCloseable {
         private final Server server = new Server();
@@ -666,7 +1068,8 @@ class JettyHttp2LivePeerTest {
                             try {
                                 MetaData.Request request = (MetaData.Request) frame.getMetaData();
                                 requests.add(request);
-                                return responder.respond(server, stream, request, streamCount.incrementAndGet());
+                                return responder.respond(
+                                        server, stream, request, streamCount.incrementAndGet());
                             } catch (Throwable failure) {
                                 peerFailure.complete(failure);
                                 return Stream.Listener.AUTO_DISCARD;

@@ -1,165 +1,195 @@
 package pro.deta.orion.agent.protocol;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.Objects;
+
 final class CborItemScanner {
     private static final int INCOMPLETE = -1;
 
-    private CborItemScanner() {
+    private final AgentProtocolLimits limits;
+    private final Deque<Frame> containers = new ArrayDeque<>();
+    private int itemStart;
+    private int position;
+
+    CborItemScanner(AgentProtocolLimits limits) {
+        this.limits = Objects.requireNonNull(limits, "limits");
     }
 
     static int itemLength(byte[] bytes, int offset, AgentProtocolLimits limits) throws AgentProtocolException {
-        int end = scan(bytes, offset, 0, offset, limits);
-        return end == INCOMPLETE ? INCOMPLETE : end - offset;
+        return itemLength(bytes, offset, bytes.length, limits);
     }
 
-    private static int scan(
-            byte[] bytes,
-            int offset,
-            int depth,
-            int itemStart,
-            AgentProtocolLimits limits
-    ) throws AgentProtocolException {
-        if (depth > limits.maxNestingDepth()) {
-            throw failure(AgentProtocolException.Reason.LIMIT_EXCEEDED, "CBOR nesting limit exceeded");
-        }
-        Header header = header(bytes, offset);
-        if (header == null) {
-            return INCOMPLETE;
-        }
-        int position = header.end();
-        return switch (header.majorType()) {
-            case 0, 1 -> position;
-            case 2, 3 -> scanString(bytes, header, itemStart, limits);
-            case 4 -> scanArray(bytes, header, depth, itemStart, limits);
-            case 5 -> scanMap(bytes, header, depth, itemStart, limits);
-            case 6 -> scan(bytes, position, depth + 1, itemStart, limits);
-            case 7 -> {
-                if (header.additionalInfo() == 31) {
-                    throw failure(AgentProtocolException.Reason.MALFORMED_CBOR, "Unexpected CBOR break marker");
+    static int itemLength(byte[] bytes, int offset, int end, AgentProtocolLimits limits)
+            throws AgentProtocolException {
+        CborItemScanner scanner = new CborItemScanner(limits);
+        scanner.reset(offset);
+        int itemEnd = scanner.scan(bytes, end);
+        return itemEnd == INCOMPLETE ? INCOMPLETE : itemEnd - offset;
+    }
+
+    int scan(byte[] bytes, int end) throws AgentProtocolException {
+        while (position < end) {
+            Frame container = containers.peek();
+            if (container != null && container.kind == Kind.INDEFINITE_STRING) {
+                int complete = scanStringChunk(bytes, end, container);
+                if (complete != INCOMPLETE) {
+                    return complete;
                 }
-                yield position;
-            }
-            default -> throw failure(AgentProtocolException.Reason.MALFORMED_CBOR, "Unknown CBOR major type");
-        };
-    }
-
-    private static int scanString(
-            byte[] bytes,
-            Header header,
-            int itemStart,
-            AgentProtocolLimits limits
-    ) throws AgentProtocolException {
-        if (header.additionalInfo() != 31) {
-            int length = length(header.argument(), limits.maxMessageBytes(), "CBOR string");
-            return advance(bytes, header.end(), length, itemStart, limits);
-        }
-
-        int position = header.end();
-        while (true) {
-            if (position >= bytes.length) {
-                return INCOMPLETE;
+                continue;
             }
             if ((bytes[position] & 0xff) == 0xff) {
-                return position + 1;
+                int complete = closeIndefiniteContainer();
+                if (complete != INCOMPLETE) {
+                    return complete;
+                }
+                continue;
             }
-            Header chunk = header(bytes, position);
-            if (chunk == null) {
+            if (containers.size() > limits.maxNestingDepth()) {
+                throw failure(AgentProtocolException.Reason.LIMIT_EXCEEDED, "CBOR nesting limit exceeded");
+            }
+            int tokenStart = position;
+            Header header = header(bytes, tokenStart, end);
+            if (header == null) {
                 return INCOMPLETE;
             }
-            if (chunk.majorType() != header.majorType() || chunk.additionalInfo() == 31) {
-                throw failure(
+            position = header.end;
+            ValueState state = switch (header.majorType) {
+                case 0, 1, 7 -> ValueState.COMPLETE;
+                case 2, 3 -> scanString(bytes, end, tokenStart, header);
+                case 4 -> openCollection(header, Kind.ARRAY, "CBOR array");
+                case 5 -> openCollection(header, Kind.MAP, "CBOR map");
+                case 6 -> {
+                    containers.push(new Frame(Kind.DEFINITE, 1, 0, -1));
+                    yield ValueState.OPENED;
+                }
+                default -> throw failure(
                         AgentProtocolException.Reason.MALFORMED_CBOR,
-                        "Indefinite CBOR string contains an invalid chunk");
-            }
-            int length = length(chunk.argument(), limits.maxMessageBytes(), "CBOR string chunk");
-            position = advance(bytes, chunk.end(), length, itemStart, limits);
-            if (position == INCOMPLETE) {
+                        "Unknown CBOR major type");
+            };
+            if (state == ValueState.INCOMPLETE) {
                 return INCOMPLETE;
             }
+            if (state == ValueState.COMPLETE) {
+                int complete = completeValue();
+                if (complete != INCOMPLETE) {
+                    return complete;
+                }
+            }
+        }
+        return INCOMPLETE;
+    }
+
+    void reset(int offset) {
+        containers.clear();
+        itemStart = offset;
+        position = offset;
+    }
+
+    void shift(int count) {
+        itemStart -= count;
+        position -= count;
+    }
+
+    private ValueState scanString(byte[] bytes, int end, int tokenStart, Header header)
+            throws AgentProtocolException {
+        if (header.additionalInfo == 31) {
+            containers.push(new Frame(Kind.INDEFINITE_STRING, 0, 0, header.majorType));
+            return ValueState.OPENED;
+        }
+        int length = length(header.argument, limits.maxMessageBytes(), "CBOR string");
+        long valueEnd = (long) position + length;
+        checkItemLength(valueEnd);
+        if (valueEnd > end) {
+            position = tokenStart;
+            return ValueState.INCOMPLETE;
+        }
+        position = (int) valueEnd;
+        return ValueState.COMPLETE;
+    }
+
+    private ValueState openCollection(Header header, Kind kind, String name) throws AgentProtocolException {
+        if (header.additionalInfo == 31) {
+            containers.push(new Frame(kind.indefinite(), 0, 0, -1));
+            return ValueState.OPENED;
+        }
+        int entries = length(header.argument, limits.maxCollectionEntries(), name);
+        long values = kind == Kind.MAP ? (long) entries * 2 : entries;
+        if (values == 0) {
+            return ValueState.COMPLETE;
+        }
+        containers.push(new Frame(Kind.DEFINITE, values, 0, -1));
+        return ValueState.OPENED;
+    }
+
+    private int scanStringChunk(byte[] bytes, int end, Frame string) throws AgentProtocolException {
+        if ((bytes[position] & 0xff) == 0xff) {
+            containers.pop();
+            position++;
+            return completeValue();
+        }
+        Header chunk = header(bytes, position, end);
+        if (chunk == null) {
+            return INCOMPLETE;
+        }
+        if (chunk.majorType != string.stringMajorType || chunk.additionalInfo == 31) {
+            throw failure(
+                    AgentProtocolException.Reason.MALFORMED_CBOR,
+                    "Indefinite CBOR string contains an invalid chunk");
+        }
+        int length = length(chunk.argument, limits.maxMessageBytes(), "CBOR string chunk");
+        long chunkEnd = (long) chunk.end + length;
+        checkItemLength(chunkEnd);
+        if (chunkEnd > end) {
+            return INCOMPLETE;
+        }
+        position = (int) chunkEnd;
+        return INCOMPLETE;
+    }
+
+    private int closeIndefiniteContainer() throws AgentProtocolException {
+        Frame frame = containers.peek();
+        if (frame == null || (frame.kind != Kind.INDEFINITE_ARRAY && frame.kind != Kind.INDEFINITE_MAP)) {
+            throw failure(AgentProtocolException.Reason.MALFORMED_CBOR, "Unexpected CBOR break marker");
+        }
+        if (frame.kind == Kind.INDEFINITE_MAP && (frame.completedValues & 1) != 0) {
+            throw failure(
+                    AgentProtocolException.Reason.MALFORMED_CBOR,
+                    "Indefinite CBOR map has no value for key");
+        }
+        containers.pop();
+        position++;
+        return completeValue();
+    }
+
+    private int completeValue() throws AgentProtocolException {
+        while (true) {
+            Frame parent = containers.peek();
+            if (parent == null) {
+                return position;
+            }
+            if (parent.kind == Kind.DEFINITE) {
+                parent.remaining--;
+                if (parent.remaining == 0) {
+                    containers.pop();
+                    continue;
+                }
+                return INCOMPLETE;
+            }
+            parent.completedValues++;
+            int entries = parent.kind == Kind.INDEFINITE_MAP
+                    ? parent.completedValues / 2
+                    : parent.completedValues;
+            if (entries > limits.maxCollectionEntries()) {
+                throw failure(
+                        AgentProtocolException.Reason.LIMIT_EXCEEDED,
+                        "CBOR collection exceeds configured limit");
+            }
+            return INCOMPLETE;
         }
     }
 
-    private static int scanArray(
-            byte[] bytes,
-            Header header,
-            int depth,
-            int itemStart,
-            AgentProtocolLimits limits
-    ) throws AgentProtocolException {
-        int position = header.end();
-        if (header.additionalInfo() == 31) {
-            int entries = 0;
-            while (true) {
-                if (position >= bytes.length) {
-                    return INCOMPLETE;
-                }
-                if ((bytes[position] & 0xff) == 0xff) {
-                    return position + 1;
-                }
-                checkEntries(++entries, limits);
-                position = scan(bytes, position, depth + 1, itemStart, limits);
-                if (position == INCOMPLETE) {
-                    return INCOMPLETE;
-                }
-            }
-        }
-
-        int entries = length(header.argument(), limits.maxCollectionEntries(), "CBOR array");
-        for (int index = 0; index < entries; index++) {
-            position = scan(bytes, position, depth + 1, itemStart, limits);
-            if (position == INCOMPLETE) {
-                return INCOMPLETE;
-            }
-        }
-        return position;
-    }
-
-    private static int scanMap(
-            byte[] bytes,
-            Header header,
-            int depth,
-            int itemStart,
-            AgentProtocolLimits limits
-    ) throws AgentProtocolException {
-        int position = header.end();
-        if (header.additionalInfo() == 31) {
-            int entries = 0;
-            while (true) {
-                if (position >= bytes.length) {
-                    return INCOMPLETE;
-                }
-                if ((bytes[position] & 0xff) == 0xff) {
-                    return position + 1;
-                }
-                checkEntries(++entries, limits);
-                position = scan(bytes, position, depth + 1, itemStart, limits);
-                if (position == INCOMPLETE) {
-                    return INCOMPLETE;
-                }
-                position = scan(bytes, position, depth + 1, itemStart, limits);
-                if (position == INCOMPLETE) {
-                    return INCOMPLETE;
-                }
-            }
-        }
-
-        int entries = length(header.argument(), limits.maxCollectionEntries(), "CBOR map");
-        for (int index = 0; index < entries; index++) {
-            position = scan(bytes, position, depth + 1, itemStart, limits);
-            if (position == INCOMPLETE) {
-                return INCOMPLETE;
-            }
-            position = scan(bytes, position, depth + 1, itemStart, limits);
-            if (position == INCOMPLETE) {
-                return INCOMPLETE;
-            }
-        }
-        return position;
-    }
-
-    private static Header header(byte[] bytes, int offset) throws AgentProtocolException {
-        if (offset >= bytes.length) {
-            return null;
-        }
+    private Header header(byte[] bytes, int offset, int end) throws AgentProtocolException {
         int initial = bytes[offset] & 0xff;
         int majorType = initial >>> 5;
         int additionalInfo = initial & 0x1f;
@@ -175,7 +205,7 @@ final class CborItemScanner {
             return new Header(majorType, additionalInfo, additionalInfo, offset + 1);
         }
         int argumentBytes = 1 << (additionalInfo - 24);
-        if (bytes.length - offset - 1 < argumentBytes) {
+        if (end - offset - 1 < argumentBytes) {
             return null;
         }
         long argument = 0;
@@ -185,18 +215,10 @@ final class CborItemScanner {
         return new Header(majorType, additionalInfo, argument, offset + 1 + argumentBytes);
     }
 
-    private static int advance(
-            byte[] bytes,
-            int position,
-            int length,
-            int itemStart,
-            AgentProtocolLimits limits
-    ) throws AgentProtocolException {
-        long end = (long) position + length;
-        if (end - itemStart > limits.maxMessageBytes()) {
+    private void checkItemLength(long itemEnd) throws AgentProtocolException {
+        if (itemEnd - itemStart > limits.maxMessageBytes()) {
             throw failure(AgentProtocolException.Reason.LIMIT_EXCEEDED, "CBOR item exceeds configured limit");
         }
-        return end > bytes.length ? INCOMPLETE : (int) end;
     }
 
     private static int length(long value, int maximum, String name) throws AgentProtocolException {
@@ -206,16 +228,41 @@ final class CborItemScanner {
         return (int) value;
     }
 
-    private static void checkEntries(int entries, AgentProtocolLimits limits) throws AgentProtocolException {
-        if (entries > limits.maxCollectionEntries()) {
-            throw failure(
-                    AgentProtocolException.Reason.LIMIT_EXCEEDED,
-                    "CBOR collection exceeds configured limit");
+    private static AgentProtocolException failure(AgentProtocolException.Reason reason, String message) {
+        return new AgentProtocolException(reason, message);
+    }
+
+    private enum Kind {
+        DEFINITE,
+        ARRAY,
+        MAP,
+        INDEFINITE_ARRAY,
+        INDEFINITE_MAP,
+        INDEFINITE_STRING;
+
+        Kind indefinite() {
+            return this == ARRAY ? INDEFINITE_ARRAY : INDEFINITE_MAP;
         }
     }
 
-    private static AgentProtocolException failure(AgentProtocolException.Reason reason, String message) {
-        return new AgentProtocolException(reason, message);
+    private enum ValueState {
+        COMPLETE,
+        OPENED,
+        INCOMPLETE
+    }
+
+    private static final class Frame {
+        private final Kind kind;
+        private long remaining;
+        private int completedValues;
+        private final int stringMajorType;
+
+        private Frame(Kind kind, long remaining, int completedValues, int stringMajorType) {
+            this.kind = kind;
+            this.remaining = remaining;
+            this.completedValues = completedValues;
+            this.stringMajorType = stringMajorType;
+        }
     }
 
     private record Header(int majorType, int additionalInfo, long argument, int end) {

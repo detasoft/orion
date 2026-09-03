@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.nio.ByteBuffer;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,6 +56,17 @@ class AgentProtocolCodecTest {
     }
 
     @Test
+    void decodesKnownAndUnknownMessagesFromBoundedRanges() throws Exception {
+        AgentMessage known = new AgentMessage.SessionSync(SESSION_ID, Optional.of(new EventId(9)));
+        byte[] knownEncoded = CODEC.encode(known);
+        byte[] unknownEncoded = Hex.parse("83197ffe4200ff66667574757265");
+
+        assertThat(decodeRange(knownEncoded)).isEqualTo(known);
+        assertThat(decodeRange(unknownEncoded))
+                .isEqualTo(new AgentMessage.Unknown(0x7ffe, ProtocolBytes.copyOf(unknownEncoded)));
+    }
+
+    @Test
     void leavesUnknownMessagePayloadOpaqueToKnownFieldLimits() throws Exception {
         byte[] encoded = Hex.parse("82197ffe450102030405");
         AgentProtocolCodec codec = new AgentProtocolCodec(
@@ -90,7 +102,7 @@ class AgentProtocolCodecTest {
         List<AgentMessage> actual = new ArrayList<>();
 
         for (byte value : sequence) {
-            actual.addAll(decoder.accept(new byte[]{value}));
+            addDecoded(actual, decoder.accept(ByteBuffer.wrap(new byte[]{value})));
         }
 
         assertThat(actual).containsExactlyElementsOf(expected);
@@ -102,14 +114,18 @@ class AgentProtocolCodecTest {
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
         byte[] encoded = CODEC.encode(new AgentMessage.RequestSessionList());
 
-        assertThat(decoder.accept(java.util.Arrays.copyOf(encoded, encoded.length - 1))).isEmpty();
+        byte[] partial = java.util.Arrays.copyOf(encoded, encoded.length - 1);
+        assertThat(decoder.accept(ByteBuffer.wrap(partial)).outcomes())
+                .isEmpty();
         assertThat(decoder.pendingBytes()).isEqualTo(encoded.length - 1);
-        assertThat(decoder.accept(new byte[]{encoded[encoded.length - 1]}))
-                .containsExactly(new AgentMessage.RequestSessionList());
+        SequenceDecodeResult<AgentMessage> complete = decoder.accept(
+                ByteBuffer.wrap(new byte[]{encoded[encoded.length - 1]}));
+        assertThat(complete.outcomes()).containsExactly(
+                new SequenceDecodeResult.Decoded<>(new AgentMessage.RequestSessionList()));
 
-        assertThatExceptionOfType(AgentProtocolException.class)
-                .isThrownBy(() -> decoder.accept(new byte[]{(byte) 0xff}))
-                .extracting(AgentProtocolException::reason)
+        assertThat(decoder.accept(ByteBuffer.wrap(new byte[]{(byte) 0xff})).terminalIssue())
+                .get()
+                .extracting(issue -> issue.exception().reason())
                 .isEqualTo(AgentProtocolException.Reason.MALFORMED_CBOR);
     }
 
@@ -358,5 +374,21 @@ class AgentProtocolCodecTest {
             output.writeBytes(CODEC.encode(message));
         }
         return output.toByteArray();
+    }
+
+    private static void addDecoded(List<AgentMessage> messages, SequenceDecodeResult<AgentMessage> result) {
+        for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
+                messages.add(decoded.value());
+            }
+        }
+    }
+
+    private static AgentMessage decodeRange(byte[] encoded) throws AgentProtocolException {
+        byte[] surrounded = new byte[encoded.length + 2];
+        surrounded[0] = (byte) 0xff;
+        System.arraycopy(encoded, 0, surrounded, 1, encoded.length);
+        surrounded[surrounded.length - 1] = (byte) 0xff;
+        return CODEC.decode(surrounded, 1, surrounded.length - 1);
     }
 }

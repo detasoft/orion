@@ -22,7 +22,6 @@ the AgentD lifecycle.
 
 ## Child Tasks
 
-- [ ] [Consolidate typed Agent protocol stream decoding](typed-protocol-stream-decoding/TASK.md)
 - [ ] [Read session journals](journal-reader/TASK.md)
 - [ ] [Synchronize and resume journal events](journal-sync/TASK.md)
 - [ ] [Route server session commands](command-orchestration/TASK.md)

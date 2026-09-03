@@ -60,22 +60,28 @@ public final class AgentProtocolCodec {
 
     public AgentMessage decode(byte[] encoded) throws AgentProtocolException {
         Objects.requireNonNull(encoded, "encoded");
-        if (encoded.length > limits.maxMessageBytes()) {
+        return decode(encoded, 0, encoded.length);
+    }
+
+    AgentMessage decode(byte[] encoded, int from, int to) throws AgentProtocolException {
+        Objects.requireNonNull(encoded, "encoded");
+        Objects.checkFromToIndex(from, to, encoded.length);
+        if (to - from > limits.maxMessageBytes()) {
             throw failure(LIMIT_EXCEEDED, "Agent protocol message exceeds configured limit");
         }
-        int itemLength = CborItemScanner.itemLength(encoded, 0, limits);
-        if (itemLength < 0 || itemLength != encoded.length) {
+        int itemLength = CborItemScanner.itemLength(encoded, from, to, limits);
+        if (itemLength < 0 || itemLength != to - from) {
             throw failure(MALFORMED_CBOR, "Agent protocol message must contain exactly one complete CBOR item");
         }
 
-        List<CborArrayItems.Slice> items = CborArrayItems.parse(encoded, limits);
+        List<CborArrayItems.Slice> items = CborArrayItems.parse(encoded, from, to, limits);
         if (items.isEmpty()) {
             throw failure(MISSING_FIELD, "Missing message type");
         }
         int typeCode = messageType(read(encoded, items.getFirst()));
         AgentMessageType type = AgentMessageType.fromCode(typeCode);
         if (type == null) {
-            return new AgentMessage.Unknown(typeCode, ProtocolBytes.copyOf(encoded));
+            return new AgentMessage.Unknown(typeCode, ProtocolBytes.copyOf(encoded, from, to));
         }
         Fields fields = knownFields(encoded, items, type);
 
@@ -174,8 +180,7 @@ public final class AgentProtocolCodec {
 
     private CborReader.Value read(byte[] encoded, CborArrayItems.Slice slice)
             throws AgentProtocolException {
-        byte[] item = java.util.Arrays.copyOfRange(encoded, slice.from(), slice.to());
-        return new CborReader(item, limits).readRoot();
+        return new CborReader(encoded, slice.from(), slice.to(), limits).readRoot();
     }
 
     private static int messageType(CborReader.Value value) throws AgentProtocolException {
