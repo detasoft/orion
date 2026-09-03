@@ -64,6 +64,44 @@ fn hosts_a_real_tty_and_preserves_raw_output() {
 }
 
 #[test]
+fn bounds_compresses_and_replays_the_session_journal() {
+    let directory = temporary_directory("bounded-journal");
+    let mut host = HostGuard::spawn_with_options(
+        directory,
+        &[
+            "--journal-segment-bytes",
+            "1",
+            "--journal-max-bytes",
+            "1048576",
+        ],
+        &["/bin/sh", "-c", "printf bounded-journal-output"],
+        "xterm-256color",
+        80,
+        24,
+    );
+
+    let status = host.wait();
+    assert!(status.success(), "session-host exited with {status}");
+    let (compressed_segments, active_segments) = journal_segment_numbers(host.directory());
+    assert!(!compressed_segments.is_empty());
+    assert_eq!(active_segments.len(), 1);
+
+    let result = journal::read_after(host.directory(), 0).unwrap();
+    assert_eq!(terminal_output(&result.events), b"bounded-journal-output");
+    assert_eq!(
+        result.events.first().unwrap().event_type,
+        event_type::PROCESS_STARTED
+    );
+    assert_eq!(
+        result.events.last().unwrap().event_type,
+        event_type::PROCESS_EXITED
+    );
+
+    let metadata = journal::read_metadata(host.directory()).unwrap();
+    assert_eq!(metadata.active_segment, active_segments[0]);
+}
+
+#[test]
 fn orders_control_commands_and_deduplicates_input_after_reconnect() {
     let directory = temporary_directory("control");
     let mut host = HostGuard::spawn(
@@ -365,6 +403,17 @@ struct HostGuard {
 
 impl HostGuard {
     fn spawn(directory: PathBuf, child_command: &[&str], term: &str, cols: u16, rows: u16) -> Self {
+        Self::spawn_with_options(directory, &[], child_command, term, cols, rows)
+    }
+
+    fn spawn_with_options(
+        directory: PathBuf,
+        options: &[&str],
+        child_command: &[&str],
+        term: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Self {
         let directory = DirectoryGuard::new(directory);
         let child = Command::new(env!("CARGO_BIN_EXE_session-host"))
             .args(base_arguments(
@@ -374,6 +423,7 @@ impl HostGuard {
                 cols,
                 rows,
             ))
+            .args(options)
             .arg("--")
             .args(child_command)
             .stdin(Stdio::null())
@@ -597,6 +647,24 @@ fn terminal_output(events: &[journal::JournalEvent]) -> Vec<u8> {
         }
     }
     output
+}
+
+fn journal_segment_numbers(directory: &Path) -> (Vec<u64>, Vec<u64>) {
+    let mut compressed = Vec::new();
+    let mut active = Vec::new();
+    for entry in fs::read_dir(directory).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        let name = name.to_str().unwrap();
+        if let Some(number) = name.strip_suffix(".cbor.zst") {
+            compressed.push(number.parse().unwrap());
+        } else if let Some(number) = name.strip_suffix(".cbor") {
+            active.push(number.parse().unwrap());
+        }
+    }
+    compressed.sort_unstable();
+    active.sort_unstable();
+    (compressed, active)
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

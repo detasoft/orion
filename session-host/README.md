@@ -91,3 +91,19 @@ make session-host-fixtures
 The journal fixtures are shared with AgentD and server-side consumers. Any
 future change to their version-1 bytes requires an intentional compatibility
 decision.
+
+## Journal Storage Limits
+
+`--journal-segment-bytes` sets the uncompressed target size for each journal
+segment and defaults to 67,108,864 bytes (64 MiB). `--journal-max-bytes` limits
+the physical size of the retained journal and defaults to 1,073,741,824 bytes
+(1 GiB). Both values are positive decimal byte counts, and the journal maximum
+must be at least the segment target.
+
+The host rotates only between complete CBOR items, so one oversized event stays
+whole and may exceed the segment target. Closed segments are compressed and
+oldest closed segments are deleted asynchronously. Disk usage can temporarily
+exceed the configured maximum while maintenance catches up. The active raw
+segment is never deleted; if it alone exceeds the maximum, the journal remains
+over the limit until it rotates. Readers behind a deleted prefix receive a
+retention gap whose floor is the first event in the oldest remaining segment.

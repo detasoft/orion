@@ -2,6 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
+pub use crate::journal::{DEFAULT_JOURNAL_MAX_BYTES, DEFAULT_JOURNAL_SEGMENT_BYTES};
+
 pub const DEFAULT_COLS: u16 = 160;
 pub const DEFAULT_ROWS: u16 = 50;
 pub const DEFAULT_TERM: &str = "xterm-256color";
@@ -23,6 +25,8 @@ pub struct SessionOptions {
     pub colorterm: Option<String>,
     pub sandbox_policy: Option<PathBuf>,
     pub sandbox_unavailable: SandboxUnavailable,
+    pub journal_segment_bytes: u64,
+    pub journal_max_bytes: u64,
     pub command: Vec<OsString>,
 }
 
@@ -82,6 +86,8 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
     let mut colorterm = None;
     let mut sandbox_policy = None;
     let mut sandbox_unavailable = None;
+    let mut journal_segment_bytes = None;
+    let mut journal_max_bytes = None;
     let mut index = 0;
 
     while index < arguments.len() {
@@ -91,16 +97,29 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             if command.is_empty() {
                 return Err(ParseError::new("missing child command after --"));
             }
+            let session_id = required(session_id, "--session-id")?;
+            let session_dir = required(session_dir, "--session-dir")?;
+            let cwd = required(cwd, "--cwd")?;
+            let journal_segment_bytes =
+                journal_segment_bytes.unwrap_or(DEFAULT_JOURNAL_SEGMENT_BYTES);
+            let journal_max_bytes = journal_max_bytes.unwrap_or(DEFAULT_JOURNAL_MAX_BYTES);
+            if journal_max_bytes < journal_segment_bytes {
+                return Err(ParseError::new(
+                    "--journal-max-bytes must be greater than or equal to --journal-segment-bytes",
+                ));
+            }
             return Ok(Command::Run(SessionOptions {
-                session_id: required(session_id, "--session-id")?,
-                session_dir: required(session_dir, "--session-dir")?,
-                cwd: required(cwd, "--cwd")?,
+                session_id,
+                session_dir,
+                cwd,
                 cols: cols.unwrap_or(DEFAULT_COLS),
                 rows: rows.unwrap_or(DEFAULT_ROWS),
                 term: term.unwrap_or_else(|| DEFAULT_TERM.to_owned()),
                 colorterm,
                 sandbox_policy,
                 sandbox_unavailable: sandbox_unavailable.unwrap_or(SandboxUnavailable::Fail),
+                journal_segment_bytes,
+                journal_max_bytes,
                 command,
             }));
         }
@@ -126,6 +145,12 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             "--sandbox-policy" => set_once(&mut sandbox_policy, PathBuf::from(value), option)?,
             "--sandbox-unavailable" => {
                 set_once(&mut sandbox_unavailable, parse_sandbox_unavailable(value)?, option)?
+            }
+            "--journal-segment-bytes" => {
+                set_once(&mut journal_segment_bytes, parse_journal_bytes(value, option)?, option)?
+            }
+            "--journal-max-bytes" => {
+                set_once(&mut journal_max_bytes, parse_journal_bytes(value, option)?, option)?
             }
             _ => return Err(ParseError::new(format!("unknown option: {option}"))),
         }
@@ -176,6 +201,18 @@ fn parse_dimension(value: &OsStr, option: &str) -> Result<u16, ParseError> {
     Ok(parsed)
 }
 
+fn parse_journal_bytes(value: &OsStr, option: &str) -> Result<u64, ParseError> {
+    let error = || ParseError::new(format!("{option} must be a positive decimal integer"));
+    let value = value
+        .to_str()
+        .ok_or_else(&error)?;
+    let parsed = value.parse::<u64>().map_err(|_| error())?;
+    if parsed == 0 {
+        return Err(error());
+    }
+    Ok(parsed)
+}
+
 fn parse_environment_value(value: &OsStr, option: &str) -> Result<String, ParseError> {
     let value = value
         .to_str()
@@ -206,6 +243,21 @@ mod tests {
         values.iter().map(OsString::from).collect()
     }
 
+    fn session_arguments(options: &[&str]) -> Vec<OsString> {
+        let mut arguments = strings(&[
+            "session-host",
+            "--session-id",
+            "session-1",
+            "--session-dir",
+            "/sessions/session-1",
+            "--cwd",
+            "/work",
+        ]);
+        arguments.extend(options.iter().map(OsString::from));
+        arguments.extend(strings(&["--", "bash"]));
+        arguments
+    }
+
     #[test]
     fn parses_complete_session_command() {
         let command = parse(strings(&[
@@ -228,6 +280,10 @@ mod tests {
             "/policy.json",
             "--sandbox-unavailable",
             "run-unsandboxed",
+            "--journal-segment-bytes",
+            "4096",
+            "--journal-max-bytes",
+            "16384",
             "--",
             "bash",
             "-l",
@@ -246,6 +302,8 @@ mod tests {
                 colorterm: Some("truecolor".to_owned()),
                 sandbox_policy: Some(PathBuf::from("/policy.json")),
                 sandbox_unavailable: SandboxUnavailable::RunUnsandboxed,
+                journal_segment_bytes: 4096,
+                journal_max_bytes: 16384,
                 command: strings(&["bash", "-l"]),
             })
         );
@@ -273,6 +331,8 @@ mod tests {
         assert_eq!(options.rows, DEFAULT_ROWS);
         assert_eq!(options.term, DEFAULT_TERM);
         assert_eq!(options.sandbox_unavailable, SandboxUnavailable::Fail);
+        assert_eq!(options.journal_segment_bytes, DEFAULT_JOURNAL_SEGMENT_BYTES);
+        assert_eq!(options.journal_max_bytes, DEFAULT_JOURNAL_MAX_BYTES);
     }
 
     #[test]
@@ -298,6 +358,57 @@ mod tests {
         assert_eq!(
             invalid_size.unwrap_err().to_string(),
             "--cols must be between 1 and 65535"
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_journal_limits() {
+        for (option, value) in [
+            ("--journal-segment-bytes", "not-a-number"),
+            ("--journal-max-bytes", "18446744073709551616"),
+        ] {
+            let result = parse(session_arguments(&[option, value]));
+
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                format!("{option} must be a positive decimal integer")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_zero_journal_limits() {
+        for option in ["--journal-segment-bytes", "--journal-max-bytes"] {
+            let result = parse(session_arguments(&[option, "0"]));
+
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                format!("{option} must be a positive decimal integer")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_journal_limits() {
+        for option in ["--journal-segment-bytes", "--journal-max-bytes"] {
+            let result = parse(session_arguments(&[option, "4096", option, "8192"]));
+
+            assert_eq!(result.unwrap_err().to_string(), format!("duplicate option: {option}"));
+        }
+    }
+
+    #[test]
+    fn rejects_journal_max_smaller_than_segment() {
+        let result = parse(session_arguments(&[
+            "--journal-segment-bytes",
+            "16384",
+            "--journal-max-bytes",
+            "4096",
+        ]));
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "--journal-max-bytes must be greater than or equal to --journal-segment-bytes"
         );
     }
 }

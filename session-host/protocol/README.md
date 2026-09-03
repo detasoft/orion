@@ -49,6 +49,16 @@ truncate the file to the last complete boundary. Invalid CBOR before that tail
 is corruption. Closed and compressed segments must contain only complete
 items.
 
+Rotation occurs only between complete CBOR items. A single item larger than
+the configured segment target remains indivisible in one segment. Closed
+segments are compressed and physical-size retention runs asynchronously, so
+the files on disk may temporarily exceed the configured journal maximum while
+maintenance catches up or publishes a replacement. Retention deletes only the
+oldest closed prefix and never deletes the active raw segment. If the active
+segment alone exceeds the maximum, all closed segments may be removed while
+the active segment remains over the limit. After deletion, the retention-gap
+floor is derived from the first record in the oldest remaining segment.
+
 ## Event Type Allocation
 
 | Range | Owner |
@@ -220,6 +230,8 @@ session-host \
   [--term xterm-256color] [--colorterm truecolor] \
   [--sandbox-policy PATH] \
   [--sandbox-unavailable fail|run-unsandboxed] \
+  [--journal-segment-bytes 67108864] \
+  [--journal-max-bytes 1073741824] \
   -- COMMAND [ARG...]
 ```
 
@@ -228,6 +240,11 @@ is neither `.` nor `..`. Dimensions are 1-65535. Option names and environment
 values must be valid UTF-8. Paths and child arguments use native OS strings at
 the process boundary; the implementation rejects values it cannot encode in
 required UTF-8 metadata rather than silently replacing bytes.
+
+Journal limits are positive decimal byte counts. The segment target defaults
+to 67,108,864 bytes (64 MiB), and the physical journal maximum defaults to
+1,073,741,824 bytes (1 GiB). The journal maximum must be at least the segment
+target.
 
 Duplicate and unknown options are errors. A requested sandbox defaults to
 fail-closed when unavailable. `--help` and `--version` are standalone actions.

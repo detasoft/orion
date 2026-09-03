@@ -1,7 +1,11 @@
 use std::cmp::max;
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +18,8 @@ const MAX_CBOR_DEPTH: usize = 64;
 const MAX_RECORD_FIELDS: usize = 1024;
 const MAX_ENCODED_RECORD_LENGTH: usize = MAX_PAYLOAD_LENGTH + 4096;
 const MAX_DECOMPRESSED_SEGMENT_LENGTH: u64 = 512 * 1024 * 1024;
+pub const DEFAULT_JOURNAL_SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
+pub const DEFAULT_JOURNAL_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Durability {
@@ -24,12 +30,16 @@ pub enum Durability {
 #[derive(Clone, Debug)]
 pub struct JournalConfig {
     pub durability: Durability,
+    pub segment_max_bytes: u64,
+    pub journal_max_bytes: u64,
 }
 
 impl Default for JournalConfig {
     fn default() -> Self {
         Self {
             durability: Durability::Buffered,
+            segment_max_bytes: DEFAULT_JOURNAL_SEGMENT_BYTES,
+            journal_max_bytes: DEFAULT_JOURNAL_MAX_BYTES,
         }
     }
 }
@@ -61,7 +71,9 @@ pub struct ReadResult {
 #[derive(Debug)]
 pub enum JournalError {
     Io(io::Error),
+    Configuration(String),
     Format(String),
+    Maintenance(String),
     EventIdExhausted,
     PayloadTooLarge(usize),
 }
@@ -70,11 +82,101 @@ impl std::fmt::Display for JournalError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(error) => write!(formatter, "journal I/O error: {error}"),
+            Self::Configuration(message) => {
+                write!(formatter, "invalid journal configuration: {message}")
+            }
             Self::Format(message) => write!(formatter, "invalid journal format: {message}"),
+            Self::Maintenance(message) => write!(formatter, "journal maintenance failed: {message}"),
             Self::EventIdExhausted => formatter.write_str("journal event ID is exhausted"),
             Self::PayloadTooLarge(length) => {
                 write!(formatter, "journal payload exceeds 16 MiB: {length}")
             }
+        }
+    }
+}
+
+// Active segment numbers make stale reconciliation commands harmless: FIFO delivery eventually
+// supplies the newest boundary, and Finish always carries the final boundary before shutdown.
+enum MaintenanceCommand {
+    Reconcile(u64),
+    Finish(u64),
+}
+
+trait MaintenanceFileSystem: Send + Sync {
+    fn rename(&self, source: &Path, target: &Path) -> io::Result<()>;
+
+    fn remove_file(&self, path: &Path) -> io::Result<()>;
+}
+
+struct RealMaintenanceFileSystem;
+
+impl MaintenanceFileSystem for RealMaintenanceFileSystem {
+    fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
+        fs::rename(source, target)
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
+    }
+}
+
+struct JournalMaintenance {
+    sender: Sender<MaintenanceCommand>,
+    thread: Option<JoinHandle<Result<(), JournalError>>>,
+}
+
+impl JournalMaintenance {
+    fn start_with_file_system(
+        directory: PathBuf,
+        active_segment: u64,
+        durability: Durability,
+        journal_max_bytes: u64,
+        file_system: Arc<dyn MaintenanceFileSystem>,
+    ) -> Result<Self, JournalError> {
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(MaintenanceCommand::Reconcile(active_segment))
+            .map_err(|_| JournalError::Maintenance("cannot schedule initial reconciliation".to_owned()))?;
+        let thread = thread::Builder::new()
+            .name("session-journal-maintenance".to_owned())
+            .spawn(move || {
+                run_maintenance(
+                    &directory,
+                    durability,
+                    journal_max_bytes,
+                    file_system,
+                    receiver,
+                )
+            })?;
+        Ok(Self {
+            sender,
+            thread: Some(thread),
+        })
+    }
+
+    fn reconcile(&self, active_segment: u64) {
+        let _ = self.sender.send(MaintenanceCommand::Reconcile(active_segment));
+    }
+
+    fn ensure_running(&self) -> Result<(), JournalError> {
+        if self.thread.is_none() {
+            return Err(JournalError::Maintenance(
+                "maintenance has already finished".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self, active_segment: u64) -> Result<(), JournalError> {
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        let _ = self.sender.send(MaintenanceCommand::Finish(active_segment));
+        match thread.join() {
+            Ok(result) => result,
+            Err(_) => Err(JournalError::Maintenance(
+                "maintenance thread panicked".to_owned(),
+            )),
         }
     }
 }
@@ -100,8 +202,10 @@ pub struct JournalWriter {
     journal_id: [u8; 16],
     previous_event_id: u64,
     segment_number: u64,
+    active_length: u64,
     session_start: Instant,
     config: JournalConfig,
+    maintenance: JournalMaintenance,
 }
 
 impl JournalWriter {
@@ -110,18 +214,42 @@ impl JournalWriter {
         journal_id: [u8; 16],
         config: JournalConfig,
     ) -> Result<Self, JournalError> {
+        Self::create_with_maintenance_file_system(
+            directory,
+            journal_id,
+            config,
+            Arc::new(RealMaintenanceFileSystem),
+        )
+    }
+
+    fn create_with_maintenance_file_system(
+        directory: impl AsRef<Path>,
+        journal_id: [u8; 16],
+        config: JournalConfig,
+        file_system: Arc<dyn MaintenanceFileSystem>,
+    ) -> Result<Self, JournalError> {
+        validate_config(&config)?;
         let directory = directory.as_ref().to_path_buf();
         fs::create_dir_all(&directory)?;
         let segment_number = FIRST_SEGMENT;
         let file = create_segment(&directory, segment_number, config.durability)?;
+        let maintenance = JournalMaintenance::start_with_file_system(
+            directory.clone(),
+            segment_number,
+            config.durability,
+            config.journal_max_bytes,
+            file_system,
+        )?;
         Ok(Self {
             directory,
             file,
             journal_id,
             previous_event_id: 0,
             segment_number,
+            active_length: 0,
             session_start: Instant::now(),
             config,
+            maintenance,
         })
     }
 
@@ -130,10 +258,30 @@ impl JournalWriter {
         journal_id: [u8; 16],
         config: JournalConfig,
     ) -> Result<Self, JournalError> {
+        Self::recover_with_maintenance_file_system(
+            directory,
+            journal_id,
+            config,
+            Arc::new(RealMaintenanceFileSystem),
+        )
+    }
+
+    fn recover_with_maintenance_file_system(
+        directory: impl AsRef<Path>,
+        journal_id: [u8; 16],
+        config: JournalConfig,
+        file_system: Arc<dyn MaintenanceFileSystem>,
+    ) -> Result<Self, JournalError> {
+        validate_config(&config)?;
         let directory = directory.as_ref().to_path_buf();
         let segments = discover_segments(&directory)?;
         let Some(active) = segments.last() else {
-            return Self::create(directory, journal_id, config);
+            return Self::create_with_maintenance_file_system(
+                directory,
+                journal_id,
+                config,
+                file_system,
+            );
         };
         if active.compressed {
             return Err(JournalError::Format(
@@ -155,14 +303,23 @@ impl JournalWriter {
             }
         }
         file.seek(SeekFrom::End(0))?;
+        let maintenance = JournalMaintenance::start_with_file_system(
+            directory.clone(),
+            active.number,
+            config.durability,
+            config.journal_max_bytes,
+            file_system,
+        )?;
         Ok(Self {
             directory,
             file,
             journal_id,
             previous_event_id,
             segment_number: active.number,
+            active_length: scan.last_boundary,
             session_start: Instant::now(),
             config,
+            maintenance,
         })
     }
 
@@ -190,6 +347,7 @@ impl JournalWriter {
         flags: u32,
         payload: &[u8],
     ) -> Result<u64, JournalError> {
+        self.maintenance.ensure_running()?;
         if payload.len() > MAX_PAYLOAD_LENGTH {
             return Err(JournalError::PayloadTooLarge(payload.len()));
         }
@@ -205,15 +363,30 @@ impl JournalWriter {
             .ok_or(JournalError::EventIdExhausted)?;
         let event_id = max(raw_event_id, next);
         let record = encode_event(event_id, event_type, payload)?;
+        let record_length = u64::try_from(record.len())
+            .map_err(|_| JournalError::Format("journal record length exceeds u64".to_owned()))?;
+        let next_length = self
+            .active_length
+            .checked_add(record_length)
+            .ok_or_else(|| JournalError::Format("active segment length overflow".to_owned()))?;
+        if self.active_length != 0 && next_length > self.config.segment_max_bytes {
+            self.rotate()?;
+        }
         self.file.write_all(&record)?;
         if self.config.durability == Durability::EveryRecord {
             self.file.sync_data()?;
         }
+        self.active_length = if self.active_length == 0 {
+            record_length
+        } else {
+            next_length
+        };
         self.previous_event_id = event_id;
         Ok(event_id)
     }
 
     pub fn rotate(&mut self) -> Result<(), JournalError> {
+        self.maintenance.ensure_running()?;
         self.file.flush()?;
         if self.config.durability == Durability::EveryRecord {
             self.file.sync_data()?;
@@ -222,8 +395,11 @@ impl JournalWriter {
             .segment_number
             .checked_add(1)
             .ok_or_else(|| JournalError::Format("segment number is exhausted".to_owned()))?;
-        self.file = create_segment(&self.directory, number, self.config.durability)?;
+        let file = create_segment(&self.directory, number, self.config.durability)?;
+        self.file = file;
         self.segment_number = number;
+        self.active_length = 0;
+        self.maintenance.reconcile(number);
         Ok(())
     }
 
@@ -236,6 +412,10 @@ impl JournalWriter {
         &self.directory
     }
 
+    pub fn active_segment_number(&self) -> u64 {
+        self.segment_number
+    }
+
     pub fn first_event_id(&self) -> Option<u64> {
         discover_segments(&self.directory)
             .and_then(|segments| first_available_event_id(&segments))
@@ -246,6 +426,223 @@ impl JournalWriter {
     pub fn latest_event_id(&self) -> Option<u64> {
         (self.previous_event_id != 0).then_some(self.previous_event_id)
     }
+
+    pub fn finish_maintenance(&mut self) -> Result<(), JournalError> {
+        self.maintenance.finish(self.segment_number)
+    }
+}
+
+impl Drop for JournalWriter {
+    fn drop(&mut self) {
+        let _ = self.finish_maintenance();
+    }
+}
+
+fn run_maintenance(
+    directory: &Path,
+    durability: Durability,
+    journal_max_bytes: u64,
+    file_system: Arc<dyn MaintenanceFileSystem>,
+    receiver: Receiver<MaintenanceCommand>,
+) -> Result<(), JournalError> {
+    let mut pending_error = None;
+    while let Ok(command) = receiver.recv() {
+        let (active_segment, finish) = match command {
+            MaintenanceCommand::Reconcile(active_segment) => (active_segment, false),
+            MaintenanceCommand::Finish(active_segment) => (active_segment, true),
+        };
+        let result = reconcile_journal(
+            directory,
+            active_segment,
+            durability,
+            journal_max_bytes,
+            file_system.as_ref(),
+        );
+        if finish {
+            return result;
+        }
+        match result {
+            Ok(()) => pending_error = None,
+            Err(error) => pending_error = Some(error),
+        }
+    }
+    match pending_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+fn reconcile_journal(
+    directory: &Path,
+    active_segment: u64,
+    durability: Durability,
+    journal_max_bytes: u64,
+    file_system: &dyn MaintenanceFileSystem,
+) -> Result<(), JournalError> {
+    compress_closed_segments(directory, active_segment, durability, file_system)?;
+    enforce_retention(
+        directory,
+        active_segment,
+        durability,
+        journal_max_bytes,
+        file_system,
+    )
+}
+
+fn compress_closed_segments(
+    directory: &Path,
+    active_segment: u64,
+    durability: Durability,
+    file_system: &dyn MaintenanceFileSystem,
+) -> Result<(), JournalError> {
+    let mut raw_segments = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let Some((number, compressed)) = segment_number(&entry.file_name()) else {
+            continue;
+        };
+        if !compressed && number < active_segment {
+            raw_segments.push((number, entry.path()));
+        }
+    }
+    raw_segments.sort_by_key(|(number, _)| *number);
+    for (number, raw_path) in raw_segments {
+        reconcile_closed_segment(
+            directory,
+            number,
+            &raw_path,
+            durability,
+            file_system,
+        )?;
+    }
+    Ok(())
+}
+
+fn reconcile_closed_segment(
+    directory: &Path,
+    number: u64,
+    raw_path: &Path,
+    durability: Durability,
+    file_system: &dyn MaintenanceFileSystem,
+) -> Result<(), JournalError> {
+    let temporary = compressed_temporary_segment_path(directory, number);
+    if temporary.try_exists()? {
+        file_system.remove_file(&temporary)?;
+        sync_directory_if_required(directory, durability)?;
+    }
+    let compressed = compressed_segment_path(directory, number);
+    if compressed.try_exists()? {
+        if published_compression_matches_raw(&compressed, raw_path)? {
+            file_system.remove_file(raw_path)?;
+            sync_directory_if_required(directory, durability)?;
+            return Ok(());
+        }
+        file_system.remove_file(&compressed)?;
+        sync_directory_if_required(directory, durability)?;
+    }
+    compress_segment(directory, number, raw_path, durability, file_system)
+}
+
+fn published_compression_matches_raw(
+    compressed_path: &Path,
+    raw_path: &Path,
+) -> Result<bool, JournalError> {
+    let compressed = File::open(compressed_path)?;
+    let mut decoder = match zstd::stream::read::Decoder::new(compressed) {
+        Ok(decoder) => decoder,
+        Err(_) => return Ok(false),
+    };
+    let mut raw = File::open(raw_path)?;
+    Ok(decoded_stream_matches_raw(
+        &mut decoder,
+        &mut raw,
+        MAX_DECOMPRESSED_SEGMENT_LENGTH,
+    )?)
+}
+
+fn decoded_stream_matches_raw(
+    decoded: &mut impl Read,
+    raw: &mut impl Read,
+    maximum_decoded_length: u64,
+) -> io::Result<bool> {
+    let mut decoded_buffer = [0_u8; 8192];
+    let mut raw_buffer = [0_u8; 8192];
+    let mut decoded_length = 0_u64;
+    loop {
+        let length = match decoded.read(&mut decoded_buffer) {
+            Ok(length) => length,
+            Err(_) => return Ok(false),
+        };
+        if length == 0 {
+            let mut extra = [0_u8; 1];
+            return Ok(raw.read(&mut extra)? == 0);
+        }
+        let Some(next_length) = decoded_length.checked_add(length as u64) else {
+            return Ok(false);
+        };
+        if next_length > maximum_decoded_length {
+            return Ok(false);
+        }
+        decoded_length = next_length;
+        match raw.read_exact(&mut raw_buffer[..length]) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(false),
+            Err(error) => return Err(error),
+        }
+        if decoded_buffer[..length] != raw_buffer[..length] {
+            return Ok(false);
+        }
+    }
+}
+
+fn sync_directory_if_required(
+    directory: &Path,
+    durability: Durability,
+) -> Result<(), JournalError> {
+    if durability == Durability::EveryRecord {
+        sync_directory(directory)?;
+    }
+    Ok(())
+}
+
+fn compress_segment(
+    directory: &Path,
+    number: u64,
+    raw_path: &Path,
+    durability: Durability,
+    file_system: &dyn MaintenanceFileSystem,
+) -> Result<(), JournalError> {
+    let mut raw = File::open(raw_path)?;
+    let temporary = compressed_temporary_segment_path(directory, number);
+    let output = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&temporary)?;
+    let mut encoder = zstd::stream::write::Encoder::new(output, 3)?;
+    io::copy(&mut raw, &mut encoder)?;
+    let output = encoder.finish()?;
+    if durability == Durability::EveryRecord {
+        output.sync_all()?;
+    }
+    file_system.rename(&temporary, &compressed_segment_path(directory, number))?;
+    if durability == Durability::EveryRecord {
+        sync_directory(directory)?;
+    }
+    file_system.remove_file(raw_path)?;
+    if durability == Durability::EveryRecord {
+        sync_directory(directory)?;
+    }
+    Ok(())
+}
+
+fn validate_config(config: &JournalConfig) -> Result<(), JournalError> {
+    if config.segment_max_bytes == 0 || config.journal_max_bytes < config.segment_max_bytes {
+        return Err(JournalError::Configuration(
+            "journal limits must be positive and max must cover one segment".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn create_segment(
@@ -332,7 +729,42 @@ pub fn read_after(
     directory: impl AsRef<Path>,
     requested_event_id: u64,
 ) -> Result<ReadResult, JournalError> {
-    let segments = discover_segments(directory.as_ref())?;
+    read_after_with_hook(directory.as_ref(), requested_event_id, |_, _| {})
+}
+
+fn read_after_with_hook(
+    directory: &Path,
+    requested_event_id: u64,
+    mut after_discovery: impl FnMut(usize, &[SegmentFile]),
+) -> Result<ReadResult, JournalError> {
+    let first = read_after_snapshot(
+        directory,
+        requested_event_id,
+        0,
+        &mut after_discovery,
+    );
+    if matches!(
+        &first,
+        Err(JournalError::Io(error)) if error.kind() == io::ErrorKind::NotFound
+    ) {
+        return read_after_snapshot(
+            directory,
+            requested_event_id,
+            1,
+            &mut after_discovery,
+        );
+    }
+    first
+}
+
+fn read_after_snapshot(
+    directory: &Path,
+    requested_event_id: u64,
+    attempt: usize,
+    after_discovery: &mut impl FnMut(usize, &[SegmentFile]),
+) -> Result<ReadResult, JournalError> {
+    let segments = discover_segments(directory)?;
+    after_discovery(attempt, &segments);
     let first_event_ids = discover_first_event_ids(&segments)?;
     let first_available = first_event_ids.iter().flatten().next().copied();
     let gap = first_available
@@ -371,26 +803,115 @@ struct SegmentFile {
     compressed: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SegmentSize {
+    number: u64,
+    physical_bytes: u64,
+    active: bool,
+}
+
+impl SegmentSize {
+    fn closed(number: u64, physical_bytes: u64) -> Self {
+        Self {
+            number,
+            physical_bytes,
+            active: false,
+        }
+    }
+
+    fn active(number: u64, physical_bytes: u64) -> Self {
+        Self {
+            number,
+            physical_bytes,
+            active: true,
+        }
+    }
+}
+
+fn retention_deletions(
+    segments: &[SegmentSize],
+    journal_max_bytes: u64,
+) -> Result<Vec<u64>, JournalError> {
+    let mut total = 0_u64;
+    for segment in segments {
+        total = total.checked_add(segment.physical_bytes).ok_or_else(|| {
+            JournalError::Maintenance("physical journal size overflow".to_owned())
+        })?;
+    }
+    let mut deletions = Vec::new();
+    for segment in segments {
+        if total <= journal_max_bytes || segment.active {
+            break;
+        }
+        total -= segment.physical_bytes;
+        deletions.push(segment.number);
+    }
+    Ok(deletions)
+}
+
+fn enforce_retention(
+    directory: &Path,
+    active_segment: u64,
+    durability: Durability,
+    journal_max_bytes: u64,
+    file_system: &dyn MaintenanceFileSystem,
+) -> Result<(), JournalError> {
+    let segments = discover_segments(directory)?;
+    let mut sizes = Vec::new();
+    for segment in &segments {
+        if segment.number > active_segment {
+            break;
+        }
+        let physical_bytes = fs::metadata(&segment.path)?.len();
+        if segment.number == active_segment {
+            sizes.push(SegmentSize::active(segment.number, physical_bytes));
+        } else {
+            sizes.push(SegmentSize::closed(segment.number, physical_bytes));
+        }
+    }
+    let deletions = retention_deletions(&sizes, journal_max_bytes)?;
+    for number in deletions {
+        let segment = segments
+            .iter()
+            .find(|segment| segment.number == number)
+            .ok_or_else(|| JournalError::Maintenance("retention segment disappeared".to_owned()))?;
+        file_system.remove_file(&segment.path)?;
+        sync_directory_if_required(directory, durability)?;
+    }
+    Ok(())
+}
+
 fn discover_segments(directory: &Path) -> Result<Vec<SegmentFile>, JournalError> {
-    let mut segments = Vec::new();
+    let mut candidates = BTreeMap::<u64, (Option<PathBuf>, Option<PathBuf>)>::new();
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let Some((number, compressed)) = segment_number(&entry.file_name()) else {
             continue;
         };
-        segments.push(SegmentFile {
-            number,
-            path: entry.path(),
-            compressed,
-        });
-    }
-    segments.sort_by_key(|segment| segment.number);
-    for pair in segments.windows(2) {
-        if pair[0].number == pair[1].number {
-            return Err(JournalError::Format(
-                "both compressed and uncompressed copies exist for a segment".to_owned(),
-            ));
+        let candidate = candidates.entry(number).or_default();
+        if compressed {
+            candidate.1 = Some(entry.path());
+        } else {
+            candidate.0 = Some(entry.path());
         }
+    }
+    let mut segments = Vec::with_capacity(candidates.len());
+    for (number, (raw, compressed)) in candidates {
+        if let Some(path) = raw {
+            segments.push(SegmentFile {
+                number,
+                path,
+                compressed: false,
+            });
+        } else if let Some(path) = compressed {
+            segments.push(SegmentFile {
+                number,
+                path,
+                compressed: true,
+            });
+        }
+    }
+    for pair in segments.windows(2) {
         if pair[0].number.checked_add(1) != Some(pair[1].number) {
             return Err(JournalError::Format("segment sequence has a gap".to_owned()));
         }
@@ -495,20 +1016,24 @@ fn scan_path(
 
 fn read_segment_bytes(segment: &SegmentFile) -> Result<Vec<u8>, JournalError> {
     if segment.compressed {
-        let file = File::open(&segment.path)?;
-        let decoder = zstd::stream::read::Decoder::new(file)?;
-        let mut bytes = Vec::new();
-        decoder
-            .take(MAX_DECOMPRESSED_SEGMENT_LENGTH + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAX_DECOMPRESSED_SEGMENT_LENGTH {
-            return Err(JournalError::Format(
-                "decompressed journal segment exceeds the size limit".to_owned(),
-            ));
-        }
-        return Ok(bytes);
+        return read_compressed_segment_bytes(&segment.path);
     }
     Ok(fs::read(&segment.path)?)
+}
+
+fn read_compressed_segment_bytes(path: &Path) -> Result<Vec<u8>, JournalError> {
+    let file = File::open(path)?;
+    let decoder = zstd::stream::read::Decoder::new(file)?;
+    let mut bytes = Vec::new();
+    decoder
+        .take(MAX_DECOMPRESSED_SEGMENT_LENGTH + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_DECOMPRESSED_SEGMENT_LENGTH {
+        return Err(JournalError::Format(
+            "decompressed journal segment exceeds the size limit".to_owned(),
+        ));
+    }
+    Ok(bytes)
 }
 
 fn scan_sequence(
@@ -941,6 +1466,14 @@ fn segment_path(directory: &Path, number: u64) -> PathBuf {
     directory.join(format!("{number:08}.cbor"))
 }
 
+fn compressed_segment_path(directory: &Path, number: u64) -> PathBuf {
+    directory.join(format!("{number:08}.cbor.zst"))
+}
+
+fn compressed_temporary_segment_path(directory: &Path, number: u64) -> PathBuf {
+    directory.join(format!("{number:08}.cbor.zst.tmp"))
+}
+
 fn segment_number(name: &std::ffi::OsStr) -> Option<(u64, bool)> {
     let name = name.to_str()?;
     let (number, compressed) = if let Some(number) = name.strip_suffix(".cbor.zst") {
@@ -1185,6 +1718,103 @@ fn valid_dimensions(cols: u16, rows: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::Duration;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum RetentionFailureSignal {
+        AttemptStarted,
+        FailureReturned,
+        RetryStarted,
+    }
+
+    struct FailingRetentionFileSystem {
+        target_name: &'static str,
+        remaining_failures: Mutex<Option<usize>>,
+        signal: Sender<RetentionFailureSignal>,
+        release_first_failure: Option<Arc<(Mutex<bool>, Condvar)>>,
+        release_retry: Option<Arc<(Mutex<bool>, Condvar)>>,
+    }
+
+    struct ReleaseMaintenanceWaits {
+        waits: [Arc<(Mutex<bool>, Condvar)>; 2],
+    }
+
+    impl Drop for ReleaseMaintenanceWaits {
+        fn drop(&mut self) {
+            for wait in &self.waits {
+                let (lock, condition) = &**wait;
+                let mut released = match lock.lock() {
+                    Ok(released) => released,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                *released = true;
+                condition.notify_all();
+            }
+        }
+    }
+
+    fn receive_retention_signal(
+        receiver: &Receiver<RetentionFailureSignal>,
+    ) -> RetentionFailureSignal {
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_else(|error| panic!("journal retention maintenance signal failed: {error}"))
+    }
+
+    impl MaintenanceFileSystem for FailingRetentionFileSystem {
+        fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
+            fs::rename(source, target)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            let is_target = path.file_name() == Some(OsStr::new(self.target_name));
+            let should_fail = if is_target {
+                let mut remaining = self.remaining_failures.lock().unwrap();
+                match remaining.as_mut() {
+                    Some(0) => false,
+                    Some(count) => {
+                        *count -= 1;
+                        true
+                    }
+                    None => true,
+                }
+            } else {
+                false
+            };
+            if !should_fail {
+                if is_target {
+                    if let Some(release) = &self.release_retry {
+                        let _ = self.signal.send(RetentionFailureSignal::RetryStarted);
+                        let (lock, condition) = &**release;
+                        let mut released = lock.lock().unwrap();
+                        while !*released {
+                            released = condition.wait(released).unwrap();
+                        }
+                    }
+                }
+                return fs::remove_file(path);
+            }
+            let _ = self
+                .signal
+                .send(RetentionFailureSignal::AttemptStarted);
+            if let Some(release) = &self.release_first_failure {
+                let (lock, condition) = &**release;
+                let mut released = lock.lock().unwrap();
+                while !*released {
+                    released = condition.wait(released).unwrap();
+                }
+                let _ = self
+                    .signal
+                    .send(RetentionFailureSignal::FailureReturned);
+            }
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "injected retention deletion failure",
+            ))
+        }
+    }
 
     fn temporary_directory(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!(
@@ -1216,6 +1846,745 @@ mod tests {
         encoded
     }
 
+    fn journal_config(segment_max_bytes: u64, journal_max_bytes: u64) -> JournalConfig {
+        JournalConfig {
+            durability: Durability::Buffered,
+            segment_max_bytes,
+            journal_max_bytes,
+        }
+    }
+
+    fn decode_compressed_segment(directory: &Path, number: u64) -> Vec<u8> {
+        let compressed = fs::read(directory.join(format!("{number:08}.cbor.zst"))).unwrap();
+        zstd::stream::decode_all(compressed.as_slice()).unwrap()
+    }
+
+    fn write_raw_event(directory: &Path, number: u64, event_id: u64, payload: &[u8]) -> Vec<u8> {
+        let encoded = encode_event(event_id, protocol::event_type::PTY_OUTPUT, payload).unwrap();
+        fs::write(segment_path(directory, number), &encoded).unwrap();
+        encoded
+    }
+
+    fn write_compressed_bytes(directory: &Path, number: u64, decoded: &[u8]) -> Vec<u8> {
+        let compressed = zstd::stream::encode_all(decoded, 1).unwrap();
+        fs::write(compressed_segment_path(directory, number), &compressed).unwrap();
+        compressed
+    }
+
+    #[test]
+    fn retention_deletes_the_oldest_closed_prefix_to_reach_the_limit() {
+        let segments = [
+            SegmentSize::closed(1, 40),
+            SegmentSize::closed(2, 40),
+            SegmentSize::active(3, 40),
+        ];
+
+        assert_eq!(retention_deletions(&segments, 80).unwrap(), [1]);
+    }
+
+    #[test]
+    fn retention_deletes_every_closed_segment_when_the_active_segment_exceeds_the_limit() {
+        let segments = [
+            SegmentSize::closed(1, 40),
+            SegmentSize::closed(2, 40),
+            SegmentSize::active(3, 40),
+        ];
+
+        assert_eq!(retention_deletions(&segments, 20).unwrap(), [1, 2]);
+    }
+
+    #[test]
+    fn retention_keeps_every_segment_when_the_journal_is_within_the_limit() {
+        let segments = [
+            SegmentSize::closed(1, 40),
+            SegmentSize::closed(2, 40),
+            SegmentSize::active(3, 40),
+        ];
+
+        assert!(retention_deletions(&segments, 120).unwrap().is_empty());
+    }
+
+    #[test]
+    fn retention_reports_physical_size_overflow() {
+        let segments = [
+            SegmentSize::closed(1, u64::MAX),
+            SegmentSize::active(2, 1),
+        ];
+
+        assert!(matches!(
+            retention_deletions(&segments, u64::MAX),
+            Err(JournalError::Maintenance(message))
+                if message == "physical journal size overflow"
+        ));
+    }
+
+    #[test]
+    fn journal_config_defaults_to_buffered_approved_size_limits() {
+        let config = JournalConfig::default();
+
+        assert_eq!(config.durability, Durability::Buffered);
+        assert_eq!(config.segment_max_bytes, 64 * 1024 * 1024);
+        assert_eq!(config.journal_max_bytes, 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn rotates_before_an_item_would_cross_the_segment_limit() {
+        let directory = temporary_directory("automatic-rotation");
+        let first = encode_event(1, protocol::event_type::PTY_OUTPUT, b"one").unwrap();
+        let second = encode_event(2, protocol::event_type::PTY_OUTPUT, b"two").unwrap();
+        let limit = u64::try_from(first.len() + second.len() - 1).unwrap();
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], journal_config(limit, 1024)).unwrap();
+
+        writer
+            .append_at(1, protocol::event_type::PTY_OUTPUT, 1, 0, b"one")
+            .unwrap();
+        writer
+            .append_at(2, protocol::event_type::PTY_OUTPUT, 1, 0, b"two")
+            .unwrap();
+        writer.flush().unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(decode_compressed_segment(&directory, 1), first);
+        assert_eq!(fs::read(directory.join("00000002.cbor")).unwrap(), second);
+        assert_eq!(writer.active_segment_number(), 2);
+        assert_eq!(
+            read_after(&directory, 0)
+                .unwrap()
+                .events
+                .iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            [1, 2],
+        );
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn compresses_every_closed_segment_and_leaves_the_active_segment_raw() {
+        let directory = temporary_directory("background-compression");
+        let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, b"same-size").unwrap();
+        let limit = u64::try_from(encoded.len()).unwrap();
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], journal_config(limit, 1024)).unwrap();
+
+        for event_id in 1..=3 {
+            writer
+                .append_at(event_id, protocol::event_type::PTY_OUTPUT, 1, 0, b"same-size")
+                .unwrap();
+        }
+        writer.finish_maintenance().unwrap();
+        writer.finish_maintenance().unwrap();
+
+        for number in 1..=2 {
+            assert!(directory.join(format!("{number:08}.cbor.zst")).is_file());
+            assert!(!directory.join(format!("{number:08}.cbor")).exists());
+        }
+        assert!(directory.join("00000003.cbor").is_file());
+        assert!(!directory.join("00000003.cbor.zst").exists());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_append_after_maintenance_has_finished_without_mutating_the_writer() {
+        let directory = temporary_directory("append-after-maintenance");
+        let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, b"same-size").unwrap();
+        let limit = u64::try_from(encoded.len()).unwrap();
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], journal_config(limit, 1024)).unwrap();
+        writer
+            .append_at(1, protocol::event_type::PTY_OUTPUT, 1, 0, b"same-size")
+            .unwrap();
+        writer.finish_maintenance().unwrap();
+
+        let error = writer
+            .append_at(2, protocol::event_type::PTY_OUTPUT, 1, 0, b"same-size")
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            JournalError::Maintenance(message) if message == "maintenance has already finished"
+        ));
+        assert_eq!(writer.active_segment_number(), 1);
+        assert_eq!(writer.latest_event_id(), Some(1));
+        assert!(!directory.join("00000002.cbor").exists());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rejects_direct_rotation_after_maintenance_has_finished() {
+        let directory = temporary_directory("rotate-after-maintenance");
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], JournalConfig::default()).unwrap();
+        writer.finish_maintenance().unwrap();
+
+        let error = writer.rotate().unwrap_err();
+
+        assert!(matches!(
+            error,
+            JournalError::Maintenance(message) if message == "maintenance has already finished"
+        ));
+        assert_eq!(writer.active_segment_number(), 1);
+        assert!(!directory.join("00000002.cbor").exists());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn compressed_segments_decode_to_the_exact_original_cbor_bytes() {
+        let directory = temporary_directory("exact-compressed-bytes");
+        let payloads = [b"aaaaaaaa".as_slice(), b"bbbbbbbb".as_slice(), b"cccccccc".as_slice()];
+        let expected = payloads
+            .iter()
+            .enumerate()
+            .map(|(index, payload)| {
+                encode_event(
+                    u64::try_from(index + 1).unwrap(),
+                    protocol::event_type::PTY_OUTPUT,
+                    payload,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let limit = u64::try_from(expected[0].len()).unwrap();
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], journal_config(limit, 1024)).unwrap();
+
+        for (index, payload) in payloads.iter().enumerate() {
+            writer
+                .append_at(
+                    u64::try_from(index + 1).unwrap(),
+                    protocol::event_type::PTY_OUTPUT,
+                    1,
+                    0,
+                    payload,
+                )
+                .unwrap();
+        }
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(decode_compressed_segment(&directory, 1), expected[0]);
+        assert_eq!(decode_compressed_segment(&directory, 2), expected[1]);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn compression_preserves_compressible_and_incompressible_event_sequences() {
+        let mut random_payload = vec![0_u8; 4096];
+        let mut state = 0x91a2_b3c4_u32;
+        for byte in &mut random_payload {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            *byte = state.to_le_bytes()[0];
+        }
+        let payload_sets = [
+            ("compressible", vec![0x5a; 4096]),
+            ("incompressible", random_payload),
+        ];
+
+        for (name, payload) in payload_sets {
+            let directory = temporary_directory(name);
+            let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, &payload).unwrap();
+            let limit = u64::try_from(encoded.len()).unwrap();
+            let mut writer =
+                JournalWriter::create(&directory, [7; 16], journal_config(limit, 64 * 1024)).unwrap();
+
+            for event_id in 1..=4 {
+                writer
+                    .append_at(event_id, protocol::event_type::PTY_OUTPUT, 1, 0, &payload)
+                    .unwrap();
+            }
+            writer.finish_maintenance().unwrap();
+
+            let read = read_after(&directory, 0).unwrap();
+            assert_eq!(
+                read.events.iter().map(|event| event.event_id).collect::<Vec<_>>(),
+                [1, 2, 3, 4],
+            );
+            assert!(read.events.iter().all(|event| event.payload == payload));
+            drop(writer);
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn retention_uses_physical_sizes_and_preserves_a_readable_contiguous_suffix() {
+        let directory = temporary_directory("physical-retention");
+        let mut payload = vec![0_u8; 2048];
+        let mut state = 0x6d2b_79f5_u32;
+        for byte in &mut payload {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            *byte = state.to_le_bytes()[0];
+        }
+        let records = (1..=5)
+            .map(|event_id| {
+                encode_event(event_id, protocol::event_type::PTY_OUTPUT, &payload).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let compressed_sizes = records
+            .iter()
+            .map(|record| zstd::stream::encode_all(record.as_slice(), 3).unwrap().len() as u64)
+            .collect::<Vec<_>>();
+        let segment_max_bytes = records[0].len() as u64;
+        let journal_max_bytes = compressed_sizes[3] + records[4].len() as u64;
+        let mut writer = JournalWriter::create(
+            &directory,
+            [7; 16],
+            journal_config(segment_max_bytes, journal_max_bytes),
+        )
+        .unwrap();
+
+        for event_id in 1..=5 {
+            writer
+                .append_at(event_id, protocol::event_type::PTY_OUTPUT, 1, 0, &payload)
+                .unwrap();
+        }
+        writer.finish_maintenance().unwrap();
+
+        for number in 1..=3 {
+            assert!(!segment_path(&directory, number).exists());
+            assert!(!compressed_segment_path(&directory, number).exists());
+        }
+        let segments = discover_segments(&directory).unwrap();
+        assert_eq!(
+            segments.iter().map(|segment| segment.number).collect::<Vec<_>>(),
+            [4, 5]
+        );
+        assert!(segments[0].compressed);
+        assert!(!segments[1].compressed);
+        assert!(!segment_path(&directory, 4).exists());
+        assert!(!compressed_segment_path(&directory, 5).exists());
+        let physical_total = segments
+            .iter()
+            .map(|segment| fs::metadata(&segment.path).unwrap().len())
+            .sum::<u64>();
+        assert!(physical_total <= journal_max_bytes);
+        let read = read_after(&directory, 0).unwrap();
+        assert_eq!(
+            read.gap,
+            Some(RetentionGap {
+                requested_event_id: 0,
+                first_available_event_id: 4,
+            })
+        );
+        assert_eq!(
+            read.events.iter().map(|event| event.event_id).collect::<Vec<_>>(),
+            [4, 5]
+        );
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retention_never_deletes_an_oversized_active_segment() {
+        let directory = temporary_directory("oversized-active-retention");
+        let payload = vec![0x5a; 4096];
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], journal_config(1, 1)).unwrap();
+
+        writer
+            .append_at(1, protocol::event_type::PTY_OUTPUT, 1, 0, &payload)
+            .unwrap();
+        writer.finish_maintenance().unwrap();
+
+        let active = segment_path(&directory, 1);
+        assert!(active.is_file());
+        assert!(fs::metadata(active).unwrap().len() > 1);
+        let read = read_after(&directory, 0).unwrap();
+        assert_eq!(read.events.len(), 1);
+        assert_eq!(read.events[0].event_id, 1);
+        assert_eq!(read.events[0].payload, payload);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn maintenance_retries_a_transient_retention_deletion_without_blocking_writes() {
+        let directory = temporary_directory("retention-deletion-retry");
+        write_raw_event(&directory, 1, 1, b"closed");
+        write_raw_event(&directory, 2, 2, b"active");
+        let (signal_sender, signal_receiver) = mpsc::channel();
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let release_retry = Arc::new((Mutex::new(false), Condvar::new()));
+        let file_system = Arc::new(FailingRetentionFileSystem {
+            target_name: "00000001.cbor.zst",
+            remaining_failures: Mutex::new(Some(1)),
+            signal: signal_sender,
+            release_first_failure: Some(release.clone()),
+            release_retry: Some(release_retry.clone()),
+        });
+        let mut writer = JournalWriter::recover_with_maintenance_file_system(
+            &directory,
+            [7; 16],
+            journal_config(1, 1),
+            file_system,
+        )
+        .unwrap();
+        let _release_guard = ReleaseMaintenanceWaits {
+            waits: [release.clone(), release_retry.clone()],
+        };
+
+        assert_eq!(
+            receive_retention_signal(&signal_receiver),
+            RetentionFailureSignal::AttemptStarted
+        );
+        writer
+            .append_at(3, protocol::event_type::PTY_OUTPUT, 1, 0, b"new active")
+            .unwrap();
+        assert!(compressed_segment_path(&directory, 1).is_file());
+        assert!(!segment_path(&directory, 1).exists());
+        let (lock, condition) = &*release;
+        *lock.lock().unwrap() = true;
+        condition.notify_one();
+        assert_eq!(
+            receive_retention_signal(&signal_receiver),
+            RetentionFailureSignal::FailureReturned
+        );
+        assert_eq!(
+            receive_retention_signal(&signal_receiver),
+            RetentionFailureSignal::RetryStarted
+        );
+        assert!(compressed_segment_path(&directory, 1).is_file());
+        let (lock, condition) = &*release_retry;
+        *lock.lock().unwrap() = true;
+        condition.notify_one();
+
+        writer.finish_maintenance().unwrap();
+
+        assert!(!compressed_segment_path(&directory, 1).exists());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn finish_surfaces_a_persistent_retention_deletion_failure_after_writes_succeed() {
+        let directory = temporary_directory("persistent-retention-deletion-failure");
+        write_raw_event(&directory, 1, 1, b"closed");
+        write_raw_event(&directory, 2, 2, b"active");
+        let (signal_sender, signal_receiver) = mpsc::channel();
+        let file_system = Arc::new(FailingRetentionFileSystem {
+            target_name: "00000001.cbor.zst",
+            remaining_failures: Mutex::new(None),
+            signal: signal_sender,
+            release_first_failure: None,
+            release_retry: None,
+        });
+        let mut writer = JournalWriter::recover_with_maintenance_file_system(
+            &directory,
+            [7; 16],
+            journal_config(1, 1),
+            file_system,
+        )
+        .unwrap();
+
+        assert_eq!(
+            receive_retention_signal(&signal_receiver),
+            RetentionFailureSignal::AttemptStarted
+        );
+        writer
+            .append_at(3, protocol::event_type::PTY_OUTPUT, 1, 0, b"new active")
+            .unwrap();
+        let error = writer.finish_maintenance().unwrap_err();
+
+        assert!(matches!(
+            error,
+            JournalError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied
+        ));
+        assert!(compressed_segment_path(&directory, 1).is_file());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovery_schedules_compression_of_existing_closed_raw_segments() {
+        let directory = temporary_directory("recovery-compression");
+        for event_id in 1..=3 {
+            let encoded = encode_event(event_id, protocol::event_type::PTY_OUTPUT, b"payload").unwrap();
+            fs::write(directory.join(format!("{event_id:08}.cbor")), encoded).unwrap();
+        }
+
+        let mut writer =
+            JournalWriter::recover(&directory, [7; 16], journal_config(1024, 4096)).unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert!(directory.join("00000001.cbor.zst").is_file());
+        assert!(directory.join("00000002.cbor.zst").is_file());
+        assert!(directory.join("00000003.cbor").is_file());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovery_replaces_an_abandoned_compression_temporary_file() {
+        let directory = temporary_directory("recovery-abandoned-compression");
+        let closed = write_raw_event(&directory, 1, 1, b"closed");
+        let active = write_raw_event(&directory, 2, 2, b"active");
+        fs::write(compressed_temporary_segment_path(&directory, 1), b"abandoned").unwrap();
+        fs::write(compressed_temporary_segment_path(&directory, 99), b"temporary-only").unwrap();
+
+        let discovered = discover_segments(&directory).unwrap();
+        assert_eq!(discovered.iter().map(|segment| segment.number).collect::<Vec<_>>(), [1, 2]);
+        let before = read_after(&directory, 0).unwrap();
+        assert_eq!(before.events.iter().map(|event| event.event_id).collect::<Vec<_>>(), [1, 2]);
+
+        let mut writer =
+            JournalWriter::recover(&directory, [7; 16], journal_config(1024, 4096)).unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert!(!segment_path(&directory, 1).exists());
+        assert!(!compressed_temporary_segment_path(&directory, 1).exists());
+        assert!(compressed_temporary_segment_path(&directory, 99).is_file());
+        assert_eq!(decode_compressed_segment(&directory, 1), closed);
+        assert_eq!(fs::read(segment_path(&directory, 2)).unwrap(), active);
+        assert!(!compressed_segment_path(&directory, 2).exists());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovery_keeps_an_equal_published_compression_and_removes_the_raw_copy() {
+        let directory = temporary_directory("recovery-equal-compression");
+        let closed = write_raw_event(&directory, 1, 1, b"closed");
+        let published = write_compressed_bytes(&directory, 1, &closed);
+        write_raw_event(&directory, 2, 2, b"active");
+
+        let discovered = discover_segments(&directory).unwrap();
+        assert_eq!(discovered[0].path, segment_path(&directory, 1));
+        assert!(!discovered[0].compressed);
+        let before = read_after(&directory, 0).unwrap();
+        assert_eq!(before.events.iter().map(|event| event.event_id).collect::<Vec<_>>(), [1, 2]);
+
+        let mut writer =
+            JournalWriter::recover(&directory, [7; 16], journal_config(1024, 4096)).unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(fs::read(compressed_segment_path(&directory, 1)).unwrap(), published);
+        assert!(!segment_path(&directory, 1).exists());
+        assert!(segment_path(&directory, 2).is_file());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovery_rebuilds_a_corrupt_published_compression_from_the_raw_copy() {
+        let directory = temporary_directory("recovery-corrupt-compression");
+        let closed = write_raw_event(&directory, 1, 1, b"closed");
+        fs::write(compressed_segment_path(&directory, 1), b"not-zstd").unwrap();
+        write_raw_event(&directory, 2, 2, b"active");
+
+        let before = read_after(&directory, 0).unwrap();
+        assert_eq!(before.events.iter().map(|event| event.event_id).collect::<Vec<_>>(), [1, 2]);
+
+        let mut writer =
+            JournalWriter::recover(&directory, [7; 16], journal_config(1024, 4096)).unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(decode_compressed_segment(&directory, 1), closed);
+        assert!(!segment_path(&directory, 1).exists());
+        assert!(segment_path(&directory, 2).is_file());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovery_rebuilds_a_different_published_compression_from_the_raw_copy() {
+        let directory = temporary_directory("recovery-different-compression");
+        let closed = write_raw_event(&directory, 1, 1, b"authoritative");
+        let different = encode_event(1, protocol::event_type::PTY_OUTPUT, b"different").unwrap();
+        assert_ne!(different, closed);
+        write_compressed_bytes(&directory, 1, &different);
+        write_raw_event(&directory, 2, 2, b"active");
+
+        let before = read_after(&directory, 0).unwrap();
+        assert_eq!(before.events[0].payload, b"authoritative");
+        assert_eq!(before.events.iter().map(|event| event.event_id).collect::<Vec<_>>(), [1, 2]);
+
+        let mut writer =
+            JournalWriter::recover(&directory, [7; 16], journal_config(1024, 4096)).unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(decode_compressed_segment(&directory, 1), closed);
+        assert!(!segment_path(&directory, 1).exists());
+        assert!(segment_path(&directory, 2).is_file());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn reconciliation_preserves_one_ordered_event_per_logical_segment() {
+        let directory = temporary_directory("recovery-logical-segments");
+        let first = write_raw_event(&directory, 1, 1, b"first");
+        let stale = encode_event(1, protocol::event_type::PTY_OUTPUT, b"stale").unwrap();
+        write_compressed_bytes(&directory, 1, &stale);
+        let second = write_raw_event(&directory, 2, 2, b"second");
+        fs::write(compressed_temporary_segment_path(&directory, 2), b"abandoned").unwrap();
+        let third = write_raw_event(&directory, 3, 3, b"third");
+
+        let mut writer =
+            JournalWriter::recover(&directory, [7; 16], journal_config(1024, 4096)).unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(decode_compressed_segment(&directory, 1), first);
+        assert_eq!(decode_compressed_segment(&directory, 2), second);
+        assert_eq!(fs::read(segment_path(&directory, 3)).unwrap(), third);
+        assert_eq!(
+            read_after(&directory, 0)
+                .unwrap()
+                .events
+                .iter()
+                .map(|event| event.event_id)
+                .collect::<Vec<_>>(),
+            [1, 2, 3],
+        );
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovery_still_rejects_a_compressed_only_newest_segment() {
+        let directory = temporary_directory("recovery-compressed-active");
+        let active = encode_event(1, protocol::event_type::PTY_OUTPUT, b"active").unwrap();
+        write_compressed_bytes(&directory, 1, &active);
+
+        let result = JournalWriter::recover(&directory, [7; 16], journal_config(1024, 4096));
+        let error = match result {
+            Ok(_) => panic!("compressed active segment was accepted"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(
+            error,
+            JournalError::Format(message)
+                if message == "the newest journal segment must be active and uncompressed"
+        ));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn does_not_rotate_when_an_item_exactly_reaches_the_segment_limit() {
+        let directory = temporary_directory("exact-segment-limit");
+        let first = encode_event(1, protocol::event_type::PTY_OUTPUT, b"one").unwrap();
+        let second = encode_event(2, protocol::event_type::PTY_OUTPUT, b"two").unwrap();
+        let limit = u64::try_from(first.len() + second.len()).unwrap();
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], journal_config(limit, 1024)).unwrap();
+
+        writer
+            .append_at(1, protocol::event_type::PTY_OUTPUT, 1, 0, b"one")
+            .unwrap();
+        writer
+            .append_at(2, protocol::event_type::PTY_OUTPUT, 1, 0, b"two")
+            .unwrap();
+        writer.flush().unwrap();
+
+        assert_eq!(
+            fs::read(directory.join("00000001.cbor")).unwrap(),
+            [first, second].concat(),
+        );
+        assert!(!directory.join("00000002.cbor").exists());
+        assert_eq!(writer.active_segment_number(), 1);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn keeps_an_oversized_first_item_whole_then_rotates_before_the_next_item() {
+        let directory = temporary_directory("oversized-item");
+        let first = encode_event(1, protocol::event_type::PTY_OUTPUT, b"whole").unwrap();
+        let second = encode_event(2, protocol::event_type::PTY_OUTPUT, b"next").unwrap();
+        let limit = u64::try_from(first.len() - 1).unwrap();
+        let mut writer =
+            JournalWriter::create(&directory, [7; 16], journal_config(limit, 1024)).unwrap();
+
+        writer
+            .append_at(1, protocol::event_type::PTY_OUTPUT, 1, 0, b"whole")
+            .unwrap();
+        writer
+            .append_at(2, protocol::event_type::PTY_OUTPUT, 1, 0, b"next")
+            .unwrap();
+        writer.flush().unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(decode_compressed_segment(&directory, 1), first);
+        assert_eq!(fs::read(directory.join("00000002.cbor")).unwrap(), second);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recovered_active_length_rotates_the_next_item_after_a_partial_tail() {
+        let directory = temporary_directory("recovered-active-length");
+        let first = encode_event(1, protocol::event_type::PTY_OUTPUT, b"one").unwrap();
+        let second = encode_event(2, protocol::event_type::PTY_OUTPUT, b"two").unwrap();
+        let partial = hex_bytes("830319010046706172");
+        fs::write(
+            directory.join("00000001.cbor"),
+            [first.clone(), partial].concat(),
+        )
+        .unwrap();
+        let limit = u64::try_from(first.len() + second.len() - 1).unwrap();
+
+        let mut writer =
+            JournalWriter::recover(&directory, [7; 16], journal_config(limit, 1024)).unwrap();
+        writer
+            .append_at(2, protocol::event_type::PTY_OUTPUT, 1, 0, b"two")
+            .unwrap();
+        writer.flush().unwrap();
+        writer.finish_maintenance().unwrap();
+
+        assert_eq!(decode_compressed_segment(&directory, 1), first);
+        assert_eq!(fs::read(directory.join("00000002.cbor")).unwrap(), second);
+        assert_eq!(writer.active_segment_number(), 2);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn create_rejects_invalid_journal_limits() {
+        for (segment_max_bytes, journal_max_bytes) in [(0, 1024), (1024, 1023)] {
+            let directory = temporary_directory("invalid-create-limits");
+            let result = JournalWriter::create(
+                &directory,
+                [7; 16],
+                journal_config(segment_max_bytes, journal_max_bytes),
+            );
+            let error = match result {
+                Ok(_) => panic!("invalid journal limits were accepted"),
+                Err(error) => error,
+            };
+
+            assert!(matches!(error, JournalError::Configuration(_)));
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    #[test]
+    fn recover_rejects_invalid_journal_limits() {
+        for (segment_max_bytes, journal_max_bytes) in [(0, 1024), (1024, 1023)] {
+            let directory = temporary_directory("invalid-recover-limits");
+            fs::write(directory.join("00000001.cbor"), Vec::<u8>::new()).unwrap();
+            let result = JournalWriter::recover(
+                &directory,
+                [7; 16],
+                journal_config(segment_max_bytes, journal_max_bytes),
+            );
+            let error = match result {
+                Ok(_) => panic!("invalid journal limits were accepted"),
+                Err(error) => error,
+            };
+
+            assert!(matches!(error, JournalError::Configuration(_)));
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
     #[test]
     fn writes_a_headerless_cbor_sequence_and_rotates_between_items() {
         let directory = temporary_directory("cbor-sequence");
@@ -1228,13 +2597,15 @@ mod tests {
             .append_at(0, protocol::event_type::PTY_RESIZE, 1, 0, &protocol::pty_resize_payload(180, 50))
             .unwrap();
         writer.flush().unwrap();
+        writer.finish_maintenance().unwrap();
 
         assert_eq!((first, second), (1, 2));
-        assert_eq!(fs::read(directory.join("00000001.cbor")).unwrap(), hex_bytes("830119010043001bff"));
+        assert_eq!(decode_compressed_segment(&directory, 1), hex_bytes("830119010043001bff"));
         assert_eq!(
             fs::read(directory.join("00000002.cbor")).unwrap(),
             hex_bytes("83021901028218b41832"),
         );
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1277,6 +2648,7 @@ mod tests {
         let read = read_after(&directory, 0).unwrap();
         assert_eq!(read.events.iter().map(|event| event.event_id).collect::<Vec<_>>(), [1, 2, 3, 4]);
         assert_eq!(read.events[2].payload, [input_id.to_vec(), vec![0, 0xff]].concat());
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1337,6 +2709,7 @@ mod tests {
         ] {
             assert!(parse_record(&hex_bytes(invalid)).is_err(), "accepted invalid record {invalid}");
         }
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1424,6 +2797,110 @@ mod tests {
     }
 
     #[test]
+    fn read_retries_after_compression_replaces_a_discovered_raw_segment() {
+        let directory = temporary_directory("read-compression-race");
+        let first = write_raw_event(&directory, 1, 1, b"first");
+        write_raw_event(&directory, 2, 2, b"second");
+        let mut attempts = 0;
+
+        let read = read_after_with_hook(&directory, 0, |attempt, segments| {
+            attempts += 1;
+            assert_eq!(attempt, attempts - 1);
+            if attempt == 0 {
+                assert_eq!(segments[0].path, segment_path(&directory, 1));
+                write_compressed_bytes(&directory, 1, &first);
+                fs::remove_file(segment_path(&directory, 1)).unwrap();
+            }
+        })
+        .unwrap();
+
+        assert_eq!(attempts, 2);
+        assert_eq!(
+            read.gap,
+            Some(RetentionGap {
+                requested_event_id: 0,
+                first_available_event_id: 1,
+            })
+        );
+        assert_eq!(
+            read.events.iter().map(|event| event.event_id).collect::<Vec<_>>(),
+            [1, 2]
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn read_retries_with_a_fresh_gap_floor_after_retention_removes_the_oldest_segment() {
+        let directory = temporary_directory("read-retention-race");
+        write_raw_event(&directory, 1, 1, b"first");
+        write_raw_event(&directory, 2, 2, b"second");
+        write_raw_event(&directory, 3, 3, b"third");
+        let mut attempts = 0;
+
+        let read = read_after_with_hook(&directory, 0, |attempt, segments| {
+            attempts += 1;
+            if attempt == 0 {
+                assert_eq!(
+                    segments.iter().map(|segment| segment.number).collect::<Vec<_>>(),
+                    [1, 2, 3]
+                );
+                fs::remove_file(segment_path(&directory, 1)).unwrap();
+            }
+        })
+        .unwrap();
+
+        assert_eq!(attempts, 2);
+        assert_eq!(
+            read.gap,
+            Some(RetentionGap {
+                requested_event_id: 0,
+                first_available_event_id: 2,
+            })
+        );
+        assert_eq!(
+            read.events.iter().map(|event| event.event_id).collect::<Vec<_>>(),
+            [2, 3]
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn read_returns_the_second_not_found_error_without_an_unbounded_retry() {
+        let directory = temporary_directory("read-repeated-not-found");
+        write_raw_event(&directory, 1, 1, b"first");
+        write_raw_event(&directory, 2, 2, b"second");
+        let mut attempts = 0;
+
+        let result = read_after_with_hook(&directory, 0, |_attempt, segments| {
+            attempts += 1;
+            fs::remove_file(&segments[0].path).unwrap();
+        });
+
+        assert_eq!(attempts, 2);
+        assert!(matches!(
+            result,
+            Err(JournalError::Io(error)) if error.kind() == io::ErrorKind::NotFound
+        ));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn read_does_not_retry_a_non_not_found_format_error() {
+        let directory = temporary_directory("read-format-race");
+        write_raw_event(&directory, 1, 1, b"first");
+        let mut attempts = 0;
+
+        let result = read_after_with_hook(&directory, 0, |_attempt, segments| {
+            attempts += 1;
+            fs::write(&segments[0].path, [0xff]).unwrap();
+        });
+
+        assert_eq!(attempts, 1);
+        assert!(matches!(result, Err(JournalError::Format(_))));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn recovers_and_truncates_only_a_partial_active_tail() {
         let directory = temporary_directory("recover-cbor-tail");
         let complete = hex_bytes("830719010044676f6f64");
@@ -1441,6 +2918,7 @@ mod tests {
                 .unwrap(),
             8,
         );
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1462,6 +2940,7 @@ mod tests {
                 .unwrap(),
             1,
         );
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1568,6 +3047,42 @@ mod tests {
 
         assert_eq!(first_event_id_from_decoded_stream(&mut decoded).unwrap(), Some(42));
         assert!(!decoded.remainder_requested);
+    }
+
+    #[test]
+    fn compressed_raw_comparison_stops_when_the_decoded_limit_is_exceeded() {
+        struct ChunkedReader {
+            bytes: Vec<u8>,
+            position: usize,
+            max_chunk: usize,
+        }
+
+        impl Read for ChunkedReader {
+            fn read(&mut self, target: &mut [u8]) -> io::Result<usize> {
+                let remaining = self.bytes.len() - self.position;
+                let length = remaining.min(target.len()).min(self.max_chunk);
+                target[..length]
+                    .copy_from_slice(&self.bytes[self.position..self.position + length]);
+                self.position += length;
+                Ok(length)
+            }
+        }
+
+        let bytes = (0_u8..64).collect::<Vec<_>>();
+        let mut decoded = ChunkedReader {
+            bytes: bytes.clone(),
+            position: 0,
+            max_chunk: 3,
+        };
+        let mut raw = ChunkedReader {
+            bytes,
+            position: 0,
+            max_chunk: 1,
+        };
+
+        assert!(!decoded_stream_matches_raw(&mut decoded, &mut raw, 4).unwrap());
+        assert_eq!(decoded.position, 6);
+        assert_eq!(raw.position, 3);
     }
 
     #[test]

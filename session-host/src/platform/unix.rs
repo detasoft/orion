@@ -84,6 +84,8 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         journal_id,
         JournalConfig {
             durability: Durability::Buffered,
+            segment_max_bytes: options.journal_segment_bytes,
+            journal_max_bytes: options.journal_max_bytes,
         },
     )?;
     let started_at = epoch_millis()?;
@@ -166,6 +168,7 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     {
         thread::sleep(Duration::from_millis(1));
     }
+    lock_state(&state)?.journal.finish_maintenance()?;
     Ok(())
 }
 
@@ -454,6 +457,7 @@ impl SharedState {
                 .unwrap_or(event_id),
         );
         self.metadata.latest_event_id = Some(event_id);
+        self.metadata.active_segment = self.journal.active_segment_number();
         Ok(event_id)
     }
 
