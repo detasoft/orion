@@ -99,7 +99,11 @@ public final class LooseRefStore {
         for (Update update : updates) {
             Objects.requireNonNull(update, "update");
             RefUpdateResult result =
-                    applyUpdate(updatedRefs, update.refName(), update.expectedOldId(), update.newId());
+                    applyUpdate(
+                            updatedRefs,
+                            update.refName(),
+                            update.expectedOldId(),
+                            update.newId());
             results.add(result);
             if (result == RefUpdateResult.STALE) {
                 anyStale = true;
@@ -113,6 +117,39 @@ public final class LooseRefStore {
             persistSnapshot(updatedRefs);
             refs.clear();
             refs.putAll(updatedRefs);
+        }
+        return List.copyOf(results);
+    }
+
+    public List<RefUpdateResult> previewUpdates(
+            List<Update> updates,
+            boolean atomic) {
+        Objects.requireNonNull(updates, "updates");
+        return withCurrentRefs(() -> previewCurrentRefs(updates, atomic));
+    }
+
+    private List<RefUpdateResult> previewCurrentRefs(
+            List<Update> updates,
+            boolean atomic) {
+        Map<String, String> updatedRefs = new HashMap<>(refs);
+        List<RefUpdateResult> results = new ArrayList<>(updates.size());
+        boolean stale = false;
+        for (Update update : updates) {
+            Objects.requireNonNull(update, "update");
+            RefUpdateResult result = applyUpdate(
+                    updatedRefs,
+                    update.refName(),
+                    update.expectedOldId(),
+                    update.newId());
+            results.add(result);
+            stale |= result == RefUpdateResult.STALE;
+        }
+        if (atomic && stale) {
+            List<RefUpdateResult> staleResults = new ArrayList<>(updates.size());
+            for (int index = 0; index < updates.size(); index++) {
+                staleResults.add(RefUpdateResult.STALE);
+            }
+            return List.copyOf(staleResults);
         }
         return List.copyOf(results);
     }

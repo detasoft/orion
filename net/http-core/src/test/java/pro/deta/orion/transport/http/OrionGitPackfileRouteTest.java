@@ -16,6 +16,7 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
@@ -24,6 +25,7 @@ import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.pack.PublishedPack;
+import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -47,10 +49,11 @@ class OrionGitPackfileRouteTest {
 
     @Test
     void streamsPublishedPackForAuthorizedReader() throws Exception {
-        FileNativeGitRepositoryProvider provider =
+        FileNativeGitRepositoryProvider backend =
                 new FileNativeGitRepositoryProvider(tempDir);
-        NativeGitRepository repository = provider.create("team/project.git")
+        NativeGitRepository repository = backend.create("team/project.git")
                 .valueOrFailure("repository");
+        RecordingProvider provider = new RecordingProvider(backend);
         PublishedPackFixture pack = publishPack(repository);
         OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
@@ -71,6 +74,7 @@ class OrionGitPackfileRouteTest {
         assertThat(response.headers).containsEntry("Cache-Control", "no-cache");
         assertThat(response.contentLength).isEqualTo(pack.packBytes().length);
         assertThat(response.body.toByteArray()).isEqualTo(pack.packBytes());
+        assertThat(provider.readCalls).isEqualTo(1);
     }
 
     @Test
@@ -229,6 +233,41 @@ class OrionGitPackfileRouteTest {
         @Override
         public byte[] packBytes() {
             return packBytes.clone();
+        }
+    }
+
+    private static final class RecordingProvider implements NativeGitRepositoryProvider {
+        private final NativeGitRepositoryProvider backend;
+        private int readCalls;
+
+        private RecordingProvider(NativeGitRepositoryProvider backend) {
+            this.backend = backend;
+        }
+
+        @Override
+        public List<String> repositoryNames() {
+            return backend.repositoryNames();
+        }
+
+        @Override
+        public boolean exists(String repositoryName) {
+            return backend.exists(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> find(String repositoryName) {
+            return backend.find(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> create(String repositoryName) {
+            return backend.create(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> openForRead(String repositoryName) {
+            readCalls++;
+            return backend.find(repositoryName);
         }
     }
 

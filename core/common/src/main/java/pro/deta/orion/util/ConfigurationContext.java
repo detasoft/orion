@@ -23,7 +23,7 @@ public class ConfigurationContext {
         this(configuration, System.getenv());
     }
 
-    ConfigurationContext(OrionConfiguration configuration, Map<String, String> environment) {
+    public ConfigurationContext(OrionConfiguration configuration, Map<String, String> environment) {
         this.configuration = configuration;
         this.environment = Map.copyOf(environment);
         this.baseDir = new LazySupplier<>(() -> {

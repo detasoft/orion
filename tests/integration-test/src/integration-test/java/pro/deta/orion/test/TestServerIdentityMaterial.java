@@ -7,6 +7,7 @@ import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.ServerIdentityMaterial;
 import pro.deta.orion.schema.config.OrionConfiguration;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.util.Map;
@@ -24,7 +25,12 @@ final class TestServerIdentityMaterial implements AutoCloseable {
     }
 
     static TestServerIdentityMaterial open(OrionConfiguration configuration) throws Exception {
+        Path baseDirectory = Path.of(configuration.getBootstrap().getBaseDir());
+        Files.createDirectories(baseDirectory);
+        configuration.getBootstrap().getKeyMaterial().setLocation(
+                baseDirectory.toRealPath().resolve("material.p12").toString());
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
+        configuration.getBootstrap().getKeyMaterial().setCreateIfMissing(true);
         ServerIdentityMaterial material = ServerIdentityMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, PASSWORD));
         try {

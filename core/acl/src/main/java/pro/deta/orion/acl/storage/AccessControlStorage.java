@@ -12,6 +12,10 @@ public interface AccessControlStorage {
 
     String primaryPath();
 
+    default boolean createIfMissing() {
+        return false;
+    }
+
     default ChangeSubscription onChange(Consumer<String> listener) {
         Objects.requireNonNull(listener, "listener");
         return () -> {

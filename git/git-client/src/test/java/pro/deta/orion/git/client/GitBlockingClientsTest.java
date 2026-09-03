@@ -205,6 +205,29 @@ class GitBlockingClientsTest {
     }
 
     @Test
+    void requestsAtomicReceivePackWhenRequired() {
+        byte[] response = concat(
+                advertisement("report-status atomic"),
+                packet("unpack ok\n"),
+                packet("ok refs/heads/main\n"),
+                flush());
+        RecordingTransport transport = new RecordingTransport(response);
+        GitReceivePackRequest request = new GitReceivePackRequest(
+                List.of(new GitReceivePackRequest.Command(
+                        OLD_ID, NEW_ID, "refs/heads/main")),
+                output -> { },
+                true);
+
+        GitClientResult<GitReceivePackResult> result =
+                new GitReceivePackClient(transport).push(
+                        REMOTE, GitClientOptions.defaults(), request);
+
+        assertThat(success(result).accepted()).isTrue();
+        assertThat(transport.session.output.ascii())
+                .contains("\0report-status atomic\n");
+    }
+
+    @Test
     void rejectsPushStatusWithoutAStatusForEverySentCommand() {
         assertMalformedPushStatus(packet("unpack ok\n"));
         assertMalformedPushStatus(concat(

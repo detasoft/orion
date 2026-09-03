@@ -7,12 +7,10 @@ import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
-import pro.deta.orion.keymaterial.ServerIdentityMaterial;
 import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.io.IOException;
 import java.io.PrintStream;
-import java.security.GeneralSecurityException;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -73,17 +71,19 @@ public class App {
         ConfigurationProvider configurationProvider = configurationProvider(options);
         try {
             OrionConfiguration configuration = configurationProvider.readConfiguration();
-            try (ServerIdentityMaterial serverIdentity = ServerIdentityMaterialFactory.open(
+            try (BootstrapContext bootstrap = BootstrapContext.open(
                     configuration, Map.copyOf(System.getenv()))) {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
                         .configurationProvider(() -> configuration)
                         .runtimeOptions(options.runtimeOptions())
-                        .serverIdentityCapability(serverIdentity)
+                        .serverIdentityCapability(bootstrap.serverIdentity())
+                        .nativeGitRepositoryProvider(bootstrap.repositoryProvider())
+                        .bootstrapRepositorySources(bootstrap.repositorySources())
                         .build();
                 return run(orionComponent.orionApplicationLifecycle(), true);
             }
-        } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            log.error("Cannot open configured server identity material", failure);
+        } catch (RuntimeException failure) {
+            log.error("Cannot bootstrap Orion runtime", failure);
             return 1;
         }
     }

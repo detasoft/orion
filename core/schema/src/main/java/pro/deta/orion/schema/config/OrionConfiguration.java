@@ -4,9 +4,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
 import jakarta.inject.Singleton;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 @RequiredArgsConstructor
@@ -26,28 +24,7 @@ public class OrionConfiguration {
         private KeyMaterialConfig keyMaterial = new KeyMaterialConfig();
     }
 
-    @Data
-    public static class BootstrapAccessControlConfig {
-        private String location = "local:orion";
-        private String ref = "refs/heads/main";
-        private String branch;
-        private List<String> paths = new ArrayList<>(List.of("orion.xml"));
-        private boolean createDefaultIfMissing = true;
-        private Map<String, String> auth = new LinkedHashMap<>();
-
-        public String primaryPath() {
-            if (paths == null || paths.isEmpty()) {
-                throw new IllegalStateException("At least one ACL path must be configured");
-            }
-            return paths.getFirst();
-        }
-
-        public String configurationRef() {
-            if (branch != null && !branch.isBlank()) {
-                return branch;
-            }
-            return ref;
-        }
+    public static class BootstrapAccessControlConfig extends BootstrapConfigurationSourceConfig {
     }
 
     @Data

@@ -26,7 +26,6 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
-import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
@@ -65,7 +64,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final AccessControlStorage accessControlStorage;
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
-    private final OrionConfiguration configuration;
     private final OrionRuntimeOptions runtimeOptions;
     private final ServerIdentityCapability serverIdentity;
     private final JwtAccessTokenService jwtAccessTokenService;
@@ -79,13 +77,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             AccessControlStorage accessControlStorage,
             OrionPasswordHashingService orionPasswordHashingService,
             OrionProvider orionProvider,
-            OrionConfiguration configuration,
             OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity) {
         this.accessControlStorage = accessControlStorage;
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.orionProvider = orionProvider;
-        this.configuration = configuration;
         this.runtimeOptions = runtimeOptions;
         this.serverIdentity = serverIdentity;
         this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
@@ -108,7 +104,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 }
                 case Result.Failure<AccessControlSnapshot> f -> {
                     if (f.code() == Result.FailureCode.NOT_FOUND) {
-                        if (!configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing()) {
+                        if (!accessControlStorage.createIfMissing()) {
                             throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
                         }
                         if (runtimeOptions.resetRootPassword()) {

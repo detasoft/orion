@@ -1,11 +1,5 @@
 package pro.deta.orion.test;
 
-import org.eclipse.jgit.lib.Constants;
-import org.eclipse.jgit.lib.ObjectId;
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.revwalk.RevWalk;
-import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
-import org.eclipse.jgit.treewalk.TreeWalk;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.XmlService;
@@ -82,7 +76,7 @@ class RuntimeHttpAdminAclUpdateIT {
 
         try (RuntimeHttpTestSupport.StartedOrion restarted = RuntimeHttpTestSupport.start(configuration)) {
             assertUserAuthenticates(restarted, "http-updated-user");
-            assertThat(userIds(readFileFromAclRepository(orionRoot))).containsExactly("http-updated-user");
+            assertThat(userIds(readFileFromAclRepository(restarted))).containsExactly("http-updated-user");
         }
     }
 
@@ -100,7 +94,7 @@ class RuntimeHttpAdminAclUpdateIT {
                     "root",
                     rootPassword,
                     600);
-            byte[] storedBefore = readFileFromAclRepository(orionRoot);
+            byte[] storedBefore = readFileFromAclRepository(orion);
             RuntimeHttpTestSupport.HttpResponse activeBefore = RuntimeHttpTestSupport.request(
                     "GET",
                     orion.httpUrl("/api/admin/acl"),
@@ -114,7 +108,7 @@ class RuntimeHttpAdminAclUpdateIT {
                     "<AccessControl><users>".getBytes(StandardCharsets.UTF_8));
 
             assertThat(update.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
-            assertThat(readFileFromAclRepository(orionRoot)).containsExactly(storedBefore);
+            assertThat(readFileFromAclRepository(orion)).containsExactly(storedBefore);
             RuntimeHttpTestSupport.HttpResponse activeAfter = RuntimeHttpTestSupport.request(
                     "GET",
                     orion.httpUrl("/api/admin/acl"),
@@ -157,17 +151,14 @@ class RuntimeHttpAdminAclUpdateIT {
                 .isInstanceOf(AuthenticationResult.Success.class);
     }
 
-    private static byte[] readFileFromAclRepository(Path orionRoot) throws IOException {
-        Path repositoryPath = orionRoot.resolve("repos").resolve("orion");
-        try (Repository repository = FileRepositoryBuilder.create(repositoryPath.toFile());
-             RevWalk revWalk = new RevWalk(repository)) {
-            ObjectId head = repository.resolve(Constants.R_HEADS + "master");
-            assertThat(head).isNotNull();
-            var commit = revWalk.parseCommit(head);
-            try (TreeWalk treeWalk = TreeWalk.forPath(repository, ACL_FILE, commit.getTree())) {
-                assertThat(treeWalk).isNotNull();
-                return repository.open(treeWalk.getObjectId(0)).getBytes();
-            }
-        }
+    private static byte[] readFileFromAclRepository(RuntimeHttpTestSupport.StartedOrion orion) throws Exception {
+        return orion.repositoryProvider()
+                .openForRead("orion")
+                .valueOrFailure("ACL repository should exist")
+                .loadFiles(
+                        orion.configuration().getBootstrap().getAccessControl().selectedRef(),
+                        List.of(ACL_FILE))
+                .files()
+                .get(ACL_FILE);
     }
 }

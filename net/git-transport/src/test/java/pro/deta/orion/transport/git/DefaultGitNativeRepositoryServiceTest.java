@@ -8,9 +8,12 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
+import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
@@ -32,6 +35,7 @@ import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommand;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceiveCommandSection;
 import pro.deta.orion.git.parser.wire.exchange.LegacyReceivePack;
 import pro.deta.orion.git.parser.wire.exchange.LsRefsRequest;
+import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -61,6 +65,16 @@ class DefaultGitNativeRepositoryServiceTest {
                 .hasMessageContaining("Native repository does not exist: /demo.git");
 
         assertThat(provider.exists("/demo.git")).isFalse();
+    }
+
+    @Test
+    void opensRepositoryForLogicalReadBeforeUploadAdvertisement() {
+        RecordingProvider provider = new RecordingProvider(providerWithMainRef());
+        GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
+
+        legacyUploadPackAdvertisement(service, request("/demo.git"));
+
+        assertThat(provider.readCalls).isEqualTo(1);
     }
 
     @Test
@@ -465,6 +479,39 @@ class DefaultGitNativeRepositoryServiceTest {
                 .containsEntry("refs/heads/main", MAIN_ID)
                 .containsEntry("refs/heads/feature", feature.value());
         assertThat(repository.readObject(feature)).isPresent();
+    }
+
+    @Test
+    void receivePublishesThroughRepositoryProvider() {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = backend.create("/demo.git")
+                .valueOrFailure("repository");
+        RecordingProvider provider = new RecordingProvider(backend);
+        provider.rejectPublication = true;
+        GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
+        LooseObjectStore quarantine = new LooseObjectStore();
+        GitObjectId feature = quarantine.write(
+                ObjectType.BLOB,
+                "feature".getBytes(StandardCharsets.US_ASCII));
+
+        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+                service.completeLegacyReceivePack(
+                        receivePack(
+                                service,
+                                List.of(new LegacyReceiveCommand(
+                                        GitObjectId.of(NULL_ID),
+                                        feature,
+                                        "refs/heads/feature")),
+                                Set.of(),
+                                quarantine),
+                        GitNativeRepositoryAccessHook.ALLOW_ALL);
+
+        assertThat(provider.publishCalls).isEqualTo(1);
+        assertThat(statuses).containsExactly(
+                new GitNativeRepositoryService.ReceivePackStatus(
+                        "refs/heads/feature", false, "stale"));
+        assertThat(repository.refs()).isEmpty();
+        assertThat(repository.readObject(feature)).isEmpty();
     }
 
     @Test
@@ -1180,6 +1227,64 @@ class DefaultGitNativeRepositoryServiceTest {
     }
 
     private record ReceiveCapabilityCase(GitWireConfiguration configuration, List<String> expectedTokens) {
+    }
+
+    private static final class RecordingProvider implements NativeGitRepositoryProvider {
+        private final NativeGitRepositoryProvider backend;
+        private int readCalls;
+        private int publishCalls;
+        private boolean rejectPublication;
+
+        private RecordingProvider(NativeGitRepositoryProvider backend) {
+            this.backend = backend;
+        }
+
+        @Override
+        public List<String> repositoryNames() {
+            return backend.repositoryNames();
+        }
+
+        @Override
+        public boolean exists(String repositoryName) {
+            return backend.exists(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> find(String repositoryName) {
+            return backend.find(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> create(String repositoryName) {
+            return backend.create(repositoryName);
+        }
+
+        @Override
+        public Result<NativeGitRepository> openForRead(String repositoryName) {
+            readCalls++;
+            return backend.find(repositoryName);
+        }
+
+        @Override
+        public List<RefUpdateResult> publish(
+                String repositoryName,
+                LooseObjectStore objects,
+                List<LooseRefStore.Update> updates,
+                boolean atomic) {
+            publishCalls++;
+            if (!rejectPublication) {
+                return NativeGitRepositoryProvider.super.publish(
+                        repositoryName,
+                        objects,
+                        updates,
+                        atomic);
+            }
+            List<RefUpdateResult> results = new ArrayList<>(updates.size());
+            for (int index = 0; index < updates.size(); index++) {
+                results.add(RefUpdateResult.STALE);
+            }
+            return List.copyOf(results);
+        }
     }
 
     private static final class RecordingAccessHook

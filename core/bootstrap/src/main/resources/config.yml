@@ -9,9 +9,11 @@ bootstrap:
       - orion.xml
     createDefaultIfMissing: true
   keyMaterial:
-    location: key-material/orion.p12
+    location: local:orion
+    ref: refs/heads/main
+    path: material.p12
     password: env:ORION_KEY_MATERIAL_PASSWORD
-    createIfMissing: true
+    createIfMissing: false
     clusterId: orion
     serverSigning:
       algorithm: RSA

@@ -76,11 +76,19 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                 gitPorts.ssh())) {
             Path knownHosts = tempDir.resolve("known_hosts");
             Files.writeString(knownHosts, gitServer.knownHostsLine() + "\n");
+            String privateKeyLocation = privateKey.toRealPath().toUri().toString();
+            String knownHostsLocation = knownHosts.toRealPath().toUri().toString();
             OrionConfiguration configuration = RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot, config -> {
-                config.getBootstrap().getAccessControl().setLocation("git+" + gitServer.repositoryUrl("orion-acl.git"));
-                config.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
-                config.getBootstrap().getAccessControl().getAuth().put("privateKey", privateKey.toUri().toString());
-                config.getBootstrap().getAccessControl().getAuth().put("knownHosts", knownHosts.toUri().toString());
+                config.getBootstrap().getAccessControl()
+                        .setLocation("git+" + gitServer.repositoryUrl("orion-acl.git"));
+                config.getBootstrap().getAccessControl().setRef(BRANCH);
+                config.getBootstrap().getAccessControl().setPath(ACL_FILE);
+                config.getBootstrap().getAccessControl().getAuth()
+                        .put("credentialKind", "ssh-private-key");
+                config.getBootstrap().getAccessControl().getAuth()
+                        .put("credential", privateKeyLocation);
+                config.getBootstrap().getAccessControl().getAuth()
+                        .put("knownHosts", knownHostsLocation);
             });
 
             try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(configuration)) {
@@ -91,7 +99,7 @@ class RuntimeHttpAdminRemoteGitSshAclIT {
                 assertThat(initialAcl.status()).isEqualTo(HttpURLConnection.HTTP_OK);
                 assertThat(userIds(initialAcl.body().getBytes(StandardCharsets.UTF_8)))
                         .contains("root", "remote-bootstrap-user");
-                assertThat(orionRoot.resolve("repos").resolve("orion")).doesNotExist();
+                assertThat(orion.repositoryProvider().repositoryNames()).isEmpty();
 
                 RuntimeHttpTestSupport.HttpResponse update = RuntimeHttpTestSupport.request(
                         "POST",

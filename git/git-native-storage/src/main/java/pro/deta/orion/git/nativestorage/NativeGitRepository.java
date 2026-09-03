@@ -130,6 +130,47 @@ public class NativeGitRepository implements AutoCloseable {
                 author);
     }
 
+    public NativeGitFileUpdate prepareFileUpdate(
+            String branch,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws GitOperationException {
+        return new NativeRepositoryFileSaver(this).prepareFiles(branch, files, message, author);
+    }
+
+    public NativeGitFileUpdate prepareFileUpdate(
+            String branch,
+            String expectedRefRevision,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws GitOperationException {
+        return new NativeRepositoryFileSaver(this).prepareFiles(
+                branch, expectedRefRevision, files, message, author, true);
+    }
+
+    public NativeGitFileUpdate prepareProxyFileUpdate(
+            String branch,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws GitOperationException {
+        return new NativeRepositoryFileSaver(this).prepareFiles(
+                branch,
+                files,
+                message,
+                author,
+                false);
+    }
+
+    public NativeGitFileUpdate prepareProxyFileUpdate(
+            String branch,
+            String expectedRefRevision,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws GitOperationException {
+        return new NativeRepositoryFileSaver(this).prepareFiles(
+                branch, expectedRefRevision, files, message, author, false);
+    }
+
     public String defaultHead() {
         return defaultHead;
     }
@@ -224,6 +265,16 @@ public class NativeGitRepository implements AutoCloseable {
         }
         notifyRefUpdates(updates, results, atomic);
         return results;
+    }
+
+    public List<RefUpdateResult> previewRefUpdates(
+            List<LooseRefStore.Update> updates,
+            boolean atomic) {
+        return looseRefStore.previewUpdates(updates, atomic);
+    }
+
+    public void publishObjects(LooseObjectStore objects) {
+        looseObjectStore.putAll(Objects.requireNonNull(objects, "objects"));
     }
 
     private void notifyRefUpdates(

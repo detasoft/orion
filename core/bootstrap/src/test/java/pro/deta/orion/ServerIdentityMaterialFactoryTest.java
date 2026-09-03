@@ -3,6 +3,7 @@ package pro.deta.orion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.keymaterial.ServerIdentityMaterial;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 
@@ -86,11 +87,28 @@ class ServerIdentityMaterialFactoryTest {
         assertThat(Files.exists(tempDir.resolve("security/orion.p12"))).isFalse();
     }
 
+    @Test
+    void opensIdentityFromAlreadyResolvedContentStore() throws Exception {
+        OrionConfiguration configuration = configuration();
+        configuration.getBootstrap().getKeyMaterial().setLocation("git+https://example.test/private.git");
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+
+        try (ServerIdentityMaterial identity = ServerIdentityMaterialFactory.open(
+                configuration,
+                Map.of(PASSWORD_ENV, "test-password"),
+                store)) {
+            assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
+        }
+
+        assertThat(store.read()).isPresent();
+    }
+
     private OrionConfiguration configuration() {
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getBootstrap().getKeyMaterial().setLocation("security/orion.p12");
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
+        configuration.getBootstrap().getKeyMaterial().setCreateIfMissing(true);
         configuration.getBootstrap().getKeyMaterial().setClusterId("test-cluster");
         configuration.getBootstrap()
                 .getKeyMaterial()

@@ -7,6 +7,10 @@ import jakarta.inject.Named;
 import jakarta.inject.Singleton;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
@@ -15,6 +19,8 @@ import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.OrionTransportModule;
+
+import java.util.List;
 
 @Singleton
 @Component(modules = {OrionRuntimeModule.class, OrionTransportModule.class})
@@ -36,11 +42,22 @@ public interface OrionComponent {
         @BindsInstance Builder configurationProvider(ConfigurationProvider configurationProvider);
         @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
+        @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryProvider repositoryProvider);
+        @BindsInstance Builder bootstrapRepositorySources(BootstrapRepositorySources repositorySources);
 
         default Builder defaultConfigurationProvider() {
-            return configurationProvider(OrionConfiguration::new)
+            OrionConfiguration configuration = new OrionConfiguration();
+            ProxyAwareNativeGitRepositoryProvider repositoryProvider =
+                    new ProxyAwareNativeGitRepositoryProvider(new InMemoryNativeGitRepositoryProvider());
+            ResolvedBootstrapSource configurationSource = repositoryProvider.resolveProvisional(
+                    BootstrapRepositorySources.CONFIGURATION,
+                    configuration.getBootstrap().getAccessControl(),
+                    true);
+            return configurationProvider(() -> configuration)
                     .runtimeOptions(OrionRuntimeOptions.defaults())
-                    .serverIdentityCapability(ServerIdentityCapability.unavailable());
+                    .serverIdentityCapability(ServerIdentityCapability.unavailable())
+                    .nativeGitRepositoryProvider(repositoryProvider)
+                    .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)));
         }
     }
 }

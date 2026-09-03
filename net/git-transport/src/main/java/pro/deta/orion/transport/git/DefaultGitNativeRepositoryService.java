@@ -88,7 +88,7 @@ public final class DefaultGitNativeRepositoryService
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(accessHook, "accessHook");
         accessHook.beforeRead(repositoryPath);
-        return check(repositoryPath, repositoryProvider.find(repositoryPath));
+        return check(repositoryPath, repositoryProvider.openForRead(repositoryPath));
     }
 
     private NativeGitRepository check(
@@ -130,7 +130,7 @@ public final class DefaultGitNativeRepositoryService
             return repositoryProvider.create(repositoryName);
         }
         accessHook.beforeWrite(repositoryName);
-        return repositoryProvider.find(repositoryName);
+        return repositoryProvider.openForWrite(repositoryName);
     }
 
     @Override
@@ -379,7 +379,8 @@ public final class DefaultGitNativeRepositoryService
             }
             return List.copyOf(statuses);
         }
-        List<RefUpdateResult> results = repository.publishObjectsAndRefs(
+        List<RefUpdateResult> results = repositoryProvider.publish(
+                repositoryPath,
                 receivePack.quarantine(),
                 validUpdates,
                 atomic);

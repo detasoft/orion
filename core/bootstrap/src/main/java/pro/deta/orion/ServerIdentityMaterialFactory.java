@@ -43,8 +43,22 @@ public final class ServerIdentityMaterialFactory {
         Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
         String location = resolveAgainstBaseDirectory(material.getLocation(), baseDirectory, "location");
-        String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
         KeyMaterialContentStore store = resolver.resolveStore(location);
+        return open(configuration, environment, store);
+    }
+
+    public static ServerIdentityMaterial open(
+            OrionConfiguration configuration,
+            Map<String, String> environment,
+            KeyMaterialContentStore store) throws IOException, GeneralSecurityException {
+        if (configuration == null) {
+            throw new IllegalArgumentException("Orion configuration must not be null");
+        }
+        KeyMaterialConfig material = configuration.getBootstrap().getKeyMaterial();
+        requireMaterialConfig(material);
+        Path baseDirectory = ConfigurationContext.baseDirectory(configuration, environment);
+        KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
+        String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
         SigningMaterialSet signingMaterial = signingMaterial(material);
         try (KeyMaterialOptions options = resolver.pkcs12Options(
                 password, material.isCreateIfMissing())) {

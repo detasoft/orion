@@ -592,6 +592,30 @@ class NativeGitRepositoryTest {
     }
 
     @Test
+    void preparedFileUpdateDoesNotMoveRefUntilPublished() throws Exception {
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+
+        NativeGitFileUpdate update = repository.prepareFileUpdate(
+                "main",
+                Map.of("orion.xml", "prepared acl".getBytes(StandardCharsets.UTF_8)),
+                "prepared acl",
+                GitCommitAuthor.EMPTY);
+
+        assertThat(repository.refs()).isEmpty();
+        assertThat(repository.publishObjectsAndRefs(
+                update.objects(), update.refUpdates(), true))
+                .containsExactly(RefUpdateResult.CREATED);
+        assertThat(repository.loadFiles("main", List.of("orion.xml")).files())
+                .containsEntry(
+                        "orion.xml",
+                        "prepared acl".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
     void repositorySavesFilesOverExistingBranchContent() throws Exception {
         NativeGitRepository repository = new NativeGitRepository(
                 "demo.git",

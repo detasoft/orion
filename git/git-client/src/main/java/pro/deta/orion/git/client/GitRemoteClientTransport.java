@@ -8,6 +8,7 @@ import java.util.Objects;
  * Selects a native remote transport from the repository URI scheme.
  */
 public final class GitRemoteClientTransport implements GitClientTransport {
+    private final GitClientTransport file;
     private final GitClientTransport tcp;
     private final GitClientTransport ssh;
     private final GitClientTransport smartHttp;
@@ -15,13 +16,22 @@ public final class GitRemoteClientTransport implements GitClientTransport {
     public GitRemoteClientTransport(
             GitClientTransport ssh,
             GitClientTransport smartHttp) {
-        this(new GitTcpClientTransport(), ssh, smartHttp);
+        this(new GitFileClientTransport(), new GitTcpClientTransport(), ssh, smartHttp);
     }
 
     public GitRemoteClientTransport(
             GitClientTransport tcp,
             GitClientTransport ssh,
             GitClientTransport smartHttp) {
+        this(new GitFileClientTransport(), tcp, ssh, smartHttp);
+    }
+
+    public GitRemoteClientTransport(
+            GitClientTransport file,
+            GitClientTransport tcp,
+            GitClientTransport ssh,
+            GitClientTransport smartHttp) {
+        this.file = Objects.requireNonNull(file, "file");
         this.tcp = Objects.requireNonNull(tcp, "tcp");
         this.ssh = Objects.requireNonNull(ssh, "ssh");
         this.smartHttp = Objects.requireNonNull(smartHttp, "smartHttp");
@@ -38,6 +48,7 @@ public final class GitRemoteClientTransport implements GitClientTransport {
             throw unsupported();
         }
         return switch (scheme.toLowerCase(Locale.ROOT)) {
+            case "file" -> file.open(service, remoteUri, options);
             case "git" -> tcp.open(service, remoteUri, options);
             case "ssh" -> ssh.open(service, remoteUri, options);
             case "http", "https" -> smartHttp.open(service, remoteUri, options);

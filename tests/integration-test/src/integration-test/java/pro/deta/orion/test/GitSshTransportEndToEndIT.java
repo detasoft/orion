@@ -31,7 +31,6 @@ import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
-import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
@@ -49,7 +48,6 @@ import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -581,9 +579,7 @@ class GitSshTransportEndToEndIT {
     void unknownSshExecCommandReturnsStableFailure() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
-        KeyPair serverIdentityKey = KeyUtils.readKeyFromFile(
-                orionRoot.resolve("server-identity").resolve("signing-rsa.pem")
-        ).valueOrFailure("Server identity key should be available after startup");
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
 
         SshCommandResult result = executeCommandOverSsh(
                 startedOrion,
@@ -880,10 +876,8 @@ class GitSshTransportEndToEndIT {
             OrionRuntimeOptions runtimeOptions) {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
-            OrionComponent component = DaggerOrionComponent.builder()
-                    .configurationProvider(() -> configuration)
-                    .runtimeOptions(runtimeOptions)
-                    .serverIdentityCapability(identity.capability())
+            OrionComponent component = TestRuntimeBootstrap
+                    .componentBuilder(configuration, identity.capability(), runtimeOptions)
                     .build();
             OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
@@ -892,7 +886,7 @@ class GitSshTransportEndToEndIT {
             return new StartedOrion(
                     configuration,
                     lifecycle,
-                    nativeRepositoryProvider(configuration),
+                    component.nativeGitRepositoryProvider(),
                     component.orionAccessControlService(),
                     identity);
         } catch (Exception failure) {
@@ -1206,10 +1200,6 @@ class GitSshTransportEndToEndIT {
 
         configuration.getTransport().getHttps().setEnabled(false);
         return configuration;
-    }
-
-    private static NativeGitRepositoryProvider nativeRepositoryProvider(OrionConfiguration configuration) {
-        return new FileNativeGitRepositoryProvider(Path.of(URI.create(configuration.getStorage().getLocation())));
     }
 
     private void assertRepositoryContains(

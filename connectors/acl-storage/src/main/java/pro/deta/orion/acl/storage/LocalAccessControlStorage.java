@@ -2,8 +2,8 @@ package pro.deta.orion.acl.storage;
 
 import jakarta.inject.Inject;
 import lombok.RequiredArgsConstructor;
-import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.lifecycle.OrionEnableServiceSupport;
+import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
 import pro.deta.orion.util.Result;
@@ -16,13 +16,13 @@ import java.util.Map;
 
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 public class LocalAccessControlStorage extends OrionEnableServiceSupport implements AccessControlStorage {
-    private final OrionConfiguration.BootstrapAccessControlConfig config;
+    private final BootstrapConfigurationSourceConfig config;
 
     @Override
     public Result<AccessControlSnapshot> load() {
         Map<String, byte[]> files = new java.util.LinkedHashMap<>();
         try {
-            for (String configuredPath : config.getPaths()) {
+            for (String configuredPath : config.selectedPaths()) {
                 Path file = aclPath(configuredPath);
                 if (!Files.exists(file)) {
                     return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
@@ -54,7 +54,12 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
 
     @Override
     public String primaryPath() {
-        return config.primaryPath();
+        return config.getPath();
+    }
+
+    @Override
+    public boolean createIfMissing() {
+        return config.isCreateDefaultIfMissing();
     }
 
     private Path aclPath(String configuredPath) {
@@ -69,7 +74,8 @@ public class LocalAccessControlStorage extends OrionEnableServiceSupport impleme
     private Path aclDirectory() {
         ResourceLocation location = ResourceLocation.parse(config.getLocation(), "ACL location");
         Path path = switch (location.scheme()) {
-            case ResourceScheme.File ignored -> Paths.get(location.pathOrSchemeSpecificPart("File ACL location must include a path"));
+            case ResourceScheme.File ignored -> Paths.get(
+                    location.pathOrSchemeSpecificPart("File ACL location must include a path"));
             case ResourceScheme.Empty ignored -> Path.of(config.getLocation());
             case ResourceScheme.Local ignored -> Path.of(location.normalizedRelativePath());
             default -> throw new IllegalArgumentException("Unsupported local ACL location: " + config.getLocation());

@@ -1,10 +1,9 @@
 package pro.deta.orion.test;
 
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
-import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 
 import java.io.IOException;
@@ -44,10 +43,8 @@ final class RuntimeHttpTestSupport {
     static StartedOrion start(OrionConfiguration orionConfiguration) {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(orionConfiguration);
-            OrionComponent orionComponent = DaggerOrionComponent.builder()
-                    .configurationProvider(() -> orionConfiguration)
-                    .runtimeOptions(OrionRuntimeOptions.defaults())
-                    .serverIdentityCapability(identity.capability())
+            OrionComponent orionComponent = TestRuntimeBootstrap
+                    .componentBuilder(orionConfiguration, identity.capability())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
@@ -56,6 +53,7 @@ final class RuntimeHttpTestSupport {
                     orionConfiguration,
                     lifecycle,
                     orionComponent.orionAccessControlService(),
+                    orionComponent.nativeGitRepositoryProvider(),
                     identity);
         } catch (Exception failure) {
             throw new IllegalStateException("Cannot open test server identity", failure);
@@ -116,6 +114,7 @@ final class RuntimeHttpTestSupport {
             OrionConfiguration configuration,
             OrionApplicationLifecycle lifecycle,
             OrionAccessControlServiceImpl accessControlService,
+            NativeGitRepositoryProvider repositoryProvider,
             TestServerIdentityMaterial identity)
             implements AutoCloseable {
         URL httpUrl(String path) throws IOException {

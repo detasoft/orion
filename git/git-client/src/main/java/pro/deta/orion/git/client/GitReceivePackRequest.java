@@ -5,7 +5,14 @@ import java.util.Objects;
 
 public record GitReceivePackRequest(
         List<Command> commands,
-        GitPackSource packSource) {
+        GitPackSource packSource,
+        boolean atomic) {
+
+    public GitReceivePackRequest(
+            List<Command> commands,
+            GitPackSource packSource) {
+        this(commands, packSource, false);
+    }
 
     public GitReceivePackRequest {
         commands = List.copyOf(Objects.requireNonNull(commands, "commands"));

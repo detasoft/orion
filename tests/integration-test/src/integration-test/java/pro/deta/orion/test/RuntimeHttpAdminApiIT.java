@@ -82,7 +82,6 @@ class RuntimeHttpAdminApiIT {
     @Test
     void adminRepositoryApiRejectsUnauthorizedAndInvalidCreateRequestsWithoutSideEffects() throws Exception {
         Path orionRoot = tempDir.resolve("orion-repository-api");
-        Path repositoriesRoot = orionRoot.resolve("repos");
         try (RuntimeHttpTestSupport.StartedOrion orion = RuntimeHttpTestSupport.start(
                 RuntimeHttpTestSupport.httpOnlyConfiguration(orionRoot))) {
             String token = TestBearerTokens.issueRootToken(
@@ -97,7 +96,7 @@ class RuntimeHttpAdminApiIT {
                     "application/json",
                     OBJECT_MAPPER.writeValueAsBytes(Map.of("name", "denied-admin-project")));
             assertThat(withoutToken.status()).isEqualTo(HttpURLConnection.HTTP_FORBIDDEN);
-            assertThat(repositoriesRoot.resolve("denied-admin-project")).doesNotExist();
+            assertThat(orion.repositoryProvider().exists("denied-admin-project")).isFalse();
 
             RuntimeHttpTestSupport.HttpResponse missingName = RuntimeHttpTestSupport.request(
                     "POST",
@@ -114,7 +113,6 @@ class RuntimeHttpAdminApiIT {
                     "application/json",
                     OBJECT_MAPPER.writeValueAsBytes(Map.of("name", "   ")));
             assertThat(blankName.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
-            assertThat(repositoriesRoot.resolve("   ")).doesNotExist();
 
             RuntimeHttpTestSupport.HttpResponse invalidJson = RuntimeHttpTestSupport.request(
                     "POST",
@@ -123,7 +121,7 @@ class RuntimeHttpAdminApiIT {
                     "application/json",
                     "{\"name\":\"malformed-project\"".getBytes(StandardCharsets.UTF_8));
             assertThat(invalidJson.status()).isEqualTo(HttpURLConnection.HTTP_BAD_REQUEST);
-            assertThat(repositoriesRoot.resolve("malformed-project")).doesNotExist();
+            assertThat(orion.repositoryProvider().exists("malformed-project")).isFalse();
 
             RuntimeHttpTestSupport.HttpResponse validCreate = RuntimeHttpTestSupport.request(
                     "POST",
@@ -132,7 +130,7 @@ class RuntimeHttpAdminApiIT {
                     "application/json",
                     OBJECT_MAPPER.writeValueAsBytes(Map.of("name", "created-project")));
             assertThat(validCreate.status()).isEqualTo(HttpURLConnection.HTTP_CREATED);
-            assertThat(repositoriesRoot.resolve("created-project").resolve("config")).exists();
+            assertThat(orion.repositoryProvider().exists("created-project")).isTrue();
         }
     }
 
@@ -291,7 +289,6 @@ class RuntimeHttpAdminApiIT {
             assertThat(lifecycleState.contentType()).startsWith("text/plain");
             assertThat(lifecycleState.body()).contains("orion: RUNNING");
             assertThat(lifecycleState.body()).contains("executor: RUNNING");
-            assertThat(lifecycleState.body()).contains("jgit-runtime: RUNNING");
             assertThat(lifecycleState.body()).contains("event-manager: RUNNING");
             assertThat(lifecycleState.body()).contains("access-control: RUNNING");
             assertThat(lifecycleState.body()).contains("transports: RUNNING");

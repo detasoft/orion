@@ -17,7 +17,11 @@ import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
@@ -29,6 +33,7 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.KeyUtils;
+import pro.deta.orion.util.ConfigurationContext;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -422,7 +427,7 @@ class InternalConfigurationRepositoryLifecycleTest {
         byte[] secondaryAcl = defaultAclBytes("old-root-password");
         OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
         NativeGitRepository repository = reset.nativeGitRepositoryProvider()
-                .create(REPOSITORY_NAME)
+                .openForWrite(REPOSITORY_NAME)
                 .valueOrFailure("configuration repository");
         repository.saveFiles(
                 CONFIGURATION_REF,
@@ -816,10 +821,19 @@ class InternalConfigurationRepositoryLifecycleTest {
             OrionConfiguration configuration,
             OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity) {
+        FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(
+                new ConfigurationContext(configuration).getFileGitStoragePath());
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
+        ResolvedBootstrapSource configurationSource = provider.resolveProvisional(
+                BootstrapRepositorySources.CONFIGURATION,
+                configuration.getBootstrap().getAccessControl(),
+                configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(serverIdentity)
+                .nativeGitRepositoryProvider(provider)
+                .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)))
                 .build();
     }
 

@@ -11,18 +11,20 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.transport.RefSpec;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.BootstrapContext;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
-import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.GitOperationException;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
 
 import java.io.ByteArrayInputStream;
@@ -41,6 +43,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
@@ -72,7 +75,7 @@ class OrionStartupIT {
             assertInitialConfigurationCreated(orionRoot);
         }
 
-        ObjectId initialAclCommit = aclHead(orionRoot);
+        String initialAclCommit = aclHead(orionRoot);
 
         try (StartedOrion ignored = startServerWithConfig(serverConfiguration(orionRoot))) {
             assertInitialConfigurationCreated(orionRoot);
@@ -108,7 +111,7 @@ class OrionStartupIT {
                     orion.accessControlService().accessControlConfigurationFile());
 
             assertThat(hasUser(loadedAcl, "remote-user")).isTrue();
-            assertThat(aclRepository(orionRoot)).doesNotExist();
+            assertThat(orion.repositoryProvider().repositoryNames()).isEmpty();
 
             orion.accessControlService().saveAccessControlConfigurationFile(
                     serialize(accessControlWithUsers("root", "saved-remote-user")));
@@ -120,7 +123,7 @@ class OrionStartupIT {
     }
 
     @Test
-    void startsWithVersionOneAclAndMigratesItOnFirstChange() throws Exception {
+    void startsWithVersionOneAclAndMigratesItWhenServerIdentityIsSynchronized() throws Exception {
         Path orionRoot = tempDir.resolve("orion");
         Path legacyAclDirectory = tempDir.resolve("legacy-acl");
         Path legacyAclFile = legacyAclDirectory.resolve(ACL_FILE);
@@ -154,7 +157,9 @@ class OrionStartupIT {
 
         try (StartedOrion orion = startServerWithConfig(configuration)) {
             assertThat(orion.accessControlService().userExists("legacy-user")).isTrue();
-            assertThat(Files.readAllBytes(legacyAclFile)).isEqualTo(legacyAcl);
+            assertThat(new String(Files.readAllBytes(legacyAclFile), StandardCharsets.UTF_8))
+                    .contains("<orion schemaVersion=\"2\">")
+                    .doesNotContain("<AccessControl");
 
             orion.accessControlService().createOrUpdateUser(
                     new AccessControlUserUpdate("new-user", "new@example.test", List.of(), List.of()));
@@ -217,10 +222,8 @@ class OrionStartupIT {
 
         ServerSocket occupiedHttpPort = bindHttpPort(configuration);
         try {
-            OrionComponent orionComponent = DaggerOrionComponent.builder()
-                    .configurationProvider(() -> configuration)
-                    .runtimeOptions(OrionRuntimeOptions.defaults())
-                    .serverIdentityCapability(ServerIdentityCapability.unavailable())
+            OrionComponent orionComponent = TestRuntimeBootstrap
+                    .componentBuilder(configuration, ServerIdentityCapability.unavailable())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
 
@@ -240,7 +243,7 @@ class OrionStartupIT {
     }
 
     @Test
-    void unavailableRemoteAclStorageFailsRootStartupBeforeTransportsStart() throws Exception {
+    void unavailableRemoteAclStorageFailsBeforeRuntimeConstruction() throws Exception {
         Path orionRoot = tempDir.resolve("orion-acl-failure");
         Path missingRemoteAclRepository = tempDir.resolve("missing-acl.git");
         OrionConfiguration configuration = serverConfiguration(orionRoot);
@@ -251,45 +254,38 @@ class OrionStartupIT {
         configuration.getTransport().getSsh().setEnabled(false);
         configuration.getTransport().getHttps().setEnabled(false);
 
-        OrionComponent orionComponent = DaggerOrionComponent.builder()
-                .configurationProvider(() -> configuration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
-                .serverIdentityCapability(ServerIdentityCapability.unavailable())
-                .build();
-        OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
-
-        assertThat(lifecycle.runApplication()).isEqualTo(ERR);
-        assertThat(lifecycle.describeLifecycle())
-                .contains("orion: ERR", "access-control: ERR", "transports: NEW", "http: NEW")
-                .doesNotContain("transports: RUNNING", "http: RUNNING");
-
-        assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
-        lifecycle.waitForShutdown();
+        assertThatThrownBy(() -> BootstrapContext.open(configuration, Map.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap inputs are unavailable or invalid");
         assertCanBindHttpPort(configuration);
     }
 
     private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
-        OrionComponent orionComponent = DaggerOrionComponent.builder()
-                .configurationProvider(() -> orionConfiguration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
-                .serverIdentityCapability(ServerIdentityCapability.unavailable())
-                .build();
-        OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
-        assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
-        lifecycle.waitForStarting();
-        return new StartedOrion(orionConfiguration, lifecycle, orionComponent.orionAccessControlService());
+        try {
+            TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(orionConfiguration);
+            OrionComponent orionComponent = TestRuntimeBootstrap
+                    .componentBuilder(orionConfiguration, identity.capability())
+                    .build();
+            OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
+            assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+            lifecycle.waitForStarting();
+            return new StartedOrion(
+                    orionConfiguration,
+                    lifecycle,
+                    orionComponent.orionAccessControlService(),
+                    orionComponent.nativeGitRepositoryProvider(),
+                    identity);
+        } catch (Exception failure) {
+            throw new IllegalStateException("Cannot start Orion test runtime", failure);
+        }
     }
 
     private static void assertInitialConfigurationCreated(Path orionRoot) throws IOException {
-        assertThat(aclRepository(orionRoot).resolve("config")).exists();
+        assertThat(repositoryProvider(orionRoot).exists("orion")).isTrue();
         AccessControl accessControl = readAcl(orionRoot);
         assertThat(hasUser(accessControl, "root")).isTrue();
         assertThat(hasRole(accessControl, "ROOT")).isTrue();
         assertThat(hasGrant(accessControl, "ALL_REPOSITORY")).isTrue();
-    }
-
-    private static Path aclRepository(Path orionRoot) {
-        return orionRoot.resolve("repos").resolve("orion");
     }
 
     private static AccessControl readAcl(Path orionRoot) throws IOException {
@@ -297,16 +293,31 @@ class OrionStartupIT {
         return new XmlService().deserialize(new ByteArrayInputStream(content));
     }
 
-    private static ObjectId aclHead(Path orionRoot) throws IOException {
-        try (Repository repository = FileRepositoryBuilder.create(aclRepository(orionRoot).toFile())) {
-            ObjectId head = repository.resolve(Constants.R_HEADS + BRANCH);
-            assertThat(head).isNotNull();
-            return head;
-        }
+    private static String aclHead(Path orionRoot) {
+        String head = repositoryProvider(orionRoot)
+                .openForRead("orion")
+                .valueOrFailure("ACL repository should exist")
+                .refs()
+                .get(Constants.R_HEADS + BRANCH);
+        assertThat(head).isNotNull();
+        return head;
     }
 
     private static byte[] readFileFromAclRepository(Path orionRoot) throws IOException {
-        return readFileFromRepository(aclRepository(orionRoot), ACL_FILE);
+        try {
+            return repositoryProvider(orionRoot)
+                    .openForRead("orion")
+                    .valueOrFailure("ACL repository should exist")
+                    .loadFiles(Constants.R_HEADS + BRANCH, List.of(ACL_FILE))
+                    .files()
+                    .get(ACL_FILE);
+        } catch (GitOperationException failure) {
+            throw new IOException("Cannot read ACL repository", failure);
+        }
+    }
+
+    private static NativeGitRepositoryProvider repositoryProvider(Path orionRoot) {
+        return new FileNativeGitRepositoryProvider(orionRoot.resolve("repos"));
     }
 
     private static byte[] readFileFromRepository(Path repositoryPath, String filePath) throws IOException {
@@ -457,6 +468,7 @@ class OrionStartupIT {
         configuration.getBootstrap().setBaseDir(orionRoot.toString());
         configuration.getStorage().setLocation(orionRoot.resolve("repos").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation("local:orion");
+        configuration.getBootstrap().getAccessControl().setRef("refs/heads/" + BRANCH);
 
         TestPorts.nextBatch().configure(configuration);
         configuration.getTransport().getHttps().setEnabled(false);
@@ -500,7 +512,9 @@ class OrionStartupIT {
     private record StartedOrion(
             OrionConfiguration configuration,
             OrionApplicationLifecycle lifecycle,
-            OrionAccessControlServiceImpl accessControlService)
+            OrionAccessControlServiceImpl accessControlService,
+            NativeGitRepositoryProvider repositoryProvider,
+            TestServerIdentityMaterial identity)
             implements AutoCloseable {
         private URL httpUrl(String path) throws IOException {
             return new URL(
@@ -512,8 +526,12 @@ class OrionStartupIT {
 
         @Override
         public void close() {
-            lifecycle.shutdownApplication();
-            lifecycle.waitForShutdown();
+            try {
+                lifecycle.shutdownApplication();
+                lifecycle.waitForShutdown();
+            } finally {
+                identity.close();
+            }
         }
     }
 

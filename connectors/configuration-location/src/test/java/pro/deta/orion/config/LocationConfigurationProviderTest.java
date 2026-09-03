@@ -53,8 +53,7 @@ class LocationConfigurationProviderTest {
                 bootstrap:
                   baseDir: /tmp/orion-file-yaml
                   accessControl:
-                    paths:
-                      - file-yaml.xml
+                    path: file-yaml.xml
                 transport:
                   http:
                     port: 28080
@@ -73,8 +72,7 @@ class LocationConfigurationProviderTest {
                 bootstrap:
                   baseDir: /tmp/orion-file-uri
                   accessControl:
-                    paths:
-                      - file-uri.xml
+                    path: file-uri.xml
                 transport:
                   http:
                     port: 28580
@@ -94,7 +92,7 @@ class LocationConfigurationProviderTest {
                 baseDir = "/tmp/orion-file-toml"
 
                 [bootstrap.accessControl]
-                paths = ["file-toml.xml"]
+                path = "file-toml.xml"
 
                 [transport.http]
                 port = 29080
@@ -137,8 +135,7 @@ class LocationConfigurationProviderTest {
                 bootstrap:
                   baseDir: %s
                   accessControl:
-                    paths:
-                      - %s
+                    path: %s
                 transport:
                   http:
                     port: %d
@@ -151,7 +148,7 @@ class LocationConfigurationProviderTest {
                 baseDir = "%s"
 
                 [bootstrap.accessControl]
-                paths = ["%s"]
+                path = "%s"
 
                 [transport.http]
                 port = %d
@@ -164,7 +161,7 @@ class LocationConfigurationProviderTest {
             String accessControlPath,
             int httpPort) {
         assertEquals(baseDir, configuration.getBootstrap().getBaseDir());
-        assertEquals(accessControlPath, configuration.getBootstrap().getAccessControl().primaryPath());
+        assertEquals(accessControlPath, configuration.getBootstrap().getAccessControl().getPath());
         assertEquals(httpPort, configuration.getTransport().getHttp().getPort());
     }
 

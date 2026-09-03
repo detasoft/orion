@@ -40,7 +40,7 @@ class GitRemoteClientTransportTest {
 
         assertThatThrownBy(() -> transport.open(
                 GitClientService.UPLOAD_PACK,
-                URI.create("file:///repository.git"),
+                URI.create("ftp://example.test/repository.git"),
                 GitClientOptions.defaults()))
                 .isInstanceOf(GitClientTransportException.class)
                 .extracting(error -> ((GitClientTransportException) error).kind())

@@ -10,13 +10,14 @@ import pro.deta.orion.acl.storage.AccessControlStorageResolver;
 import pro.deta.orion.acl.storage.LocalAccessControlStorage;
 import pro.deta.orion.acl.storage.NativeGitAccessControlStorage;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
+import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
-import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -71,7 +72,7 @@ class OrionRuntimeModuleTest {
         OrionConfiguration configuration = configurationWithAcl("local:internal/settings");
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
 
-        AccessControlStorage storage = new AccessControlStorageResolver(configuration, provider).resolve();
+        AccessControlStorage storage = resolvedStorage(configuration, provider);
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_FILE, "versioned acl".getBytes(StandardCharsets.UTF_8)),
                 new AccessControlSaveRequest("versioned acl", UserEmail.EMPTY));
@@ -96,9 +97,20 @@ class OrionRuntimeModuleTest {
     }
 
     private AccessControlStorage runtimeAccessControlStorage(OrionConfiguration configuration) {
+        return resolvedStorage(configuration, new InMemoryNativeGitRepositoryProvider());
+    }
+
+    private static AccessControlStorage resolvedStorage(
+            OrionConfiguration configuration,
+            InMemoryNativeGitRepositoryProvider backend) {
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
+        ResolvedBootstrapSource resolved = provider.resolveProvisional(
+                BootstrapRepositorySources.CONFIGURATION,
+                configuration.getBootstrap().getAccessControl(),
+                configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
         return new AccessControlStorageResolver(
-                configuration,
-                new InMemoryNativeGitRepositoryProvider()).resolve();
+                new BootstrapRepositorySources(List.of(resolved)),
+                provider).resolve();
     }
 
     private byte[] aclBytes(String userId) throws Exception {
@@ -127,27 +139,8 @@ class OrionRuntimeModuleTest {
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getStorage().setLocation(tempDir.resolve("repos").toUri().toString());
         configuration.getBootstrap().getAccessControl().setLocation(location);
-        configuration.getBootstrap().getAccessControl().setBranch(BRANCH);
-        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
+        configuration.getBootstrap().getAccessControl().setRef(BRANCH);
+        configuration.getBootstrap().getAccessControl().setPath(ACL_FILE);
         return configuration;
-    }
-
-    private OrionConfiguration defaultRuntimeConfiguration() {
-        OrionConfiguration configuration = new OrionConfiguration();
-        configuration.getBootstrap().setBaseDir(tempDir.toString());
-        configuration.getStorage().setLocation(tempDir.resolve("repos").toUri().toString());
-        configuration.getTransport().getGit().setEnabled(false);
-        configuration.getTransport().getSsh().setEnabled(false);
-        configuration.getTransport().getHttp().setEnabled(false);
-        configuration.getTransport().getHttps().setEnabled(false);
-        return configuration;
-    }
-
-    private OrionComponent runtimeComponent(OrionConfiguration configuration) {
-        return DaggerOrionComponent.builder()
-                .configurationProvider(() -> configuration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
-                .serverIdentityCapability(ServerIdentityCapability.unavailable())
-                .build();
     }
 }

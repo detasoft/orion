@@ -19,7 +19,6 @@ import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
-import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
@@ -447,7 +446,6 @@ class OrionAccessControlServiceImplTest {
                 storage,
                 new OrionPasswordHashingService(),
                 provider,
-                new OrionConfiguration(),
                 runtimeOptions,
                 testServerIdentity());
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
@@ -494,7 +492,6 @@ class OrionAccessControlServiceImplTest {
                 storage,
                 new OrionPasswordHashingService(),
                 provider,
-                new OrionConfiguration(),
                 OrionRuntimeOptions.defaults(),
                 serverIdentity);
         eventManager.onStart();
@@ -731,6 +728,11 @@ class OrionAccessControlServiceImplTest {
         @Override
         public String primaryPath() {
             return ACL_PATH;
+        }
+
+        @Override
+        public boolean createIfMissing() {
+            return true;
         }
     }
 }

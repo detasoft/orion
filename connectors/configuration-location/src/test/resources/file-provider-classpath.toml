@@ -2,7 +2,7 @@
 baseDir = "/tmp/orion-classpath-toml"
 
 [bootstrap.accessControl]
-paths = ["classpath-toml.xml"]
+path = "classpath-toml.xml"
 
 [transport.http]
 port = 19080

@@ -16,6 +16,34 @@ class OrionConfigurationBootstrapShapeTest {
     private Path tempDir;
 
     @Test
+    void keyMaterialSourceDefaultsToTheBootstrapRepository() {
+        OrionConfiguration configuration = new OrionConfiguration();
+
+        assertEquals("local:orion", configuration.getBootstrap().getKeyMaterial().getLocation());
+        assertEquals("refs/heads/main", configuration.getBootstrap().getKeyMaterial().selectedRef());
+        assertEquals("material.p12", configuration.getBootstrap().getKeyMaterial().getPath());
+        assertFalse(configuration.getBootstrap().getKeyMaterial().isCreateIfMissing());
+    }
+
+    @Test
+    void partialKeyMaterialSectionRetainsFailClosedSourceDefaults() throws Exception {
+        Path configFile = tempDir.resolve("partial-material.yml");
+        Files.writeString(configFile, """
+                bootstrap:
+                  keyMaterial:
+                    password: env:TEST_MATERIAL_PASSWORD
+                """);
+
+        OrionConfiguration configuration = new LocationConfigurationProvider()
+                .configurationLookup(configFile.toString());
+
+        assertEquals("local:orion", configuration.getBootstrap().getKeyMaterial().getLocation());
+        assertEquals("refs/heads/main", configuration.getBootstrap().getKeyMaterial().selectedRef());
+        assertEquals("material.p12", configuration.getBootstrap().getKeyMaterial().getPath());
+        assertFalse(configuration.getBootstrap().getKeyMaterial().isCreateIfMissing());
+    }
+
+    @Test
     void parsesBootstrapStorageAndTransportShape() throws Exception {
         Path configFile = tempDir.resolve("orion.yml");
         Files.writeString(configFile, """
@@ -24,17 +52,22 @@ class OrionConfigurationBootstrapShapeTest {
                   workDir: work
                   threadPoolSize: 7
                   accessControl:
-                    location: local:orion
+                    location: git+https://config.example/orion.git
                     ref: refs/heads/configuration
-                    paths:
-                      - acl/orion.xml
+                    path: acl/orion.xml
                     createDefaultIfMissing: false
                     auth:
-                      username: acl
+                      credentialKind: http-bearer
+                      credential: env:ORION_CONFIG_TOKEN
                   keyMaterial:
-                    location: security/orion.p12
+                    location: git+ssh://material.example/orion.git
+                    ref: refs/heads/keys
+                    path: stores/material.p12
                     password: env:ORION_KEY_MATERIAL_PASSWORD
                     createIfMissing: false
+                    auth:
+                      credentialKind: ssh-private-key
+                      credential: file:/run/secrets/orion-material-key
                     clusterId: orion-cluster
                     serverSigning:
                       algorithm: RSA
@@ -88,18 +121,29 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals("/tmp/orion", configuration.getBootstrap().getBaseDir());
         assertEquals("work", configuration.getBootstrap().getWorkDir());
         assertEquals(7, configuration.getBootstrap().getThreadPoolSize());
-        assertEquals("local:orion", configuration.getBootstrap().getAccessControl().getLocation());
+        assertEquals(
+                "git+https://config.example/orion.git",
+                configuration.getBootstrap().getAccessControl().getLocation());
         assertEquals(
                 "refs/heads/configuration",
-                configuration.getBootstrap().getAccessControl().configurationRef());
-        assertEquals("acl/orion.xml", configuration.getBootstrap().getAccessControl().primaryPath());
+                configuration.getBootstrap().getAccessControl().selectedRef());
+        assertEquals("acl/orion.xml", configuration.getBootstrap().getAccessControl().getPath());
         assertFalse(configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing());
-        assertEquals("acl", configuration.getBootstrap().getAccessControl().getAuth().get("username"));
-        assertEquals("security/orion.p12", configuration.getBootstrap().getKeyMaterial().getLocation());
+        assertEquals(
+                "env:ORION_CONFIG_TOKEN",
+                configuration.getBootstrap().getAccessControl().getAuth().get("credential"));
+        assertEquals(
+                "git+ssh://material.example/orion.git",
+                configuration.getBootstrap().getKeyMaterial().getLocation());
+        assertEquals("refs/heads/keys", configuration.getBootstrap().getKeyMaterial().selectedRef());
+        assertEquals("stores/material.p12", configuration.getBootstrap().getKeyMaterial().getPath());
         assertEquals(
                 "env:ORION_KEY_MATERIAL_PASSWORD",
                 configuration.getBootstrap().getKeyMaterial().getPassword());
         assertFalse(configuration.getBootstrap().getKeyMaterial().isCreateIfMissing());
+        assertEquals(
+                "file:/run/secrets/orion-material-key",
+                configuration.getBootstrap().getKeyMaterial().getAuth().get("credential"));
         assertEquals("orion-cluster", configuration.getBootstrap().getKeyMaterial().getClusterId());
         assertEquals(
                 "server-signing-v2",

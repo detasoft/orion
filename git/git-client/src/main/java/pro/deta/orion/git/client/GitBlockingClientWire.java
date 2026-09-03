@@ -160,6 +160,13 @@ final class GitBlockingClientWire {
                 advertisement, "report-status", GitClientFailure.Phase.NEGOTIATION);
         List<String> selected = new ArrayList<>();
         selected.add("report-status");
+        if (request.atomic()) {
+            requireCapability(
+                    advertisement,
+                    "atomic",
+                    GitClientFailure.Phase.NEGOTIATION);
+            selected.add("atomic");
+        }
         boolean deletesRef = false;
         for (GitReceivePackRequest.Command command : request.commands()) {
             if (GitClientValidation.NULL_ID.equalsIgnoreCase(
