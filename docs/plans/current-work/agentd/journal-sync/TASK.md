@@ -13,7 +13,7 @@ forward durable commit acknowledgements to `session-host` for safe retention.
 - Completed AgentD HTTP/2 transport and session discovery.
 - [Journal reader](../journal-reader/TASK.md).
 - Native-host `ACK_JOURNAL` compatibility contract from
-  [control-to-journal idempotency](../../native-session-host/control-journal-idempotency/TASK.md).
+  the [control-journal idempotency design](../../../2026-09-03-native-control-journal-idempotency-design.md).
 
 ## Requirements
 

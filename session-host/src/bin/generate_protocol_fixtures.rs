@@ -15,6 +15,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     fs::write(directory.join("control-v1.bin"), protocol_fixture::control())?;
     fs::write(
+        directory.join("control-idempotency-v2.bin"),
+        protocol_fixture::control_idempotency_v2(),
+    )?;
+    fs::write(
+        directory.join("command-events-v1.hex"),
+        protocol_fixture::command_events_hex(),
+    )?;
+    fs::write(
         directory.join("truncated-item-v1.hex"),
         protocol_fixture::truncated_item_hex(),
     )?;

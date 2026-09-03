@@ -101,9 +101,37 @@ the physical size of the retained journal and defaults to 1,073,741,824 bytes
 must be at least the segment target.
 
 The host rotates only between complete CBOR items, so one oversized event stays
-whole and may exceed the segment target. Closed segments are compressed and
-oldest closed segments are deleted asynchronously. Disk usage can temporarily
-exceed the configured maximum while maintenance catches up. The active raw
-segment is never deleted; if it alone exceeds the maximum, the journal remains
-over the limit until it rotates. Readers behind a deleted prefix receive a
-retention gap whose floor is the first event in the oldest remaining segment.
+whole and may exceed the segment target. Closed segments are compressed without
+waiting for server acknowledgement. Physical deletion is different: the host
+deletes only a size-selected oldest prefix whose complete events are covered by
+the durable `control-retention-state` watermark. With no watermark, or while
+server acknowledgement lags, the journal may remain above its configured
+maximum indefinitely. The active raw segment is never deleted. Readers behind
+a deleted prefix receive a retention gap whose floor is the first event in the
+oldest remaining segment.
+
+## Idempotent Session Controls
+
+Established-session `INPUT`, `RESIZE`, `SIGNAL`, and `TERMINATE` requests use
+payload schema 2. AgentD assigns each operation a nonzero monotonic sequence
+and supplies its CommandId, the exact opaque server CBOR command item, and the
+typed effect bytes. The host compares all of those bytes for retry identity;
+it never decodes or re-encodes the server command item.
+
+Before applying an external effect, the live host durably writes
+`COMMAND_ACCEPTED`. It then writes a durable `COMMAND_RESULT` and returns that
+result event ID. A matching completed retry returns the original result ID
+without repeating the effect. A matching pending retry reports that the
+operation is still in progress. Conflicting or unexplained stale sequences are
+rejected. `--max-unacknowledged-operations` bounds the live retry ledger and
+defaults to 4096; server acknowledgement evicts covered completed entries but
+does not lower the host's accepted-sequence high-water mark.
+
+AgentD recovery uses the server's durably committed prefix plus the later
+suffix in the still-running host journal. The host does not reconstruct a
+failed incarnation, and AgentD keeps no private durable command cursor. After
+the server durably commits a complete journal prefix, AgentD may send its event
+ID through `ACK_JOURNAL`. The host atomically persists that monotonic watermark
+beside the journal before requesting deletion. The sidecar is local deletion
+permission only: it is not a journal record, an AgentD recovery cursor, or
+evidence that the server committed anything by itself.

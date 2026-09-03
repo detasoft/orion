@@ -1,8 +1,8 @@
 # Expose Process Control and PTY Closure
 
 Status: todo
-Depends on: completed Unix process host,
-../control-journal-idempotency/TASK.md
+Depends on: completed Unix process host and the
+[control-journal idempotency design](../../../2026-09-03-native-control-journal-idempotency-design.md).
 
 Keep a live `session-host` as the sole declaration that a session is running,
 while exposing its owned processes for inspection and addressed signalling.

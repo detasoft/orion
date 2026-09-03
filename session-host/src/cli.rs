@@ -7,6 +7,7 @@ pub use crate::journal::{DEFAULT_JOURNAL_MAX_BYTES, DEFAULT_JOURNAL_SEGMENT_BYTE
 pub const DEFAULT_COLS: u16 = 160;
 pub const DEFAULT_ROWS: u16 = 50;
 pub const DEFAULT_TERM: &str = "xterm-256color";
+pub const DEFAULT_MAX_UNACKNOWLEDGED_OPERATIONS: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SandboxUnavailable {
@@ -27,6 +28,7 @@ pub struct SessionOptions {
     pub sandbox_unavailable: SandboxUnavailable,
     pub journal_segment_bytes: u64,
     pub journal_max_bytes: u64,
+    pub max_unacknowledged_operations: usize,
     pub command: Vec<OsString>,
 }
 
@@ -88,6 +90,7 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
     let mut sandbox_unavailable = None;
     let mut journal_segment_bytes = None;
     let mut journal_max_bytes = None;
+    let mut max_unacknowledged_operations = None;
     let mut index = 0;
 
     while index < arguments.len() {
@@ -103,6 +106,8 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             let journal_segment_bytes =
                 journal_segment_bytes.unwrap_or(DEFAULT_JOURNAL_SEGMENT_BYTES);
             let journal_max_bytes = journal_max_bytes.unwrap_or(DEFAULT_JOURNAL_MAX_BYTES);
+            let max_unacknowledged_operations = max_unacknowledged_operations
+                .unwrap_or(DEFAULT_MAX_UNACKNOWLEDGED_OPERATIONS);
             if journal_max_bytes < journal_segment_bytes {
                 return Err(ParseError::new(
                     "--journal-max-bytes must be greater than or equal to --journal-segment-bytes",
@@ -120,6 +125,7 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
                 sandbox_unavailable: sandbox_unavailable.unwrap_or(SandboxUnavailable::Fail),
                 journal_segment_bytes,
                 journal_max_bytes,
+                max_unacknowledged_operations,
                 command,
             }));
         }
@@ -152,6 +158,11 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             "--journal-max-bytes" => {
                 set_once(&mut journal_max_bytes, parse_journal_bytes(value, option)?, option)?
             }
+            "--max-unacknowledged-operations" => set_once(
+                &mut max_unacknowledged_operations,
+                parse_positive_usize(value, option)?,
+                option,
+            )?,
             _ => return Err(ParseError::new(format!("unknown option: {option}"))),
         }
         index += 1;
@@ -207,6 +218,16 @@ fn parse_journal_bytes(value: &OsStr, option: &str) -> Result<u64, ParseError> {
         .to_str()
         .ok_or_else(&error)?;
     let parsed = value.parse::<u64>().map_err(|_| error())?;
+    if parsed == 0 {
+        return Err(error());
+    }
+    Ok(parsed)
+}
+
+fn parse_positive_usize(value: &OsStr, option: &str) -> Result<usize, ParseError> {
+    let error = || ParseError::new(format!("{option} must be a positive decimal integer"));
+    let value = value.to_str().ok_or_else(&error)?;
+    let parsed = value.parse::<usize>().map_err(|_| error())?;
     if parsed == 0 {
         return Err(error());
     }
@@ -284,6 +305,8 @@ mod tests {
             "4096",
             "--journal-max-bytes",
             "16384",
+            "--max-unacknowledged-operations",
+            "8192",
             "--",
             "bash",
             "-l",
@@ -304,6 +327,7 @@ mod tests {
                 sandbox_unavailable: SandboxUnavailable::RunUnsandboxed,
                 journal_segment_bytes: 4096,
                 journal_max_bytes: 16384,
+                max_unacknowledged_operations: 8192,
                 command: strings(&["bash", "-l"]),
             })
         );
@@ -333,6 +357,7 @@ mod tests {
         assert_eq!(options.sandbox_unavailable, SandboxUnavailable::Fail);
         assert_eq!(options.journal_segment_bytes, DEFAULT_JOURNAL_SEGMENT_BYTES);
         assert_eq!(options.journal_max_bytes, DEFAULT_JOURNAL_MAX_BYTES);
+        assert_eq!(options.max_unacknowledged_operations, 4096);
     }
 
     #[test]
@@ -410,5 +435,31 @@ mod tests {
             result.unwrap_err().to_string(),
             "--journal-max-bytes must be greater than or equal to --journal-segment-bytes"
         );
+    }
+
+    #[test]
+    fn parses_and_validates_the_unacknowledged_operation_capacity() {
+        let Command::Run(options) = parse(session_arguments(&[
+            "--max-unacknowledged-operations",
+            "8192",
+        ]))
+        .unwrap()
+        else {
+            panic!("expected run command");
+        };
+        assert_eq!(options.max_unacknowledged_operations, 8192);
+
+        for values in [
+            vec!["--max-unacknowledged-operations", "0"],
+            vec!["--max-unacknowledged-operations", "not-a-number"],
+            vec![
+                "--max-unacknowledged-operations",
+                "1",
+                "--max-unacknowledged-operations",
+                "2",
+            ],
+        ] {
+            assert!(parse(session_arguments(&values)).is_err());
+        }
     }
 }

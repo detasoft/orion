@@ -8,6 +8,9 @@ pub const MAX_PAYLOAD_LENGTH: usize = 16 * 1024 * 1024;
 pub const CONTROL_MAGIC: &[u8; 4] = b"ORCT";
 
 pub mod event_type {
+    pub const COMMAND_ACCEPTED: u16 = 0x0001;
+    pub const COMMAND_RESULT: u16 = 0x0002;
+
     pub const PTY_OUTPUT: u16 = 0x0100;
     pub const PTY_INPUT: u16 = 0x0101;
     pub const PTY_RESIZE: u16 = 0x0102;
@@ -32,6 +35,7 @@ pub mod control_message {
     pub const TERMINATE: u16 = 0x0004;
     pub const STATUS: u16 = 0x0005;
     pub const APPEND_EVENT: u16 = 0x0006;
+    pub const ACK_JOURNAL: u16 = 0x0007;
 
     pub const ACCEPTED: u16 = 0x8000;
     pub const DUPLICATE: u16 = 0x8001;
@@ -46,6 +50,33 @@ pub struct ControlFrame<'a> {
     pub flags: u32,
     pub request_id: u64,
     pub payload: &'a [u8],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationControlPayload {
+    pub operation_sequence: u64,
+    pub command_id: Vec<u8>,
+    pub command_envelope: Vec<u8>,
+    pub effect: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandOutcome {
+    Succeeded,
+    Failed,
+    Rejected,
+    Ambiguous,
+}
+
+impl CommandOutcome {
+    pub const fn wire_code(self) -> u64 {
+        match self {
+            Self::Succeeded => 1,
+            Self::Failed => 2,
+            Self::Rejected => 3,
+            Self::Ambiguous => 4,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -81,6 +112,111 @@ pub fn encode_control_frame(frame: ControlFrame<'_>) -> Result<Vec<u8>, EncodeEr
     put_u32(&mut encoded[28..32], crc32c(frame.payload));
     encoded[CONTROL_HEADER_LENGTH..].copy_from_slice(frame.payload);
     Ok(encoded)
+}
+
+pub fn encode_operation_control_payload(
+    message_type: u16,
+    operation_sequence: u64,
+    command_id: &[u8],
+    command_envelope: &[u8],
+    effect: &[u8],
+) -> Result<Vec<u8>, EncodeError> {
+    validate_operation_identity(operation_sequence, command_id, command_envelope)?;
+    validate_operation_effect(message_type, effect)?;
+    let payload_length = 8_usize
+        .checked_add(2)
+        .and_then(|length| length.checked_add(command_id.len()))
+        .and_then(|length| length.checked_add(4))
+        .and_then(|length| length.checked_add(command_envelope.len()))
+        .and_then(|length| length.checked_add(effect.len()))
+        .ok_or(EncodeError::PayloadTooLarge {
+            actual: usize::MAX,
+            maximum: MAX_PAYLOAD_LENGTH,
+        })?;
+    validate_payload_length(payload_length)?;
+    let envelope_length = u32::try_from(command_envelope.len()).map_err(|_| {
+        EncodeError::PayloadTooLarge {
+            actual: command_envelope.len(),
+            maximum: MAX_PAYLOAD_LENGTH,
+        }
+    })?;
+    let mut payload = Vec::with_capacity(payload_length);
+    payload.extend_from_slice(&operation_sequence.to_le_bytes());
+    payload.extend_from_slice(&(command_id.len() as u16).to_le_bytes());
+    payload.extend_from_slice(command_id);
+    payload.extend_from_slice(&envelope_length.to_le_bytes());
+    payload.extend_from_slice(command_envelope);
+    payload.extend_from_slice(effect);
+    Ok(payload)
+}
+
+pub fn decode_operation_control_payload(
+    message_type: u16,
+    payload: &[u8],
+) -> Result<OperationControlPayload, EncodeError> {
+    validate_payload_length(payload.len())?;
+    if payload.len() < 10 {
+        return Err(EncodeError::InvalidPayload(
+            "operation control payload is truncated before the command ID",
+        ));
+    }
+    let operation_sequence = u64::from_le_bytes(payload[0..8].try_into().unwrap());
+    let command_id_length = usize::from(u16::from_le_bytes(payload[8..10].try_into().unwrap()));
+    let command_id_end = 10_usize.checked_add(command_id_length).ok_or(
+        EncodeError::InvalidPayload("operation control command ID length overflows"),
+    )?;
+    let envelope_length_end = command_id_end.checked_add(4).ok_or(
+        EncodeError::InvalidPayload("operation control command envelope length overflows"),
+    )?;
+    if payload.len() < envelope_length_end {
+        return Err(EncodeError::InvalidPayload(
+            "operation control payload is truncated before the command envelope",
+        ));
+    }
+    let envelope_length = u32::from_le_bytes(
+        payload[command_id_end..envelope_length_end]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let envelope_end = envelope_length_end.checked_add(envelope_length).ok_or(
+        EncodeError::InvalidPayload("operation control command envelope length overflows"),
+    )?;
+    if payload.len() < envelope_end {
+        return Err(EncodeError::InvalidPayload(
+            "operation control command envelope is truncated",
+        ));
+    }
+    let command_id = &payload[10..command_id_end];
+    let command_envelope = &payload[envelope_length_end..envelope_end];
+    let effect = &payload[envelope_end..];
+    validate_operation_identity(operation_sequence, command_id, command_envelope)?;
+    validate_operation_effect(message_type, effect)?;
+    Ok(OperationControlPayload {
+        operation_sequence,
+        command_id: command_id.to_vec(),
+        command_envelope: command_envelope.to_vec(),
+        effect: effect.to_vec(),
+    })
+}
+
+pub fn journal_ack_payload(event_id: u64) -> Result<[u8; 8], EncodeError> {
+    if event_id == 0 {
+        return Err(EncodeError::InvalidPayload(
+            "journal acknowledgement event ID must be nonzero",
+        ));
+    }
+    Ok(event_id.to_le_bytes())
+}
+
+pub fn decode_journal_ack_payload(payload: &[u8]) -> Result<u64, EncodeError> {
+    if payload.len() != 8 {
+        return Err(EncodeError::InvalidPayload(
+            "journal acknowledgement payload must be 8 bytes",
+        ));
+    }
+    let event_id = u64::from_le_bytes(payload.try_into().unwrap());
+    journal_ack_payload(event_id)?;
+    Ok(event_id)
 }
 
 pub fn pty_input_payload(input_id: [u8; 16], bytes: &[u8]) -> Result<Vec<u8>, EncodeError> {
@@ -169,6 +305,48 @@ pub fn encode_signal(event_id: u64, kind: u16, platform_code: i32) -> Result<Vec
     Ok(encoded)
 }
 
+pub fn encode_command_accepted(
+    event_id: u64,
+    operation_sequence: u64,
+    command_envelope: &[u8],
+) -> Result<Vec<u8>, EncodeError> {
+    validate_operation_sequence(operation_sequence)?;
+    validate_command_envelope(command_envelope)?;
+    let mut encoded = event_prefix(event_id, event_type::COMMAND_ACCEPTED);
+    cbor_array(&mut encoded, 2);
+    cbor_unsigned(&mut encoded, operation_sequence);
+    cbor_bytes(&mut encoded, command_envelope);
+    Ok(encoded)
+}
+
+pub fn encode_command_result(
+    event_id: u64,
+    operation_sequence: u64,
+    command_id: &[u8],
+    outcome: CommandOutcome,
+    detail: &str,
+) -> Result<Vec<u8>, EncodeError> {
+    validate_operation_sequence(operation_sequence)?;
+    validate_command_id(command_id)?;
+    if detail.len() > 4096 {
+        return Err(EncodeError::InvalidPayload(
+            "command result detail exceeds 4096 bytes",
+        ));
+    }
+    if outcome == CommandOutcome::Succeeded && !detail.is_empty() {
+        return Err(EncodeError::InvalidPayload(
+            "successful command result detail must be empty",
+        ));
+    }
+    let mut encoded = event_prefix(event_id, event_type::COMMAND_RESULT);
+    cbor_array(&mut encoded, 4);
+    cbor_unsigned(&mut encoded, operation_sequence);
+    cbor_bytes(&mut encoded, command_id);
+    cbor_unsigned(&mut encoded, outcome.wire_code());
+    cbor_text(&mut encoded, detail);
+    Ok(encoded)
+}
+
 pub fn valid_terminal_dimensions(cols: u32, rows: u32) -> bool {
     (1..=65535).contains(&cols) && (1..=65535).contains(&rows)
 }
@@ -179,6 +357,89 @@ pub fn valid_signal(kind: u16, platform_code: i32) -> bool {
         0xffff => platform_code >= 0,
         _ => false,
     }
+}
+
+fn validate_operation_identity(
+    operation_sequence: u64,
+    command_id: &[u8],
+    command_envelope: &[u8],
+) -> Result<(), EncodeError> {
+    validate_operation_sequence(operation_sequence)?;
+    validate_command_id(command_id)?;
+    validate_command_envelope(command_envelope)
+}
+
+fn validate_operation_sequence(operation_sequence: u64) -> Result<(), EncodeError> {
+    if operation_sequence == 0 {
+        return Err(EncodeError::InvalidPayload(
+            "operation sequence must be nonzero",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_command_id(command_id: &[u8]) -> Result<(), EncodeError> {
+    if !valid_command_id(command_id) {
+        return Err(EncodeError::InvalidPayload(
+            "command ID must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_command_envelope(command_envelope: &[u8]) -> Result<(), EncodeError> {
+    if command_envelope.is_empty() {
+        return Err(EncodeError::InvalidPayload(
+            "command envelope must not be empty",
+        ));
+    }
+    validate_payload_length(command_envelope.len())
+}
+
+fn valid_command_id(command_id: &[u8]) -> bool {
+    if command_id.is_empty() || command_id.len() > 128 || !command_id[0].is_ascii_alphanumeric() {
+        return false;
+    }
+    command_id[1..].iter().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-')
+    })
+}
+
+fn validate_operation_effect(message_type: u16, effect: &[u8]) -> Result<(), EncodeError> {
+    let valid = match message_type {
+        control_message::INPUT => effect.len() >= 16,
+        control_message::RESIZE => {
+            effect.len() == 8
+                && valid_terminal_dimensions(
+                    u32::from_le_bytes(effect[0..4].try_into().unwrap()),
+                    u32::from_le_bytes(effect[4..8].try_into().unwrap()),
+                )
+        }
+        control_message::SIGNAL => {
+            effect.len() == 8
+                && u16::from_le_bytes(effect[2..4].try_into().unwrap()) == 0
+                && valid_signal(
+                    u16::from_le_bytes(effect[0..2].try_into().unwrap()),
+                    i32::from_le_bytes(effect[4..8].try_into().unwrap()),
+                )
+        }
+        control_message::TERMINATE => {
+            effect.len() == 8
+                && u16::from_le_bytes(effect[0..2].try_into().unwrap()) <= 1
+                && u16::from_le_bytes(effect[2..4].try_into().unwrap()) == 0
+        }
+        _ => {
+            return Err(EncodeError::InvalidPayload(
+                "operation control message type is unsupported",
+            ));
+        }
+    };
+    if !valid {
+        return Err(EncodeError::InvalidPayload(
+            "operation control effect payload is invalid",
+        ));
+    }
+    Ok(())
 }
 
 pub fn encode_binary_event(
@@ -354,6 +615,222 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_idempotent_control_fixture_is_stable() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("protocol/fixtures/control-idempotency-v2.bin");
+        assert_eq!(std::fs::read(path).unwrap(), protocol_fixture::control_idempotency_v2());
+    }
+
+    #[test]
+    fn checked_in_command_event_fixture_is_stable() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("protocol/fixtures/command-events-v1.hex");
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            protocol_fixture::command_events_hex(),
+        );
+    }
+
+    #[test]
+    fn schema_two_operation_controls_round_trip_owned_identity_and_effects() {
+        let input_id = [0x5a; 16];
+        let cases = [
+            (
+                control_message::INPUT,
+                [input_id.as_slice(), b"terminal input"].concat(),
+            ),
+            (control_message::RESIZE, [180_u32.to_le_bytes(), 50_u32.to_le_bytes()].concat()),
+            (
+                control_message::SIGNAL,
+                concat_slices(&[
+                    &1_u16.to_le_bytes(),
+                    &0_u16.to_le_bytes(),
+                    &(-1_i32).to_le_bytes(),
+                ]),
+            ),
+            (
+                control_message::TERMINATE,
+                concat_slices(&[
+                    &0_u16.to_le_bytes(),
+                    &0_u16.to_le_bytes(),
+                    &250_u32.to_le_bytes(),
+                ]),
+            ),
+        ];
+
+        for (index, (message_type, effect)) in cases.into_iter().enumerate() {
+            let sequence = (i64::MAX as u64) + 1 + index as u64;
+            let command_id = format!("command.{index}");
+            let envelope = [0x84, 0x01, 0x02, 0x03, 0x66, b'f', b'u', b't', b'u', b'r', b'e'];
+            let mut encoded = encode_operation_control_payload(
+                message_type,
+                sequence,
+                command_id.as_bytes(),
+                &envelope,
+                &effect,
+            )
+            .unwrap();
+
+            let decoded = decode_operation_control_payload(message_type, &encoded).unwrap();
+            encoded.fill(0);
+
+            assert_eq!(decoded.operation_sequence, sequence);
+            assert_eq!(decoded.command_id, command_id.as_bytes());
+            assert_eq!(decoded.command_envelope, envelope);
+            assert_eq!(decoded.effect, effect);
+        }
+    }
+
+    #[test]
+    fn schema_two_operation_controls_reject_invalid_common_fields() {
+        let effect = [0_u8; 16];
+        assert_invalid_operation_payload(
+            control_message::INPUT,
+            0,
+            b"command",
+            &[0x80],
+            &effect,
+            "operation sequence must be nonzero",
+        );
+        for command_id in [b"".as_slice(), b" unsafe", b"slash/not-safe"] {
+            assert_invalid_operation_payload(
+                control_message::INPUT,
+                1,
+                command_id,
+                &[0x80],
+                &effect,
+                "command ID",
+            );
+        }
+        let oversized_command_id = vec![b'a'; 129];
+        assert_invalid_operation_payload(
+            control_message::INPUT,
+            1,
+            &oversized_command_id,
+            &[0x80],
+            &effect,
+            "command ID",
+        );
+        assert_invalid_operation_payload(
+            control_message::INPUT,
+            1,
+            b"command",
+            &[],
+            &effect,
+            "command envelope must not be empty",
+        );
+    }
+
+    #[test]
+    fn schema_two_operation_controls_reject_truncated_and_oversized_envelopes() {
+        let mut truncated = operation_prefix(1, b"command", 3);
+        truncated.extend_from_slice(&[0x80, 0x81]);
+        assert!(decode_operation_control_payload(control_message::INPUT, &truncated)
+            .unwrap_err()
+            .to_string()
+            .contains("command envelope"));
+
+        let oversized = vec![0_u8; MAX_PAYLOAD_LENGTH + 1];
+        assert!(matches!(
+            decode_operation_control_payload(control_message::INPUT, &oversized),
+            Err(EncodeError::PayloadTooLarge { .. })
+        ));
+
+        let mut declared_oversized = operation_prefix(1, b"command", u32::MAX);
+        declared_oversized.push(0x80);
+        assert!(decode_operation_control_payload(control_message::INPUT, &declared_oversized)
+            .unwrap_err()
+            .to_string()
+            .contains("command envelope"));
+    }
+
+    #[test]
+    fn schema_two_operation_controls_validate_each_effect_shape() {
+        let invalid_cases = [
+            (control_message::INPUT, vec![0_u8; 15]),
+            (control_message::RESIZE, [0_u32.to_le_bytes(), 50_u32.to_le_bytes()].concat()),
+            (
+                control_message::SIGNAL,
+                concat_slices(&[
+                    &1_u16.to_le_bytes(),
+                    &1_u16.to_le_bytes(),
+                    &(-1_i32).to_le_bytes(),
+                ]),
+            ),
+            (
+                control_message::TERMINATE,
+                concat_slices(&[
+                    &2_u16.to_le_bytes(),
+                    &0_u16.to_le_bytes(),
+                    &0_u32.to_le_bytes(),
+                ]),
+            ),
+        ];
+        for (message_type, effect) in invalid_cases {
+            assert_invalid_operation_payload(
+                message_type,
+                1,
+                b"command",
+                &[0x80],
+                &effect,
+                "effect payload",
+            );
+        }
+    }
+
+    #[test]
+    fn acknowledgement_watermarks_are_nonzero_exact_unsigned_values() {
+        let watermark = (i64::MAX as u64) + 1;
+        let encoded = journal_ack_payload(watermark).unwrap();
+        assert_eq!(decode_journal_ack_payload(&encoded).unwrap(), watermark);
+        assert!(journal_ack_payload(0).is_err());
+        assert!(decode_journal_ack_payload(&0_u64.to_le_bytes()).is_err());
+        assert!(decode_journal_ack_payload(&encoded[..7]).is_err());
+    }
+
+    #[test]
+    fn command_events_encode_exact_envelopes_and_frozen_outcomes() {
+        let sequence = (i64::MAX as u64) + 7;
+        let envelope = [0x84, 0x01, 0x02, 0x03, 0x66, b'f', b'u', b't', b'u', b'r', b'e'];
+        assert_eq!(
+            encode_command_accepted(1, sequence, &envelope).unwrap(),
+            [
+                0x83, 0x01, 0x01, 0x82, 0x1b, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x06, 0x4b, 0x84, 0x01, 0x02, 0x03, 0x66, b'f', b'u', b't', b'u', b'r', b'e',
+            ],
+        );
+        assert_eq!(CommandOutcome::Succeeded.wire_code(), 1);
+        assert_eq!(CommandOutcome::Failed.wire_code(), 2);
+        assert_eq!(CommandOutcome::Rejected.wire_code(), 3);
+        assert_eq!(CommandOutcome::Ambiguous.wire_code(), 4);
+        assert_eq!(
+            encode_command_result(2, sequence, b"command.7", CommandOutcome::Succeeded, "").unwrap(),
+            [
+                0x83, 0x02, 0x02, 0x84, 0x1b, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x06, 0x49, b'c', b'o', b'm', b'm', b'a', b'n', b'd', b'.', b'7', 0x01,
+                0x60,
+            ],
+        );
+    }
+
+    #[test]
+    fn command_events_reject_invalid_identity_and_detail() {
+        assert!(encode_command_accepted(1, 0, &[0x80]).is_err());
+        assert!(encode_command_accepted(1, 1, &[]).is_err());
+        assert!(encode_command_result(2, 0, b"command", CommandOutcome::Failed, "failed").is_err());
+        assert!(encode_command_result(2, 1, b"bad/id", CommandOutcome::Failed, "failed").is_err());
+        assert!(encode_command_result(2, 1, b"command", CommandOutcome::Succeeded, "detail").is_err());
+        assert!(encode_command_result(
+            2,
+            1,
+            b"command",
+            CommandOutcome::Failed,
+            &"x".repeat(4097),
+        )
+        .is_err());
+    }
+
+    #[test]
     fn metadata_fixture_contains_only_session_manifest_fields() {
         let metadata = include_str!("../protocol/fixtures/metadata-v1.json");
         for required in [
@@ -404,6 +881,38 @@ mod tests {
                 u8::from_str_radix(text, 16).unwrap()
             })
             .collect()
+    }
+
+    fn operation_prefix(sequence: u64, command_id: &[u8], envelope_length: u32) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&sequence.to_le_bytes());
+        payload.extend_from_slice(&(command_id.len() as u16).to_le_bytes());
+        payload.extend_from_slice(command_id);
+        payload.extend_from_slice(&envelope_length.to_le_bytes());
+        payload
+    }
+
+    fn concat_slices(parts: &[&[u8]]) -> Vec<u8> {
+        parts.iter().flat_map(|part| part.iter().copied()).collect()
+    }
+
+    fn assert_invalid_operation_payload(
+        message_type: u16,
+        sequence: u64,
+        command_id: &[u8],
+        envelope: &[u8],
+        effect: &[u8],
+        expected: &str,
+    ) {
+        let error = encode_operation_control_payload(
+            message_type,
+            sequence,
+            command_id,
+            envelope,
+            effect,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains(expected), "unexpected error: {error}");
     }
 }
 
@@ -461,6 +970,74 @@ pub mod protocol_fixture {
         [request, response].concat()
     }
 
+    pub fn control_idempotency_v2() -> Vec<u8> {
+        let input_id = [
+            0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd,
+            0xfe, 0xff,
+        ];
+        let input_bytes = b"echo v2\n";
+        let command_ids = ["command.input", "command.resize", "command.signal", "command.terminate"];
+        let envelopes = command_envelopes(&command_ids, input_id, input_bytes);
+        let effects = [
+            [input_id.as_slice(), input_bytes].concat(),
+            [200_u32.to_le_bytes(), 60_u32.to_le_bytes()].concat(),
+            concat_parts(&[
+                &1_u16.to_le_bytes(),
+                &0_u16.to_le_bytes(),
+                &(-1_i32).to_le_bytes(),
+            ]),
+            concat_parts(&[
+                &0_u16.to_le_bytes(),
+                &0_u16.to_le_bytes(),
+                &500_u32.to_le_bytes(),
+            ]),
+        ];
+        let message_types = [
+            control_message::INPUT,
+            control_message::RESIZE,
+            control_message::SIGNAL,
+            control_message::TERMINATE,
+        ];
+        let mut frames = Vec::new();
+        for index in 0..message_types.len() {
+            let operation_sequence = (i64::MAX as u64) + 1 + index as u64;
+            let payload = encode_operation_control_payload(
+                message_types[index],
+                operation_sequence,
+                command_ids[index].as_bytes(),
+                &envelopes[index],
+                &effects[index],
+            )
+            .unwrap();
+            frames.push(
+                encode_control_frame(ControlFrame {
+                    message_type: message_types[index],
+                    payload_schema_version: 2,
+                    flags: 0,
+                    request_id: 70 + index as u64,
+                    payload: &payload,
+                })
+                .unwrap(),
+            );
+        }
+        let acknowledgement = journal_ack_payload((i64::MAX as u64) + 5).unwrap();
+        frames.push(
+            encode_control_frame(ControlFrame {
+                message_type: control_message::ACK_JOURNAL,
+                payload_schema_version: 1,
+                flags: 0,
+                request_id: 74,
+                payload: &acknowledgement,
+            })
+            .unwrap(),
+        );
+        frames.concat()
+    }
+
+    pub fn command_events_hex() -> String {
+        format_hex_records(&command_event_records())
+    }
+
     fn journal_records() -> Vec<Vec<u8>> {
         vec![
             encode_pty_output(1, &[0, 0x1b, 0xff]).unwrap(),
@@ -468,6 +1045,73 @@ pub mod protocol_fixture {
             encode_pty_input(3, "00010203-0405-0607-0809-0a0b0c0d0e0f", &[0, 0xff]).unwrap(),
             encode_process_exited(4, 0),
         ]
+    }
+
+    fn command_event_records() -> Vec<Vec<u8>> {
+        let input_id = [
+            0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd,
+            0xfe, 0xff,
+        ];
+        let command_id = "command.input";
+        let envelope = command_envelopes(&[command_id, "resize", "signal", "terminate"], input_id, b"echo v2\n")
+            .remove(0);
+        let operation_sequence = (i64::MAX as u64) + 1;
+        vec![
+            encode_command_accepted(1, operation_sequence, &envelope).unwrap(),
+            encode_command_result(
+                2,
+                operation_sequence,
+                command_id.as_bytes(),
+                CommandOutcome::Succeeded,
+                "",
+            )
+            .unwrap(),
+        ]
+    }
+
+    fn command_envelopes(
+        command_ids: &[&str; 4],
+        input_id: [u8; 16],
+        input_bytes: &[u8],
+    ) -> Vec<Vec<u8>> {
+        let mut input = command_envelope_prefix(0x8101, command_ids[0]);
+        cbor_bytes(&mut input, &input_id);
+        cbor_bytes(&mut input, input_bytes);
+        cbor_text(&mut input, "future");
+
+        let mut resize = command_envelope_prefix(0x8102, command_ids[1]);
+        cbor_unsigned(&mut resize, 200);
+        cbor_unsigned(&mut resize, 60);
+        cbor_text(&mut resize, "future");
+
+        let mut signal = command_envelope_prefix(0x8103, command_ids[2]);
+        cbor_unsigned(&mut signal, 1);
+        cbor_signed(&mut signal, -1);
+        cbor_text(&mut signal, "future");
+
+        let mut terminate = command_envelope_prefix(0x8104, command_ids[3]);
+        cbor_unsigned(&mut terminate, 0);
+        cbor_unsigned(&mut terminate, 500);
+        cbor_text(&mut terminate, "future");
+        vec![input, resize, signal, terminate]
+    }
+
+    fn command_envelope_prefix(message_type: u16, command_id: &str) -> Vec<u8> {
+        let mut envelope = Vec::new();
+        cbor_array(&mut envelope, 6);
+        cbor_unsigned(&mut envelope, u64::from(message_type));
+        cbor_text(&mut envelope, command_id);
+        cbor_text(&mut envelope, "session-v2");
+        envelope
+    }
+
+    fn concat_parts(parts: &[&[u8]]) -> Vec<u8> {
+        let length = parts.iter().map(|part| part.len()).sum();
+        let mut bytes = Vec::with_capacity(length);
+        for part in parts {
+            bytes.extend_from_slice(part);
+        }
+        bytes
     }
 
     fn truncated_item_records() -> Vec<Vec<u8>> {

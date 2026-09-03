@@ -26,6 +26,5 @@ commands, and survives independently of `agentd`.
 - [ ] [Expose process control and PTY closure](process-control-and-pty-closure/TASK.md)
 - [ ] [Coordinate session termination](termination-coordination/TASK.md)
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
-- [ ] [Make control-to-journal delivery idempotent](control-journal-idempotency/TASK.md)
 - [ ] [Implement the Windows ConPTY host](windows-host/TASK.md)
 - [ ] [Package targets and verify end-to-end acceptance](release-and-acceptance/TASK.md)

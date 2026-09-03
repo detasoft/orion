@@ -17,14 +17,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::PlatformKind;
 use super::sandbox::PreparedSandbox;
 use crate::cli::{SandboxUnavailable, SessionOptions};
+use crate::control_journal::{Admission, LiveOperationLedger, OperationIdentity};
 use crate::host::{
-    self, ERROR_INVALID_REQUEST, ERROR_INVALID_STATE, ERROR_IO, ERROR_UNSUPPORTED_MESSAGE,
-    ERROR_UNSUPPORTED_SCHEMA, HostError, OwnedControlFrame,
+    self, ERROR_INVALID_REQUEST, ERROR_INVALID_STATE, ERROR_IO, ERROR_POLICY,
+    ERROR_UNSUPPORTED_MESSAGE, ERROR_UNSUPPORTED_SCHEMA, HostError, OwnedControlFrame,
 };
 use crate::journal::{
     self, ControlMetadata, ControlTransport, Durability, JournalConfig, JournalWriter, Metadata,
     SandboxEnforcement, SandboxMetadata, SandboxRuleMetadata, SandboxUnavailablePolicy,
 };
+use crate::journal_acknowledgement::{JournalAcknowledgement, validate_received_watermark};
 use crate::protocol::{self, control_message, event_type};
 
 const CONTROL_ENDPOINT: &str = "control.sock";
@@ -90,6 +92,8 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
             journal_max_bytes: options.journal_max_bytes,
         },
     )?;
+    let acknowledgement = JournalAcknowledgement::open(&options.session_dir)
+        .map_err(|error| HostError::Protocol(error.to_string()))?;
     let started_at = epoch_millis()?;
     let mut metadata = initial_metadata(&options, &sandbox, started_at)?;
     journal::write_metadata(&options.session_dir, &metadata, Durability::Buffered)?;
@@ -103,8 +107,10 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         journal,
         metadata,
         master,
-        accepted_inputs: HashMap::new(),
-        input_order: Arc::new(Mutex::new(())),
+        operations: LiveOperationLedger::new(options.max_unacknowledged_operations)
+            .map_err(|error| HostError::InvalidOptions(error.to_owned()))?,
+        operation_order: Arc::new(Mutex::new(())),
+        acknowledgement,
         descendants: Arc::new(Mutex::new(descendants)),
         child_live: true,
         exit_code: i32::MIN,
@@ -559,8 +565,9 @@ struct SharedState {
     journal: JournalWriter,
     metadata: Metadata,
     master: File,
-    accepted_inputs: HashMap<[u8; 16], u64>,
-    input_order: Arc<Mutex<()>>,
+    operations: LiveOperationLedger,
+    operation_order: Arc<Mutex<()>>,
+    acknowledgement: JournalAcknowledgement,
     descendants: Arc<Mutex<DescendantTracker>>,
     child_live: bool,
     exit_code: i32,
@@ -572,6 +579,10 @@ impl SharedState {
         let event_id = self.journal.append(event, 1, 0, payload)?;
         self.journal.flush()?;
         Ok(event_id)
+    }
+
+    fn append_durable(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
+        Ok(self.journal.append_durable(event, 1, 0, payload)?)
     }
 
     fn persist_metadata(&self) -> Result<(), HostError> {
@@ -652,94 +663,262 @@ fn serve_connection(
 }
 
 fn handle_request(frame: &OwnedControlFrame, state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
-    if frame.payload_schema_version != 1 {
-        return response_error(ERROR_UNSUPPORTED_SCHEMA, "unsupported payload schema");
-    }
     match frame.message_type {
-        control_message::INPUT => handle_input(&frame.payload, state),
-        control_message::RESIZE => handle_resize(&frame.payload, state),
-        control_message::SIGNAL => handle_signal(&frame.payload, state),
-        control_message::TERMINATE => handle_terminate(&frame.payload, state),
-        control_message::STATUS => handle_status(&frame.payload, state),
-        control_message::APPEND_EVENT => response_error(
-            ERROR_UNSUPPORTED_MESSAGE,
-            "ordered harness event ingress is not enabled yet",
-        ),
+        control_message::INPUT
+        | control_message::RESIZE
+        | control_message::SIGNAL
+        | control_message::TERMINATE => {
+            if frame.payload_schema_version != 2 {
+                response_error(ERROR_UNSUPPORTED_SCHEMA, "operation controls require schema 2")
+            } else {
+                handle_operation(frame, state)
+            }
+        }
+        control_message::STATUS => {
+            if frame.payload_schema_version != 1 {
+                response_error(ERROR_UNSUPPORTED_SCHEMA, "STATUS requires schema 1")
+            } else {
+                handle_status(&frame.payload, state)
+            }
+        }
+        control_message::ACK_JOURNAL => {
+            if frame.payload_schema_version != 1 {
+                response_error(ERROR_UNSUPPORTED_SCHEMA, "ACK_JOURNAL requires schema 1")
+            } else {
+                handle_journal_acknowledgement(&frame.payload, state)
+            }
+        }
+        control_message::APPEND_EVENT => {
+            if frame.payload_schema_version != 1 {
+                response_error(ERROR_UNSUPPORTED_SCHEMA, "APPEND_EVENT requires schema 1")
+            } else {
+                response_error(
+                    ERROR_UNSUPPORTED_MESSAGE,
+                    "ordered harness event ingress is not enabled yet",
+                )
+            }
+        }
         _ => response_error(ERROR_UNSUPPORTED_MESSAGE, "unsupported control message"),
     }
 }
 
-fn handle_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
-    if payload.len() < 16 {
-        return response_error(
-            ERROR_INVALID_REQUEST,
-            "INPUT payload is shorter than its UUID",
-        );
-    }
-    let input_id: [u8; 16] = payload[..16].try_into().unwrap();
-    let input_order = match lock_state(state) {
-        Ok(state) => Arc::clone(&state.input_order),
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
+fn handle_operation(
+    frame: &OwnedControlFrame,
+    shared: &Arc<Mutex<SharedState>>,
+) -> (u16, Vec<u8>) {
+    let operation = match protocol::decode_operation_control_payload(
+        frame.message_type,
+        &frame.payload,
+    ) {
+        Ok(operation) => operation,
+        Err(error) => return response_error(ERROR_INVALID_REQUEST, &error.to_string()),
     };
-    let _input_guard = match input_order.lock() {
+    if frame.message_type == control_message::SIGNAL
+        && let Err(detail) = parse_signal(&operation.effect)
+    {
+        return response_error(ERROR_INVALID_REQUEST, detail);
+    }
+    let identity = OperationIdentity {
+        operation_sequence: operation.operation_sequence,
+        command_id: operation.command_id.clone(),
+        command_envelope: operation.command_envelope.clone(),
+        message_type: frame.message_type,
+        effect: operation.effect.clone(),
+    };
+    let operation_order = {
+        let mut state = match lock_state(shared) {
+            Ok(state) => state,
+            Err(error) => return response_error(ERROR_IO, &error.to_string()),
+        };
+        match state.operations.admit(identity) {
+            Admission::New => {
+                if !state.child_live {
+                    state
+                        .operations
+                        .cancel_reservation(operation.operation_sequence);
+                    return response_error(ERROR_INVALID_STATE, "child process has exited");
+                }
+                Arc::clone(&state.operation_order)
+            }
+            Admission::Pending => {
+                return response_error(ERROR_INVALID_STATE, "operation is still in progress");
+            }
+            Admission::Completed { result_event_id } => {
+                return (
+                    control_message::ACCEPTED,
+                    host::event_id_payload(result_event_id).to_vec(),
+                );
+            }
+            Admission::Conflict => {
+                return response_error(
+                    ERROR_INVALID_REQUEST,
+                    "operation sequence was reused with a different identity",
+                );
+            }
+            Admission::Stale => {
+                return response_error(ERROR_INVALID_REQUEST, "operation sequence is stale");
+            }
+            Admission::Full => {
+                return response_error(ERROR_POLICY, "unacknowledged operation capacity is full");
+            }
+        }
+    };
+    let _operation_guard = match operation_order.lock() {
         Ok(guard) => guard,
-        Err(_) => return response_error(ERROR_IO, "input order mutex is poisoned"),
+        Err(_) => {
+            cancel_operation_reservation(shared, operation.operation_sequence);
+            return response_error(ERROR_IO, "operation order mutex is poisoned");
+        }
     };
-    let mut state = match lock_state(state) {
-        Ok(state) => state,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
-    if !state.child_live {
-        return response_error(ERROR_INVALID_STATE, "child process has exited");
-    }
-    if let Some(event_id) = state.accepted_inputs.get(&input_id) {
-        return (
-            control_message::DUPLICATE,
-            host::event_id_payload(*event_id).to_vec(),
+    let pre_effect_failure = {
+        let mut state = match lock_state(shared) {
+            Ok(state) => state,
+            Err(error) => {
+                cancel_operation_reservation(shared, operation.operation_sequence);
+                return response_error(ERROR_IO, &error.to_string());
+            }
+        };
+        if !state.child_live {
+            state
+                .operations
+                .cancel_reservation(operation.operation_sequence);
+            return response_error(ERROR_INVALID_STATE, "child process has exited");
+        }
+        if state
+            .operations
+            .accepted_sequence_high_watermark()
+            .is_some_and(|watermark| operation.operation_sequence <= watermark)
+        {
+            state
+                .operations
+                .cancel_reservation(operation.operation_sequence);
+            return response_error(ERROR_INVALID_REQUEST, "operation sequence is stale");
+        }
+        let payload = command_accepted_payload(
+            operation.operation_sequence,
+            &operation.command_envelope,
         );
-    }
-    let event_id = match state.append(event_type::PTY_INPUT, payload) {
-        Ok(event_id) => event_id,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
+        if let Err(error) = state.append_durable(event_type::COMMAND_ACCEPTED, &payload) {
+            state
+                .operations
+                .cancel_reservation(operation.operation_sequence);
+            return response_error(ERROR_IO, &error.to_string());
+        }
+        if !state.operations.mark_pending(operation.operation_sequence) {
+            return response_error(ERROR_IO, "operation ledger transition failed");
+        }
+        None
     };
-    state.accepted_inputs.insert(input_id, event_id);
-    let mut master = match state.master.try_clone() {
-        Ok(master) => master,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
+
+    let effect_result = match pre_effect_failure {
+        Some(error) => Err(error),
+        None => execute_operation_effect(frame.message_type, &operation.effect, shared),
     };
-    drop(state);
-    if let Err(error) = master.write_all(&payload[16..]) {
-        return response_error(ERROR_IO, &error.to_string());
-    }
+    let (outcome, detail) = match effect_result {
+        Ok(()) => (protocol::CommandOutcome::Succeeded, String::new()),
+        Err(detail) => (protocol::CommandOutcome::Failed, bounded_result_detail(&detail)),
+    };
+    let result_event_id = {
+        let mut state = match lock_state(shared) {
+            Ok(state) => state,
+            Err(error) => return response_error(ERROR_IO, &error.to_string()),
+        };
+        let payload = command_result_payload(
+            operation.operation_sequence,
+            &operation.command_id,
+            outcome,
+            &detail,
+        );
+        let event_id = match state.append_durable(event_type::COMMAND_RESULT, &payload) {
+            Ok(event_id) => event_id,
+            Err(error) => return response_error(ERROR_IO, &error.to_string()),
+        };
+        if !state.operations.complete(operation.operation_sequence, event_id) {
+            return response_error(ERROR_IO, "operation ledger completion failed");
+        }
+        event_id
+    };
     (
         control_message::ACCEPTED,
-        host::event_id_payload(event_id).to_vec(),
+        host::event_id_payload(result_event_id).to_vec(),
     )
 }
 
-fn handle_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
-    if payload.len() != 8 {
-        return response_error(ERROR_INVALID_REQUEST, "RESIZE payload must be 8 bytes");
+fn cancel_operation_reservation(state: &Arc<Mutex<SharedState>>, operation_sequence: u64) {
+    if let Ok(mut state) = lock_state(state) {
+        state.operations.cancel_reservation(operation_sequence);
     }
+}
+
+fn command_accepted_payload(operation_sequence: u64, command_envelope: &[u8]) -> Vec<u8> {
+    [operation_sequence.to_le_bytes().as_slice(), command_envelope].concat()
+}
+
+fn command_result_payload(
+    operation_sequence: u64,
+    command_id: &[u8],
+    outcome: protocol::CommandOutcome,
+    detail: &str,
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(11 + command_id.len() + detail.len());
+    payload.extend_from_slice(&operation_sequence.to_le_bytes());
+    payload.extend_from_slice(&(command_id.len() as u16).to_le_bytes());
+    payload.extend_from_slice(command_id);
+    payload.push(outcome.wire_code() as u8);
+    payload.extend_from_slice(detail.as_bytes());
+    payload
+}
+
+fn bounded_result_detail(detail: &str) -> String {
+    let mut end = detail.len().min(4096);
+    while !detail.is_char_boundary(end) {
+        end -= 1;
+    }
+    detail[..end].to_owned()
+}
+
+fn execute_operation_effect(
+    message_type: u16,
+    effect: &[u8],
+    state: &Arc<Mutex<SharedState>>,
+) -> Result<(), String> {
+    match message_type {
+        control_message::INPUT => apply_input(effect, state),
+        control_message::RESIZE => apply_resize(effect, state),
+        control_message::SIGNAL => {
+            let (kind, signal) = parse_signal(effect).map_err(str::to_owned)?;
+            apply_foreground_signal(kind, signal, state)
+        }
+        control_message::TERMINATE => apply_terminate(effect, state),
+        _ => Err("unsupported operation control".to_owned()),
+    }
+}
+
+fn apply_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), String> {
+    let mut state = lock_state(state).map_err(|error| error.to_string())?;
+    if !state.child_live {
+        return Err("child process has exited".to_owned());
+    }
+    state
+        .append(event_type::PTY_INPUT, payload)
+        .map_err(|error| error.to_string())?;
+    let mut master = state.master.try_clone().map_err(|error| error.to_string())?;
+    drop(state);
+    master
+        .write_all(&payload[16..])
+        .map_err(|error| error.to_string())
+}
+
+fn apply_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), String> {
     let cols = host::u32_at(&payload[0..4]);
     let rows = host::u32_at(&payload[4..8]);
-    if cols == 0 || cols > u32::from(u16::MAX) || rows == 0 || rows > u32::from(u16::MAX) {
-        return response_error(
-            ERROR_INVALID_REQUEST,
-            "terminal dimensions are out of range",
-        );
-    }
-    let mut state = match lock_state(state) {
-        Ok(state) => state,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
+    let mut state = lock_state(state).map_err(|error| error.to_string())?;
     if !state.child_live {
-        return response_error(ERROR_INVALID_STATE, "child process has exited");
+        return Err("child process has exited".to_owned());
     }
-    let event_id = match state.append(event_type::PTY_RESIZE, payload) {
-        Ok(event_id) => event_id,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
+    state
+        .append(event_type::PTY_RESIZE, payload)
+        .map_err(|error| error.to_string())?;
     let dimensions = libc::winsize {
         ws_row: rows as u16,
         ws_col: cols as u16,
@@ -747,52 +926,55 @@ fn handle_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u
         ws_ypixel: 0,
     };
     if unsafe { libc::ioctl(state.master.as_raw_fd(), libc::TIOCSWINSZ, &dimensions) } != 0 {
-        return response_error(ERROR_IO, &io::Error::last_os_error().to_string());
+        return Err(io::Error::last_os_error().to_string());
     }
     state.metadata.current_cols = cols as u16;
     state.metadata.current_rows = rows as u16;
-    if let Err(error) = state.persist_metadata() {
-        return response_error(ERROR_IO, &error.to_string());
-    }
-    (
-        control_message::ACCEPTED,
-        host::event_id_payload(event_id).to_vec(),
-    )
+    state.persist_metadata().map_err(|error| error.to_string())
 }
 
-fn handle_signal(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
-    let (kind, signal) = match parse_signal(payload) {
-        Ok(signal) => signal,
-        Err(detail) => return response_error(ERROR_INVALID_REQUEST, detail),
-    };
-    apply_foreground_signal(kind, signal, state)
-}
-
-fn handle_terminate(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
-    if payload.len() != 8 {
-        return response_error(ERROR_INVALID_REQUEST, "TERMINATE payload must be 8 bytes");
-    }
+fn apply_terminate(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), String> {
     let mode = u16::from_le_bytes(payload[0..2].try_into().unwrap());
-    let reserved = u16::from_le_bytes(payload[2..4].try_into().unwrap());
-    if reserved != 0 || mode > 1 {
-        return response_error(
-            ERROR_INVALID_REQUEST,
-            "invalid TERMINATE mode or reserved field",
-        );
-    }
     if mode == 1 {
         return apply_descendant_signal(3, libc::SIGKILL, state);
     }
     let grace_millis = host::u32_at(&payload[4..8]);
-    let response = apply_descendant_signal(2, libc::SIGTERM, state);
-    if response.0 == control_message::ACCEPTED {
-        let state = Arc::clone(state);
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(u64::from(grace_millis)));
-            let _ = apply_descendant_signal(3, libc::SIGKILL, &state);
-        });
+    apply_descendant_signal(2, libc::SIGTERM, state)?;
+    let state = Arc::clone(state);
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(u64::from(grace_millis)));
+        let _ = apply_descendant_signal(3, libc::SIGKILL, &state);
+    });
+    Ok(())
+}
+
+fn handle_journal_acknowledgement(
+    payload: &[u8],
+    shared: &Arc<Mutex<SharedState>>,
+) -> (u16, Vec<u8>) {
+    let requested = match protocol::decode_journal_ack_payload(payload) {
+        Ok(event_id) => event_id,
+        Err(error) => return response_error(ERROR_INVALID_REQUEST, &error.to_string()),
+    };
+    let mut state = match lock_state(shared) {
+        Ok(state) => state,
+        Err(error) => return response_error(ERROR_IO, &error.to_string()),
+    };
+    if let Err(error) = validate_received_watermark(requested, state.journal.latest_event_id()) {
+        return response_error(ERROR_INVALID_REQUEST, &error.to_string());
     }
-    response
+    let durable = match state.acknowledgement.advance(requested) {
+        Ok(event_id) => event_id,
+        Err(error) => return response_error(ERROR_IO, &error.to_string()),
+    };
+    state.operations.acknowledge(durable);
+    if let Err(error) = state.journal.apply_retention_through(durable) {
+        eprintln!("session-host: journal retention will be retried: {error}");
+    }
+    (
+        control_message::ACCEPTED,
+        host::event_id_payload(durable).to_vec(),
+    )
 }
 
 fn handle_status(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
@@ -827,59 +1009,44 @@ fn apply_foreground_signal(
     kind: u16,
     signal: libc::c_int,
     state: &Arc<Mutex<SharedState>>,
-) -> (u16, Vec<u8>) {
-    let mut state = match lock_state(state) {
-        Ok(state) => state,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
+) -> Result<(), String> {
+    let mut state = lock_state(state).map_err(|error| error.to_string())?;
     if !state.child_live {
-        return response_error(ERROR_INVALID_STATE, "child process has exited");
+        return Err("child process has exited".to_owned());
     }
     let payload = host::signal_payload(kind, signal);
-    let event_id = match state.append(event_type::SIGNAL, &payload) {
-        Ok(event_id) => event_id,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
+    state
+        .append(event_type::SIGNAL, &payload)
+        .map_err(|error| error.to_string())?;
     let foreground_group = unsafe { libc::tcgetpgrp(state.master.as_raw_fd()) };
     if foreground_group < 0 {
-        return response_error(ERROR_IO, &io::Error::last_os_error().to_string());
+        return Err(io::Error::last_os_error().to_string());
     }
     drop(state);
     if unsafe { libc::kill(-foreground_group, signal) } != 0 {
-        return response_error(ERROR_IO, &io::Error::last_os_error().to_string());
+        return Err(io::Error::last_os_error().to_string());
     }
-    (
-        control_message::ACCEPTED,
-        host::event_id_payload(event_id).to_vec(),
-    )
+    Ok(())
 }
 
 fn apply_descendant_signal(
     kind: u16,
     signal: libc::c_int,
     state: &Arc<Mutex<SharedState>>,
-) -> (u16, Vec<u8>) {
-    let mut state = match lock_state(state) {
-        Ok(state) => state,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
+) -> Result<(), String> {
+    let mut state = lock_state(state).map_err(|error| error.to_string())?;
     if !state.child_live {
-        return response_error(ERROR_INVALID_STATE, "child process has exited");
+        return Err("child process has exited".to_owned());
     }
     let payload = host::signal_payload(kind, signal);
-    let event_id = match state.append(event_type::SIGNAL, &payload) {
-        Ok(event_id) => event_id,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
+    state
+        .append(event_type::SIGNAL, &payload)
+        .map_err(|error| error.to_string())?;
     let descendants = Arc::clone(&state.descendants);
     drop(state);
-    if let Err(error) = lock_descendants(&descendants).and_then(|mut tracker| tracker.signal(signal)) {
-        return response_error(ERROR_IO, &error.to_string());
-    }
-    (
-        control_message::ACCEPTED,
-        host::event_id_payload(event_id).to_vec(),
-    )
+    lock_descendants(&descendants)
+        .and_then(|mut tracker| tracker.signal(signal))
+        .map_err(|error| error.to_string())
 }
 
 fn parse_signal(payload: &[u8]) -> Result<(u16, libc::c_int), &'static str> {

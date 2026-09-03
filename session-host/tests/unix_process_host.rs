@@ -1,7 +1,7 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 #[cfg(target_os = "linux")]
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
@@ -11,10 +11,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use orion_session_host::host::{self, OwnedControlFrame};
+use orion_session_host::host::{self, ERROR_INVALID_REQUEST, ERROR_POLICY, OwnedControlFrame};
 use orion_session_host::journal::{self, Metadata};
+use orion_session_host::journal_acknowledgement::STATE_FILE_NAME;
 use orion_session_host::protocol::{
-    self, MAX_PAYLOAD_LENGTH, control_message, event_type,
+    self, ControlFrame, control_message, event_type,
 };
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -324,7 +325,7 @@ fn bounds_compresses_and_replays_the_session_journal() {
 }
 
 #[test]
-fn orders_control_commands_and_deduplicates_input_after_reconnect() {
+fn orders_idempotent_controls_and_reuses_results_after_reconnect() {
     let directory = temporary_directory("control");
     let mut host = HostGuard::spawn(
         directory,
@@ -358,28 +359,92 @@ fn orders_control_commands_and_deduplicates_input_after_reconnect() {
     );
 
     let resize = protocol::pty_resize_payload(101, 37);
-    let resized = request(&mut first, control_message::RESIZE, 2, &resize);
+    let resized = operation_request(
+        &mut first,
+        control_message::RESIZE,
+        2,
+        1,
+        b"resize-1",
+        b"server-envelope-resize",
+        &resize,
+    );
     assert_eq!(resized.message_type, control_message::ACCEPTED);
-    let resize_event_id = u64_at(&resized.payload);
+    let resize_result_event_id = u64_at(&resized.payload);
 
     let input_id = [0x4a; 16];
     let input = protocol::pty_input_payload(input_id, b"hello\n").unwrap();
-    let accepted = request(&mut first, control_message::INPUT, 3, &input);
+    let accepted = operation_request(
+        &mut first,
+        control_message::INPUT,
+        3,
+        2,
+        b"input-2",
+        b"server-envelope-input",
+        &input,
+    );
     assert_eq!(accepted.message_type, control_message::ACCEPTED);
-    let input_event_id = u64_at(&accepted.payload);
-    assert!(resize_event_id < input_event_id);
+    let input_result_event_id = u64_at(&accepted.payload);
+    assert!(resize_result_event_id < input_result_event_id);
     drop(first);
 
     let mut reconnected = connect(host.directory());
+    let duplicate = operation_request(
+        &mut reconnected,
+        control_message::INPUT,
+        4,
+        2,
+        b"input-2",
+        b"server-envelope-input",
+        &input,
+    );
+    assert_eq!(duplicate.message_type, control_message::ACCEPTED);
+    assert_eq!(u64_at(&duplicate.payload), input_result_event_id);
+
     let changed_retry = protocol::pty_input_payload(input_id, b"second\n").unwrap();
-    let duplicate = request(&mut reconnected, control_message::INPUT, 4, &changed_retry);
-    assert_eq!(duplicate.message_type, control_message::DUPLICATE);
-    assert_eq!(u64_at(&duplicate.payload), input_event_id);
+    let conflict = operation_request(
+        &mut reconnected,
+        control_message::INPUT,
+        5,
+        2,
+        b"input-2",
+        b"server-envelope-input",
+        &changed_retry,
+    );
+    assert_error(&conflict, ERROR_INVALID_REQUEST);
+    let command_id_conflict = operation_request(
+        &mut reconnected,
+        control_message::INPUT,
+        6,
+        2,
+        b"input-2-changed",
+        b"server-envelope-input",
+        &input,
+    );
+    assert_error(&command_id_conflict, ERROR_INVALID_REQUEST);
+    let envelope_conflict = operation_request(
+        &mut reconnected,
+        control_message::INPUT,
+        7,
+        2,
+        b"input-2",
+        b"server-envelope-input-changed",
+        &input,
+    );
+    assert_error(&envelope_conflict, ERROR_INVALID_REQUEST);
 
     wait_for_output(host.directory(), b"GOT:hello");
     let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
-    let terminated = request(&mut reconnected, control_message::TERMINATE, 5, &terminate);
+    let terminated = operation_request(
+        &mut reconnected,
+        control_message::TERMINATE,
+        8,
+        5,
+        b"terminate-5",
+        b"server-envelope-terminate",
+        &terminate,
+    );
     assert_eq!(terminated.message_type, control_message::ACCEPTED);
+    let terminate_result_event_id = u64_at(&terminated.payload);
     drop(reconnected);
 
     let status = host.wait();
@@ -399,6 +464,29 @@ fn orders_control_commands_and_deduplicates_input_after_reconnect() {
         .unwrap();
     assert_eq!(resize_event.payload, resize);
     assert!(resize_event.event_id < inputs[0].event_id);
+    assert_command_triplet(&result.events, event_type::PTY_RESIZE, resize_result_event_id);
+    assert_command_triplet(&result.events, event_type::PTY_INPUT, input_result_event_id);
+    assert_command_triplet(
+        &result.events,
+        event_type::SIGNAL,
+        terminate_result_event_id,
+    );
+    assert_eq!(
+        result
+            .events
+            .iter()
+            .filter(|event| event.event_type == event_type::COMMAND_ACCEPTED)
+            .count(),
+        3,
+    );
+    assert_eq!(
+        result
+            .events
+            .iter()
+            .filter(|event| event.event_type == event_type::COMMAND_RESULT)
+            .count(),
+        3,
+    );
     assert!(
         result
             .events
@@ -437,12 +525,28 @@ fn leaves_metadata_unchanged_across_output_input_and_signal_events() {
     let metadata_before = fs::read(host.directory().join("metadata")).unwrap();
 
     let input = protocol::pty_input_payload([0x6d; 16], b"hello\n").unwrap();
-    let accepted = request(&mut stream, control_message::INPUT, 2, &input);
+    let accepted = operation_request(
+        &mut stream,
+        control_message::INPUT,
+        2,
+        1,
+        b"metadata-input",
+        b"server-envelope-metadata-input",
+        &input,
+    );
     assert_eq!(accepted.message_type, control_message::ACCEPTED);
     wait_for_output(host.directory(), b"GOT:hello");
 
     let signal = host::signal_payload(1, -1);
-    let signalled = request(&mut stream, control_message::SIGNAL, 3, &signal);
+    let signalled = operation_request(
+        &mut stream,
+        control_message::SIGNAL,
+        3,
+        2,
+        b"metadata-signal",
+        b"server-envelope-metadata-signal",
+        &signal,
+    );
     assert_eq!(signalled.message_type, control_message::ACCEPTED);
     drop(stream);
 
@@ -455,6 +559,182 @@ fn leaves_metadata_unchanged_across_output_input_and_signal_events() {
     assert!(result.events.iter().any(|event| event.event_type == event_type::PTY_INPUT));
     assert!(result.events.iter().any(|event| event.event_type == event_type::PTY_OUTPUT));
     assert!(result.events.iter().any(|event| event.event_type == event_type::SIGNAL));
+}
+
+#[test]
+fn completed_retry_returns_its_result_after_the_child_exits() {
+    let directory = temporary_directory("completed-retry-after-exit");
+    let mut host = HostGuard::spawn(
+        directory,
+        &["/bin/sh", "-c", "sleep 30"],
+        "xterm-256color",
+        80,
+        24,
+    );
+    let mut stream = connect(host.directory());
+    let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
+    let first = operation_request(
+        &mut stream,
+        control_message::TERMINATE,
+        1,
+        1,
+        b"terminate-after-exit",
+        b"server-envelope-terminate-after-exit",
+        &terminate,
+    );
+    assert_eq!(first.message_type, control_message::ACCEPTED);
+    let result_event_id = u64_at(&first.payload);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let status = request(&mut stream, control_message::STATUS, 2, &[]);
+        assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
+        if u16_at(&status.payload[2..4]) & 2 == 0 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "child remained live after TERMINATE");
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    let retry = operation_request(
+        &mut stream,
+        control_message::TERMINATE,
+        3,
+        1,
+        b"terminate-after-exit",
+        b"server-envelope-terminate-after-exit",
+        &terminate,
+    );
+    assert_eq!(retry.message_type, control_message::ACCEPTED);
+    assert_eq!(u64_at(&retry.payload), result_event_id);
+    drop(stream);
+    assert!(host.wait().success());
+}
+
+#[test]
+fn durable_acknowledgement_controls_retention_and_ledger_capacity() {
+    let directory = temporary_directory("control-ack");
+    let mut host = HostGuard::spawn_with_options(
+        directory,
+        &[
+            "--journal-segment-bytes",
+            "1",
+            "--journal-max-bytes",
+            "1",
+            "--max-unacknowledged-operations",
+            "1",
+        ],
+        &["/bin/sh", "-c", "printf READY; sleep 30"],
+        "xterm-256color",
+        80,
+        24,
+    );
+    wait_for_output(host.directory(), b"READY");
+
+    let mut stream = connect(host.directory());
+    let resize = protocol::pty_resize_payload(90, 30);
+    let accepted = operation_request(
+        &mut stream,
+        control_message::RESIZE,
+        1,
+        10,
+        b"resize-10",
+        b"server-envelope-resize-10",
+        &resize,
+    );
+    assert_eq!(accepted.message_type, control_message::ACCEPTED);
+    let first_result_id = u64_at(&accepted.payload);
+
+    let full = operation_request(
+        &mut stream,
+        control_message::RESIZE,
+        2,
+        11,
+        b"resize-11",
+        b"server-envelope-resize-11",
+        &resize,
+    );
+    assert_error(&full, ERROR_POLICY);
+
+    let schema_one = request(&mut stream, control_message::RESIZE, 3, &resize);
+    assert_eq!(schema_one.message_type, control_message::ERROR);
+
+    let zero = request(
+        &mut stream,
+        control_message::ACK_JOURNAL,
+        4,
+        &0_u64.to_le_bytes(),
+    );
+    assert_error(&zero, ERROR_INVALID_REQUEST);
+    let future = request(
+        &mut stream,
+        control_message::ACK_JOURNAL,
+        5,
+        &(first_result_id + 1).to_le_bytes(),
+    );
+    assert_error(&future, ERROR_INVALID_REQUEST);
+
+    wait_for_compressed_segment(host.directory());
+    let segment_count_before = journal_file_count(host.directory());
+    assert!(segment_count_before > 1);
+
+    let acknowledged = request(
+        &mut stream,
+        control_message::ACK_JOURNAL,
+        6,
+        &first_result_id.to_le_bytes(),
+    );
+    assert_eq!(acknowledged.message_type, control_message::ACCEPTED);
+    assert_eq!(u64_at(&acknowledged.payload), first_result_id);
+    assert_eq!(
+        fs::read_to_string(host.directory().join(STATE_FILE_NAME)).unwrap(),
+        format!(r#"{{"stateVersion":1,"acknowledgedEventId":{first_result_id}}}"#),
+    );
+    assert!(journal_file_count(host.directory()) < segment_count_before);
+
+    let lower = request(
+        &mut stream,
+        control_message::ACK_JOURNAL,
+        7,
+        &(first_result_id - 1).to_le_bytes(),
+    );
+    assert_eq!(lower.message_type, control_message::ACCEPTED);
+    assert_eq!(u64_at(&lower.payload), first_result_id);
+
+    let stale = operation_request(
+        &mut stream,
+        control_message::RESIZE,
+        8,
+        9,
+        b"resize-9",
+        b"server-envelope-resize-9",
+        &resize,
+    );
+    assert_error(&stale, ERROR_INVALID_REQUEST);
+    let admitted = operation_request(
+        &mut stream,
+        control_message::RESIZE,
+        9,
+        11,
+        b"resize-11",
+        b"server-envelope-resize-11",
+        &resize,
+    );
+    assert_eq!(admitted.message_type, control_message::ACCEPTED);
+
+    let result = journal::read_after(host.directory(), first_result_id).unwrap();
+    assert!(
+        result
+            .events
+            .iter()
+            .all(|event| event.event_type != control_message::ACK_JOURNAL)
+    );
+    let metadata = fs::read_to_string(host.directory().join("metadata")).unwrap();
+    assert!(!metadata.contains("acknowledg"));
+
+    drop(stream);
+    kill_recorded_child(host.directory());
+    assert!(host.wait().success());
 }
 
 #[test]
@@ -491,7 +771,15 @@ fn keeps_detached_pty_descendant_controllable_after_its_leader_exits() {
     assert_eq!(u16_at(&status.payload[2..4]) & 3, 3);
 
     let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
-    let terminated = request(&mut stream, control_message::TERMINATE, 2, &terminate);
+    let terminated = operation_request(
+        &mut stream,
+        control_message::TERMINATE,
+        2,
+        1,
+        b"terminate-orphan",
+        b"server-envelope-terminate-orphan",
+        &terminate,
+    );
     assert_eq!(terminated.message_type, control_message::ACCEPTED);
     drop(stream);
     assert!(host.wait().success());
@@ -515,20 +803,31 @@ fn sends_interactive_signals_to_the_foreground_process_group() {
 
     let mut stream = connect(host.directory());
     let signal = host::signal_payload(1, -1);
-    let response = request(&mut stream, control_message::SIGNAL, 1, &signal);
+    let response = operation_request(
+        &mut stream,
+        control_message::SIGNAL,
+        1,
+        1,
+        b"signal-1",
+        b"server-envelope-signal",
+        &signal,
+    );
     assert_eq!(response.message_type, control_message::ACCEPTED);
+    let result_event_id = u64_at(&response.payload);
     drop(stream);
 
     let status = host.wait_with_timeout(Duration::from_secs(2));
     assert!(status.success(), "session-host exited with {status}");
+    let result = journal::read(host.directory(), 0).unwrap();
+    assert_command_triplet(&result.events, event_type::SIGNAL, result_event_id);
 }
 
 #[test]
-fn blocked_pty_input_does_not_block_status_or_termination() {
+fn blocked_pty_input_does_not_block_status_ack_or_matching_retry() {
     let directory = temporary_directory("blocked-input");
     let mut host = HostGuard::spawn(
         directory,
-        &["/bin/sh", "-c", "printf READY; sleep 30"],
+        &["/bin/sh", "-c", "stty raw -echo; printf READY; kill -STOP $$"],
         "xterm-256color",
         80,
         24,
@@ -540,10 +839,18 @@ fn blocked_pty_input_does_not_block_status_or_termination() {
         let mut stream = connect(&input_directory);
         let input = protocol::pty_input_payload(
             [0x62; 16],
-            &vec![b'x'; MAX_PAYLOAD_LENGTH - 16],
+            &vec![b'x'; 1024 * 1024],
         )
         .unwrap();
-        request(&mut stream, control_message::INPUT, 1, &input)
+        operation_request(
+            &mut stream,
+            control_message::INPUT,
+            1,
+            1,
+            b"blocked-input",
+            b"server-envelope-blocked-input",
+            &input,
+        )
     });
     wait_for_event(host.directory(), event_type::PTY_INPUT);
 
@@ -551,13 +858,45 @@ fn blocked_pty_input_does_not_block_status_or_termination() {
     stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let status = request(&mut stream, control_message::STATUS, 2, &[]);
     assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
+    let latest_event_id = u64_at(&status.payload[36..44]);
+    let acknowledged = request(
+        &mut stream,
+        control_message::ACK_JOURNAL,
+        3,
+        &latest_event_id.to_le_bytes(),
+    );
+    assert_eq!(acknowledged.message_type, control_message::ACCEPTED);
 
-    let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
-    let terminated = request(&mut stream, control_message::TERMINATE, 3, &terminate);
-    assert_eq!(terminated.message_type, control_message::ACCEPTED);
+    let input = protocol::pty_input_payload(
+        [0x62; 16],
+        &vec![b'x'; 1024 * 1024],
+    )
+    .unwrap();
+    let pending = operation_request(
+        &mut stream,
+        control_message::INPUT,
+        4,
+        1,
+        b"blocked-input",
+        b"server-envelope-blocked-input",
+        &input,
+    );
+    assert_eq!(pending.message_type, control_message::ERROR);
     drop(stream);
-    let _ = input_thread.join().unwrap();
+    kill_recorded_child(host.directory());
+    let completed = input_thread.join().unwrap();
+    assert_eq!(completed.message_type, control_message::ACCEPTED);
+    let result_event_id = u64_at(&completed.payload);
     assert!(host.wait().success());
+    let result = journal::read_after(host.directory(), latest_event_id).unwrap();
+    let command_result = result
+        .events
+        .iter()
+        .find(|event| event.event_id == result_event_id)
+        .unwrap();
+    assert_eq!(command_result.event_type, event_type::COMMAND_RESULT);
+    let outcome_index = 10 + usize::from(u16_at(&command_result.payload[8..10]));
+    assert_eq!(command_result.payload[outcome_index], 2);
 }
 
 #[test]
@@ -618,7 +957,15 @@ fn remains_available_after_the_launching_process_exits() {
     wait_for_output(directory.path(), b"READY");
     let mut stream = connect(directory.path());
     let input = protocol::pty_input_payload([0x73; 16], b"yes\n").unwrap();
-    let response = request(&mut stream, control_message::INPUT, 1, &input);
+    let response = operation_request(
+        &mut stream,
+        control_message::INPUT,
+        1,
+        1,
+        b"parent-input",
+        b"server-envelope-parent-input",
+        &input,
+    );
     assert_eq!(response.message_type, control_message::ACCEPTED);
     drop(stream);
 
@@ -663,7 +1010,15 @@ fn rejects_a_second_host_without_unlinking_the_live_endpoint() {
     let status = request(&mut stream, control_message::STATUS, 1, &[]);
     assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
     let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
-    let terminated = request(&mut stream, control_message::TERMINATE, 2, &terminate);
+    let terminated = operation_request(
+        &mut stream,
+        control_message::TERMINATE,
+        2,
+        1,
+        b"duplicate-host-terminate",
+        b"server-envelope-duplicate-host-terminate",
+        &terminate,
+    );
     assert_eq!(terminated.message_type, control_message::ACCEPTED);
     drop(stream);
     assert!(host.wait().success());
@@ -764,10 +1119,13 @@ impl Drop for HostGuard {
         }
         if let Ok(mut stream) = UnixStream::connect(self.directory.path().join("control.sock")) {
             let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
-            let _ = request(
+            let _ = operation_request(
                 &mut stream,
                 control_message::TERMINATE,
                 u64::MAX,
+                u64::MAX,
+                b"test-cleanup",
+                b"server-envelope-test-cleanup",
                 &terminate,
             );
             thread::sleep(Duration::from_millis(50));
@@ -897,7 +1255,45 @@ fn request(
     request_id: u64,
     payload: &[u8],
 ) -> OwnedControlFrame {
-    host::write_control_frame(stream, message_type, request_id, payload).unwrap_or_else(|error| {
+    request_with_schema(stream, message_type, 1, request_id, payload)
+}
+
+fn operation_request(
+    stream: &mut UnixStream,
+    message_type: u16,
+    request_id: u64,
+    operation_sequence: u64,
+    command_id: &[u8],
+    command_envelope: &[u8],
+    effect: &[u8],
+) -> OwnedControlFrame {
+    let payload = protocol::encode_operation_control_payload(
+        message_type,
+        operation_sequence,
+        command_id,
+        command_envelope,
+        effect,
+    )
+    .unwrap();
+    request_with_schema(stream, message_type, 2, request_id, &payload)
+}
+
+fn request_with_schema(
+    stream: &mut UnixStream,
+    message_type: u16,
+    payload_schema_version: u16,
+    request_id: u64,
+    payload: &[u8],
+) -> OwnedControlFrame {
+    let bytes = protocol::encode_control_frame(ControlFrame {
+        message_type,
+        payload_schema_version,
+        flags: 0,
+        request_id,
+        payload,
+    })
+    .unwrap();
+    stream.write_all(&bytes).unwrap_or_else(|error| {
         panic!("cannot write control message {message_type:#06x} request {request_id}: {error}")
     });
     host::read_control_frame(stream)
@@ -907,6 +1303,27 @@ fn request(
         .unwrap_or_else(|| {
             panic!("control connection closed for message {message_type:#06x} request {request_id}")
         })
+}
+
+fn assert_error(frame: &OwnedControlFrame, code: u32) {
+    assert_eq!(frame.message_type, control_message::ERROR);
+    assert!(frame.payload.len() >= 4);
+    assert_eq!(u32_at(&frame.payload[..4]), code);
+}
+
+fn assert_command_triplet(
+    events: &[journal::JournalEvent],
+    effect_type: u16,
+    result_event_id: u64,
+) {
+    let result_index = events
+        .iter()
+        .position(|event| event.event_id == result_event_id)
+        .unwrap();
+    assert!(result_index >= 2);
+    assert_eq!(events[result_index - 2].event_type, event_type::COMMAND_ACCEPTED);
+    assert_eq!(events[result_index - 1].event_type, effect_type);
+    assert_eq!(events[result_index].event_type, event_type::COMMAND_RESULT);
 }
 
 fn wait_for_output(directory: &Path, expected: &[u8]) {
@@ -941,6 +1358,19 @@ fn wait_for_event(directory: &Path, expected: u16) {
     }
 }
 
+fn wait_for_compressed_segment(directory: &Path) {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        if !journal_segment_numbers(directory).0.is_empty() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for compressed journal segment"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
 fn wait_for_process_exit(pid: i32) {
     let deadline = Instant::now() + TIMEOUT;
     loop {
@@ -982,6 +1412,11 @@ fn journal_segment_numbers(directory: &Path) -> (Vec<u64>, Vec<u64>) {
     compressed.sort_unstable();
     active.sort_unstable();
     (compressed, active)
+}
+
+fn journal_file_count(directory: &Path) -> usize {
+    let (compressed, active) = journal_segment_numbers(directory);
+    compressed.len() + active.len()
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
