@@ -38,13 +38,22 @@ roles, grants, passwords, or unrelated credentials. The ACL implementation
 parses keys before mutation and performs each change atomically under its
 existing reload lock.
 
-The reload lock serializes callers in one process, but it cannot exclude a
-reset or another Orion process writing the native ACL repository. A native ACL
-snapshot's Git commit version is therefore also its write precondition. The
-native repository builds the replacement commit from that exact commit and
-updates the configured ref with compare-and-set against the same object ID. If
-the ref has advanced, the save reports a dedicated concurrent-update outcome
-and leaves the newer ref and its files untouched. Snapshots without a version
+The reload lock serializes every live ACL read-modify-write path in one process,
+including credential changes, admin user replacement, and internal server-key
+synchronization. Each path reloads a snapshot, changes only the owning ACL
+file, and preserves the snapshot version. An intentional whole-file replacement
+is not treated as read-modify-write.
+
+The lock cannot exclude another Orion process writing the native ACL
+repository. A native ACL snapshot's Git commit version is therefore also its
+write precondition. The native repository builds the replacement commit from
+that exact commit and updates the configured ref with compare-and-set against
+the same object ID. A file-backed ref store must refresh the durable refs and
+perform comparison plus persistence under a repository-scoped interprocess
+lock; its process-local map is only a cache, never the CAS authority. Separate
+repository providers must observe one another's accepted updates. If the ref
+has advanced, the save reports a dedicated concurrent-update outcome and
+leaves the newer ref and its files untouched. Snapshots without a version
 retain the existing unconditional save behavior, which is needed for initial
 creation and local-file storage.
 
@@ -125,6 +134,8 @@ listed as an SSH key and cannot authenticate by password or public key.
 The locked state has these rules:
 
 - existing and newly presented root JWTs fail;
+- every named-user and `git` public-key resolver rejects a locked root even if
+  malformed or externally edited ACL data also contains an SSH key;
 - token issue for a stale in-memory root identity fails;
 - internal server-key synchronization does not inject a key;
 - `/auth/key add` cannot unlock root from the still-open session;
@@ -155,6 +166,8 @@ They do not expose candidate keys or key material.
 - Parse and validate every requested key and selector before mutation.
 - Resolve the user and current persisted credentials again under the ACL reload
   lock immediately before saving.
+- Put admin user updates and internal server-key synchronization under the same
+  snapshot/version-aware lock so they cannot restore stale credentials.
 - Serialize only the intended user's credentials while preserving all other
   users, roles, grants, and non-SSH credentials.
 - Return expected validation, ambiguity, last-key, and locked-root outcomes as
@@ -177,12 +190,17 @@ unambiguous candidate selection, ACL isolation, and concurrent-state failures.
 Native storage tests advance the configuration ref after loading a snapshot,
 then prove a stale conditional save is rejected and cannot replace either the
 newer ACL bytes or unrelated files from the winning commit.
+They use distinct file-backed repository providers over the same directory and
+also prove that reads refresh externally advanced refs.
 
 Removal tests cover missing and ambiguous prefixes, duplicate records, current
 key removal, last-key refusal, forced non-root lockout, generation preservation
 with remaining root keys, and forced root locking. Root tests also cover token
 revocation, blocked token issue and key addition, restart persistence, skipped
-server-key synchronization, and recovery by a later reset.
+server-key synchronization, rejection by both named-user and `git` key
+resolution, and recovery by a later reset. Deterministic interleaving coverage
+proves an admin user update cannot resurrect a removed root key or lose the
+credential change.
 
 Command tests cover `/auth/key` routing, authorization, argument combinations,
 `--force` parsing and validation, structured output, sensitive-value audit

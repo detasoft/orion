@@ -146,7 +146,9 @@ git commit -m "Define SSH credential management contracts"
 - Create: `git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/GitRepositoryConcurrentUpdateException.java`
 - Modify: `git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/NativeGitRepository.java`
 - Modify: `git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/NativeRepositoryFileSaver.java`
+- Modify: `git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/ref/LooseRefStore.java`
 - Modify: `git/git-native-storage/src/test/java/pro/deta/orion/git/nativestorage/NativeGitRepositoryTest.java`
+- Modify: `git/git-native-storage/src/test/java/pro/deta/orion/git/nativestorage/ref/LooseRefStoreTest.java`
 - Create: `core/acl/src/main/java/pro/deta/orion/acl/storage/AccessControlConcurrentUpdateException.java`
 - Modify: `core/acl/src/main/java/pro/deta/orion/acl/storage/AccessControlStorage.java`
 - Modify: `connectors/acl-storage/src/main/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorage.java`
@@ -154,10 +156,15 @@ git commit -m "Define SSH credential management contracts"
 
 **Step 1: Write failing conditional native-save tests**
 
-Save and load version one, write version two through the existing unconditional API, then attempt to save files with
-version one's commit ID as the expected version. Assert a dedicated `GitRepositoryConcurrentUpdateException`, an
-unchanged branch ref at version two, and unchanged version-two contents. Also prove a successful conditional save
-uses the expected commit as its parent and preserves files not included in the update.
+Open two file-backed ref stores and two `FileNativeGitRepositoryProvider` instances over the same repository
+directory before advancing the ref. Save and load version one through both, write version two through the first, then
+attempt to save files through the second with version one's commit ID as the expected version. Assert a dedicated
+`GitRepositoryConcurrentUpdateException`, an unchanged branch ref at version two, and unchanged version-two
+contents. Assert that the second store's reads and snapshots observe the external advance. Also race two conditional
+updates from the same expected version and require exactly one accepted result.
+
+Keep the existing successful conditional-save test proving the expected commit is the parent and files not included
+in the update are preserved.
 
 **Step 2: Write failing ACL-storage version tests**
 
@@ -172,22 +179,30 @@ Run outside the sandbox:
 
 ```sh
 mvn test -Pdev -T 4 -q -pl git/git-native-storage -am \
-  -Dtest=NativeGitRepositoryTest \
+  -Dtest='NativeGitRepositoryTest,LooseRefStoreTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
 mvn test -Pdev -T 4 -q -pl connectors/acl-storage -am \
   -Dtest=NativeGitAccessControlStorageTest \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-Expected: FAIL because native saves currently resolve the branch at save time and ignore
-`AccessControlSnapshot.version()`.
+Expected: FAIL because conditional saves compare with a process-local ref cache, while long-lived file-backed stores
+do not refresh externally advanced refs.
 
 **Step 4: Implement exact-version compare-and-set**
 
 Add a conditional `NativeGitRepository.saveFilesIfVersion(...)` path. It must parse the expected commit ID, read and
 overlay that exact commit's tree, create a child commit, and update the configured ref with the expected commit ID as
 the compare-and-set old value. Map `RefUpdateResult.STALE` to the dedicated checked concurrent-update exception.
-Keep the existing unconditional `saveFiles(...)` behavior and callers unchanged.
+
+For a file-backed `LooseRefStore`, serialize refresh, comparison, and persistence with a lock shared by store
+instances in the JVM plus an operating-system file lock scoped to the canonical repository path. Refresh durable
+loose refs inside that critical section before applying any single or batch update; refresh file-backed reads so a
+long-lived provider observes another process's accepted ref changes. Preserve the in-memory store behavior and the
+existing batch publication callback ordering. Do not allocate a thread per lock or I/O call.
+
+Keep the existing unconditional `saveFiles(...)` API behavior, but make its ref update use the same durable update
+primitive rather than the stale process-local cache.
 
 When `AccessControlSnapshot.version()` is present, `NativeGitAccessControlStorage.save(...)` must use the conditional
 path and translate the native stale exception to `AccessControlConcurrentUpdateException`. When the version is empty,
@@ -226,6 +241,11 @@ snapshot and verify that only the file containing the user changes.
 For generation-aware root, assert every added key retains the existing root generation. Assert that a locked root
 returns `ROOT_LOCKED` without mutation.
 
+Add a deterministic interleaving test for the live admin `createOrUpdateUser` path and a credential mutation. Prove
+that both operations share `reloadLock`, reload their own current snapshot, preserve unrelated ACL files, and cannot
+restore a removed root key or lose an added key. Cover internal server-key synchronization as another
+snapshot/version-aware read-modify-write path rather than allowing it to flatten or overwrite split ACL state.
+
 **Step 3: Verify RED**
 
 Run outside the sandbox:
@@ -251,6 +271,12 @@ control-flow exception beyond that storage boundary. Log no full pasted or candi
 Refactor `addSshKeysToUser` to delegate to `addSshCredentials`; retain its existing public behavior for successful
 password-authenticated enrollment and convert a typed failure to the existing exceptional boundary only where a
 legacy caller cannot consume a typed result.
+
+Move `createOrUpdateUser` under the same reload lock and make it load and mutate the current `AccessControlSnapshot`.
+Replace an existing unique user in its owning file, add a missing user to the primary file, preserve every other file
+and ACL object, and save with the loaded version. Apply the same snapshot/version discipline to internal server-key
+synchronization. Leave only initial creation and intentional whole-file replacement on a versionless save path;
+remove or stop calling cached whole-ACL read-modify-write helpers.
 
 **Step 5: Verify GREEN and commit**
 
@@ -290,7 +316,7 @@ root authentication fail closed.
 
 Extend root-state helpers so a locked root:
 
-- fails password, public-key, and bearer-token authentication;
+- fails password, named-user public-key, `git` public-key resolution, and bearer-token authentication;
 - refuses token issue and SSH credential addition;
 - is skipped by internal server-key synchronization;
 - remains locked after normal restart;
@@ -298,6 +324,10 @@ Extend root-state helpers so a locked root:
 
 Assert that all root JWTs issued before locking fail, including generation-bound tokens. When at least one SSH key
 remains, remove only the selected key and preserve the current generation on the survivors.
+
+Include a fail-closed malformed-state test containing both a locked-root marker and an OpenSSH key. Both named root
+authentication and the username-independent `authenticateGitSshKey` resolver must reject that root. If a non-root
+user owns the same key, the `git` resolver may resolve only that non-root identity.
 
 **Step 4: Verify RED, implement, and verify GREEN**
 
