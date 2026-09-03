@@ -2,6 +2,7 @@
 
 Status: todo
 Detailed design: ../../2026-08-20-virtual-thread-git-io-buffering-design.md
+Depends on: [Git server transport composition review](../git-server-transport-architecture-review/TASK.md)
 
 Move the Jetty HTTP and SSH Git transport paths to a blocking virtual-thread
 execution model while keeping transport-specific byte adapters separate from
