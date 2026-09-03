@@ -14,12 +14,12 @@ longer selects an unavailable-policy mode. Metadata v1 keeps its existing field 
 
 ---
 
-### Task 1: Remove the native-host mode selector
+### Task 1: Specify the native CLI and capability fallback
 
 **Files:**
 
 - Modify: `session-host/src/cli.rs`
-- Modify: `session-host/src/main.rs`
+- Modify: `session-host/tests/unix_process_host.rs`
 
 **Step 1: Write the failing CLI tests**
 
@@ -47,47 +47,7 @@ make session-host-test
 
 Expected: the removed-option assertion fails because parsing still succeeds.
 
-**Step 3: Remove the CLI mode**
-
-Delete `SandboxUnavailable`, `SessionOptions.sandbox_unavailable`, the parser accumulator and match arm,
-`parse_sandbox_unavailable`, and the help line. A policy needs only:
-
-```text
---sandbox-policy PATH        Filesystem sandbox policy
-```
-
-Do not add a replacement flag.
-
-**Step 4: Run the Rust suite to verify GREEN**
-
-Run outside the sandbox:
-
-```bash
-make session-host-test
-```
-
-Expected: CLI unit tests pass. Record any unrelated process-host failure separately rather than widening this task.
-
-**Step 5: Commit the CLI change**
-
-```bash
-git add session-host/src/cli.rs session-host/src/main.rs
-git commit -m "Remove configurable Landlock fallback mode"
-```
-
-### Task 2: Make capability mismatch warn and continue
-
-**Files:**
-
-- Modify: `session-host/src/platform/sandbox.rs`
-- Modify: `session-host/src/platform/unix.rs`
-- Modify: `session-host/tests/unix_process_host.rs`
-- Modify: `session-host/src/journal.rs`
-- Modify: `session-host/protocol/fixtures/metadata-v1.json`
-- Modify: `session-host/protocol/README.md`
-- Modify: `session-host/MODULE_REVIEW.md`
-
-**Step 1: Write the failing process-host test**
+**Step 3: Write the failing process-host test**
 
 Replace the explicit-mode tests with one unsupported-machine expectation. On non-Linux, and in the existing Linux
 `current_landlock_abi() < 9` branch, launch with only `--sandbox-policy` and assert:
@@ -110,7 +70,7 @@ Rename `invalid_grants_are_fatal_even_with_unsandboxed_fallback` to
 `invalid_grants_remain_fatal_when_landlock_is_unavailable` and remove the obsolete CLI argument. The invalid grant
 assertions must stay fatal on every Unix platform.
 
-**Step 2: Run the Rust suite to verify RED**
+**Step 4: Run the Rust suite to verify the capability RED**
 
 Run outside the sandbox:
 
@@ -121,7 +81,36 @@ make session-host-test
 Expected on macOS or Linux with Landlock ABI below 9: the unsupported-machine test receives exit code 70 instead of
 success. On newer Linux, run the classification unit test and use the old-kernel guest for the real RED observation.
 
-**Step 3: Implement the capability-only fallback**
+Do not remove `SessionOptions.sandbox_unavailable` yet. Both native RED tests must exist before the coupled
+production change because `platform/sandbox.rs` and `platform/unix.rs` still read that field.
+
+### Task 2: Remove the selector and implement capability fallback
+
+**Files:**
+
+- Modify: `session-host/src/cli.rs`
+- Modify: `session-host/src/main.rs`
+- Modify: `session-host/src/platform/sandbox.rs`
+- Modify: `session-host/src/platform/unix.rs`
+- Modify: `session-host/tests/unix_process_host.rs`
+- Modify: `session-host/src/journal.rs`
+- Modify: `session-host/protocol/fixtures/metadata-v1.json`
+- Modify: `session-host/protocol/README.md`
+- Modify: `session-host/MODULE_REVIEW.md`
+
+**Step 1: Remove the CLI mode**
+
+Delete `SandboxUnavailable`, `SessionOptions.sandbox_unavailable`, the parser accumulator and match arm,
+`parse_sandbox_unavailable`, and the help line. A policy needs only:
+
+```text
+--sandbox-policy PATH        Filesystem sandbox policy
+```
+
+Do not add a replacement flag. Perform this removal in the same production step as the fallback and metadata
+changes below so the Rust tree never claims a GREEN state while dependent code still reads the removed field.
+
+**Step 2: Implement the capability-only fallback**
 
 In `PreparedSandbox::prepare`, remove the option check but keep the existing classification boundary:
 
@@ -152,7 +141,7 @@ unavailable_policy: SandboxUnavailablePolicy::RunUnsandboxed,
 Update the metadata round-trip fixture and `metadata-v1.json` to that fixed value. Update the protocol README and
 module review to describe automatic capability fallback and fail-closed rule application.
 
-**Step 4: Run the Rust suite to verify GREEN**
+**Step 3: Run the Rust suite to verify GREEN**
 
 Run outside the sandbox:
 
@@ -163,7 +152,7 @@ git diff --check
 
 Expected: fallback, invalid-grant, metadata, and CLI tests pass; formatting check is clean.
 
-**Step 5: Verify the real old-kernel path**
+**Step 4: Verify the real old-kernel path**
 
 Copy the task source to `root@gw.ntechs.ru:30022`, build with the existing hermetic Rust and Zig toolchains, and run
 the exact unsupported-Landlock process test on kernel 5.4:
@@ -177,7 +166,7 @@ Then invoke the built host with a valid compiled policy and `/usr/bin/true`. Exp
 exit code 0, one warning in stderr, and metadata with `requested: true`, `enforcement: none`, and
 `unavailablePolicy: run-unsandboxed`.
 
-**Step 6: Commit the native fallback**
+**Step 5: Commit the coupled native change**
 
 ```bash
 git add session-host
