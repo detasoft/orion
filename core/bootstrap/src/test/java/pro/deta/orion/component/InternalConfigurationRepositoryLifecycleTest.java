@@ -21,7 +21,6 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.KeyUtils;
 
 import java.io.ByteArrayInputStream;
@@ -289,7 +288,6 @@ class InternalConfigurationRepositoryLifecycleTest {
             ServerIdentityCapability serverIdentity) {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
-                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .serverIdentityCapability(serverIdentity)
                 .build();
     }

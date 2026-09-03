@@ -30,9 +30,7 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
-import pro.deta.orion.transport.git.auth.SshEnrollmentTokenStore;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.ConfigurationContext;
 
@@ -115,15 +113,6 @@ class GitSshTransportStateMachineTest {
         assertPasswordAuthenticationFails(service.boundPort(), "alice", "accepted-by-legacy-authenticator");
         assertPublicKeyAuthenticationSucceeds(service.boundPort(), "alice", keyPair);
         assertPublicKeyAuthenticationSucceeds(service.boundPort(), "git", keyPair);
-    }
-
-    @Test
-    void startsTheEnrollmentTokenStoreWhenSshStarts() {
-        service = service(0);
-
-        service.onStart();
-
-        assertTrue(Files.exists(tempDir.resolve("ssh-enrollment-token.properties")));
     }
 
     @Test
@@ -229,17 +218,13 @@ class GitSshTransportStateMachineTest {
                 dispatcher,
                 new CommandNavigator(CommandNode.builder().build()),
                 executor);
-        SshEnrollmentTokenStore tokenStore = new SshEnrollmentTokenStore(
-                configurationContext,
-                OrionRuntimeOptions.defaults());
-        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControlService, tokenStore);
+        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControlService);
         return new GitSshTransportService(
                 configuration,
                 commandFactory,
                 shell,
                 () -> hostKeyService,
-                authenticator,
-                tokenStore);
+                authenticator);
     }
 
     private static void assertPasswordAuthenticationFails(int port, String username, String password)

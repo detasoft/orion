@@ -1,11 +1,9 @@
 package pro.deta.orion.transport.git.auth;
 
 import org.apache.sshd.common.AttributeRepository;
-import org.apache.sshd.common.SshConstants;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.apache.sshd.common.config.keys.PublicKeyEntryResolver;
 import org.apache.sshd.server.auth.keyboard.InteractiveChallenge;
-import org.apache.sshd.server.auth.keyboard.KeyboardInteractiveAuthenticator;
 import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
 import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
@@ -16,6 +14,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.security.PublicKey;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,24 +24,20 @@ import java.util.Set;
 import static pro.deta.orion.transport.git.GitSshTransportService.SSH_AUTHENTICATED_USER;
 
 @Singleton
-public final class OrionSshAuthenticator implements PublickeyAuthenticator, KeyboardInteractiveAuthenticator {
+public final class OrionSshAuthenticator implements PublickeyAuthenticator {
     private static final String GIT_USERNAME = "git";
     private static final AttributeRepository.AttributeKey<PendingPublicKeyAttempt> PENDING_PUBLIC_KEY =
             new AttributeRepository.AttributeKey<>();
     private static final AttributeRepository.AttributeKey<LinkedHashMap<String, PublicKey>> PROVED_PUBLIC_KEYS =
             new AttributeRepository.AttributeKey<>();
-    private static final AttributeRepository.AttributeKey<List<PublicKey>> ENROLLMENT_OPTIONS =
+    private static final AttributeRepository.AttributeKey<Boolean> KEYBOARD_INTERACTIVE_FAILED =
             new AttributeRepository.AttributeKey<>();
 
     private final OrionAccessControlService accessControlService;
-    private final SshEnrollmentTokenStore tokenStore;
 
     @Inject
-    public OrionSshAuthenticator(
-            OrionAccessControlService accessControlService,
-            SshEnrollmentTokenStore tokenStore) {
+    public OrionSshAuthenticator(OrionAccessControlService accessControlService) {
         this.accessControlService = accessControlService;
-        this.tokenStore = tokenStore;
     }
 
     @Override
@@ -83,65 +78,76 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator, Keyb
         session.removeAttribute(PENDING_PUBLIC_KEY);
     }
 
-    @Override
-    public InteractiveChallenge generateChallenge(
-            ServerSession session,
-            String username,
-            String lang,
-            String subMethods) {
-        if (GIT_USERNAME.equalsIgnoreCase(username) || !accessControlService.userExists(username)) {
+    boolean allowsKeyboardInteractive(ServerSession session, String username) {
+        return !Boolean.TRUE.equals(session.getAttribute(KEYBOARD_INTERACTIVE_FAILED))
+                && !GIT_USERNAME.equalsIgnoreCase(username)
+                && accessControlService.userExists(username);
+    }
+
+    InteractiveChallenge passwordChallenge() {
+        InteractiveChallenge challenge = new InteractiveChallenge();
+        challenge.setInteractionName("Orion authentication");
+        challenge.setInteractionInstruction("");
+        challenge.setLanguageTag("");
+        challenge.addPrompt("Orion password: ", false);
+        return challenge;
+    }
+
+    PasswordAuthentication authenticatePassword(ServerSession session, String username, String password) {
+        if (!allowsKeyboardInteractive(session, username) || password == null) {
             return null;
         }
+        byte[] credential = password.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            return switch (accessControlService.authenticateUser(username, credential)) {
+                case AuthenticationResult.Success(var identity) ->
+                        new PasswordAuthentication(identity, provedCandidates(session));
+                case AuthenticationResult.Failure ignored -> null;
+            };
+        } finally {
+            Arrays.fill(credential, (byte) 0);
+        }
+    }
 
-        List<PublicKey> candidates = provedCandidates(session);
-        session.setAttribute(ENROLLMENT_OPTIONS, candidates);
+    InteractiveChallenge selectionChallenge(List<PublicKey> candidates) {
         InteractiveChallenge challenge = new InteractiveChallenge();
         challenge.setInteractionName("Orion SSH key enrollment");
         challenge.setInteractionInstruction(candidateInstruction(candidates));
         challenge.setLanguageTag("");
-        challenge.addPrompt("Enrollment token: ", false);
         challenge.addPrompt("Keys (`all`, numbers, or OpenSSH key): ", true);
         return challenge;
     }
 
-    @Override
-    public boolean authenticate(
+    boolean completePasswordAuthentication(
             ServerSession session,
             String username,
-            List<String> responses) throws Exception {
-        if (GIT_USERNAME.equalsIgnoreCase(username)
-                || !accessControlService.userExists(username)
-                || responses == null
-                || responses.size() != 2) {
+            PasswordAuthentication authentication,
+            String selection) {
+        if (!allowsKeyboardInteractive(session, username) || authentication == null) {
             return false;
         }
-
-        List<String> selectedKeys = selectedKeys(session, responses.get(1));
+        if (authentication.candidates().isEmpty()) {
+            session.setAttribute(SSH_AUTHENTICATED_USER, authentication.identity());
+            return true;
+        }
+        List<String> selectedKeys = selectedKeys(session, authentication.candidates(), selection);
         if (selectedKeys == null || selectedKeys.isEmpty()) {
             return false;
         }
-        boolean enrolled = tokenStore.consumeIfValid(
-                responses.get(0),
-                () -> accessControlService.addSshKeysToUser(username, selectedKeys));
-        if (!enrolled) {
-            return false;
-        }
-
+        accessControlService.addSshKeysToUser(username, selectedKeys);
         session.removeAttribute(PROVED_PUBLIC_KEYS);
-        session.removeAttribute(ENROLLMENT_OPTIONS);
-        session.disconnect(
-                SshConstants.SSH2_DISCONNECT_BY_APPLICATION,
-                "SSH keys enrolled; reconnect using an enrolled key");
+        session.setAttribute(SSH_AUTHENTICATED_USER, authentication.identity());
+        return true;
+    }
+
+    boolean failKeyboardInteractive(ServerSession session) {
+        session.setAttribute(KEYBOARD_INTERACTIVE_FAILED, true);
         return false;
     }
 
-    private List<String> selectedKeys(ServerSession session, String selection) {
+    private List<String> selectedKeys(ServerSession session, List<PublicKey> candidates, String selection) {
         if (selection == null || selection.isBlank()) {
             return null;
-        }
-        List<PublicKey> candidates = session.getAttribute(ENROLLMENT_OPTIONS);
-        if (candidates == null) {
-            candidates = List.of();
         }
         String trimmed = selection.trim();
         if ("all".equalsIgnoreCase(trimmed)) {
@@ -234,6 +240,12 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator, Keyb
 
         private static PendingPublicKeyAttempt candidate(PublicKey key) {
             return new PendingPublicKeyAttempt(key, null);
+        }
+    }
+
+    record PasswordAuthentication(UserIdentity identity, List<PublicKey> candidates) {
+        PasswordAuthentication {
+            candidates = List.copyOf(candidates);
         }
     }
 }

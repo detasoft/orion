@@ -17,7 +17,7 @@ Orion shell without granting broader ACL administration.
 - Make additions immediately usable without reconnect and make removal require
   an unambiguous fingerprint prefix.
 - Define safe last-key removal and lost-key recovery behavior without turning
-  the bootstrap token into a permanent authentication method.
+  password-authenticated enrollment into a bypass of Orion identity checks.
 - Persist changes through the existing credential configuration path while
   keeping SSH algorithms extensible.
 - Audit additions and removals separately and redact pasted key material where

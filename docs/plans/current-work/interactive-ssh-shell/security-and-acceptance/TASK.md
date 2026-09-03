@@ -14,13 +14,14 @@ lifecycle.
   programs, escape through quoting, or enable SSH forwarding or filesystem use.
 - Cover Git authentication and upload/receive compatibility alongside named-user
   shell and exec authentication.
-- Cover bootstrap output and regeneration, lost-key recovery, multiple offered
-  keys, ownership proof, token invalidation, and credential audit redaction.
+- Cover password-first enrollment and recovery, invalid-password candidate
+  confidentiality, multiple offered keys, ownership proof, and credential audit
+  redaction.
 - Verify ACL-filtered help, completion, lists, scoped resolution, actions,
   ambiguous prefixes, and cross-organization isolation for ordinary users.
 - Verify interactive/no-PTY equivalence, stable exit codes and plain output,
   PTY resize, cancellation, EOF, reconnect, and server shutdown.
 - Extend acceptance coverage for streaming backpressure and session attachment
   when those follow-up tasks are included in the release.
-- Publish operator documentation for login, bootstrap recovery, key management,
-  automation, audit behavior, and session detach semantics.
+- Publish operator documentation for login, password-authenticated recovery, key
+  management, automation, audit behavior, and session detach semantics.

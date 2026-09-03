@@ -17,7 +17,7 @@ and the existing session-host control protocol for the later PTY gateway.
 ## Non-negotiable boundaries
 
 - Preserve `git@orion` public-key identity and existing `git-upload-pack` and `git-receive-pack` handling.
-- Authenticate interactive users by `username + SSH credential`; bootstrap tokens are one-time enrollment only.
+- Authenticate named users by registered keys or their Orion password; password authentication may enroll keys.
 - Do not expose an operating-system shell, command escape, arbitrary process execution, or a public SSH endpoint
   on session-host.
 - Keep command parsing, authorization, handlers, results, and rendering independent of Apache Mina SSHD.
@@ -34,13 +34,13 @@ The shared endpoint selects behavior from the SSH username and request type:
 - `<user>@orion` uses named-user authentication and may request either the Orion shell or Orion command exec.
 - A failed user public-key attempt may contribute a candidate key to the connection-local enrollment set, but
   must not authorize the connection.
-- Bootstrap proceeds only through keyboard-interactive authentication and a server-generated one-time token.
+- Enrollment proceeds only through keyboard-interactive authentication with the named Orion user's password.
 
-At first server start, generate a bootstrap token and expose it through the configured startup-output mechanism.
-Do not regenerate or reveal it during normal operation. An explicit restart option may request a replacement.
-After successful token verification, display the deduplicated keys offered on that SSH connection and require the
-user to select one or more keys or paste an OpenSSH public key. Persist selected credentials, invalidate the token,
-close the connection, and require a key-authenticated reconnect.
+The first keyboard-interactive round contains only a hidden password prompt. After successful password
+verification, display deduplicated keys offered on that SSH connection and require the user to select one or more
+keys or paste an OpenSSH public key. Persist selected credentials and authenticate the current SSH session so the
+original shell or exec request continues without reconnecting. A valid password with no candidates authenticates
+the named user directly.
 
 Before implementation, verify Apache Mina SSHD 2.13.2 behavior for public-key authentication probes. Enrollment
 should accept automatically collected keys only when the protocol proves possession of the matching private key;
@@ -161,7 +161,7 @@ separately and avoid consuming normal terminal control characters used by applic
 
 ## Task order and dependencies
 
-1. Establish named-user authentication and bootstrap key enrollment while preserving Git behavior.
+1. Establish named-user authentication and password-authenticated key enrollment while preserving Git behavior.
 2. Introduce the transport-independent command core and SSH exec adapter.
 3. Replace the current process shell with the interactive Orion PTY frontend.
 4. Add authenticated credential-management commands.
@@ -180,8 +180,8 @@ attachment may ship later, but the command/result abstractions must leave room f
 - `help`, navigation, history, completion, `whoami`, repository/session/proxy listings, system visibility, and
   SSH key listing work for authorized users.
 - Organization-local paths and ID-prefix resolution respect current scope and report ambiguity safely.
-- Bootstrap authenticates once, lets the user select one or more proven offered keys or paste a key, persists the
-  result, invalidates the token, closes the connection, and succeeds by public key after reconnect.
+- Password authentication reveals candidates only after success, lets the user select proven offered keys or paste
+  a key, persists the result, and continues the current authenticated connection.
 - Ordinary users see only resources permitted by the existing ACL.
 - `ssh user@orion /repository ls` uses the same handler as the interactive shell, has no prompt or ANSI output,
   and returns a meaningful exit code.

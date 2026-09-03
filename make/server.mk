@@ -5,7 +5,9 @@ ORION_HTTP_HOST ?= localhost
 ORION_HTTP_PORT ?= 8000
 ORION_SSH_USER ?= root
 ORION_SSH_KEY ?= $(ORION_ROOT)/admin-identity.pem
-ORION_SSH_OPTIONS ?= -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+ORION_SSH_CONFIG ?= /dev/null
+ORION_SSH_OPTIONS ?= -F $(ORION_SSH_CONFIG) -o IdentitiesOnly=yes -o IdentityFile=none \
+	-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 ORION_TOKEN_TTL_SECONDS ?= 3600
 ORION_GIT_USER ?= $(ORION_SSH_USER)
 ORION_GIT_KEY ?= $(ORION_SSH_KEY)
@@ -51,15 +53,13 @@ admin-key:
 	fi
 
 enroll-admin-key: admin-key
-	@test -n "$${ORION_SSH_ENROLLMENT_TOKEN}" || { \
-		echo 'ORION_SSH_ENROLLMENT_TOKEN is required; copy it from first-start output.' >&2; \
+	@test -n "$${ORION_ROOT_PASSWORD}" || { \
+		echo 'ORION_ROOT_PASSWORD is required; use the generated Orion root password.' >&2; \
 		exit 2; \
 	}
 	@DISPLAY=orion SSH_ASKPASS="$(CURDIR)/make/ssh-enrollment-askpass.sh" SSH_ASKPASS_REQUIRE=force \
 		ssh $(ORION_SSH_OPTIONS) -o PreferredAuthentications=publickey,keyboard-interactive \
 		-o PasswordAuthentication=no -i "$(ORION_SSH_KEY)" -p $(ORION_SSH_PORT) \
-		-l root $(ORION_SSH_HOST) state >/dev/null 2>&1 || true
-	@ssh $(ORION_SSH_OPTIONS) -i "$(ORION_SSH_KEY)" -p $(ORION_SSH_PORT) \
 		-l root $(ORION_SSH_HOST) state >/dev/null
 	@printf 'Admin SSH key enrolled: %s\n' "$(ORION_SSH_KEY)"
 
@@ -68,7 +68,7 @@ run-server: require-key-material-password admin-key
 
 # Scenario:
 # 1. Export ORION_KEY_MATERIAL_PASSWORD, then start the server: make run-server
-# 2. Enroll the generated admin key with the token printed on first start.
+# 2. Enroll the generated admin key with the generated Orion root password.
 # 3. Issue a temporary admin token and export it into the current shell:
 #      eval "$$(make -s issue-token)"
 # 3. Use that token for the HTTP admin API:

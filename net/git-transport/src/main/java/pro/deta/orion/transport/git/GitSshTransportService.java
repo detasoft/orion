@@ -15,7 +15,6 @@ import org.apache.sshd.common.util.security.SecurityUtils;
 import org.apache.sshd.common.util.security.bouncycastle.BouncyCastleSecurityProviderRegistrar;
 import org.apache.sshd.common.util.security.eddsa.EdDSASecurityProviderRegistrar;
 import org.apache.sshd.server.SshServer;
-import org.apache.sshd.server.auth.keyboard.UserAuthKeyboardInteractiveFactory;
 import org.apache.sshd.server.forward.StaticDecisionForwardingFilter;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -24,7 +23,7 @@ import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.transport.git.auth.EnrollmentAwarePublicKeyAuthFactory;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
-import pro.deta.orion.transport.git.auth.SshEnrollmentTokenStore;
+import pro.deta.orion.transport.git.auth.PasswordKeyboardInteractiveAuthFactory;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
@@ -52,7 +51,6 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
     private final OrionShell shellFactory;
     private final Provider<SshHostKeyService> sshHostKeyService;
     private final OrionSshAuthenticator authenticator;
-    private final SshEnrollmentTokenStore enrollmentTokenStore;
 
 
     public void onStart() {
@@ -60,7 +58,6 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
         if (!isEnabled()) {
             return;
         }
-        enrollmentTokenStore.start();
         SecurityUtils.registerSecurityProvider(new BouncyCastleSecurityProviderRegistrar());
         if (SecurityUtils.isBouncyCastleRegistered()) {
             log.info("BouncyCastle is registered as a JCE provider");
@@ -90,9 +87,8 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
 
             sshd.setUserAuthFactories(List.of(
                     new EnrollmentAwarePublicKeyAuthFactory(authenticator),
-                    UserAuthKeyboardInteractiveFactory.INSTANCE));
+                    new PasswordKeyboardInteractiveAuthFactory(authenticator)));
             sshd.setPublickeyAuthenticator(authenticator);
-            sshd.setKeyboardInteractiveAuthenticator(authenticator);
             sshd.setPasswordAuthenticator(null);
 //                sshd.setSessionFactory(new SshServerSessionFactory(sshd));
             sshd.setFileSystemFactory(new FileSystemFactory() {

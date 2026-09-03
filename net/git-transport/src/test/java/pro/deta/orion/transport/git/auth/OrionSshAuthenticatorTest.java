@@ -25,15 +25,12 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PublicKey;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -74,7 +71,7 @@ class OrionSshAuthenticatorTest {
     void rejectsUnknownUsersAndUnknownGitKeys() throws Exception {
         KeyPair key = keyPair();
         try (Fixture fixture = new Fixture()) {
-            RecordingInteraction interaction = new RecordingInteraction(fixture.token, "all");
+            RecordingInteraction interaction = new RecordingInteraction("correct-password", "all");
 
             assertAuthenticationFails(
                     fixture,
@@ -90,11 +87,11 @@ class OrionSshAuthenticatorTest {
     }
 
     @Test
-    void enrollsAProvedCandidateThenRequiresAKeyAuthenticatedReconnect() throws Exception {
+    void invalidPasswordNeverDisclosesProvedCandidates() throws Exception {
         KeyPair candidate = keyPair();
         try (Fixture fixture = new Fixture()) {
             fixture.accessControl.addUser("alice");
-            RecordingInteraction interaction = new RecordingInteraction(fixture.token, "all");
+            RecordingInteraction interaction = new RecordingInteraction("1", "all");
 
             assertAuthenticationFails(
                     fixture,
@@ -103,25 +100,25 @@ class OrionSshAuthenticatorTest {
                     PUBLIC_KEY_AND_INTERACTIVE,
                     interaction);
 
-            String fingerprint = KeyUtils.getFingerPrint(candidate.getPublic());
-            assertThat(interaction.instruction)
-                    .contains("1. " + KeyUtils.getKeyType(candidate.getPublic()))
-                    .contains(fingerprint)
-                    .doesNotContain(PublicKeyEntry.toString(candidate.getPublic()));
-            assertThat(fixture.accessControl.keysFor("alice")).hasSize(1);
-            authenticateSuccessfully(fixture, "alice", List.of(candidate), PUBLIC_KEY_ONLY, null);
+            assertThat(interaction.prompts).containsExactly(List.of("Orion password: "));
+            assertThat(interaction.echoes).containsExactly(List.of(false));
+            assertThat(interaction.instructions.getFirst())
+                    .doesNotContain(KeyUtils.getKeyType(candidate.getPublic()))
+                    .doesNotContain(KeyUtils.getFingerPrint(candidate.getPublic()))
+                    .doesNotContain("candidate", "Keys (`all`");
+            assertThat(fixture.accessControl.keysFor("alice")).isEmpty();
         }
     }
 
     @Test
-    void enrollsMultipleProvedCandidatesWithoutDuplicatingRepeatedAttempts() throws Exception {
+    void enrollsProvedCandidatesInASecondRoundAndAuthenticatesTheSameSession() throws Exception {
         KeyPair first = keyPair();
         KeyPair second = keyPair();
         try (Fixture fixture = new Fixture()) {
             fixture.accessControl.addUser("alice");
-            RecordingInteraction interaction = new RecordingInteraction(fixture.token, "2,1");
+            RecordingInteraction interaction = new RecordingInteraction("correct-password", "2,1");
 
-            assertAuthenticationFails(
+            authenticateSuccessfully(
                     fixture,
                     "alice",
                     List.of(first, first, second),
@@ -130,62 +127,61 @@ class OrionSshAuthenticatorTest {
 
             String firstFingerprint = KeyUtils.getFingerPrint(first.getPublic());
             String secondFingerprint = KeyUtils.getFingerPrint(second.getPublic());
-            assertThat(interaction.instruction)
+            assertThat(interaction.instructions).hasSize(2);
+            assertThat(interaction.prompts)
+                    .containsExactly(List.of("Orion password: "), List.of("Keys (`all`, numbers, or OpenSSH key): "));
+            assertThat(interaction.instructions.get(1))
                     .containsOnlyOnce(firstFingerprint)
                     .containsOnlyOnce(secondFingerprint);
             assertThat(fixture.accessControl.keysFor("alice")).hasSize(2);
-            authenticateSuccessfully(fixture, "alice", List.of(first), PUBLIC_KEY_ONLY, null);
-            authenticateSuccessfully(fixture, "alice", List.of(second), PUBLIC_KEY_ONLY, null);
         }
     }
 
     @Test
-    void enrollsAManuallyPastedOpenSshKeyWithoutACandidate() throws Exception {
+    void validPasswordWithoutCandidatesAuthenticatesInOneRound() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.accessControl.addUser("alice");
+            RecordingInteraction interaction = new RecordingInteraction("correct-password", null);
+
+            authenticateSuccessfully(fixture, "alice", List.of(), INTERACTIVE_ONLY, interaction);
+
+            assertThat(interaction.prompts).containsExactly(List.of("Orion password: "));
+            assertThat(fixture.accessControl.authenticatedUserIds).contains("alice");
+        }
+    }
+
+    @Test
+    void enrollsAManuallyPastedOpenSshKeyAfterPasswordAuthentication() throws Exception {
+        KeyPair candidate = keyPair();
         KeyPair pasted = keyPair();
         try (Fixture fixture = new Fixture()) {
             fixture.accessControl.addUser("alice");
             RecordingInteraction interaction = new RecordingInteraction(
-                    fixture.token,
+                    "correct-password",
                     PublicKeyEntry.toString(pasted.getPublic()) + " alice@laptop");
 
-            assertAuthenticationFails(fixture, "alice", List.of(), INTERACTIVE_ONLY, interaction);
+            authenticateSuccessfully(fixture, "alice", List.of(candidate), PUBLIC_KEY_AND_INTERACTIVE, interaction);
 
-            assertThat(interaction.instruction).contains("No proved candidate keys");
-            assertThat(fixture.accessControl.keysFor("alice")).hasSize(1);
-            authenticateSuccessfully(fixture, "alice", List.of(pasted), PUBLIC_KEY_ONLY, null);
+            assertThat(interaction.instructions).hasSize(2);
+            assertThat(fixture.accessControl.keysFor("alice"))
+                    .singleElement()
+                    .satisfies(key -> assertThat(key.getEncoded()).isEqualTo(pasted.getPublic().getEncoded()));
         }
     }
 
     @Test
-    void invalidAndConsumedTokensCannotEnrollKeys() throws Exception {
-        KeyPair first = keyPair();
-        KeyPair second = keyPair();
+    void malformedSelectionCannotEnrollKeys() throws Exception {
+        KeyPair candidate = keyPair();
         try (Fixture fixture = new Fixture()) {
             fixture.accessControl.addUser("alice");
 
             assertAuthenticationFails(
                     fixture,
                     "alice",
-                    List.of(),
-                    INTERACTIVE_ONLY,
-                    new RecordingInteraction("invalid-token", PublicKeyEntry.toString(first.getPublic())));
+                    List.of(candidate),
+                    PUBLIC_KEY_AND_INTERACTIVE,
+                    new RecordingInteraction("correct-password", "1,1"));
             assertThat(fixture.accessControl.keysFor("alice")).isEmpty();
-
-            assertAuthenticationFails(
-                    fixture,
-                    "alice",
-                    List.of(),
-                    INTERACTIVE_ONLY,
-                    new RecordingInteraction(fixture.token, PublicKeyEntry.toString(first.getPublic())));
-            assertThat(fixture.accessControl.keysFor("alice")).hasSize(1);
-
-            assertAuthenticationFails(
-                    fixture,
-                    "alice",
-                    List.of(),
-                    INTERACTIVE_ONLY,
-                    new RecordingInteraction(fixture.token, PublicKeyEntry.toString(second.getPublic())));
-            assertThat(fixture.accessControl.keysFor("alice")).hasSize(1);
         }
     }
 
@@ -194,7 +190,7 @@ class OrionSshAuthenticatorTest {
         KeyPair candidate = keyPair();
         try (Fixture fixture = new Fixture()) {
             fixture.accessControl.addUser("alice");
-            RecordingInteraction firstInteraction = new RecordingInteraction("invalid-token", "all");
+            RecordingInteraction firstInteraction = new RecordingInteraction("wrong-password", "all");
 
             assertAuthenticationFails(
                     fixture,
@@ -202,18 +198,18 @@ class OrionSshAuthenticatorTest {
                     List.of(candidate),
                     PUBLIC_KEY_AND_INTERACTIVE,
                     firstInteraction);
-            assertThat(firstInteraction.instruction)
-                    .contains(KeyUtils.getFingerPrint(candidate.getPublic()));
+            assertThat(firstInteraction.instructions.getFirst())
+                    .doesNotContain(KeyUtils.getFingerPrint(candidate.getPublic()));
 
-            RecordingInteraction secondInteraction = new RecordingInteraction(fixture.token, "all");
-            assertAuthenticationFails(
+            RecordingInteraction secondInteraction = new RecordingInteraction("correct-password", null);
+            authenticateSuccessfully(
                     fixture,
                     "alice",
                     List.of(),
                     INTERACTIVE_ONLY,
                     secondInteraction);
 
-            assertThat(secondInteraction.instruction).contains("No proved candidate keys");
+            assertThat(secondInteraction.instructions).hasSize(1);
             assertThat(fixture.accessControl.keysFor("alice")).isEmpty();
         }
     }
@@ -221,30 +217,19 @@ class OrionSshAuthenticatorTest {
     @Test
     void aPublicKeyProbeWithoutASignatureIsNotAnEnrollmentCandidate() throws Exception {
         KeyPair probed = keyPair();
-        KeyPair pasted = keyPair();
         try (Fixture fixture = new Fixture()) {
             fixture.accessControl.addUser("alice");
-            RecordingInteraction probeInteraction = new RecordingInteraction(fixture.token, "all");
+            RecordingInteraction probeInteraction = new RecordingInteraction("correct-password", null);
 
-            assertAuthenticationFails(
+            authenticateSuccessfully(
                     fixture,
                     "alice",
                     List.of(probed),
                     List.of(PROBE_ONLY_FACTORY, UserAuthKeyboardInteractiveFactory.INSTANCE),
                     probeInteraction);
 
-            assertThat(probeInteraction.instruction).contains("No proved candidate keys");
+            assertThat(probeInteraction.instructions).hasSize(1);
             assertThat(fixture.accessControl.keysFor("alice")).isEmpty();
-
-            assertAuthenticationFails(
-                    fixture,
-                    "alice",
-                    List.of(),
-                    INTERACTIVE_ONLY,
-                    new RecordingInteraction(fixture.token, PublicKeyEntry.toString(pasted.getPublic())));
-            assertThat(fixture.accessControl.keysFor("alice"))
-                    .singleElement()
-                    .satisfies(key -> assertThat(key.getEncoded()).isEqualTo(pasted.getPublic().getEncoded()));
         }
     }
 
@@ -340,19 +325,9 @@ class OrionSshAuthenticatorTest {
     private final class Fixture implements AutoCloseable {
         private final RecordingAccessControlService accessControl = new RecordingAccessControlService();
         private final SshServer server = SshServer.setUpDefaultServer();
-        private final String token;
 
         private Fixture() throws Exception {
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            SshEnrollmentTokenStore tokenStore = SshEnrollmentTokenStore.forTest(
-                    tempDir,
-                    false,
-                    new PrintStream(output, true, StandardCharsets.UTF_8),
-                    new SecureRandom());
-            tokenStore.start();
-            token = output.toString(StandardCharsets.UTF_8).strip()
-                    .substring(SshEnrollmentTokenStore.TOKEN_OUTPUT_PREFIX.length());
-            OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl, tokenStore);
+            OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
             KeyPair hostKey = keyPair();
             server.setHost("127.0.0.1");
             server.setPort(0);
@@ -360,10 +335,9 @@ class OrionSshAuthenticatorTest {
                     org.apache.sshd.common.config.keys.KeyUtils.getKeyType(hostKey.getPublic()),
                     hostKey)));
             server.setPublickeyAuthenticator(authenticator);
-            server.setKeyboardInteractiveAuthenticator(authenticator);
             List<UserAuthFactory> factories = List.of(
                     new EnrollmentAwarePublicKeyAuthFactory(authenticator),
-                    org.apache.sshd.server.auth.keyboard.UserAuthKeyboardInteractiveFactory.INSTANCE);
+                    new PasswordKeyboardInteractiveAuthFactory(authenticator));
             server.setUserAuthFactories(factories);
             server.start();
         }
@@ -383,13 +357,15 @@ class OrionSshAuthenticatorTest {
     }
 
     private static final class RecordingInteraction implements UserInteraction {
-        private final String token;
+        private final String password;
         private final String selection;
         private int callCount;
-        private String instruction = "";
+        private final List<String> instructions = new ArrayList<>();
+        private final List<List<String>> prompts = new ArrayList<>();
+        private final List<List<Boolean>> echoes = new ArrayList<>();
 
-        private RecordingInteraction(String token, String selection) {
-            this.token = token;
+        private RecordingInteraction(String password, String selection) {
+            this.password = password;
             this.selection = selection;
         }
 
@@ -402,10 +378,14 @@ class OrionSshAuthenticatorTest {
                 String[] prompt,
                 boolean[] echo) {
             callCount++;
-            this.instruction = instruction;
-            assertThat(prompt).containsExactly("Enrollment token: ", "Keys (`all`, numbers, or OpenSSH key): ");
-            assertThat(echo).containsExactly(false, true);
-            return new String[]{token, selection};
+            instructions.add(instruction);
+            prompts.add(List.of(prompt));
+            List<Boolean> roundEchoes = new ArrayList<>(echo.length);
+            for (boolean value : echo) {
+                roundEchoes.add(value);
+            }
+            echoes.add(List.copyOf(roundEchoes));
+            return callCount == 1 ? new String[]{password} : new String[]{selection};
         }
 
         @Override
@@ -460,7 +440,11 @@ class OrionSshAuthenticatorTest {
 
         @Override
         public AuthenticationResult authenticateUser(String userName, byte[] credential) {
-            throw new UnsupportedOperationException();
+            if (keysByUser.containsKey(userName)
+                    && Arrays.equals("correct-password".getBytes(StandardCharsets.UTF_8), credential)) {
+                return success(userName);
+            }
+            return AuthenticationResult.failure("authentication failed");
         }
 
         @Override

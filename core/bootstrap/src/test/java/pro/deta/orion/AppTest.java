@@ -86,45 +86,6 @@ class AppTest {
     }
 
     @Test
-    void restartForwardsSshEnrollmentTokenRegenerationToTheRunProcess() throws Exception {
-        RecordingLauncher launcher = new RecordingLauncher(new RecordingProcess(42));
-        OrionServiceManager manager = new OrionServiceManager(
-                new OrionServiceManager.Settings(
-                        "orion",
-                        tempDir,
-                        tempDir.resolve("orion.pid"),
-                        tempDir.resolve("orion.log"),
-                        Duration.ofSeconds(1),
-                        "java",
-                        "-Xmx256m",
-                        tempDir.resolve("orion.jar")
-                ),
-                launcher,
-                pid -> Optional.empty()
-        );
-
-        int exitCode = App.runCommand(
-                new String[]{"restart", "--regenerate-ssh-enrollment-token"},
-                output(),
-                output(),
-                unusedVerifier(),
-                () -> manager
-        );
-
-        assertEquals(0, exitCode);
-        assertEquals(
-                List.of(
-                        "java",
-                        "-Xmx256m",
-                        "-jar",
-                        tempDir.resolve("orion.jar").toString(),
-                        "run",
-                        "--regenerate-ssh-enrollment-token"),
-                launcher.command
-        );
-    }
-
-    @Test
     void helpDoesNotCreateServiceManager() throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
 

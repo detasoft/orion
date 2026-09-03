@@ -134,30 +134,54 @@ class ServerMakeTargetsTest {
                 {
                     printf 'call=%s\n' "$count"
                     printf 'arg=%s\n' "$@"
-                    if [ "$count" -eq 1 ]; then
-                        printf 'token=%s\n' "$("$SSH_ASKPASS" 'Enrollment token: ')"
-                        printf 'keys=%s\n' "$("$SSH_ASKPASS" 'Keys (`all`, numbers, or OpenSSH key): ')"
-                    fi
+                    printf 'password=%s\n' "$("$SSH_ASKPASS" '(root@localhost) Orion password: ')"
+                    key_prompt='(root@localhost) Keys (`all`, numbers, or OpenSSH key): '
+                    printf 'keys=%s\n' "$("$SSH_ASKPASS" "$key_prompt")"
                 } >> "$CAPTURE_FILE"
-                if [ "$count" -eq 1 ]; then
-                    exit 255
-                fi
                 printf 'orion: RUNNING\n'
                 """);
         ProcessBuilder builder = make(
                 "enroll-admin-key",
-                "ORION_SSH_KEY=" + identity,
-                "ORION_SSH_ENROLLMENT_TOKEN=test-enrollment-token");
+                "ORION_SSH_KEY=" + identity);
         configureFakeCommand(builder, bin, capture);
+        builder.environment().put("ORION_ROOT_PASSWORD", "test-root-password");
 
         Process process = builder.start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
         assertThat(process.waitFor()).as(output).isZero();
         assertThat(output).contains("Admin SSH key enrolled: " + identity);
-        assertThat(Files.readString(capture))
-                .contains("call=1", "token=test-enrollment-token", "keys=all", "call=2")
-                .contains("arg=" + identity);
+        List<String> invocation = Files.readAllLines(capture);
+        assertThat(invocation)
+                .containsSubsequence(
+                        "arg=-F",
+                        "arg=/dev/null",
+                        "arg=-o",
+                        "arg=IdentitiesOnly=yes",
+                        "arg=-o",
+                        "arg=IdentityFile=none")
+                .containsSubsequence("arg=-i", "arg=" + identity)
+                .doesNotContain("arg=~/.ssh/id_rsa");
+        assertThat(invocation).filteredOn(line -> line.equals("arg=-i")).hasSize(1);
+        assertThat(invocation).filteredOn(line -> line.equals("arg=" + identity)).hasSize(1);
+        assertThat(String.join("\n", invocation))
+                .contains("call=1", "password=test-root-password", "keys=all")
+                .doesNotContain("call=2");
+    }
+
+    @Test
+    void enrollmentRequiresTheOrionRootPassword() throws Exception {
+        Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
+
+        ProcessBuilder builder = make(
+                "enroll-admin-key",
+                "ORION_SSH_KEY=" + identity);
+        builder.environment().remove("ORION_ROOT_PASSWORD");
+        Process process = builder.start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertThat(process.waitFor()).isNotZero();
+        assertThat(output).contains("ORION_ROOT_PASSWORD is required");
     }
 
     @Test

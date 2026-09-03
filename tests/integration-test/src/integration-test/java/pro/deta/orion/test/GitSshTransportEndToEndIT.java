@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.sshd.client.SshClient;
 import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
 import org.apache.sshd.client.auth.keyboard.UserInteraction;
+import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.channel.ClientChannelEvent;
 import org.apache.sshd.client.channel.ChannelShell;
@@ -25,13 +26,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.acl.XmlService;
+import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -44,7 +45,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-import java.io.PrintStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -55,6 +55,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.KeyPair;
 import java.security.PublicKey;
+import java.util.Arrays;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
@@ -634,17 +635,15 @@ class GitSshTransportEndToEndIT {
         Path orionRoot = tempDir.resolve("orion-root");
         KeyPair enrolledKey = KeyUtils.generateRSAKeyPair()
                 .valueOrFailure("Enrollment SSH key should be generated");
-        ByteArrayOutputStream startupOutput = new ByteArrayOutputStream();
-        PrintStream originalOut = System.out;
+        startedOrion = startFreshOrion(orionRoot);
+        char[] rootPassword = startedOrion.accessControlService()
+                .plainRootToken(PlainRootTokenAccessForTests.create());
         try {
-            System.setOut(new PrintStream(startupOutput, true, StandardCharsets.UTF_8));
-            startedOrion = startFreshOrion(orionRoot);
+            assertThat(enrollKeyAndExecuteOverSsh(startedOrion, "root", rootPassword, enrolledKey, "state"))
+                    .contains("orion: RUNNING");
         } finally {
-            System.setOut(originalOut);
+            Arrays.fill(rootPassword, '\0');
         }
-        String enrollmentToken = startupToken(startupOutput);
-
-        enrollKeyOverSsh(startedOrion, "root", enrollmentToken, enrolledKey.getPublic());
 
         startedOrion.stop();
         startedOrion = null;
@@ -701,7 +700,6 @@ class GitSshTransportEndToEndIT {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
             OrionComponent component = DaggerOrionComponent.builder()
                     .configurationProvider(() -> configuration)
-                    .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(identity.capability())
                     .build();
             OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
@@ -771,14 +769,17 @@ class GitSshTransportEndToEndIT {
         return result.output();
     }
 
-    private static void enrollKeyOverSsh(
+    private static String enrollKeyAndExecuteOverSsh(
             StartedOrion orion,
             String username,
-            String enrollmentToken,
-            PublicKey publicKey) throws Exception {
+            char[] password,
+            KeyPair keyPair,
+            String command) throws Exception {
         SshClient client = SshClient.setUpDefaultClient();
         client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
-        client.setUserAuthFactories(List.of(UserAuthKeyboardInteractiveFactory.INSTANCE));
+        client.setUserAuthFactories(List.of(
+                UserAuthPublicKeyFactory.INSTANCE,
+                UserAuthKeyboardInteractiveFactory.INSTANCE));
         client.setUserInteraction(new UserInteraction() {
             @Override
             public String[] interactive(
@@ -788,7 +789,13 @@ class GitSshTransportEndToEndIT {
                     String lang,
                     String[] prompt,
                     boolean[] echo) {
-                return new String[]{enrollmentToken, PublicKeyEntry.toString(publicKey)};
+                if (prompt.length == 1 && "Orion password: ".equals(prompt[0]) && !echo[0]) {
+                    return new String[]{new String(password)};
+                }
+                if (prompt.length == 1 && prompt[0].startsWith("Keys (`all`")) {
+                    return new String[]{"all"};
+                }
+                throw new AssertionError("Unexpected SSH enrollment prompt: " + List.of(prompt));
             }
 
             @Override
@@ -803,20 +810,23 @@ class GitSshTransportEndToEndIT {
                         orion.configuration().getTransport().getSsh().getPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
-            assertThatThrownBy(() -> session.auth().verify(10, TimeUnit.SECONDS))
-                    .isInstanceOf(IOException.class);
+            session.addPublicKeyIdentity(keyPair);
+            session.auth().verify(10, TimeUnit.SECONDS);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            ByteArrayOutputStream error = new ByteArrayOutputStream();
+            try (ClientChannel channel = session.createExecChannel(command)) {
+                channel.setOut(output);
+                channel.setErr(error);
+                channel.open().verify(10, TimeUnit.SECONDS);
+                channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(10));
+                assertThat(channel.getExitStatus())
+                        .as(command + " stderr: %s", error.toString(StandardCharsets.UTF_8))
+                        .isEqualTo(0);
+                return output.toString(StandardCharsets.UTF_8);
+            }
         } finally {
             client.stop();
         }
-    }
-
-    private static String startupToken(ByteArrayOutputStream startupOutput) {
-        String prefix = "SSH enrollment token: ";
-        return startupOutput.toString(StandardCharsets.UTF_8).lines()
-                .filter(line -> line.startsWith(prefix))
-                .map(line -> line.substring(prefix.length()))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("Enrollment token was not printed at startup"));
     }
 
     private static SshCommandResult executeCommandOverSsh(

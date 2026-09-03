@@ -13,7 +13,6 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.transport.OrionTransportModule;
 
 @Singleton
@@ -34,12 +33,10 @@ public interface OrionComponent {
     interface Builder {
         OrionComponent build();
         @BindsInstance Builder configurationProvider(ConfigurationProvider configurationProvider);
-        @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
 
         default Builder defaultConfigurationProvider() {
             return configurationProvider(OrionConfiguration::new)
-                    .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(ServerIdentityCapability.unavailable());
         }
     }

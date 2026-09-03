@@ -1,5 +1,9 @@
 # Interactive SSH Authentication and Enrollment Implementation Plan
 
+> **Superseded enrollment semantics:** The implementation described here used a one-time SSH enrollment token.
+> `2026-09-03-password-authenticated-key-enrollment-design.md` replaces that mechanism with password-first,
+> same-connection enrollment. This file remains as historical context for proof-aware public-key authentication.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add named-user SSH public-key authentication and one-time keyboard-interactive key enrollment while

@@ -47,24 +47,24 @@ The protected key-material store is created at
 admin SSH identity at `orion_root/admin-identity.pem` when it is missing.
 
 On first startup Orion creates a default ACL in the `orion` repository and
-prints both the generated `root` password and a one-time SSH enrollment token:
+prints the generated `root` password:
 
 ```text
 ---ROOT PASSWORD: <generated-password>
-SSH enrollment token: <enrollment-token>
 ```
 
 Keep the server running and enroll the generated admin identity from another
 terminal:
 
 ```sh
-make enroll-admin-key ORION_SSH_ENROLLMENT_TOKEN='<enrollment-token>'
+ORION_ROOT_PASSWORD='<generated-password>' make enroll-admin-key
 ```
 
-The enrollment helper proves possession of `admin-identity.pem`, consumes the
-one-time token, and verifies the enrolled key with an authenticated `state`
-command. Server signing keys remain inside the protected material store and
-are never exported as SSH client identities.
+The enrollment helper proves possession of `admin-identity.pem`, asks Orion to
+verify the root password before displaying candidate keys, enrolls the key,
+and runs an authenticated `state` command on the same SSH connection. Server
+signing keys remain inside the protected material store and are never exported
+as SSH client identities.
 
 Default local listeners:
 
