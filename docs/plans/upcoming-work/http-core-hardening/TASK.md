@@ -9,3 +9,4 @@ resource-ownership contracts before changing its Jetty execution model.
 ## Child Tasks
 
 - [ ] [Unify HTTP route invocation](unified-route-invocation/TASK.md)
+- [ ] [Centralize typed HTTP route matching](typed-route-matching/TASK.md)
