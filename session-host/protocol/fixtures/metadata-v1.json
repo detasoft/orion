@@ -28,6 +28,6 @@
     "endpoint": "control.sock"
   },
   "activeSegment": 1,
-  "oldestAvailableTimestamp": 1,
-  "latestTimestamp": 4
+  "oldestAvailableEventId": 1,
+  "latestEventId": 4
 }

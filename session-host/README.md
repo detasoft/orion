@@ -81,13 +81,13 @@ Run Rust tests through Maven:
 mvn test -pl session-host
 ```
 
-Regenerate checked-in binary protocol fixtures after an intentional protocol
+Regenerate checked-in protocol fixtures after an intentional protocol
 change:
 
 ```bash
 make session-host-fixtures
 ```
 
-Changing a v1 fixture is a compatibility change and requires a new format or
-payload-schema version. Ordinary implementation work must leave the fixtures
-unchanged.
+The journal fixtures are shared with AgentD and server-side consumers. Any
+future change to their version-1 bytes requires an intentional compatibility
+decision.

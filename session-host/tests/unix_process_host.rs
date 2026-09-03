@@ -91,21 +91,21 @@ fn orders_control_commands_and_deduplicates_input_after_reconnect() {
     let resize = protocol::pty_resize_payload(101, 37);
     let resized = request(&mut first, control_message::RESIZE, 2, &resize);
     assert_eq!(resized.message_type, control_message::ACCEPTED);
-    let resize_timestamp = u64_at(&resized.payload);
+    let resize_event_id = u64_at(&resized.payload);
 
     let input_id = [0x4a; 16];
     let input = protocol::pty_input_payload(input_id, b"hello\n").unwrap();
     let accepted = request(&mut first, control_message::INPUT, 3, &input);
     assert_eq!(accepted.message_type, control_message::ACCEPTED);
-    let input_timestamp = u64_at(&accepted.payload);
-    assert!(resize_timestamp < input_timestamp);
+    let input_event_id = u64_at(&accepted.payload);
+    assert!(resize_event_id < input_event_id);
     drop(first);
 
     let mut reconnected = connect(host.directory());
     let changed_retry = protocol::pty_input_payload(input_id, b"second\n").unwrap();
     let duplicate = request(&mut reconnected, control_message::INPUT, 4, &changed_retry);
     assert_eq!(duplicate.message_type, control_message::DUPLICATE);
-    assert_eq!(u64_at(&duplicate.payload), input_timestamp);
+    assert_eq!(u64_at(&duplicate.payload), input_event_id);
 
     wait_for_output(host.directory(), b"GOT:hello");
     let terminate = [1_u8, 0, 0, 0, 0, 0, 0, 0];
@@ -129,7 +129,7 @@ fn orders_control_commands_and_deduplicates_input_after_reconnect() {
         .find(|event| event.event_type == event_type::PTY_RESIZE)
         .unwrap();
     assert_eq!(resize_event.payload, resize);
-    assert!(resize_event.timestamp < inputs[0].timestamp);
+    assert!(resize_event.event_id < inputs[0].event_id);
     assert!(
         result
             .events
@@ -268,7 +268,7 @@ fn restores_default_sigpipe_disposition_in_child() {
         .find(|event| event.event_type == event_type::PROCESS_EXITED)
         .unwrap();
     assert_eq!(&exited.payload[0..4], &i32::MIN.to_le_bytes());
-    assert_eq!(&exited.payload[4..8], &libc::SIGPIPE.to_le_bytes());
+    assert_eq!(&exited.payload[4..8], &(-1_i32).to_le_bytes());
     assert!(!contains(&terminal_output(&result.events), b"SURVIVED"));
 }
 

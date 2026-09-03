@@ -22,7 +22,6 @@ commands, and survives independently of `agentd`.
 
 ## Child Tasks
 
-- [ ] [Replace the session journal with a CBOR Sequence](cbor-sequence-journal-format/TASK.md)
 - [ ] [Add journal segmentation, compression, and retention](journal-retention/TASK.md)
 - [ ] [Enforce the Linux Landlock sandbox](linux-sandbox/TASK.md)
 - [ ] [Harden Linux process-tree control](linux-process-tree-control/TASK.md)

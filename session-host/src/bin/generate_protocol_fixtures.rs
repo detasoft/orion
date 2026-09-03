@@ -8,15 +8,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("protocol")
         .join("fixtures");
     fs::create_dir_all(&directory)?;
-    fs::write(directory.join("journal-v1.bin"), protocol_fixture::journal())?;
+    fs::write(directory.join("session-events-v1.hex"), protocol_fixture::journal_hex())?;
+    fs::write(
+        directory.join("session-event-unknown-tail-v1.hex"),
+        protocol_fixture::unknown_event_hex(),
+    )?;
     fs::write(directory.join("control-v1.bin"), protocol_fixture::control())?;
     fs::write(
-        directory.join("truncated-record-v1.bin"),
-        protocol_fixture::truncated_record(),
-    )?;
-    fs::write(
-        directory.join("truncated-zstd-block-v1.bin"),
-        protocol_fixture::truncated_zstd_block(),
+        directory.join("truncated-item-v1.hex"),
+        protocol_fixture::truncated_item_hex(),
     )?;
     Ok(())
 }

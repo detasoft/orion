@@ -51,7 +51,7 @@ class AgentProtocolFixtureTest {
                 EVENT_CODEC.encode(
                         new EventId(3),
                         new SessionEventPayload.PtyInput(
-                                new CommandId("command-1"),
+                                new CommandId("00010203-0405-0607-0809-0a0b0c0d0e0f"),
                                 ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff}))),
                 EVENT_CODEC.encode(
                         new EventId(4),

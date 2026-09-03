@@ -132,8 +132,8 @@ pub fn write_control_frame(
     Ok(())
 }
 
-pub fn timestamp_payload(timestamp: u64) -> [u8; 8] {
-    timestamp.to_le_bytes()
+pub fn event_id_payload(event_id: u64) -> [u8; 8] {
+    event_id.to_le_bytes()
 }
 
 pub fn error_payload(code: u32, detail: &str) -> Vec<u8> {

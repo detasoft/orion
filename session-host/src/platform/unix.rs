@@ -276,8 +276,8 @@ fn initial_metadata(
             endpoint: CONTROL_ENDPOINT.to_owned(),
         },
         active_segment: 1,
-        oldest_available_timestamp: None,
-        latest_timestamp: None,
+        oldest_available_event_id: None,
+        latest_event_id: None,
     })
 }
 
@@ -446,15 +446,15 @@ struct SharedState {
 
 impl SharedState {
     fn append(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
-        let timestamp = self.journal.append(event, 1, 0, payload)?;
+        let event_id = self.journal.append(event, 1, 0, payload)?;
         self.journal.flush()?;
-        self.metadata.oldest_available_timestamp = Some(
+        self.metadata.oldest_available_event_id = Some(
             self.metadata
-                .oldest_available_timestamp
-                .unwrap_or(timestamp),
+                .oldest_available_event_id
+                .unwrap_or(event_id),
         );
-        self.metadata.latest_timestamp = Some(timestamp);
-        Ok(timestamp)
+        self.metadata.latest_event_id = Some(event_id);
+        Ok(event_id)
     }
 
     fn persist_metadata(&self) -> Result<(), HostError> {
@@ -576,17 +576,17 @@ fn handle_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8
     if !state.child_live {
         return response_error(ERROR_INVALID_STATE, "child process has exited");
     }
-    if let Some(timestamp) = state.accepted_inputs.get(&input_id) {
+    if let Some(event_id) = state.accepted_inputs.get(&input_id) {
         return (
             control_message::DUPLICATE,
-            host::timestamp_payload(*timestamp).to_vec(),
+            host::event_id_payload(*event_id).to_vec(),
         );
     }
-    let timestamp = match state.append(event_type::PTY_INPUT, payload) {
-        Ok(timestamp) => timestamp,
+    let event_id = match state.append(event_type::PTY_INPUT, payload) {
+        Ok(event_id) => event_id,
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
-    state.accepted_inputs.insert(input_id, timestamp);
+    state.accepted_inputs.insert(input_id, event_id);
     let mut master = match state.master.try_clone() {
         Ok(master) => master,
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
@@ -600,7 +600,7 @@ fn handle_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8
     }
     (
         control_message::ACCEPTED,
-        host::timestamp_payload(timestamp).to_vec(),
+        host::event_id_payload(event_id).to_vec(),
     )
 }
 
@@ -623,8 +623,8 @@ fn handle_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u
     if !state.child_live {
         return response_error(ERROR_INVALID_STATE, "child process has exited");
     }
-    let timestamp = match state.append(event_type::PTY_RESIZE, payload) {
-        Ok(timestamp) => timestamp,
+    let event_id = match state.append(event_type::PTY_RESIZE, payload) {
+        Ok(event_id) => event_id,
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
     let dimensions = libc::winsize {
@@ -643,7 +643,7 @@ fn handle_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u
     }
     (
         control_message::ACCEPTED,
-        host::timestamp_payload(timestamp).to_vec(),
+        host::event_id_payload(event_id).to_vec(),
     )
 }
 
@@ -707,14 +707,14 @@ fn handle_status(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u
     payload[28..36].copy_from_slice(
         &state
             .metadata
-            .oldest_available_timestamp
+            .oldest_available_event_id
             .unwrap_or(u64::MAX)
             .to_le_bytes(),
     );
     payload[36..44].copy_from_slice(
         &state
             .metadata
-            .latest_timestamp
+            .latest_event_id
             .unwrap_or(u64::MAX)
             .to_le_bytes(),
     );
@@ -738,8 +738,8 @@ fn apply_foreground_signal(
         return response_error(ERROR_INVALID_STATE, "child process has exited");
     }
     let payload = host::signal_payload(kind, signal);
-    let timestamp = match state.append(event_type::SIGNAL, &payload) {
-        Ok(timestamp) => timestamp,
+    let event_id = match state.append(event_type::SIGNAL, &payload) {
+        Ok(event_id) => event_id,
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
     let foreground_group = unsafe { libc::tcgetpgrp(state.master.as_raw_fd()) };
@@ -755,7 +755,7 @@ fn apply_foreground_signal(
     }
     (
         control_message::ACCEPTED,
-        host::timestamp_payload(timestamp).to_vec(),
+        host::event_id_payload(event_id).to_vec(),
     )
 }
 
@@ -772,8 +772,8 @@ fn apply_descendant_signal(
         return response_error(ERROR_INVALID_STATE, "child process has exited");
     }
     let payload = host::signal_payload(kind, signal);
-    let timestamp = match state.append(event_type::SIGNAL, &payload) {
-        Ok(timestamp) => timestamp,
+    let event_id = match state.append(event_type::SIGNAL, &payload) {
+        Ok(event_id) => event_id,
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
     let descendants = Arc::clone(&state.descendants);
@@ -786,7 +786,7 @@ fn apply_descendant_signal(
     }
     (
         control_message::ACCEPTED,
-        host::timestamp_payload(timestamp).to_vec(),
+        host::event_id_payload(event_id).to_vec(),
     )
 }
 
