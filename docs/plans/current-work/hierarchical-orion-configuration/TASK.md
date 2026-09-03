@@ -1,8 +1,8 @@
 # Add Hierarchical Orion Configuration
 
-Status: todo
+Status: active
 Depends on for encrypted secret activation:
-../../current-work/unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md
+../unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md
 
 Turn the versioned `orion.xml` stored in Orion into the desired-state model for
 organizations, teams, repositories, organization-local users, roles, grants,

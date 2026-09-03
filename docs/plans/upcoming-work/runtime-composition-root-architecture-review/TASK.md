@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on:
-[hierarchical configuration acceptance](../hierarchical-orion-configuration/administration-and-acceptance/TASK.md),
+[hierarchical configuration acceptance](../../current-work/hierarchical-orion-configuration/administration-and-acceptance/TASK.md),
 [key-material rotation and bootstrap acceptance](../../current-work/unified-key-material-bootstrap/rotation-recovery-and-acceptance/TASK.md),
 [the Git server transport review](../git-server-transport-architecture-review/TASK.md)
 Required skill: `architecture-simplifier`

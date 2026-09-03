@@ -4,7 +4,7 @@ Status: todo
 Depends on: ../bootstrap-proxy-runtime/TASK.md,
 ../../unified-key-material-bootstrap/typed-material-capabilities/TASK.md,
 ../../unified-key-material-bootstrap/configuration-secret-cryptography/TASK.md,
-../../../upcoming-work/hierarchical-orion-configuration/xml-schema-v2/TASK.md
+../../hierarchical-orion-configuration/xml-schema-v2/TASK.md
 
 Adopt a provisional bootstrap proxy into persistent system, organization, or
 project configuration without duplicating it on restart.
