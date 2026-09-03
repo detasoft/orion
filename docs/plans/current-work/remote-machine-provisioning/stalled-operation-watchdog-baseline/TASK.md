@@ -1,6 +1,7 @@
 # Fix the Stalled SSH Operation Watchdog Baseline
 
 Status: todo
+Owner: codex, session watchdog-baseline-7c2a, started 2026-09-04 00:17 Europe/Amsterdam.
 
 Restore the full-project test baseline after the focused
 `MinaSshOperationTest#wholeOperationWatchdogClosesAStalledSession` scenario
