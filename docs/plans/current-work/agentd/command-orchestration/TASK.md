@@ -2,6 +2,7 @@
 
 Status: todo
 Design: ../../../2026-09-03-agentd-command-orchestration-design.md
+Plan: ../../../2026-09-03-agentd-command-orchestration.md
 Depends on: completed AgentD HTTP/2 transport, session discovery, and session
 runtime/control; ../journal-reader/TASK.md; ../journal-sync/TASK.md; and
 ../../native-session-host/control-journal-idempotency/TASK.md
