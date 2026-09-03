@@ -17,7 +17,8 @@ public record AgentConfiguration(
         AgentGeneration generation,
         AgentLaunchId launchId,
         AgentProtocolLimits protocolLimits,
-        String agentVersion
+        String agentVersion,
+        Path sessionHostExecutable
 ) {
     public AgentConfiguration {
         serverUri = validateServerUri(serverUri);
@@ -27,6 +28,11 @@ public record AgentConfiguration(
         Objects.requireNonNull(launchId, "launchId");
         protocolLimits = Objects.requireNonNull(protocolLimits, "protocolLimits");
         agentVersion = requireValue(agentVersion, "agentVersion");
+        sessionHostExecutable = Objects.requireNonNull(sessionHostExecutable, "sessionHostExecutable");
+        if (!sessionHostExecutable.isAbsolute()) {
+            throw new IllegalArgumentException("sessionHostExecutable must be an absolute path");
+        }
+        sessionHostExecutable = sessionHostExecutable.normalize();
     }
 
     public static AgentConfiguration parse(String[] arguments) {
@@ -38,6 +44,7 @@ public record AgentConfiguration(
         AgentLaunchId launchId = null;
         int maxFrameBytes = AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES;
         String agentVersion = null;
+        Path sessionHostExecutable = null;
 
         for (int index = 0; index < arguments.length; index++) {
             String option = arguments[index];
@@ -52,6 +59,7 @@ public record AgentConfiguration(
                 case "--max-frame-bytes" ->
                         maxFrameBytes = parsePositiveInt(nextValue(arguments, ++index, option));
                 case "--agent-version" -> agentVersion = nextValue(arguments, ++index, option);
+                case "--session-host" -> sessionHostExecutable = Path.of(nextValue(arguments, ++index, option));
                 default -> throw new IllegalArgumentException("Unknown AgentD option: " + option);
             }
         }
@@ -64,6 +72,7 @@ public record AgentConfiguration(
         requireOption(generation, "--generation");
         requireOption(launchId, "--launch-id");
         requireOption(agentVersion, "--agent-version");
+        requireOption(sessionHostExecutable, "--session-host");
         return new AgentConfiguration(
                 serverUri,
                 stateDirectory,
@@ -71,7 +80,8 @@ public record AgentConfiguration(
                 generation,
                 launchId,
                 AgentProtocolLimits.defaults().withMaxFrameBytes(maxFrameBytes),
-                agentVersion);
+                agentVersion,
+                sessionHostExecutable);
     }
 
     public Path sessionsDirectory() {

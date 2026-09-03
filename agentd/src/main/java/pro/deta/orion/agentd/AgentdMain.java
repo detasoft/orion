@@ -20,6 +20,7 @@ public final class AgentdMain {
               --launch-id UUID       server-assigned launch identity
               --max-frame-bytes N    maximum Agent protocol frame size
               --agent-version VALUE  version reported during registration
+              --session-host PATH    bundled native session-host executable
               --help                 show this help
             """;
 

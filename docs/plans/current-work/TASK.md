@@ -14,3 +14,4 @@ This task node tracks active high-level implementation work.
 - [ ] [Add the Orion Git interoperability matrix](git-interoperability-matrix/TASK.md)
 - [ ] [Add transparent remote Git proxy bootstrap](remote-git-proxy-bootstrap/TASK.md)
 - [ ] [Add the interactive Orion SSH shell](interactive-ssh-shell/TASK.md)
+- [ ] [Provision remote AgentD machines](remote-machine-provisioning/TASK.md)

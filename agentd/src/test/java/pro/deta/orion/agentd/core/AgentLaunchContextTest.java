@@ -13,7 +13,8 @@ class AgentLaunchContextTest {
                 "--agent-id", "agent-1",
                 "--generation", "7",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
-                "--agent-version", "1.0.0"
+                "--agent-version", "1.0.0",
+                "--session-host", "/opt/orion/releases/1.0.0/session-host"
         });
 
         try (AgentLaunchContext first = AgentLaunchContext.create(configuration, new LaunchPermit(new byte[32]));

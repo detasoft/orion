@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+printf session-host-started > "$1"

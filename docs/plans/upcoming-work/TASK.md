@@ -8,7 +8,6 @@ tasks may be ready at the same time.
 
 ## Child Tasks
 
-- [ ] [Provision remote AgentD machines](remote-machine-provisioning/TASK.md)
 - [ ] [Add hierarchical Orion configuration](hierarchical-orion-configuration/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)
 - [ ] [Implement external Git repository synchronization](external-git-repository-sync/TASK.md)

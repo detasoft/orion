@@ -7,6 +7,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -61,14 +62,19 @@ class AgentdMainTest {
     @Test
     void readsPermitFromStdinAndPassesLaunchContextToLauncher() {
         AtomicReference<AgentLaunchContext> launched = new AtomicReference<>();
+        AtomicReference<Path> sessionHost = new AtomicReference<>();
         byte[] permit = new byte[32];
         String input = Base64.getUrlEncoder().withoutPadding().encodeToString(permit) + "\n";
 
         int exit = run(validArguments(), new ByteArrayInputStream(input.getBytes(StandardCharsets.US_ASCII)),
-                (configuration, context) -> launched.set(context));
+                (configuration, context) -> {
+                    sessionHost.set(configuration.sessionHostExecutable());
+                    launched.set(context);
+                });
 
         assertThat(exit).isZero();
         assertThat(launched.get().agentId().value()).isEqualTo("agent-1");
+        assertThat(sessionHost.get()).isEqualTo(Path.of("/opt/orion/releases/1.0.0/session-host"));
     }
 
     @Test
@@ -111,7 +117,8 @@ class AgentdMainTest {
                 "--agent-id", "agent-1",
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
-                "--agent-version", "1.0.0"
+                "--agent-version", "1.0.0",
+                "--session-host", "/opt/orion/releases/1.0.0/session-host"
         };
     }
 }

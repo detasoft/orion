@@ -19,7 +19,8 @@ class AgentConfigurationTest {
                 "--generation", "7",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--max-frame-bytes", "65536",
-                "--agent-version", "1.2.3"
+                "--agent-version", "1.2.3",
+                "--session-host", "/opt/orion/releases/1.2.3/session-host"
         });
 
         assertThat(configuration.serverUri()).isEqualTo(URI.create("https://agent.example.test/control"));
@@ -34,6 +35,8 @@ class AgentConfigurationTest {
                 UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f"));
         assertThat(configuration.protocolLimits().maxFrameBytes()).isEqualTo(65_536);
         assertThat(configuration.agentVersion()).isEqualTo("1.2.3");
+        assertThat(configuration.sessionHostExecutable())
+                .isEqualTo(Path.of("/opt/orion/releases/1.2.3/session-host"));
     }
 
     @Test
@@ -58,6 +61,14 @@ class AgentConfigurationTest {
     }
 
     @Test
+    void rejectsRelativeSessionHostExecutable() {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> AgentConfiguration.parse(
+                        arguments("--session-host", "relative/session-host")))
+                .withMessageContaining("absolute");
+    }
+
+    @Test
     void requiresEveryServerAssignedLaunchField() {
         assertThatIllegalArgumentException().isThrownBy(() -> AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
@@ -78,6 +89,14 @@ class AgentConfigurationTest {
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f"
         })).withMessageContaining("--agent-version");
+        assertThatIllegalArgumentException().isThrownBy(() -> AgentConfiguration.parse(new String[]{
+                "--server", "https://agent.test",
+                "--state-dir", "target/state",
+                "--agent-id", "agent-1",
+                "--generation", "1",
+                "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
+                "--agent-version", "1.0.0"
+        })).withMessageContaining("--session-host");
     }
 
     @Test
@@ -98,6 +117,7 @@ class AgentConfigurationTest {
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
                 "--agent-version", "1.0.0",
+                "--session-host", "/opt/orion/current/session-host",
                 option, value
         };
     }

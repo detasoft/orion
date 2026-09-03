@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+IFS= read -r permit
+session_host=
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--session-host" ]; then
+        session_host=$2
+        shift 2
+    else
+        shift
+    fi
+done
+test -n "$permit"
+test -x "$session_host"
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+install_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+sleep 1
+printf agentd-started > "$install_root/agentd.marker"
+"$session_host" "$install_root/session-host.marker"

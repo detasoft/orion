@@ -50,6 +50,8 @@ class AgentAssemblyTest {
                 configuration, context, new RecordingTransport(),
                 new MachineInfo("runner", "linux", "aarch64"));
 
+        assertThat(agent.configuration().sessionHostExecutable())
+                .isEqualTo(state.resolve("runtime/session-host").toAbsolutePath());
         agent.close();
 
         assertThat(context.permit().copyBytes()).containsOnly(0);
@@ -60,7 +62,7 @@ class AgentAssemblyTest {
                 URI.create("https://agent.test"), state,
                 new AgentId("agent-1"), new AgentGeneration(1),
                 new AgentLaunchId(UUID.fromString("10010203-0405-0607-0809-0a0b0c0d0e0f")),
-                AgentProtocolLimits.defaults(), "1.0.0");
+                AgentProtocolLimits.defaults(), "1.0.0", state.resolve("runtime/session-host"));
     }
 
     private static final class RecordingTransport implements AgentTransport {

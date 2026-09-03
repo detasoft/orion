@@ -71,6 +71,7 @@
     <module>session-host</module>
     <module>agent-protocol</module>
     <module>agentd</module>
+    <module>agent-provisioning</module>
     <module>core</module>
     <module>connectors</module>
     <module>integration</module>
