@@ -17,7 +17,7 @@
     <modules>
         <module>git-engine-test-support</module>
         <module>git-engine-orion-adapters</module>
-        <module>git-projection-parity-native</module>
+        <module>git-engine-interoperability-matrix</module>
         <module>integration-test-support</module>
         <module>test-duration-recorder</module>
         <module>integration-test</module>

@@ -7,8 +7,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
@@ -281,6 +281,75 @@ class GitInteroperabilityMatrixTest extends GitInteroperabilityMatrixRunner {
                 scenario, new TestClient("jgit"), new TestServer("orion"));
 
         assertThat(invocation).hasToString("clone [jgit -> orion]");
+    }
+
+    @Test
+    void createsEnginesLazilyWhenTheInvocationRuns() throws Exception {
+        AtomicInteger clients = new AtomicInteger();
+        AtomicInteger servers = new AtomicInteger();
+        GitMatrixInvocation invocation = new GitMatrixInvocation(
+                noOpScenario("lazy"),
+                "client",
+                "server",
+                () -> {
+                    clients.incrementAndGet();
+                    return new TestClient("client");
+                },
+                () -> {
+                    servers.incrementAndGet();
+                    return new TestServer("server");
+                });
+
+        assertThat(invocation).hasToString("lazy [client -> server]");
+        assertThat(clients).hasValue(0);
+        assertThat(servers).hasValue(0);
+
+        invocation.run();
+
+        assertThat(clients).hasValue(1);
+        assertThat(servers).hasValue(1);
+    }
+
+    @Test
+    void rejectsClientEngineMismatchBeforeCreatingTheServer() {
+        AtomicInteger servers = new AtomicInteger();
+        GitMatrixInvocation invocation = new GitMatrixInvocation(
+                noOpScenario("mismatch"),
+                "declared-client",
+                "server",
+                () -> new TestClient("actual-client"),
+                () -> {
+                    servers.incrementAndGet();
+                    return new TestServer("server");
+                });
+
+        assertThatThrownBy(invocation::run)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("declared-client")
+                .hasMessageContaining("actual-client");
+        assertThat(servers).hasValue(0);
+    }
+
+    @Test
+    void closesServerWhenItsEngineDoesNotMatchTheDeclaration() {
+        AtomicBoolean closed = new AtomicBoolean();
+        GitMatrixInvocation invocation = new GitMatrixInvocation(
+                noOpScenario("mismatch"),
+                "client",
+                "declared-server",
+                () -> new TestClient("client"),
+                () -> new TestServer("actual-server") {
+                    @Override
+                    public void close() {
+                        closed.set(true);
+                    }
+                });
+
+        assertThatThrownBy(invocation::run)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("declared-server")
+                .hasMessageContaining("actual-server");
+        assertThat(closed).isTrue();
     }
 
     @Override

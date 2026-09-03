@@ -128,7 +128,7 @@
             </dependency>
             <dependency>
                 <groupId>pro.deta.orion.tests</groupId>
-                <artifactId>git-projection-parity-native</artifactId>
+                <artifactId>git-engine-interoperability-matrix</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

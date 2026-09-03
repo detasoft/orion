@@ -4,7 +4,6 @@ Status: todo
 Depends on:
 [the Git wire re-audit](../git-wire-architecture-simplification/post-simplification-review/TASK.md),
 [the Git client removal re-audit](../git-client-architecture-simplification/post-simplification-removal-review/TASK.md),
-[the Git interoperability matrix](../../current-work/git-interoperability-matrix/TASK.md),
 [remote Git proxy bootstrap](../../current-work/remote-git-proxy-bootstrap/TASK.md)
 Blocks: [the virtual-thread Git transport migration](../virtual-thread-jetty-ssh-git-transport/TASK.md)
 Required skill: `architecture-simplifier`

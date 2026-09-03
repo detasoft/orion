@@ -12,7 +12,7 @@ public abstract class GitInteroperabilityMatrixRunner {
     @ParameterizedTest(name = "{0}")
     @MethodSource("matrix")
     final void runsScenario(GitMatrixInvocation invocation) throws Exception {
-        GitInteroperabilityHarness.run(invocation.scenario(), invocation.client(), invocation.server());
+        invocation.run();
     }
 
     protected abstract Stream<GitMatrixInvocation> matrixInvocations();
