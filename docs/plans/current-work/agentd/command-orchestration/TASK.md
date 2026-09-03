@@ -8,7 +8,9 @@ runtime/control; ../journal-reader/TASK.md; ../journal-sync/TASK.md; and
 ../../native-session-host/control-journal-idempotency/TASK.md
 
 - [ ] Route server session commands.
-  - Owner: codex, session command-orchestration-d8e4, started 2026-09-03 19:29 Europe/Amsterdam.
+  - Owner: codex, session command-orchestration-d8e4, paused 2026-09-03 19:51 Europe/Amsterdam.
+  - Next: Resume after journal-reader, journal-sync, native control-journal-idempotency, and the native
+    start-outcome contract are integrated.
 
 Validate and route server commands while deriving durable outcomes exclusively
 from each session journal.
