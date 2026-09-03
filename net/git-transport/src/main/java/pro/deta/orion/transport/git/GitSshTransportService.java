@@ -49,6 +49,7 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
     private final SshServer sshd = SshServer.setUpDefaultServer();
 
     private final SshCommandFactory commandFactory;
+    private final OrionShell shellFactory;
     private final Provider<SshHostKeyService> sshHostKeyService;
     private final OrionSshAuthenticator authenticator;
     private final SshEnrollmentTokenStore enrollmentTokenStore;
@@ -107,7 +108,7 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
             });
             sshd.setForwardingFilter(new StaticDecisionForwardingFilter(false));
             sshd.setCommandFactory(commandFactory);
-            sshd.setShellFactory(new OrionShell());
+            sshd.setShellFactory(shellFactory);
 
             // Set the server id.  This can be queried with:
             //   ssh-keyscan -t rsa,dsa -p 29418 localhost

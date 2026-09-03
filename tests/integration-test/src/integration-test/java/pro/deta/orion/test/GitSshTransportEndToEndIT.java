@@ -6,6 +6,7 @@ import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory;
 import org.apache.sshd.client.auth.keyboard.UserInteraction;
 import org.apache.sshd.client.channel.ClientChannel;
 import org.apache.sshd.client.channel.ClientChannelEvent;
+import org.apache.sshd.client.channel.ChannelShell;
 import org.apache.sshd.client.session.ClientSession;
 import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import org.eclipse.jgit.api.Git;
@@ -41,6 +42,8 @@ import pro.deta.orion.util.KeyUtils;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.PrintStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
@@ -455,6 +458,67 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void interactivePtyEditsCompletesAndNeverStartsAnOperatingSystemShell() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        Path marker = tempDir.resolve("interactive-shell-marker");
+        startedOrion = startFreshOrion(orionRoot);
+        KeyPair serverIdentityKey = startedOrion.serverIdentityKey();
+
+        SshClient client = SshClient.setUpDefaultClient();
+        client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
+        client.start();
+        try (ClientSession session = client.connect(
+                        "root",
+                        startedOrion.configuration().getTransport().getSsh().getAddress(),
+                        startedOrion.configuration().getTransport().getSsh().getPort())
+                .verify(10, TimeUnit.SECONDS)
+                .getSession()) {
+            session.addPublicKeyIdentity(serverIdentityKey);
+            session.auth().verify(10, TimeUnit.SECONDS);
+
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            PipedInputStream terminalInput = new PipedInputStream();
+            try (PipedOutputStream clientInput = new PipedOutputStream(terminalInput);
+                 ChannelShell channel = session.createShellChannel()) {
+                channel.setPtyType("xterm-256color");
+                channel.setPtyColumns(40);
+                channel.setIn(terminalInput);
+                channel.setOut(output);
+                channel.setErr(new ByteArrayOutputStream());
+                channel.open().verify(10, TimeUnit.SECONDS);
+                awaitContains(output, "[root@orion] > ");
+
+                send(clientInput, "help\r");
+                awaitContains(output, "repositories");
+                send(clientInput, "stateX\u001b[D\u001b[3~\r");
+                awaitContains(output, "orion: RUNNING");
+                send(clientInput, "\u001b[A\r");
+                awaitOccurrences(output, "orion: RUNNING", 2);
+
+                channel.sendWindowChange(20, 24, 0, 0);
+                send(clientInput, "repo\t\r");
+                awaitContains(output, "orion\n");
+                send(clientInput, "touch " + marker + "; echo $(id) | cat >x `id`\r");
+                awaitContains(output, "UNKNOWN_COMMAND: Unknown command");
+                assertThat(Files.exists(marker)).isFalse();
+
+                send(clientInput, "partial\u0004\u0003");
+                awaitContains(output, "^C");
+                clientInput.write(4);
+                clientInput.flush();
+                assertThat(channel.waitFor(
+                                EnumSet.of(ClientChannelEvent.CLOSED),
+                                TimeUnit.SECONDS.toMillis(10)))
+                        .contains(ClientChannelEvent.CLOSED);
+                assertThat(channel.getExitStatus()).isZero();
+                assertThat(output.toString(StandardCharsets.UTF_8)).contains("\u001b[2K");
+            }
+        } finally {
+            client.stop();
+        }
+    }
+
+    @Test
     void regularUserCannotListRepositoriesOverSsh() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
@@ -788,6 +852,38 @@ class GitSshTransportEndToEndIT {
         } finally {
             client.stop();
         }
+    }
+
+    private static void send(PipedOutputStream input, String value) throws IOException {
+        input.write(value.getBytes(StandardCharsets.UTF_8));
+        input.flush();
+    }
+
+    private static void awaitContains(ByteArrayOutputStream output, String expected) throws Exception {
+        awaitOccurrences(output, expected, 1);
+    }
+
+    private static void awaitOccurrences(
+            ByteArrayOutputStream output,
+            String expected,
+            int expectedCount) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (occurrences(output.toString(StandardCharsets.UTF_8), expected) < expectedCount) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Timed out waiting for terminal output: " + expected);
+            }
+            Thread.sleep(10);
+        }
+    }
+
+    private static int occurrences(String value, String expected) {
+        int result = 0;
+        int offset = 0;
+        while ((offset = value.indexOf(expected, offset)) >= 0) {
+            result++;
+            offset += expected.length();
+        }
+        return result;
     }
 
     private static int executeShutdownOverSsh(StartedOrion orion, KeyPair keyPair) throws Exception {

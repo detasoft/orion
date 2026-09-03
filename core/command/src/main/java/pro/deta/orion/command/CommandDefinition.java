@@ -13,7 +13,8 @@ public record CommandDefinition(
         Set<String> allowedWhereFields,
         Predicate<CommandContext> visibility,
         CommandAuthorization authorization,
-        CommandHandler handler) {
+        CommandHandler handler,
+        CommandCompletion completion) {
     public CommandDefinition {
         Objects.requireNonNull(action, "action");
         Objects.requireNonNull(allowedNamedParameters, "allowedNamedParameters");
@@ -22,6 +23,7 @@ public record CommandDefinition(
         Objects.requireNonNull(visibility, "visibility");
         Objects.requireNonNull(authorization, "authorization");
         Objects.requireNonNull(handler, "handler");
+        Objects.requireNonNull(completion, "completion");
         if (action.isEmpty()) {
             throw new IllegalArgumentException("action must not be empty");
         }
@@ -34,5 +36,28 @@ public record CommandDefinition(
         if (!allowedNamedParameters.containsAll(sensitiveNamedParameters)) {
             throw new IllegalArgumentException("sensitive parameters must be allowed parameters");
         }
+    }
+
+    public CommandDefinition(
+            String action,
+            int minimumPositionalArguments,
+            int maximumPositionalArguments,
+            Set<String> allowedNamedParameters,
+            Set<String> sensitiveNamedParameters,
+            Set<String> allowedWhereFields,
+            Predicate<CommandContext> visibility,
+            CommandAuthorization authorization,
+            CommandHandler handler) {
+        this(
+                action,
+                minimumPositionalArguments,
+                maximumPositionalArguments,
+                allowedNamedParameters,
+                sensitiveNamedParameters,
+                allowedWhereFields,
+                visibility,
+                authorization,
+                handler,
+                CommandCompletion.none());
     }
 }

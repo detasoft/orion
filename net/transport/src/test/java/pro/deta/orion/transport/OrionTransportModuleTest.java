@@ -2,6 +2,7 @@ package pro.deta.orion.transport;
 
 import dagger.Module;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
@@ -35,14 +36,17 @@ class OrionTransportModuleTest {
     @Test
     void transportModuleIncludesSshCommandBindingsWithoutLifecycleParameters() {
         Module module = OrionTransportModule.class.getAnnotation(Module.class);
+        boolean providesNavigator = false;
 
         assertTrue(List.of(module.includes()).contains(SshCommandModule.class));
         for (Method method : SshCommandModule.class.getDeclaredMethods()) {
+            providesNavigator |= method.getReturnType() == CommandNavigator.class;
             for (Type parameterType : method.getGenericParameterTypes()) {
                 assertFalse(parameterType.getTypeName().contains("AggregateStateMachine"));
                 assertFalse(parameterType.getTypeName().contains("OrionApplicationLifecycle"));
             }
         }
+        assertTrue(providesNavigator);
     }
 
     @Test

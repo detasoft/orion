@@ -6,6 +6,7 @@ import jakarta.inject.Singleton;
 import pro.deta.orion.command.CommandAuditDescriber;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandLineParser;
+import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.audit.AuditingCommandDispatcher;
@@ -31,6 +32,12 @@ public final class SshCommandModule {
     @Singleton
     static CommandNode commandTree(LegacySshCommandCatalog catalog) {
         return catalog.commandTree();
+    }
+
+    @Provides
+    @Singleton
+    static CommandNavigator commandNavigator(CommandNode commandTree) {
+        return new CommandNavigator(commandTree);
     }
 
     @Provides

@@ -1,9 +1,6 @@
 package pro.deta.orion.command;
 
 import pro.deta.orion.auth.check.AccessDecision;
-import pro.deta.orion.command.resource.ScopedResourceResolution;
-
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,10 +11,12 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
 
     private final CommandLineParser parser;
     private final CommandNode root;
+    private final CommandNavigator navigator;
 
     public DefaultCommandDispatcher(CommandLineParser parser, CommandNode root) {
         this.parser = Objects.requireNonNull(parser, "parser");
         this.root = Objects.requireNonNull(root, "root");
+        navigator = new CommandNavigator(root);
     }
 
     @Override
@@ -67,33 +66,21 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
     }
 
     private CommandResult dispatchParsed(CommandContext context, ParsedCommand command) throws Exception {
-        CommandNode node = root;
-        List<Object> resources = new ArrayList<>();
-        for (String segment : command.path().segments()) {
-            CommandNode staticChild = node.children().get(segment);
-            if (staticChild != null) {
-                node = staticChild;
-                continue;
-            }
-            CommandNode.DynamicChild dynamicChild = node.dynamicChild();
-            if (dynamicChild == null) {
-                return failure(CommandFailureCode.UNKNOWN_PATH, "Unknown command path");
-            }
-            ScopedResourceResolution<?> resolution = dynamicChild.resolver()
-                    .resolve(context, resources, segment);
-            if (resolution instanceof ScopedResourceResolution.Missing<?>) {
-                return failure(CommandFailureCode.MISSING_RESOURCE, "Resource was not found");
-            }
-            if (resolution instanceof ScopedResourceResolution.Ambiguous<?> ambiguous) {
-                return new CommandResult.Failure(
-                        CommandFailureCode.AMBIGUOUS_RESOURCE,
-                        "Resource selector is ambiguous",
-                        ambiguous.candidateIds());
-            }
-            ScopedResourceResolution.Resolved<?> resolved = (ScopedResourceResolution.Resolved<?>) resolution;
-            resources.add(resolved.candidate().value());
-            node = dynamicChild.node();
+        CommandNavigation navigation = navigator.locate(context, command.path());
+        if (navigation instanceof CommandNavigation.UnknownPath) {
+            return failure(CommandFailureCode.UNKNOWN_PATH, "Unknown command path");
         }
+        if (navigation instanceof CommandNavigation.Missing) {
+            return failure(CommandFailureCode.MISSING_RESOURCE, "Resource was not found");
+        }
+        if (navigation instanceof CommandNavigation.Ambiguous ambiguous) {
+            return new CommandResult.Failure(
+                    CommandFailureCode.AMBIGUOUS_RESOURCE,
+                    "Resource selector is ambiguous",
+                    ambiguous.candidates());
+        }
+        CommandLocation location = ((CommandNavigation.Located) navigation).location();
+        CommandNode node = location.node();
 
         CommandDefinition definition = findAction(node, command.action());
         if (definition == null) {
@@ -111,7 +98,7 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
                         command.positionalArguments(),
                         command.namedParameters(),
                         command.predicates()),
-                resources);
+                location.resources());
         AccessDecision decision = Objects.requireNonNull(
                 definition.authorization().authorize(invocation),
                 "authorization result");

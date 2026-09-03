@@ -19,8 +19,13 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandFailureCode;
+import pro.deta.orion.command.CommandDispatcher;
+import pro.deta.orion.command.CommandNavigator;
+import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.render.PlainCommandRenderer;
+import pro.deta.orion.internal.OrionExecutor;
+import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
@@ -31,9 +36,10 @@ import pro.deta.orion.transport.git.auth.SshEnrollmentTokenStore;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.ConfigurationContext;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
@@ -57,11 +63,15 @@ class GitSshTransportStateMachineTest {
     private Path tempDir;
 
     private GitSshTransportService service;
+    private OrionExecutor executor;
 
     @AfterEach
     void stopService() {
         if (service != null) {
             service.onStop();
+        }
+        if (executor != null) {
+            executor.shutdownNow();
         }
     }
 
@@ -128,22 +138,67 @@ class GitSshTransportStateMachineTest {
             session.addPublicKeyIdentity(keyPair);
             session.auth().verify(5, TimeUnit.SECONDS);
             try (ClientChannel channel = session.createShellChannel()) {
-                ByteArrayOutputStream error = new ByteArrayOutputStream();
-                channel.setIn(new ByteArrayInputStream(
-                        ("touch " + marker + "\nexit\n").getBytes(StandardCharsets.UTF_8)));
-                channel.setOut(new ByteArrayOutputStream());
-                channel.setErr(error);
-                channel.open().verify(5, TimeUnit.SECONDS);
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                PipedInputStream shellInput = new PipedInputStream();
+                try (PipedOutputStream clientInput = new PipedOutputStream(shellInput)) {
+                    channel.setIn(shellInput);
+                    channel.setOut(output);
+                    channel.setErr(new ByteArrayOutputStream());
+                    channel.open().verify(5, TimeUnit.SECONDS);
+                    awaitOccurrences(output, "@orion", 1);
+
+                    clientInput.write("help\n".getBytes(StandardCharsets.UTF_8));
+                    clientInput.flush();
+                    awaitOccurrences(output, "@orion", 2);
+                    clientInput.write(("touch " + marker + "\n").getBytes(StandardCharsets.UTF_8));
+                    clientInput.flush();
+                    awaitContains(output, "UNKNOWN_COMMAND");
+                    clientInput.write("quit\n".getBytes(StandardCharsets.UTF_8));
+                    clientInput.flush();
+                }
                 assertTrue(channel.waitFor(
                                 EnumSet.of(ClientChannelEvent.CLOSED),
                                 TimeUnit.SECONDS.toMillis(5))
                         .contains(ClientChannelEvent.CLOSED));
 
                 assertFalse(Files.exists(marker));
-                assertEquals(127, channel.getExitStatus());
-                assertTrue(error.toString(StandardCharsets.UTF_8).contains("You may clone a repository"));
+                assertEquals(0, channel.getExitStatus());
+                assertTrue(output.toString(StandardCharsets.UTF_8).contains("UNKNOWN_COMMAND"));
             }
         }
+    }
+
+    private static void awaitContains(ByteArrayOutputStream output, String expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!output.toString(StandardCharsets.UTF_8).contains(expected)) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Timed out waiting for terminal output: " + expected);
+            }
+            Thread.sleep(10);
+        }
+    }
+
+    private static void awaitOccurrences(
+            ByteArrayOutputStream output,
+            String expected,
+            int count) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (occurrences(output.toString(StandardCharsets.UTF_8), expected) < count) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Timed out waiting for terminal prompt " + count);
+            }
+            Thread.sleep(10);
+        }
+    }
+
+    private static int occurrences(String value, String expected) {
+        int result = 0;
+        int offset = 0;
+        while ((offset = value.indexOf(expected, offset)) >= 0) {
+            result++;
+            offset += expected.length();
+        }
+        return result;
     }
 
     private GitSshTransportService service(int port) {
@@ -158,15 +213,22 @@ class GitSshTransportStateMachineTest {
         configuration.getTransport().getSsh().setPort(port);
         ConfigurationContext configurationContext = new ConfigurationContext(configuration);
         SshHostKeyService hostKeyService = new SshHostKeyService(configurationContext);
-        SshCommandFactory commandFactory = new SshCommandFactory(
-                null,
+        CommandDispatcher dispatcher =
                 request -> new CommandResult.Failure(
                         CommandFailureCode.UNKNOWN_COMMAND,
                         "Unknown command",
-                        List.of()),
+                        List.of());
+        SshCommandFactory commandFactory = new SshCommandFactory(
+                null,
+                dispatcher,
                 new PlainCommandRenderer(),
                 null,
                 null);
+        executor = new OrionExecutor(2, new OrionThreadFactory());
+        OrionShell shell = new OrionShell(
+                dispatcher,
+                new CommandNavigator(CommandNode.builder().build()),
+                executor);
         SshEnrollmentTokenStore tokenStore = new SshEnrollmentTokenStore(
                 configurationContext,
                 OrionRuntimeOptions.defaults());
@@ -174,6 +236,7 @@ class GitSshTransportStateMachineTest {
         return new GitSshTransportService(
                 configuration,
                 commandFactory,
+                shell,
                 () -> hostKeyService,
                 authenticator,
                 tokenStore);

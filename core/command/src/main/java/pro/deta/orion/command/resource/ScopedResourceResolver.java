@@ -69,6 +69,10 @@ public final class ScopedResourceResolver<T> {
         return List.copyOf(visible);
     }
 
+    public boolean namesEnabled() {
+        return namesEnabled;
+    }
+
     private List<ScopedResourceCandidate<T>> candidates(
             CommandContext context,
             List<Object> parentResources) {

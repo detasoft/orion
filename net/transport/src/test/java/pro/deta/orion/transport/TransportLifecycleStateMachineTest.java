@@ -164,6 +164,7 @@ class TransportLifecycleStateMachineTest {
                 null,
                 null,
                 null,
+                null,
                 null));
     }
 
