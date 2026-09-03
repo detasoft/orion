@@ -8,6 +8,9 @@ Depends on: completed AgentD HTTP/2 transport,
 Validate and route server commands to the correct runtime or host and report
 their actual outcome.
 
+- [ ] Route server session commands.
+  - Owner: codex, session root-7d1f, started 2026-09-03 19:40 Europe/Amsterdam.
+
 ## Scope
 
 - Dispatch `START_SESSION`, `INPUT`, `RESIZE`, `SIGNAL`, and `TERMINATE` by
