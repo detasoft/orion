@@ -7,14 +7,64 @@ import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.GitWorkTree;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionGitServerTest {
+    @Test
+    void ignoresAnObserverPathThatDisappearsBeforeCleanup(@TempDir Path directory) throws Exception {
+        Path observer = Files.createDirectory(directory.resolve("observer"));
+        Files.delete(observer);
+
+        assertThatCode(() -> OrionGitServer.deleteRecursively(observer, Files::deleteIfExists))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void ignoresAFileThatDisappearsAtItsCleanupBoundary(@TempDir Path directory) throws Exception {
+        Path observer = Files.createDirectory(directory.resolve("observer"));
+        Path metadata = Files.writeString(observer.resolve("gc.log.lock"), "temporary");
+
+        assertThatCode(() -> OrionGitServer.deleteRecursively(observer, path -> {
+            Files.deleteIfExists(path);
+            if (path.equals(metadata)) {
+                throw new NoSuchFileException(path.toString());
+            }
+        })).doesNotThrowAnyException();
+        assertThat(observer).doesNotExist();
+    }
+
+    @Test
+    void aggregatesOtherCleanupFailuresAndContinues(@TempDir Path directory) throws Exception {
+        Path observer = Files.createDirectory(directory.resolve("observer"));
+        Path first = Files.writeString(observer.resolve("first"), "first");
+        Path second = Files.writeString(observer.resolve("second"), "second");
+        Set<Path> attempted = new LinkedHashSet<>();
+
+        IOException failure = org.assertj.core.api.Assertions.catchThrowableOfType(
+                IOException.class,
+                () -> OrionGitServer.deleteRecursively(observer, path -> {
+                    attempted.add(path);
+                    Files.deleteIfExists(path);
+                    if (path.equals(first) || path.equals(second)) {
+                        throw new IOException("cannot delete " + path.getFileName());
+                    }
+                }));
+
+        assertThat(attempted).contains(first, second);
+        assertThat(failure).isNotNull();
+        assertThat(failure.getSuppressed()).hasSize(1);
+    }
+
     @Test
     void provisionsIsolatedMainRepositoriesOnOneLoopbackPort(@TempDir Path directory) throws Exception {
         try (GitServer server = OrionGitEngines.server()) {

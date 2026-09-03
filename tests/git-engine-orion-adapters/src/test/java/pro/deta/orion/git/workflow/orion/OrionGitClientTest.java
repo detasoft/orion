@@ -6,9 +6,12 @@ import pro.deta.orion.git.client.GitReceivePackResult;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.git.workflow.GitClients;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
+import pro.deta.orion.git.workflow.GitInteroperabilityHarness;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.GitServers;
+import pro.deta.orion.git.workflow.GitScenario;
 import pro.deta.orion.git.workflow.GitWorkTree;
+import pro.deta.orion.git.workflow.GitWorkflowScenarios;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -114,6 +117,20 @@ class OrionGitClientTest {
     }
 
     @Test
+    void pushResultPropagatesAnUnclassifiedTransportFailure(@TempDir Path directory) throws Exception {
+        try (GitWorkTree workTree = OrionGitEngines.client().init(directory.resolve("source"))) {
+            commit(workTree, "README.md", "initial\n", "initial");
+            workTree.addRemote("origin", new GitRemoteRepository(
+                    directory.resolve("missing.git"), "git://127.0.0.1:1/missing.git"));
+
+            assertThatThrownBy(() -> workTree.pushResult("origin", "main"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Orion receive-pack discovery failed")
+                    .hasMessageContaining("TRANSPORT_UNAVAILABLE");
+        }
+    }
+
+    @Test
     void reportsARejectedReceivePackResultAsAnAdapterFailure() {
         GitReceivePackResult rejected = new GitReceivePackResult(
                 new GitRemoteAdvertisement(Set.of(), List.of()),
@@ -165,6 +182,32 @@ class OrionGitClientTest {
                     "origin", "+refs/heads/main:refs/heads/main"))
                     .isInstanceOf(UnsupportedOperationException.class)
                     .hasMessageContaining("forced refspecs");
+        }
+    }
+
+    @Test
+    void runsBranchAndRejectedPushCatalogScenariosThroughOrion() throws Exception {
+        for (GitScenario scenario : GitWorkflowScenarios.catalog()) {
+            if (Set.of("second-branch-fetch-and-checkout", "reject-stale-non-fast-forward")
+                    .contains(scenario.name())) {
+                GitInteroperabilityHarness.run(scenario, OrionGitEngines.client(), GitServers.jgit());
+            }
+        }
+    }
+
+    @Test
+    void resolvesHeadAgainstTheCheckedOutBranch(@TempDir Path directory) throws Exception {
+        try (GitWorkTree workTree = OrionGitEngines.client().init(directory.resolve("source"))) {
+            commit(workTree, "main.txt", "main\n", "main");
+            String main = workTree.head();
+            workTree.checkout("feature", "HEAD");
+            commit(workTree, "feature.txt", "feature\n", "feature");
+
+            workTree.updateRef("refs/tags/checked-out", "HEAD");
+
+            assertThat(workTree.head()).isNotEqualTo(main);
+            assertThat(workTree.snapshot().refs())
+                    .containsEntry("refs/tags/checked-out", workTree.head());
         }
     }
 

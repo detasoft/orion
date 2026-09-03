@@ -28,7 +28,7 @@ final class OrionGitClient implements GitClient {
 
     @Override
     public Set<GitCapability> capabilities() {
-        return OrionGitEngines.CAPABILITIES;
+        return OrionGitEngines.CLIENT_CAPABILITIES;
     }
 
     @Override

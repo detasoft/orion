@@ -17,6 +17,7 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.workflow.GitClient;
+import pro.deta.orion.git.workflow.GitOperationResult;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitScenarioContext;
 import pro.deta.orion.git.workflow.GitWorkTree;
@@ -49,6 +50,7 @@ final class OrionGitWorkTree implements GitWorkTree {
     private final NativeGitRepository repository;
     private final Set<String> stagedPaths = new LinkedHashSet<>();
     private final Map<String, GitRemoteRepository> remotes = new LinkedHashMap<>();
+    private String currentBranch = GitScenarioContext.DEFAULT_BRANCH;
 
     private OrionGitWorkTree(
             OrionGitClient client,
@@ -107,7 +109,7 @@ final class OrionGitWorkTree implements GitWorkTree {
             }
             files.put(path, Files.readAllBytes(source));
         }
-        repository.saveFiles(GitScenarioContext.DEFAULT_BRANCH, files, message, PARITY_AUTHOR);
+        repository.saveFiles(currentBranch, files, message, PARITY_AUTHOR);
         stagedPaths.clear();
     }
 
@@ -128,7 +130,19 @@ final class OrionGitWorkTree implements GitWorkTree {
     }
 
     @Override
+    public GitOperationResult pushResult(String remote, String branch) throws Exception {
+        return pushRefsResult(remote, "refs/heads/" + branch + ":refs/heads/" + branch);
+    }
+
+    @Override
     public void pushRefs(String remoteName, String... refSpecs) throws Exception {
+        GitOperationResult result = pushRefsResult(remoteName, refSpecs);
+        if (!result.isAccepted()) {
+            throw new IllegalStateException(result.diagnostic());
+        }
+    }
+
+    private GitOperationResult pushRefsResult(String remoteName, String... refSpecs) throws Exception {
         GitRemoteRepository remote = remote(remoteName);
         GitRemoteAdvertisement advertisement = OrionGitClient.requireSuccess(
                 client.receivePack().discover(client.uri(remote), client.options()),
@@ -141,7 +155,10 @@ final class OrionGitWorkTree implements GitWorkTree {
             String oldId = advertisement.findRef(parsed.destination())
                     .map(GitRemoteAdvertisement.Ref::objectId)
                     .orElse(null);
-            requireFastForward(parsed.destination(), oldId, newId);
+            if (!isFastForward(parsed.destination(), oldId, newId)) {
+                return GitOperationResult.nonFastForward(
+                        "Orion push rejected a non-fast-forward update for " + parsed.destination());
+            }
             commands.add(new GitReceivePackRequest.Command(
                     oldId == null ? NULL_ID : oldId,
                     newId,
@@ -164,6 +181,7 @@ final class OrionGitWorkTree implements GitWorkTree {
         OrionGitClient.requireAccepted(OrionGitClient.requireSuccess(
                 client.receivePack().push(client.uri(remote), client.options(), request),
                 "receive-pack"));
+        return GitOperationResult.accepted();
     }
 
     @Override
@@ -179,6 +197,11 @@ final class OrionGitWorkTree implements GitWorkTree {
     @Override
     public void fetch(String remote) throws Exception {
         fetchBranch(remote, GitScenarioContext.DEFAULT_BRANCH);
+    }
+
+    @Override
+    public void fetch(String remote, String branch) throws Exception {
+        fetchBranch(remote, branch);
     }
 
     @Override
@@ -198,11 +221,24 @@ final class OrionGitWorkTree implements GitWorkTree {
 
     @Override
     public String head() {
-        String objectId = repository.refs().get(MAIN_REF);
+        String objectId = repository.refs().get("refs/heads/" + currentBranch);
         if (objectId == null) {
             throw new IllegalStateException("Orion native HEAD is unborn");
         }
         return objectId;
+    }
+
+    @Override
+    public void checkout(String branch, String startPoint) throws Exception {
+        String refName = "refs/heads/" + branch;
+        if (!repository.refs().containsKey(refName)) {
+            updateRef(refName, startPoint);
+        }
+        currentBranch = branch;
+        Files.writeString(
+                directory.resolve(".git/HEAD"),
+                "ref: " + refName + "\n",
+                StandardCharsets.US_ASCII);
     }
 
     @Override
@@ -269,7 +305,7 @@ final class OrionGitWorkTree implements GitWorkTree {
     private String resolve(String target) {
         Objects.requireNonNull(target, "target");
         String objectId = "HEAD".equals(target)
-                ? repository.refs().get(MAIN_REF)
+                ? repository.refs().get("refs/heads/" + currentBranch)
                 : repository.refs().get(target);
         if (objectId == null && target.length() == 40) {
             GitObjectId candidate = GitObjectId.of(target);
@@ -283,16 +319,13 @@ final class OrionGitWorkTree implements GitWorkTree {
         return objectId;
     }
 
-    private void requireFastForward(String refName, String oldId, String newId) {
+    private boolean isFastForward(String refName, String oldId, String newId) {
         if (oldId == null || oldId.equals(newId) || !refName.startsWith("refs/heads/")) {
-            return;
+            return true;
         }
-        boolean fastForward = new NativeObjectClosure(repository::readObject).allRootsReachAny(
+        return new NativeObjectClosure(repository::readObject).allRootsReachAny(
                 List.of(GitObjectId.of(newId)),
                 List.of(GitObjectId.of(oldId)));
-        if (!fastForward) {
-            throw new IllegalStateException("Orion push rejected a non-fast-forward update for " + refName);
-        }
     }
 
     private static String requireFilePath(String pathspec) {

@@ -18,6 +18,13 @@ public interface GitServer extends AutoCloseable {
 
     GitRemoteRepository createRemoteRepository(Path directory, String repositoryName) throws Exception;
 
+    default GitRemoteRepository missingRemoteRepository(
+            Path directory,
+            String repositoryName) throws Exception {
+        throw new UnsupportedOperationException(
+                "Git server does not support push-created repositories: " + name());
+    }
+
     default RepositorySnapshot snapshot(GitRemoteRepository remote) throws Exception {
         return RepositorySnapshot.capture(remote.directory());
     }

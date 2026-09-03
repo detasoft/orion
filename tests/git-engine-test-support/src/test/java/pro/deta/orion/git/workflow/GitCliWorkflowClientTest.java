@@ -4,9 +4,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GitCliWorkflowClientTest {
     @Test
@@ -48,6 +50,36 @@ class GitCliWorkflowClientTest {
             assertThat(gitWorkTree.head()).isEqualTo(jgitWorkTree.head());
             assertThat(gitWorkTree.snapshot().difference(jgitWorkTree.snapshot())).isNull();
         }
+    }
+
+    @Test
+    void runsBranchAndRejectedPushCatalogScenariosThroughCanonicalGit() throws Exception {
+        for (GitScenario scenario : GitWorkflowScenarios.catalog()) {
+            if (Set.of("second-branch-fetch-and-checkout", "reject-stale-non-fast-forward")
+                    .contains(scenario.name())) {
+                GitInteroperabilityHarness.run(scenario, GitClients.git(), GitServers.jgit());
+            }
+        }
+    }
+
+    @Test
+    void propagatesAnUnclassifiedPushFailure(@TempDir Path directory) throws Exception {
+        try (GitWorkTree workTree = GitClients.git().init(directory.resolve("source"))) {
+            commitFixture(workTree);
+            workTree.addRemote("origin", new GitRemoteRepository(
+                    directory.resolve("missing"), "git://127.0.0.1:1/missing.git"));
+
+            assertThatThrownBy(() -> workTree.pushResult("origin", "main"))
+                    .isInstanceOf(java.io.IOException.class)
+                    .hasMessageContaining("Canonical Git command failed");
+        }
+    }
+
+    @Test
+    void distinguishesLiteralAllCapabilitiesFromTheSymmetricBaseline() {
+        assertThat(GitCapability.all()).containsExactlyInAnyOrder(GitCapability.values());
+        assertThat(GitCapability.symmetric())
+                .doesNotContain(GitCapability.CREATE_MISSING_REPOSITORY_ON_PUSH);
     }
 
     private static void commitFixture(GitWorkTree workTree) throws Exception {

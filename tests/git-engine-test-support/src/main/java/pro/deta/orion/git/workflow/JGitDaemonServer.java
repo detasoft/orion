@@ -38,7 +38,7 @@ final class JGitDaemonServer implements GitServer {
 
     @Override
     public Set<GitCapability> capabilities() {
-        return GitCapability.all();
+        return GitCapability.symmetric();
     }
 
     @Override

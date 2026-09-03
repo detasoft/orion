@@ -17,8 +17,7 @@ public final class GitInteroperabilityHarness {
                 client.requireAvailable();
                 requireCapabilities(scenario, client, server);
                 directory = Files.createTempDirectory("git-matrix-");
-                GitRemoteRepository remote = server.createRemoteRepository(
-                        directory, GitScenarioContext.REMOTE_REPOSITORY_NAME);
+                GitRemoteRepository remote = remoteRepository(scenario, server, directory);
                 scenario.run(new GitScenarioContext(client, server, remote, directory));
             }
         } catch (Exception | Error error) {
@@ -28,6 +27,16 @@ public final class GitInteroperabilityHarness {
         } finally {
             cleanup(directory, failure, client, server);
         }
+    }
+
+    private static GitRemoteRepository remoteRepository(
+            GitScenario scenario,
+            GitServer server,
+            Path directory) throws Exception {
+        if (scenario.remoteRepositoryMode() == GitScenario.RemoteRepositoryMode.MISSING) {
+            return server.missingRemoteRepository(directory, GitScenarioContext.REMOTE_REPOSITORY_NAME);
+        }
+        return server.createRemoteRepository(directory, GitScenarioContext.REMOTE_REPOSITORY_NAME);
     }
 
     private static void attachDiagnostics(Throwable error, GitClient client, GitServer server) {
@@ -88,13 +97,13 @@ public final class GitInteroperabilityHarness {
     }
 
     private static void requireCapabilities(GitScenario scenario, GitClient client, GitServer server) {
-        if (!client.capabilities().containsAll(scenario.requiredCapabilities())) {
+        if (!client.capabilities().containsAll(scenario.requiredClientCapabilities())) {
             throw new IllegalStateException("Client " + client.name() + " lacks "
-                    + scenario.requiredCapabilities());
+                    + scenario.requiredClientCapabilities());
         }
-        if (!server.capabilities().containsAll(scenario.requiredCapabilities())) {
+        if (!server.capabilities().containsAll(scenario.requiredServerCapabilities())) {
             throw new IllegalStateException("Server " + server.name() + " lacks "
-                    + scenario.requiredCapabilities());
+                    + scenario.requiredServerCapabilities());
         }
     }
 

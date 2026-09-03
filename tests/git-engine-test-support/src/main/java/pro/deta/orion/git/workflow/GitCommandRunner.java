@@ -40,6 +40,10 @@ final class GitCommandRunner {
     }
 
     Result run(Path directory, Map<String, String> environment, String... arguments) throws IOException {
+        return runResult(directory, environment, arguments).requireSuccess();
+    }
+
+    Result runResult(Path directory, Map<String, String> environment, String... arguments) throws IOException {
         List<String> command = command(arguments);
         Path outputFile = Files.createTempFile("orion-git-command-", ".log");
         try {
@@ -66,11 +70,7 @@ final class GitCommandRunner {
             }
 
             String output = Files.readString(outputFile, StandardCharsets.UTF_8);
-            if (process.exitValue() != 0) {
-                throw new IOException("Canonical Git command failed with exit " + process.exitValue() + ": "
-                        + format(command) + appendOutput(output));
-            }
-            return new Result(output);
+            return new Result(process.exitValue(), output, format(command));
         } finally {
             Files.deleteIfExists(outputFile);
         }
@@ -78,6 +78,10 @@ final class GitCommandRunner {
 
     Result run(Path directory, String... arguments) throws IOException {
         return run(directory, Map.of(), arguments);
+    }
+
+    Result runResult(Path directory, String... arguments) throws IOException {
+        return runResult(directory, Map.of(), arguments);
     }
 
     String version() throws IOException {
@@ -131,7 +135,19 @@ final class GitCommandRunner {
         return System.getProperty("os.name", "").startsWith("Windows") ? "NUL" : "/dev/null";
     }
 
-    record Result(String output) {
+    record Result(int exitCode, String output, String command) {
+        boolean successful() {
+            return exitCode == 0;
+        }
+
+        Result requireSuccess() throws IOException {
+            if (!successful()) {
+                throw new IOException("Canonical Git command failed with exit " + exitCode + ": "
+                        + command + appendOutput(output));
+            }
+            return this;
+        }
+
         String trimmed() {
             return output.strip();
         }

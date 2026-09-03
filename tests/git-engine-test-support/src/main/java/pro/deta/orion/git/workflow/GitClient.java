@@ -11,7 +11,7 @@ public interface GitClient {
     }
 
     default Set<GitCapability> capabilities() {
-        return GitCapability.all();
+        return GitCapability.symmetric();
     }
 
     boolean available();

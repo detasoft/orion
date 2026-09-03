@@ -10,16 +10,19 @@ import pro.deta.orion.git.workflow.GitCapability;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.RepositorySnapshot;
+import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +47,7 @@ final class OrionGitServer implements GitServer {
 
     @Override
     public Set<GitCapability> capabilities() {
-        return OrionGitEngines.CAPABILITIES;
+        return OrionGitEngines.SERVER_CAPABILITIES;
     }
 
     @Override
@@ -62,9 +65,21 @@ final class OrionGitServer implements GitServer {
                 provider.create(GitWireBootstrap.normalizeRepositoryPath(repositoryName)),
                 "provision " + repositoryName);
         repositories.put(repositoryName, repository);
-        return new GitRemoteRepository(
-                storageRoot,
-                "git://127.0.0.1:" + boundPort + "/" + repositoryName);
+        return remoteRepository(repositoryName);
+    }
+
+    @Override
+    public synchronized GitRemoteRepository missingRemoteRepository(Path directory, String repositoryName) {
+        requireOpen("declare a missing repository");
+        requireRepositoryName(repositoryName);
+        Path requestedRoot = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
+        if (root != null && !root.equals(requestedRoot)) {
+            throw new IllegalArgumentException("Orion repositories must share one isolated root");
+        }
+        if (root == null) {
+            start(requestedRoot);
+        }
+        return remoteRepository(repositoryName);
     }
 
     @Override
@@ -160,9 +175,18 @@ final class OrionGitServer implements GitServer {
         String name = path == null || !path.startsWith("/") ? "" : path.substring(1);
         NativeGitRepository repository = repositories.get(name);
         if (repository == null) {
-            throw new IllegalArgumentException("Remote does not belong to this Orion server: " + remote.uri());
+            repository = success(
+                    provider.find(GitWireBootstrap.normalizeRepositoryPath(name)),
+                    "find " + name);
+            repositories.put(name, repository);
         }
         return repository;
+    }
+
+    private GitRemoteRepository remoteRepository(String repositoryName) {
+        return new GitRemoteRepository(
+                storageRoot,
+                "git://127.0.0.1:" + boundPort + "/" + repositoryName);
     }
 
     private static NativeGitRepository success(Result<NativeGitRepository> result, String operation) {
@@ -187,24 +211,64 @@ final class OrionGitServer implements GitServer {
     }
 
     private static void deleteRecursively(Path directory) throws IOException {
-        List<Path> paths;
-        try (var contents = Files.walk(directory)) {
-            paths = new ArrayList<>(contents.sorted(Comparator.reverseOrder()).toList());
-        }
-        IOException failure = null;
-        for (Path path : paths) {
-            try {
-                Files.deleteIfExists(path);
-            } catch (IOException error) {
-                if (failure == null) {
-                    failure = error;
-                } else {
-                    failure.addSuppressed(error);
+        deleteRecursively(directory, Files::deleteIfExists);
+    }
+
+    @TestOnly
+    static void deleteRecursively(Path directory, PathDeletion deletion) throws IOException {
+        IOException[] failure = new IOException[1];
+        try {
+            Files.walkFileTree(directory, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                    delete(file, deletion, failure);
+                    return FileVisitResult.CONTINUE;
                 }
-            }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException error) {
+                    record(error, failure);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path path, IOException error) {
+                    if (error != null) {
+                        record(error, failure);
+                    }
+                    delete(path, deletion, failure);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (NoSuchFileException ignored) {
+            // Temporary JGit metadata may disappear while its observer directory is being cleaned.
         }
-        if (failure != null) {
-            throw failure;
+        if (failure[0] != null) {
+            throw failure[0];
         }
+    }
+
+    private static void delete(Path path, PathDeletion deletion, IOException[] failure) {
+        try {
+            deletion.delete(path);
+        } catch (IOException error) {
+            record(error, failure);
+        }
+    }
+
+    private static void record(IOException error, IOException[] failure) {
+        if (error instanceof NoSuchFileException) {
+            return;
+        }
+        if (failure[0] == null) {
+            failure[0] = error;
+        } else if (failure[0] != error) {
+            failure[0].addSuppressed(error);
+        }
+    }
+
+    @FunctionalInterface
+    interface PathDeletion {
+        void delete(Path path) throws IOException;
     }
 }

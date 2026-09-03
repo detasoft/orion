@@ -25,5 +25,4 @@ of the connection is Orion.
 
 ## Child Tasks
 
-- [ ] [Add the shared Git workflow scenario catalog](workflow-scenarios/TASK.md)
 - [ ] [Run the Orion-facing matrix in Maven and CI](matrix-ci-integration/TASK.md)

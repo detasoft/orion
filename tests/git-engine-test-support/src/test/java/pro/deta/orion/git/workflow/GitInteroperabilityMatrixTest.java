@@ -398,7 +398,7 @@ class GitInteroperabilityMatrixTest extends GitInteroperabilityMatrixRunner {
 
         @Override
         public Set<GitCapability> capabilities() {
-            return GitCapability.all();
+            return GitCapability.symmetric();
         }
 
         @Override

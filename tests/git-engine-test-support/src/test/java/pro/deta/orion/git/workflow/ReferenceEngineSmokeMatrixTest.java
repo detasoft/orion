@@ -16,7 +16,7 @@ class ReferenceEngineSmokeMatrixTest extends GitInteroperabilityMatrixRunner {
 
         @Override
         public Set<GitCapability> requiredCapabilities() {
-            return GitCapability.all();
+            return GitCapability.symmetric();
         }
 
         @Override

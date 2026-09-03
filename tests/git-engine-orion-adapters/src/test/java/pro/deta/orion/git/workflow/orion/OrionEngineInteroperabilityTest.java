@@ -5,12 +5,14 @@ import pro.deta.orion.git.workflow.GitCapability;
 import pro.deta.orion.git.workflow.GitClient;
 import pro.deta.orion.git.workflow.GitClients;
 import pro.deta.orion.git.workflow.GitInteroperabilityMatrixRunner;
+import pro.deta.orion.git.workflow.GitInteroperabilityHarness;
 import pro.deta.orion.git.workflow.GitMatrixInvocation;
 import pro.deta.orion.git.workflow.GitScenario;
 import pro.deta.orion.git.workflow.GitScenarioContext;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.GitServers;
 import pro.deta.orion.git.workflow.GitWorkTree;
+import pro.deta.orion.git.workflow.GitWorkflowScenarios;
 import pro.deta.orion.git.workflow.RepositorySnapshot;
 
 import java.io.IOException;
@@ -47,7 +49,7 @@ class OrionEngineInteroperabilityTest extends GitInteroperabilityMatrixRunner {
 
         @Override
         public Set<GitCapability> requiredCapabilities() {
-            return GitCapability.all();
+            return GitCapability.symmetric();
         }
 
         @Override
@@ -61,6 +63,14 @@ class OrionEngineInteroperabilityTest extends GitInteroperabilityMatrixRunner {
         assertThat(INVOCATIONS)
                 .extracting(InvocationFactory::pair)
                 .containsExactlyInAnyOrderElementsOf(REQUIRED_PAIRS);
+    }
+
+    @Test
+    void firstPushCreatesAMissingOrionRepository() throws Exception {
+        GitInteroperabilityHarness.run(
+                GitWorkflowScenarios.missingRepositoryFirstPush(),
+                OrionGitEngines.client(),
+                OrionGitEngines.server());
     }
 
     @Override

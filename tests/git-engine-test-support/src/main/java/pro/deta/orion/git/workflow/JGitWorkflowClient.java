@@ -136,7 +136,19 @@ final class JGitWorkflowClient implements GitClient {
         }
 
         @Override
+        public GitOperationResult pushResult(String remote, String branch) throws Exception {
+            return pushRefsResult(remote, "refs/heads/" + branch + ":refs/heads/" + branch);
+        }
+
+        @Override
         public void pushRefs(String remote, String... refSpecs) throws Exception {
+            GitOperationResult result = pushRefsResult(remote, refSpecs);
+            if (!result.isAccepted()) {
+                throw new IllegalStateException("JGit push failed: " + result.status());
+            }
+        }
+
+        private GitOperationResult pushRefsResult(String remote, String... refSpecs) throws Exception {
             RefSpec[] specs = new RefSpec[refSpecs.length];
             for (int index = 0; index < refSpecs.length; index++) {
                 specs[index] = new RefSpec(refSpecs[index]);
@@ -144,9 +156,15 @@ final class JGitWorkflowClient implements GitClient {
             var results = git.push().setRemote(remote).setRefSpecs(specs).call();
             for (var result : results) {
                 for (RemoteRefUpdate update : result.getRemoteUpdates()) {
-                    requireAcceptedPush(update);
+                    if (update.getStatus() == RemoteRefUpdate.Status.REJECTED_NONFASTFORWARD) {
+                        return GitOperationResult.nonFastForward("remote rejected non-fast-forward update");
+                    }
+                    if (!accepted(update.getStatus())) {
+                        return GitOperationResult.rejected("remote rejected ref update: " + update.getStatus());
+                    }
                 }
             }
+            return GitOperationResult.accepted();
         }
 
         @Override
@@ -173,6 +191,15 @@ final class JGitWorkflowClient implements GitClient {
         }
 
         @Override
+        public void fetch(String remote, String branch) throws Exception {
+            git.fetch()
+                    .setRemote(remote)
+                    .setRefSpecs(new RefSpec("+refs/heads/" + branch
+                            + ":refs/remotes/" + remote + "/" + branch))
+                    .call();
+        }
+
+        @Override
         public void pull(String remote, String branch) throws Exception {
             PullResult result = git.pull()
                     .setRemote(remote)
@@ -186,6 +213,11 @@ final class JGitWorkflowClient implements GitClient {
         }
 
         @Override
+        public void checkout(String branch, String startPoint) throws Exception {
+            git.checkout().setCreateBranch(true).setName(branch).setStartPoint(startPoint).call();
+        }
+
+        @Override
         public String head() throws Exception {
             return git.getRepository().resolve("HEAD").name();
         }
@@ -195,13 +227,8 @@ final class JGitWorkflowClient implements GitClient {
             git.close();
         }
 
-        private static void requireAcceptedPush(RemoteRefUpdate update) {
-            RemoteRefUpdate.Status status = update.getStatus();
-            if (status != RemoteRefUpdate.Status.OK
-                    && status != RemoteRefUpdate.Status.UP_TO_DATE) {
-                throw new IllegalStateException(
-                        "JGit push update failed for " + update.getRemoteName() + ": " + status);
-            }
+        private static boolean accepted(RemoteRefUpdate.Status status) {
+            return status == RemoteRefUpdate.Status.OK || status == RemoteRefUpdate.Status.UP_TO_DATE;
         }
     }
 }

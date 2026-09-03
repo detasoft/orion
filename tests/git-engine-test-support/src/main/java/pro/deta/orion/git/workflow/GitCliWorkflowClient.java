@@ -61,7 +61,11 @@ final class GitCliWorkflowClient implements GitClient {
 
     @Override
     public GitWorkTree init(Path directory) throws Exception {
-        commands.run(null, "init", "--initial-branch=" + GitScenarioContext.DEFAULT_BRANCH, directory.toString());
+        commands.run(
+                null,
+                "init",
+                "--initial-branch=" + GitScenarioContext.DEFAULT_BRANCH,
+                directory.toString());
         return new GitCliWorkTree(this, directory);
     }
 
@@ -114,6 +118,30 @@ final class GitCliWorkflowClient implements GitClient {
         }
 
         @Override
+        public GitOperationResult pushResult(String remote, String branch) throws Exception {
+            GitCommandRunner.Result result = client.commands.runResult(
+                    directory,
+                    "push",
+                    "--porcelain",
+                    remote,
+                    "refs/heads/" + branch + ":refs/heads/" + branch);
+            if (result.successful()) {
+                return GitOperationResult.accepted();
+            }
+            for (String line : result.output().split("\\R")) {
+                String[] fields = line.split("\\t", 3);
+                if (fields.length == 3
+                        && "!".equals(fields[0])
+                        && ("[rejected] (non-fast-forward)".equals(fields[2])
+                        || "[rejected] (fetch first)".equals(fields[2]))) {
+                    return GitOperationResult.nonFastForward("remote rejected non-fast-forward update");
+                }
+            }
+            result.requireSuccess();
+            throw new IllegalStateException("Unreachable canonical Git push result");
+        }
+
+        @Override
         public void pushRefs(String remote, String... refSpecs) throws Exception {
             List<String> arguments = new ArrayList<>();
             arguments.add("push");
@@ -133,8 +161,19 @@ final class GitCliWorkflowClient implements GitClient {
         }
 
         @Override
+        public void fetch(String remote, String branch) throws Exception {
+            client.commands.run(directory, "fetch", remote,
+                    "+refs/heads/" + branch + ":refs/remotes/" + remote + "/" + branch);
+        }
+
+        @Override
         public void pull(String remote, String branch) throws Exception {
             client.commands.run(directory, "pull", "--ff-only", remote, branch);
+        }
+
+        @Override
+        public void checkout(String branch, String startPoint) throws Exception {
+            client.commands.run(directory, "checkout", "-b", branch, startPoint);
         }
 
         @Override
