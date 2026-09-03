@@ -2,6 +2,7 @@
 
 Status: active
 Design: ../../../2026-09-04-landlock-capability-fallback-design.md
+Plan: ../../../2026-09-04-landlock-capability-fallback.md
 
 Allow a build session to start with a warning when its machine cannot provide
 Landlock ABI 9, while keeping invalid policies and rule-application failures
