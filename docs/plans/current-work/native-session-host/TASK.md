@@ -13,8 +13,8 @@ commands, and survives independently of `agentd`.
 - Preserve raw terminal bytes and resize history for deterministic replay.
 - Keep one host-assigned order across terminal, process, and harness events.
 - Support recovery, bounded retention, session discovery, and control reconnects.
-- Restrict the Linux child process tree with an optional fail-closed Landlock
-  policy.
+- Restrict the Linux child process tree with an optional Landlock policy whose
+  rule failures are fail-closed and whose capability mismatch is non-fatal.
 - Publish stable journal and control compatibility fixtures for external
   consumers such as `agentd`.
 - Keep terminal emulation, central-server transport, and semantic agent models
@@ -28,3 +28,4 @@ commands, and survives independently of `agentd`.
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
 - [ ] [Implement the Windows ConPTY host](windows-host/TASK.md)
 - [ ] [Package targets and verify end-to-end acceptance](release-and-acceptance/TASK.md)
+- [ ] [Run without restrictions when Landlock is unavailable](landlock-capability-fallback/TASK.md)
