@@ -25,5 +25,6 @@ the AgentD lifecycle.
 - [ ] [Read session journals](journal-reader/TASK.md)
 - [ ] [Synchronize and resume journal events](journal-sync/TASK.md)
 - [ ] [Route server session commands](command-orchestration/TASK.md)
+- [ ] [Redact session launch failure diagnostics](diagnostic-secret-redaction/TASK.md)
 - [ ] [Add platform status and lifecycle resilience](platform-status-and-resilience/TASK.md)
 - [ ] [Package AgentD and verify MVP acceptance](release-and-acceptance/TASK.md)
