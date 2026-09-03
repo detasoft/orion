@@ -16,12 +16,15 @@ depend on their different physical lifecycles.
   Smart HTTP or only SSH without a protocol-specific reason.
 - Prefer one shared contract test fixture or clearly paired scenarios over two
   independently evolving copies when that remains readable.
-- Cover one-session request planning, advertisement identity, request
-  completion, intermediate flush, streaming backpressure, pack limits, progress,
-  remote rejection, failure stages, inactivity, cancellation, and close races.
+- Cover `lsRemote`, one-session request planning, advertisement identity,
+  request completion, intermediate flush, streaming backpressure, pack limits,
+  progress, remote rejection, failure stages, inactivity, cancellation, and
+  close races.
 - Assert physical lifecycle differences explicitly: Smart HTTP uses one
   discovery `GET` plus one command `POST`, while SSH uses one authenticated
   channel and one service invocation.
+- For `lsRemote`, assert one Smart HTTP discovery `GET` without `POST` and one
+  authenticated SSH service channel without a fetch or push request.
 - Include slow-progress and fully stalled reads and writes so timeout semantics
   are compared rather than inferred from transport-specific unit tests.
 - Preserve transport-specific authentication, content-type, redirect,
