@@ -6,10 +6,11 @@ use orion_session_host::protocol::{CONTROL_VERSION, JOURNAL_VERSION};
 
 const USAGE: &str = "\
 Usage:
-  session-host --session-id ID --session-dir PATH --cwd PATH [OPTIONS] -- COMMAND [ARG...]
+  session-host --session-id ID --start-command-id ID --session-dir PATH --cwd PATH [OPTIONS] -- COMMAND [ARG...]
 
 Required:
   --session-id ID              Stable session identifier
+  --start-command-id ID        START_SESSION command identifier
   --session-dir PATH           Session metadata, journal, and control directory
   --cwd PATH                   Child working directory
 

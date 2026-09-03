@@ -94,11 +94,20 @@ The shared version 1 allocation is:
 | `0x0100` | `PTY_OUTPUT` | byte string |
 | `0x0101` | `PTY_INPUT` | `[CommandId, byte string]` |
 | `0x0102` | `PTY_RESIZE` | `[columns, rows]` |
+| `0x0200` | `PROCESS_STARTED` | `[processId]` |
 | `0x0201` | `PROCESS_EXITED` | `[signed exit code]` |
+| `0x0203` | `SESSION_START_FAILED` | `[CommandId, diagnostic, omittedByteCount]` |
 
 The transport decoder extracts EventId and event type but retains the encoded
 payload and complete encoded record. It therefore forwards unknown event types,
 payload encodings, and optional record tails byte-for-byte.
+
+Once a native journal exists, exactly one start outcome is durable before the
+host leaves its start phase. `SESSION_START_FAILED` diagnostics are strict
+UTF-8 capped at 1 MiB; truncation retains at most the first 64 KiB and last
+960 KiB and reports the removed byte count separately. Typed Java decoding of
+the lifecycle records may be added independently because the transport already
+preserves their exact encoded bytes.
 
 ## Compatibility Fixtures
 
@@ -108,5 +117,7 @@ payload encodings, and optional record tails byte-for-byte.
   event payloads.
 - `fixtures/session-event-unknown-tail-v1.hex` freezes preservation of an
   unknown event payload and an optional future record field.
+- `fixtures/start-outcomes-v1.hex` freezes native success and failure start
+  observations and is byte-identical to the session-host fixture.
 
 Whitespace in fixture files is not part of the encoding.

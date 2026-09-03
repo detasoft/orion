@@ -1,5 +1,6 @@
 package pro.deta.orion.agentd.runtime;
 
+import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.SessionId;
 
 import java.nio.file.Path;
@@ -10,6 +11,7 @@ import java.util.Optional;
 
 public record SessionSpec(
         SessionId sessionId,
+        CommandId startCommandId,
         List<String> command,
         WorkspaceReference workspace,
         Map<String, String> environment,
@@ -21,6 +23,7 @@ public record SessionSpec(
 ) {
     public SessionSpec {
         Objects.requireNonNull(sessionId, "sessionId");
+        Objects.requireNonNull(startCommandId, "startCommandId");
         command = List.copyOf(command);
         Objects.requireNonNull(workspace, "workspace");
         environment = Map.copyOf(environment);

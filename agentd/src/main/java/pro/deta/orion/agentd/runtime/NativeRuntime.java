@@ -299,6 +299,7 @@ public final class NativeRuntime implements SessionRuntime {
         List<String> command = new ArrayList<>();
         command.add(executable.toString());
         option(command, "--session-id", spec.sessionId().value());
+        option(command, "--start-command-id", spec.startCommandId().value());
         option(command, "--session-dir", sessionDirectory.toString());
         option(command, "--cwd", workingDirectory.toString());
         option(command, "--cols", Integer.toString(spec.columns()));
@@ -353,7 +354,11 @@ public final class NativeRuntime implements SessionRuntime {
                         SessionLaunchResult.FailureKind.CLEANUP_FAILED,
                         originalDetail + "; launched process remains alive");
             }
-            deleteTree(directory);
+            JournalObservation journal = Objects.requireNonNull(
+                    journalProbe.probe(directory), "journal observation");
+            if (journal == JournalObservation.MISSING) {
+                deleteTree(directory);
+            }
             return SessionLaunchResult.failed(originalKind, originalDetail);
         } catch (IOException | RuntimeException error) {
             return SessionLaunchResult.failed(

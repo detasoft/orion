@@ -23,6 +23,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         protocol_fixture::command_events_hex(),
     )?;
     fs::write(
+        directory.join("start-outcomes-v1.hex"),
+        protocol_fixture::start_outcomes_hex(),
+    )?;
+    fs::write(
         directory.join("truncated-item-v1.hex"),
         protocol_fixture::truncated_item_hex(),
     )?;

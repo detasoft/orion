@@ -895,6 +895,15 @@ fn encode_event(event_id: u64, event_type: u16, payload: &[u8]) -> Result<Vec<u8
                 u64::from_le_bytes(payload.try_into().unwrap()),
             )
         }
+        protocol::event_type::SESSION_START_FAILED => {
+            let (command_id, diagnostic, omitted_byte_count) = start_failure_fields(payload)?;
+            protocol::encode_session_start_failed(
+                event_id,
+                command_id,
+                diagnostic,
+                omitted_byte_count,
+            )
+        }
         protocol::event_type::PROCESS_EXITED => {
             if payload.len() != 8 {
                 return Err(JournalError::Format("PROCESS_EXITED payload must be 8 bytes".to_owned()));
@@ -1505,6 +1514,26 @@ fn decode_known_payload(event_type: u16, encoded: &[u8]) -> Result<Vec<u8>, Jour
             }
             Ok(process_id.to_le_bytes().to_vec())
         }
+        protocol::event_type::SESSION_START_FAILED => {
+            let fields = array_fields(encoded)?;
+            if fields.len() < 3 {
+                return Err(JournalError::Format(
+                    "SESSION_START_FAILED payload has missing fields".to_owned(),
+                ));
+            }
+            let command_id = decode_text(&encoded[fields[0].0..fields[0].1])?;
+            let diagnostic = decode_text(&encoded[fields[1].0..fields[1].1])?;
+            let omitted_byte_count = decode_unsigned(
+                &encoded[fields[2].0..fields[2].1],
+                "SESSION_START_FAILED omittedByteCount",
+            )?;
+            protocol::session_start_failed_payload(
+                &command_id,
+                &diagnostic,
+                omitted_byte_count,
+            )
+            .map_err(|error| JournalError::Format(error.to_string()))
+        }
         protocol::event_type::PROCESS_EXITED => {
             let fields = array_fields(encoded)?;
             if fields.is_empty() {
@@ -1549,7 +1578,34 @@ fn known_event_type(event_type: u16) -> bool {
             | protocol::event_type::PROCESS_STARTED
             | protocol::event_type::PROCESS_EXITED
             | protocol::event_type::SIGNAL
+            | protocol::event_type::SESSION_START_FAILED
     )
+}
+
+fn start_failure_fields(payload: &[u8]) -> Result<(&str, &str, u64), JournalError> {
+    if payload.len() < 10 {
+        return Err(JournalError::Format(
+            "SESSION_START_FAILED payload is truncated".to_owned(),
+        ));
+    }
+    let command_id_length = usize::from(u16::from_le_bytes(payload[0..2].try_into().unwrap()));
+    let command_id_end = 2_usize
+        .checked_add(command_id_length)
+        .ok_or_else(|| JournalError::Format("SESSION_START_FAILED command ID length overflows".to_owned()))?;
+    let omitted_end = command_id_end
+        .checked_add(8)
+        .ok_or_else(|| JournalError::Format("SESSION_START_FAILED payload length overflows".to_owned()))?;
+    if payload.len() < omitted_end {
+        return Err(JournalError::Format(
+            "SESSION_START_FAILED payload is truncated".to_owned(),
+        ));
+    }
+    let command_id = std::str::from_utf8(&payload[2..command_id_end])
+        .map_err(|_| JournalError::Format("SESSION_START_FAILED command ID is not UTF-8".to_owned()))?;
+    let omitted_byte_count = u64::from_le_bytes(payload[command_id_end..omitted_end].try_into().unwrap());
+    let diagnostic = std::str::from_utf8(&payload[omitted_end..])
+        .map_err(|_| JournalError::Format("SESSION_START_FAILED diagnostic is not UTF-8".to_owned()))?;
+    Ok((command_id, diagnostic, omitted_byte_count))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3104,6 +3160,32 @@ mod tests {
         }
         assert_eq!(events[0].encoded_payload[0], 0x82);
         assert!(events[0].encoded_payload.ends_with(&envelope));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn session_start_failure_round_trips_as_a_known_event() {
+        let directory = temporary_directory("session-start-failure");
+        let mut writer = JournalWriter::create(&directory, [7; 16], JournalConfig::default()).unwrap();
+        let payload = protocol::session_start_failed_payload("command.start", "exec failed", 17).unwrap();
+        writer
+            .append_at(
+                1,
+                protocol::event_type::SESSION_START_FAILED,
+                1,
+                0,
+                &payload,
+            )
+            .unwrap();
+        writer.flush().unwrap();
+
+        let event = read_after(&directory, 0).unwrap().events.remove(0);
+        assert_eq!(event.payload, payload);
+        assert!(!event.opaque);
+        assert_eq!(
+            event.encoded_record,
+            protocol::encode_session_start_failed(1, "command.start", "exec failed", 17).unwrap()
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agentd.session.ChildState;
 import pro.deta.orion.agentd.session.ControlEndpoint;
@@ -70,6 +71,7 @@ class NativeRuntimeTest {
         assertThat(launcher.command).containsSequence(
                 executable.toString(),
                 "--session-id", "session-1",
+                "--start-command-id", "command.start",
                 "--session-dir", sessionDirectory.toString(),
                 "--cwd", temporaryDirectory.toAbsolutePath().normalize().toString());
         assertThat(launcher.command).endsWith("--", "sh", "-l");
@@ -95,6 +97,7 @@ class NativeRuntimeTest {
     void rejectsUnsupportedEnvironmentBeforeCreatingTheSessionDirectory() {
         SessionSpec withEnvironment = new SessionSpec(
                 new SessionId("session-1"),
+                spec().startCommandId(),
                 List.of("sh"),
                 new WorkspaceReference.ExistingDirectory(temporaryDirectory),
                 Map.of("SECRET", "value"),
@@ -125,6 +128,7 @@ class NativeRuntimeTest {
                 Duration.ofMillis(10));
         SessionSpec unsupported = new SessionSpec(
                 spec().sessionId(),
+                spec().startCommandId(),
                 spec().command(),
                 spec().workspace(),
                 Map.of("UNSUPPORTED", "value"),
@@ -143,6 +147,7 @@ class NativeRuntimeTest {
     void rejectsBlankExecutableBeforeCreatingTheSessionDirectory() {
         SessionSpec blankExecutable = new SessionSpec(
                 spec().sessionId(),
+                spec().startCommandId(),
                 List.of("  ", "empty arguments after the executable remain valid", ""),
                 spec().workspace(),
                 spec().environment(),
@@ -167,6 +172,7 @@ class NativeRuntimeTest {
     void permitsEmptyArgumentsAfterTheExecutable() {
         SessionSpec emptyArgument = new SessionSpec(
                 spec().sessionId(),
+                spec().startCommandId(),
                 List.of("sh", ""),
                 spec().workspace(),
                 spec().environment(),
@@ -190,6 +196,7 @@ class NativeRuntimeTest {
     void rejectsInvalidSandboxPolicyAndExistingSessionWithoutLaunching() throws IOException {
         SessionSpec invalidPolicy = new SessionSpec(
                 new SessionId("session-1"),
+                spec().startCommandId(),
                 List.of("sh"),
                 new WorkspaceReference.ExistingDirectory(temporaryDirectory),
                 Map.of(),
@@ -218,7 +225,8 @@ class NativeRuntimeTest {
                 ro "%s"
                 """.formatted(temporaryDirectory.toRealPath()));
         SessionSpec sandboxed = new SessionSpec(
-                spec().sessionId(), spec().command(), spec().workspace(), spec().environment(),
+                spec().sessionId(), spec().startCommandId(), spec().command(), spec().workspace(),
+                spec().environment(),
                 spec().columns(), spec().rows(), spec().terminalType(), spec().colorTerminal(),
                 new SessionSpec.Sandbox(Optional.of(source), SessionSpec.Unavailable.FAIL));
         NativeRuntime runtime = runtime(
@@ -292,6 +300,7 @@ class NativeRuntimeTest {
     void rejectsAgentProtocolSessionIdOutsideTheNativeCliSubsetBeforeMutation() {
         SessionSpec invalidNativeId = new SessionSpec(
                 new SessionId("session:1"),
+                spec().startCommandId(),
                 spec().command(),
                 spec().workspace(),
                 Map.of(),
@@ -323,7 +332,7 @@ class NativeRuntimeTest {
 
         assertFailure(result, SessionLaunchResult.FailureKind.INITIALIZATION_TIMEOUT);
         assertThat(process.destroyCalls).isEqualTo(1);
-        assertThat(sessions.resolve("session-1")).doesNotExist();
+        assertThat(sessions.resolve("session-1")).isDirectory();
     }
 
     @Test
@@ -341,6 +350,42 @@ class NativeRuntimeTest {
         assertFailure(result, SessionLaunchResult.FailureKind.INITIALIZATION_FAILED);
         assertThat(process.destroyCalls).isZero();
         assertThat(sessions.resolve("session-1")).doesNotExist();
+    }
+
+    @Test
+    void preservesAReadableJournalAfterAnEarlyHostExit() {
+        process.alive = false;
+        NativeRuntime runtime = runtime(
+                directory -> {
+                    throw new IOException("manifest is not initialized");
+                },
+                directory -> JournalObservation.READABLE,
+                (directory, manifest, deadline) -> HostObservation.unreachable());
+
+        SessionLaunchResult result = runtime.launch(spec());
+
+        assertFailure(result, SessionLaunchResult.FailureKind.INITIALIZATION_FAILED);
+        assertThat(process.destroyCalls).isZero();
+        assertThat(sessions.resolve("session-1")).isDirectory();
+    }
+
+    @Test
+    void preservesTheDirectoryAndReportsAJournalProbeFailureDuringCleanup() {
+        process.alive = false;
+        NativeRuntime runtime = runtime(
+                directory -> {
+                    throw new IOException("manifest is not initialized");
+                },
+                directory -> {
+                    throw new IOException("journal probe failed");
+                },
+                (directory, manifest, deadline) -> HostObservation.unreachable());
+
+        SessionLaunchResult result = runtime.launch(spec());
+
+        assertFailure(result, SessionLaunchResult.FailureKind.CLEANUP_FAILED);
+        assertThat(((SessionLaunchResult.Failed) result).detail()).contains("journal probe failed");
+        assertThat(sessions.resolve("session-1")).isDirectory();
     }
 
     @Test
@@ -435,6 +480,7 @@ class NativeRuntimeTest {
     private SessionSpec spec() {
         return new SessionSpec(
                 new SessionId("session-1"),
+                new CommandId("command.start"),
                 List.of("sh", "-l"),
                 new WorkspaceReference.ExistingDirectory(temporaryDirectory),
                 Map.of(),
@@ -447,7 +493,8 @@ class NativeRuntimeTest {
 
     private SessionSpec withPolicy(Path policy) {
         return new SessionSpec(
-                spec().sessionId(), spec().command(), spec().workspace(), spec().environment(),
+                spec().sessionId(), spec().startCommandId(), spec().command(), spec().workspace(),
+                spec().environment(),
                 spec().columns(), spec().rows(), spec().terminalType(), spec().colorTerminal(),
                 new SessionSpec.Sandbox(Optional.of(policy), SessionSpec.Unavailable.FAIL));
     }

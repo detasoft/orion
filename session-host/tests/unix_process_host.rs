@@ -22,7 +22,7 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
-fn failed_exec_never_crosses_the_successful_launch_boundary() {
+fn failed_exec_records_the_authoritative_start_failure() {
     let directory = DirectoryGuard::new(temporary_directory("failed-exec"));
     let output = Command::new(env!("CARGO_BIN_EXE_session-host"))
         .args(base_arguments(
@@ -40,7 +40,51 @@ fn failed_exec_never_crosses_the_successful_launch_boundary() {
     let metadata = journal::read_metadata(directory.path()).unwrap();
     assert_eq!(metadata.child_pid, None);
     let events = journal::read(directory.path(), 0).unwrap().events;
-    assert!(events.iter().all(|event| event.event_type != event_type::PROCESS_STARTED));
+    assert_start_failure(&events, "child command exec failed");
+}
+
+#[test]
+fn missing_working_directory_records_the_authoritative_start_failure() {
+    let directory = DirectoryGuard::new(temporary_directory("missing-working-directory"));
+    let missing_cwd = directory.path().join("missing-cwd");
+    let output = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(base_arguments_with_cwd(
+            directory.path(),
+            "missing-working-directory",
+            &missing_cwd,
+            "xterm-256color",
+            80,
+            24,
+        ))
+        .args(["--", "/usr/bin/true"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(70));
+    let events = journal::read(directory.path(), 0).unwrap().events;
+    assert_start_failure(&events, "child failed to change working directory");
+}
+
+#[test]
+fn post_journal_initialization_failure_records_the_authoritative_outcome() {
+    let directory = DirectoryGuard::new(temporary_directory("post-journal-failure"));
+    fs::create_dir_all(directory.path()).unwrap();
+    fs::write(directory.path().join(STATE_FILE_NAME), b"not-json").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(base_arguments(
+            directory.path(),
+            "post-journal-failure",
+            "xterm-256color",
+            80,
+            24,
+        ))
+        .args(["--", "/usr/bin/true"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(70));
+    let events = journal::read(directory.path(), 0).unwrap().events;
+    assert_start_failure(&events, "cannot decode state");
 }
 
 #[cfg(target_os = "linux")]
@@ -269,6 +313,17 @@ fn hosts_a_real_tty_and_preserves_raw_output() {
     assert_eq!(
         result.events.first().unwrap().event_type,
         event_type::PROCESS_STARTED
+    );
+    assert_eq!(
+        result
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event.event_type,
+                event_type::PROCESS_STARTED | event_type::SESSION_START_FAILED
+            ))
+            .count(),
+        1
     );
     assert_eq!(
         result.events.last().unwrap().event_type,
@@ -1175,13 +1230,26 @@ fn base_arguments(
     cols: u16,
     rows: u16,
 ) -> Vec<String> {
+    base_arguments_with_cwd(directory, session_id, Path::new("/tmp"), term, cols, rows)
+}
+
+fn base_arguments_with_cwd(
+    directory: &Path,
+    session_id: &str,
+    cwd: &Path,
+    term: &str,
+    cols: u16,
+    rows: u16,
+) -> Vec<String> {
     vec![
         "--session-id".to_owned(),
         session_id.to_owned(),
+        "--start-command-id".to_owned(),
+        "command.start".to_owned(),
         "--session-dir".to_owned(),
         directory.display().to_string(),
         "--cwd".to_owned(),
-        "/tmp".to_owned(),
+        cwd.display().to_string(),
         "--cols".to_owned(),
         cols.to_string(),
         "--rows".to_owned(),
@@ -1189,6 +1257,24 @@ fn base_arguments(
         "--term".to_owned(),
         term.to_owned(),
     ]
+}
+
+fn assert_start_failure(events: &[journal::JournalEvent], diagnostic_fragment: &str) {
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.event_type, event_type::SESSION_START_FAILED);
+    let command_id_length = usize::from(u16_at(&event.payload[0..2]));
+    let command_id_end = 2 + command_id_length;
+    assert_eq!(&event.payload[2..command_id_end], b"command.start");
+    assert_eq!(
+        u64_at(&event.payload[command_id_end..command_id_end + 8]),
+        0
+    );
+    let diagnostic = std::str::from_utf8(&event.payload[command_id_end + 8..]).unwrap();
+    assert!(
+        diagnostic.contains(diagnostic_fragment),
+        "unexpected start failure diagnostic: {diagnostic}"
+    );
 }
 
 fn encode_policy(rules: &[(PathBuf, u64)]) -> Vec<u8> {

@@ -4,6 +4,9 @@ pub const JOURNAL_VERSION: u16 = 1;
 pub const CONTROL_VERSION: u16 = 1;
 pub const CONTROL_HEADER_LENGTH: usize = 32;
 pub const MAX_PAYLOAD_LENGTH: usize = 16 * 1024 * 1024;
+pub const MAX_START_DIAGNOSTIC_BYTES: usize = 1024 * 1024;
+pub const START_DIAGNOSTIC_PREFIX_BYTES: usize = 64 * 1024;
+pub const START_DIAGNOSTIC_SUFFIX_BYTES: usize = 960 * 1024;
 
 pub const CONTROL_MAGIC: &[u8; 4] = b"ORCT";
 
@@ -18,6 +21,7 @@ pub mod event_type {
     pub const PROCESS_STARTED: u16 = 0x0200;
     pub const PROCESS_EXITED: u16 = 0x0201;
     pub const SIGNAL: u16 = 0x0202;
+    pub const SESSION_START_FAILED: u16 = 0x0203;
 
     pub const HARNESS_MESSAGE: u16 = 0x1000;
     pub const HARNESS_STATUS: u16 = 0x1001;
@@ -292,6 +296,59 @@ pub fn encode_process_started(event_id: u64, process_id: u64) -> Result<Vec<u8>,
     Ok(encoded)
 }
 
+pub fn encode_session_start_failed(
+    event_id: u64,
+    command_id: &str,
+    diagnostic: &str,
+    omitted_byte_count: u64,
+) -> Result<Vec<u8>, EncodeError> {
+    validate_command_id(command_id.as_bytes())?;
+    if diagnostic.len() > MAX_START_DIAGNOSTIC_BYTES {
+        return Err(EncodeError::InvalidPayload(
+            "session start failure diagnostic exceeds 1 MiB",
+        ));
+    }
+    let mut encoded = event_prefix(event_id, event_type::SESSION_START_FAILED);
+    cbor_array(&mut encoded, 3);
+    cbor_text(&mut encoded, command_id);
+    cbor_text(&mut encoded, diagnostic);
+    cbor_unsigned(&mut encoded, omitted_byte_count);
+    Ok(encoded)
+}
+
+pub fn session_start_failed_payload(
+    command_id: &str,
+    diagnostic: &str,
+    omitted_byte_count: u64,
+) -> Result<Vec<u8>, EncodeError> {
+    encode_session_start_failed(1, command_id, diagnostic, omitted_byte_count)?;
+    let mut payload = Vec::with_capacity(2 + command_id.len() + 8 + diagnostic.len());
+    payload.extend_from_slice(&(command_id.len() as u16).to_le_bytes());
+    payload.extend_from_slice(command_id.as_bytes());
+    payload.extend_from_slice(&omitted_byte_count.to_le_bytes());
+    payload.extend_from_slice(diagnostic.as_bytes());
+    Ok(payload)
+}
+
+pub fn bound_start_diagnostic(diagnostic: &str) -> (String, u64) {
+    if diagnostic.len() <= MAX_START_DIAGNOSTIC_BYTES {
+        return (diagnostic.to_owned(), 0);
+    }
+    let mut prefix_end = START_DIAGNOSTIC_PREFIX_BYTES;
+    while !diagnostic.is_char_boundary(prefix_end) {
+        prefix_end -= 1;
+    }
+    let mut suffix_start = diagnostic.len() - START_DIAGNOSTIC_SUFFIX_BYTES;
+    while !diagnostic.is_char_boundary(suffix_start) {
+        suffix_start += 1;
+    }
+    let mut bounded = String::with_capacity(MAX_START_DIAGNOSTIC_BYTES);
+    bounded.push_str(&diagnostic[..prefix_end]);
+    bounded.push_str(&diagnostic[suffix_start..]);
+    let omitted = diagnostic.len() - bounded.len();
+    (bounded, omitted as u64)
+}
+
 pub fn encode_signal(event_id: u64, kind: u16, platform_code: i32) -> Result<Vec<u8>, EncodeError> {
     if !valid_signal(kind, platform_code) {
         return Err(EncodeError::InvalidPayload(
@@ -396,7 +453,7 @@ fn validate_command_envelope(command_envelope: &[u8]) -> Result<(), EncodeError>
     validate_payload_length(command_envelope.len())
 }
 
-fn valid_command_id(command_id: &[u8]) -> bool {
+pub fn valid_command_id(command_id: &[u8]) -> bool {
     if command_id.is_empty() || command_id.len() > 128 || !command_id[0].is_ascii_alphanumeric() {
         return false;
     }
@@ -632,6 +689,17 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_start_outcome_fixture_is_shared_and_stable() {
+        let native = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("protocol/fixtures/start-outcomes-v1.hex");
+        let agent = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../agent-protocol/protocol/fixtures/start-outcomes-v1.hex");
+        let generated = protocol_fixture::start_outcomes_hex();
+        assert_eq!(std::fs::read_to_string(native).unwrap(), generated);
+        assert_eq!(std::fs::read_to_string(agent).unwrap(), generated);
+    }
+
+    #[test]
     fn schema_two_operation_controls_round_trip_owned_identity_and_effects() {
         let input_id = [0x5a; 16];
         let cases = [
@@ -828,6 +896,59 @@ mod tests {
             &"x".repeat(4097),
         )
         .is_err());
+    }
+
+    #[test]
+    fn session_start_failure_has_a_frozen_lifecycle_encoding() {
+        assert_eq!(event_type::SESSION_START_FAILED, 0x0203);
+        assert_eq!(
+            encode_session_start_failed(2, "command.start", "exec failed", 0).unwrap(),
+            [
+                0x83, 0x02, 0x19, 0x02, 0x03, 0x83, 0x6d, b'c', b'o', b'm', b'm', b'a', b'n',
+                b'd', b'.', b's', b't', b'a', b'r', b't', 0x6b, b'e', b'x', b'e', b'c', b' ',
+                b'f', b'a', b'i', b'l', b'e', b'd', 0x00,
+            ],
+        );
+    }
+
+    #[test]
+    fn session_start_failure_validates_identity_and_diagnostic_bound() {
+        for command_id in ["", " unsafe", "slash/not-safe"] {
+            assert!(encode_session_start_failed(1, command_id, "failed", 0).is_err());
+        }
+        let oversized_command_id = "a".repeat(129);
+        assert!(encode_session_start_failed(1, &oversized_command_id, "failed", 0).is_err());
+        let oversized_diagnostic = "x".repeat(MAX_START_DIAGNOSTIC_BYTES + 1);
+        assert!(
+            encode_session_start_failed(1, "command.start", &oversized_diagnostic, 1).is_err()
+        );
+    }
+
+    #[test]
+    fn bounds_start_diagnostics_by_utf8_bytes_without_splitting_characters() {
+        let ascii = "a".repeat(MAX_START_DIAGNOSTIC_BYTES + 17);
+        let (bounded, omitted) = bound_start_diagnostic(&ascii);
+        assert_eq!(bounded.len(), MAX_START_DIAGNOSTIC_BYTES);
+        assert_eq!(omitted, 17);
+        assert_eq!(
+            &bounded[..START_DIAGNOSTIC_PREFIX_BYTES],
+            &ascii[..START_DIAGNOSTIC_PREFIX_BYTES]
+        );
+        assert_eq!(
+            &bounded[START_DIAGNOSTIC_PREFIX_BYTES..],
+            &ascii[ascii.len() - START_DIAGNOSTIC_SUFFIX_BYTES..]
+        );
+
+        let unicode = format!(
+            "{}é{}é",
+            "p".repeat(START_DIAGNOSTIC_PREFIX_BYTES - 1),
+            "s".repeat(START_DIAGNOSTIC_SUFFIX_BYTES)
+        );
+        let (bounded, omitted) = bound_start_diagnostic(&unicode);
+        assert!(bounded.len() <= MAX_START_DIAGNOSTIC_BYTES);
+        assert_eq!(omitted, (unicode.len() - bounded.len()) as u64);
+        assert!(bounded.starts_with(&"p".repeat(START_DIAGNOSTIC_PREFIX_BYTES - 1)));
+        assert!(bounded.ends_with('é'));
     }
 
     #[test]
@@ -1038,6 +1159,10 @@ pub mod protocol_fixture {
         format_hex_records(&command_event_records())
     }
 
+    pub fn start_outcomes_hex() -> String {
+        format_hex_records(&start_outcome_records())
+    }
+
     fn journal_records() -> Vec<Vec<u8>> {
         vec![
             encode_pty_output(1, &[0, 0x1b, 0xff]).unwrap(),
@@ -1066,6 +1191,13 @@ pub mod protocol_fixture {
                 "",
             )
             .unwrap(),
+        ]
+    }
+
+    fn start_outcome_records() -> Vec<Vec<u8>> {
+        vec![
+            encode_process_started(1, 4242).unwrap(),
+            encode_session_start_failed(2, "command.start", "exec failed", 17).unwrap(),
         ]
     }
 

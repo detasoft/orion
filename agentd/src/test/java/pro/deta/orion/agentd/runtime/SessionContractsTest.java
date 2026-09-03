@@ -2,6 +2,7 @@ package pro.deta.orion.agentd.runtime;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.protocol.WorkspaceId;
 
@@ -24,6 +25,7 @@ class SessionContractsTest {
 
         SessionSpec spec = new SessionSpec(
                 new SessionId("session-1"),
+                new CommandId("command.start"),
                 command,
                 new WorkspaceReference.ExistingDirectory(temporaryDirectory),
                 environment,
@@ -38,6 +40,7 @@ class SessionContractsTest {
 
         assertThat(spec.command()).containsExactly("sh", "-l");
         assertThat(spec.environment()).containsExactlyEntriesOf(Map.of("ORION_TEST", "value"));
+        assertThat(spec.startCommandId()).isEqualTo(new CommandId("command.start"));
     }
 
     @Test

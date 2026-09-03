@@ -68,6 +68,8 @@ pub(super) fn current_platform() -> PlatformKind {
 pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     let prepared = PreparedCommand::validate(&options)?;
     let sandbox = PreparedSandbox::prepare(&options)?;
+    let operations = LiveOperationLedger::new(options.max_unacknowledged_operations)
+        .map_err(|error| HostError::InvalidOptions(error.to_owned()))?;
 
     // A launching shell may send SIGHUP as it exits. The PTY child restores the default before
     // exec, while the host deliberately stays independent of the launcher.
@@ -92,33 +94,27 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
             journal_max_bytes: options.journal_max_bytes,
         },
     )?;
-    let acknowledgement = JournalAcknowledgement::open(&options.session_dir)
-        .map_err(|error| HostError::Protocol(error.to_string()))?;
-    let started_at = epoch_millis()?;
-    let mut metadata = initial_metadata(&options, &sandbox, started_at)?;
-    journal::write_metadata(&options.session_dir, &metadata, Durability::Buffered)?;
-
-    let (child_pid, master, descendants) = spawn_pty(&prepared, options.cols, options.rows, sandbox)?;
-    let child_pid_u64 = u64::try_from(child_pid)
-        .map_err(|_| HostError::InvalidOptions("child PID is not representable".to_owned()))?;
-    metadata.child_pid = Some(child_pid_u64);
+    let pending = PendingStartOutcome::new(journal, options.start_command_id.clone());
+    let initialized = match initialize_after_journal(&options, &prepared, sandbox, operations) {
+        Ok(initialized) => initialized,
+        Err(error) => return Err(pending.failed(error)),
+    };
+    let journal = pending.started(initialized.child_pid_u64)?;
 
     let state = Arc::new(Mutex::new(SharedState {
         journal,
-        metadata,
-        master,
-        operations: LiveOperationLedger::new(options.max_unacknowledged_operations)
-            .map_err(|error| HostError::InvalidOptions(error.to_owned()))?,
+        metadata: initialized.metadata,
+        master: initialized.master,
+        operations: initialized.operations,
         operation_order: Arc::new(Mutex::new(())),
-        acknowledgement,
-        descendants: Arc::new(Mutex::new(descendants)),
+        acknowledgement: initialized.acknowledgement,
+        descendants: Arc::new(Mutex::new(initialized.descendants)),
         child_live: true,
         exit_code: i32::MIN,
         exit_signal: -1,
     }));
     {
-        let mut state = lock_state(&state)?;
-        state.append(event_type::PROCESS_STARTED, &child_pid_u64.to_le_bytes())?;
+        let state = lock_state(&state)?;
         state.persist_metadata()?;
     }
 
@@ -137,7 +133,7 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     let reader_state = Arc::clone(&state);
     let reader_thread = thread::spawn(move || copy_pty_output(reader_master, reader_state));
 
-    let wait_status = wait_for_child(child_pid)?;
+    let wait_status = wait_for_child(initialized.child_pid)?;
     let descendants = {
         let state = lock_state(&state)?;
         Arc::clone(&state.descendants)
@@ -175,6 +171,83 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     }
     lock_state(&state)?.journal.finish_maintenance()?;
     Ok(())
+}
+
+struct PendingStartOutcome {
+    journal: JournalWriter,
+    command_id: String,
+}
+
+impl PendingStartOutcome {
+    fn new(journal: JournalWriter, command_id: String) -> Self {
+        Self {
+            journal,
+            command_id,
+        }
+    }
+
+    fn failed(mut self, launch: HostError) -> HostError {
+        let (diagnostic, omitted) = protocol::bound_start_diagnostic(&launch.to_string());
+        let persistence =
+            protocol::session_start_failed_payload(&self.command_id, &diagnostic, omitted)
+                .map_err(|error| HostError::Protocol(error.to_string()))
+                .and_then(|payload| {
+                    self.journal
+                        .append_durable(event_type::SESSION_START_FAILED, 1, 0, &payload)
+                        .map(|_| ())
+                        .map_err(HostError::from)
+                });
+        match persistence {
+            Ok(()) => launch,
+            Err(persistence) => HostError::StartOutcome {
+                launch: Box::new(launch),
+                persistence: Box::new(persistence),
+            },
+        }
+    }
+
+    fn started(mut self, child_pid: u64) -> Result<JournalWriter, HostError> {
+        self.journal
+            .append_durable(event_type::PROCESS_STARTED, 1, 0, &child_pid.to_le_bytes())?;
+        Ok(self.journal)
+    }
+}
+
+struct InitializedSession {
+    acknowledgement: JournalAcknowledgement,
+    metadata: Metadata,
+    child_pid: libc::pid_t,
+    child_pid_u64: u64,
+    master: File,
+    operations: LiveOperationLedger,
+    descendants: DescendantTracker,
+}
+
+fn initialize_after_journal(
+    options: &SessionOptions,
+    prepared: &PreparedCommand,
+    sandbox: PreparedSandbox,
+    operations: LiveOperationLedger,
+) -> Result<InitializedSession, HostError> {
+    let acknowledgement = JournalAcknowledgement::open(&options.session_dir)
+        .map_err(|error| HostError::Protocol(error.to_string()))?;
+    let started_at = epoch_millis()?;
+    let mut metadata = initial_metadata(options, &sandbox, started_at)?;
+    journal::write_metadata(&options.session_dir, &metadata, Durability::Buffered)?;
+    let (child_pid, master, descendants) =
+        spawn_pty(prepared, options.cols, options.rows, sandbox)?;
+    let child_pid_u64 = u64::try_from(child_pid)
+        .map_err(|_| HostError::InvalidOptions("child PID is not representable".to_owned()))?;
+    metadata.child_pid = Some(child_pid_u64);
+    Ok(InitializedSession {
+        acknowledgement,
+        metadata,
+        child_pid,
+        child_pid_u64,
+        master,
+        operations,
+        descendants,
+    })
 }
 
 struct EndpointGuard(PathBuf);

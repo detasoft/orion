@@ -2,6 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
+use crate::protocol;
+
 pub use crate::journal::{DEFAULT_JOURNAL_MAX_BYTES, DEFAULT_JOURNAL_SEGMENT_BYTES};
 
 pub const DEFAULT_COLS: u16 = 160;
@@ -18,6 +20,7 @@ pub enum SandboxUnavailable {
 #[derive(Debug, Eq, PartialEq)]
 pub struct SessionOptions {
     pub session_id: String,
+    pub start_command_id: String,
     pub session_dir: PathBuf,
     pub cwd: PathBuf,
     pub cols: u16,
@@ -80,6 +83,7 @@ where
 
 fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
     let mut session_id = None;
+    let mut start_command_id = None;
     let mut session_dir = None;
     let mut cwd = None;
     let mut cols = None;
@@ -101,6 +105,7 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
                 return Err(ParseError::new("missing child command after --"));
             }
             let session_id = required(session_id, "--session-id")?;
+            let start_command_id = required(start_command_id, "--start-command-id")?;
             let session_dir = required(session_dir, "--session-dir")?;
             let cwd = required(cwd, "--cwd")?;
             let journal_segment_bytes =
@@ -115,6 +120,7 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             }
             return Ok(Command::Run(SessionOptions {
                 session_id,
+                start_command_id,
                 session_dir,
                 cwd,
                 cols: cols.unwrap_or(DEFAULT_COLS),
@@ -140,6 +146,11 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
 
         match option {
             "--session-id" => set_once(&mut session_id, parse_session_id(value)?, option)?,
+            "--start-command-id" => set_once(
+                &mut start_command_id,
+                parse_start_command_id(value)?,
+                option,
+            )?,
             "--session-dir" => set_once(&mut session_dir, PathBuf::from(value), option)?,
             "--cwd" => set_once(&mut cwd, PathBuf::from(value), option)?,
             "--cols" => set_once(&mut cols, parse_dimension(value, option)?, option)?,
@@ -194,6 +205,18 @@ fn parse_session_id(value: &OsStr) -> Result<String, ParseError> {
     if !valid_length || !valid_characters || matches!(value, "." | "..") {
         return Err(ParseError::new(
             "session ID must contain 1-128 ASCII letters, digits, dots, underscores, or hyphens",
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn parse_start_command_id(value: &OsStr) -> Result<String, ParseError> {
+    let value = value.to_str().ok_or_else(|| {
+        ParseError::new("--start-command-id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+    })?;
+    if !protocol::valid_command_id(value.as_bytes()) {
+        return Err(ParseError::new(
+            "--start-command-id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
         ));
     }
     Ok(value.to_owned())
@@ -265,10 +288,16 @@ mod tests {
     }
 
     fn session_arguments(options: &[&str]) -> Vec<OsString> {
+        session_arguments_with_command_id("command.start", options)
+    }
+
+    fn session_arguments_with_command_id(command_id: &str, options: &[&str]) -> Vec<OsString> {
         let mut arguments = strings(&[
             "session-host",
             "--session-id",
             "session-1",
+            "--start-command-id",
+            command_id,
             "--session-dir",
             "/sessions/session-1",
             "--cwd",
@@ -285,6 +314,8 @@ mod tests {
             "session-host",
             "--session-id",
             "019d-session",
+            "--start-command-id",
+            "command.start",
             "--session-dir",
             "/sessions/019d-session",
             "--cwd",
@@ -317,6 +348,7 @@ mod tests {
             command,
             Command::Run(SessionOptions {
                 session_id: "019d-session".to_owned(),
+                start_command_id: "command.start".to_owned(),
                 session_dir: PathBuf::from("/sessions/019d-session"),
                 cwd: PathBuf::from("/work/project"),
                 cols: 180,
@@ -339,6 +371,8 @@ mod tests {
             "session-host",
             "--session-id",
             "session-1",
+            "--start-command-id",
+            "command.start",
             "--session-dir",
             "/sessions/session-1",
             "--cwd",
@@ -361,6 +395,39 @@ mod tests {
     }
 
     #[test]
+    fn requires_and_validates_the_start_command_id() {
+        let missing = parse(strings(&[
+            "session-host",
+            "--session-id",
+            "session-1",
+            "--session-dir",
+            "/sessions/session-1",
+            "--cwd",
+            "/work",
+            "--",
+            "bash",
+        ]));
+        assert_eq!(
+            missing.unwrap_err().to_string(),
+            "missing required option --start-command-id"
+        );
+
+        for command_id in ["", " unsafe", "slash/not-safe"] {
+            let invalid = parse(session_arguments_with_command_id(command_id, &[]));
+            assert_eq!(
+                invalid.unwrap_err().to_string(),
+                "--start-command-id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127}"
+            );
+        }
+        let oversized = "a".repeat(129);
+        let invalid = parse(session_arguments_with_command_id(&oversized, &[]));
+        assert_eq!(
+            invalid.unwrap_err().to_string(),
+            "--start-command-id must match [A-Za-z0-9][A-Za-z0-9._:-]{0,127}"
+        );
+    }
+
+    #[test]
     fn rejects_duplicate_and_invalid_options() {
         let duplicate = parse(strings(&[
             "session-host",
@@ -372,6 +439,15 @@ mod tests {
             "bash",
         ]));
         assert_eq!(duplicate.unwrap_err().to_string(), "duplicate option: --session-id");
+
+        let duplicate = parse(session_arguments(&[
+            "--start-command-id",
+            "command.another",
+        ]));
+        assert_eq!(
+            duplicate.unwrap_err().to_string(),
+            "duplicate option: --start-command-id"
+        );
 
         let invalid_size = parse(strings(&[
             "session-host",

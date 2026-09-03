@@ -23,6 +23,10 @@ pub enum HostError {
     Policy(String),
     Unsupported(String),
     Thread(String),
+    StartOutcome {
+        launch: Box<HostError>,
+        persistence: Box<HostError>,
+    },
 }
 
 impl Display for HostError {
@@ -37,6 +41,13 @@ impl Display for HostError {
             Self::Policy(message) => write!(formatter, "sandbox policy error: {message}"),
             Self::Unsupported(message) => formatter.write_str(message),
             Self::Thread(message) => write!(formatter, "host thread failed: {message}"),
+            Self::StartOutcome {
+                launch,
+                persistence,
+            } => write!(
+                formatter,
+                "{launch}; additionally failed to persist the session start outcome: {persistence}"
+            ),
         }
     }
 }
@@ -46,6 +57,7 @@ impl std::error::Error for HostError {
         match self {
             Self::Io(error) => Some(error),
             Self::Journal(error) => Some(error),
+            Self::StartOutcome { launch, .. } => Some(launch.as_ref()),
             _ => None,
         }
     }
