@@ -20,6 +20,7 @@ import pro.deta.orion.auth.PlainRootTokenAccess;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
@@ -56,6 +57,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private final OrionPasswordHashingService orionPasswordHashingService;
     private final OrionProvider orionProvider;
     private final OrionConfiguration configuration;
+    private final OrionRuntimeOptions runtimeOptions;
     private final ServerIdentityCapability serverIdentity;
     private final JwtAccessTokenService jwtAccessTokenService;
     private final AtomicReference<AccessControl> accessControl = new AtomicReference<>();
@@ -69,11 +71,13 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             OrionPasswordHashingService orionPasswordHashingService,
             OrionProvider orionProvider,
             OrionConfiguration configuration,
+            OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity) {
         this.accessControlStorage = accessControlStorage;
         this.orionPasswordHashingService = orionPasswordHashingService;
         this.orionProvider = orionProvider;
         this.configuration = configuration;
+        this.runtimeOptions = runtimeOptions;
         this.serverIdentity = serverIdentity;
         this.jwtAccessTokenService = new JwtAccessTokenService(serverIdentity);
     }
@@ -85,9 +89,15 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         });
         changeSubscription = accessControlStorage.onChange(initiator -> requestToUpdate());
         try {
-            switch (loadAccessControl()) {
-                case Result.Success<AccessControl> ignored -> requestAclUpdateAndWait("access-control start");
-                case Result.Failure<AccessControl> f -> {
+            switch (loadValidatedAccessControlSnapshot()) {
+                case Result.Success<AccessControlSnapshot>(var snapshot) -> {
+                    if (runtimeOptions.resetRootPassword()) {
+                        resetRootPassword(snapshot);
+                    } else {
+                        requestAclUpdateAndWait("access-control start");
+                    }
+                }
+                case Result.Failure<AccessControlSnapshot> f -> {
                     if (f.code() == Result.FailureCode.NOT_FOUND) {
                         if (!configuration.getBootstrap().getAccessControl().isCreateDefaultIfMissing()) {
                             throw new IllegalStateException("ACL not found and default ACL creation is disabled.");
@@ -147,7 +157,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         char[] token = plainRootToken.get();
         if (token == null) {
-            throw new IllegalStateException("Plain root token is available only after default ACL creation");
+            throw new IllegalStateException(
+                    "Plain root token is available only after root password generation");
         }
         return token.clone();
     }
@@ -340,6 +351,116 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return draft.toAccessControl();
     }
 
+    private void resetRootPassword(AccessControlSnapshot snapshot) {
+        char[] rootPassword = orionPasswordHashingService.generateRandomString(10);
+        try {
+            String passwordHash = orionPasswordHashingService.calculateHash(ARGON2, rootPassword);
+            Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
+            List<RootLocation> roots = rootLocations(drafts);
+            if (roots.size() > 1) {
+                throw new IllegalStateException("Expected at most one root user, found " + roots.size());
+            }
+
+            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
+            AccessControlDraft.User root;
+            if (roots.isEmpty()) {
+                AccessControl canonical = createDefaultAccessControl(
+                        passwordHash,
+                        AccessControl.CredentialType.ARGON2);
+                AccessControlDraft primary = primaryDraft(drafts);
+                removeCanonicalRootAuthorization(drafts, canonical, updatedFiles);
+                addCanonicalRootAuthorization(primary, canonical);
+                root = AccessControlDraft.User.from(canonical.getUsers().getFirst());
+                primary.getUsers().add(root);
+                updatedFiles.put(
+                        accessControlStorage.primaryPath(),
+                        serializeAccessControlConfiguration(primary.toAccessControl()));
+            } else {
+                RootLocation rootLocation = roots.getFirst();
+                root = rootLocation.user();
+                root.getCredentials().removeIf(credential ->
+                        credential.getType() == AccessControl.CredentialType.ARGON2
+                                || credential.getType() == AccessControl.CredentialType.SHA1);
+                root.addCredential(AccessControl.CredentialType.ARGON2, passwordHash);
+                synchronizeInternalServerKeysToRoot(rootLocation.draft());
+                updatedFiles.put(
+                        rootLocation.path(),
+                        serializeAccessControlConfiguration(rootLocation.draft().toAccessControl()));
+            }
+            saveAccessControlSnapshotAndReload(
+                    new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                    "root password reset",
+                    new UserEmail(ROOT_USER_ID, Objects.requireNonNullElse(root.getEmail(), "root@orion.pro")));
+            printAndClearPlainTextPasswordMessage(System.out, rootPassword);
+        } finally {
+            Arrays.fill(rootPassword, '\0');
+        }
+    }
+
+    private Map<String, AccessControlDraft> accessControlDrafts(AccessControlSnapshot snapshot) {
+        Map<String, AccessControlDraft> drafts = new LinkedHashMap<>();
+        for (Map.Entry<String, byte[]> entry : snapshot.files().entrySet()) {
+            drafts.put(
+                    entry.getKey(),
+                    parseAccessControlConfiguration(entry.getValue(), entry.getKey()).toDraft());
+        }
+        return drafts;
+    }
+
+    private List<RootLocation> rootLocations(Map<String, AccessControlDraft> drafts) {
+        List<RootLocation> roots = new ArrayList<>();
+        for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
+            for (AccessControlDraft.User user : entry.getValue().getUsers()) {
+                if (user.getId() != null && ROOT_USER_ID.equalsIgnoreCase(user.getId())) {
+                    roots.add(new RootLocation(entry.getKey(), entry.getValue(), user));
+                }
+            }
+        }
+        return List.copyOf(roots);
+    }
+
+    private AccessControlDraft primaryDraft(Map<String, AccessControlDraft> drafts) {
+        AccessControlDraft primary = drafts.get(accessControlStorage.primaryPath());
+        if (primary == null) {
+            throw new IllegalStateException("Primary ACL configuration file is missing: "
+                    + accessControlStorage.primaryPath());
+        }
+        return primary;
+    }
+
+    private void removeCanonicalRootAuthorization(
+            Map<String, AccessControlDraft> drafts,
+            AccessControl canonical,
+            Map<String, byte[]> updatedFiles) {
+        for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
+            AccessControlDraft draft = entry.getValue();
+            boolean changed = false;
+            for (AccessControl.Role canonicalRole : canonical.getRoles()) {
+                changed |= draft.getRoles().removeIf(role -> idsAreEqual(role.getId(), canonicalRole.getId()));
+            }
+            for (AccessControl.Grant canonicalGrant : canonical.getGrants()) {
+                changed |= draft.getGrants().removeIf(
+                        grant -> idsAreEqual(grant.getId(), canonicalGrant.getId()));
+            }
+            if (changed) {
+                updatedFiles.put(entry.getKey(), serializeAccessControlConfiguration(draft.toAccessControl()));
+            }
+        }
+    }
+
+    private void addCanonicalRootAuthorization(AccessControlDraft draft, AccessControl canonical) {
+        for (AccessControl.Role canonicalRole : canonical.getRoles()) {
+            draft.getRoles().add(AccessControlDraft.Role.from(canonicalRole));
+        }
+        for (AccessControl.Grant canonicalGrant : canonical.getGrants()) {
+            draft.getGrants().add(AccessControlDraft.Grant.from(canonicalGrant));
+        }
+    }
+
+    private boolean idsAreEqual(String first, String second) {
+        return first != null && second != null && first.equalsIgnoreCase(second);
+    }
+
     private void createDefaultAccessControlAndRequestUpdate() {
         PasswordHashingAlgorithm passwordHashingAlgorithm = defaultPasswordHashingAlgorithm();
         char[] defaultRootPassword = orionPasswordHashingService.generateRandomString(10);
@@ -350,7 +471,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             AccessControl ac = createDefaultAccessControl(
                     passwordHash,
                     defaultPasswordCredentialType(passwordHashingAlgorithm));
-            saveAccessControlAndRequestUpdate(ac, "default scheme applied", UserEmail.EMPTY);
+            saveAccessControlAndReload(ac, "default scheme applied", UserEmail.EMPTY);
             printAndClearPlainTextPasswordMessage(System.out, defaultRootPassword);
         } finally {
             Arrays.fill(defaultRootPassword, '\0');
@@ -710,6 +831,16 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         };
     }
 
+    private Result<AccessControlSnapshot> loadValidatedAccessControlSnapshot() {
+        return switch (accessControlStorage.load()) {
+            case Result.Success<AccessControlSnapshot>(var snapshot) -> switch (accessControlFrom(snapshot)) {
+                case Result.Success<AccessControl> ignored -> new Result.Success<>(snapshot);
+                case Result.Failure<AccessControl> failure -> new Result.Failure<>(failure);
+            };
+            case Result.Failure<AccessControlSnapshot> failure -> new Result.Failure<>(failure);
+        };
+    }
+
     private Result<AccessControl> accessControlFrom(AccessControlSnapshot snapshot) {
         if (snapshot.files().isEmpty()) {
             return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
@@ -744,5 +875,36 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private void saveAccessControlAndRequestUpdate(AccessControl accessControl, String message, UserEmail author) {
         saveAccessControl(accessControl, message, author);
         requestAclUpdateAndWait(author + " " + message);
+    }
+
+    private void saveAccessControlAndReload(AccessControl accessControl, String message, UserEmail author) {
+        saveAccessControl(accessControl, message, author);
+        reloadAccessControlOrThrow(author + " " + message);
+    }
+
+    private void saveAccessControlSnapshotAndReload(
+            AccessControlSnapshot snapshot,
+            String message,
+            UserEmail author) {
+        accessControlStorage.save(snapshot, new AccessControlSaveRequest(message, author));
+        reloadAccessControlOrThrow(author + " " + message);
+    }
+
+    private void reloadAccessControlOrThrow(String initiator) {
+        synchronized (reloadLock) {
+            switch (loadAccessControl()) {
+                case Result.Success<AccessControl>(var loaded) -> prepareAndUpdateAccessControl(loaded);
+                case Result.Failure<AccessControl> failure -> throw new IllegalStateException(
+                        "Cannot reload ACL after " + initiator + ": [" + failure.code() + "] "
+                                + failure.message(),
+                        failure.throwable());
+            }
+        }
+    }
+
+    private record RootLocation(
+            String path,
+            AccessControlDraft draft,
+            AccessControlDraft.User user) {
     }
 }

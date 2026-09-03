@@ -13,6 +13,10 @@
 
     <artifactId>bootstrap</artifactId>
 
+    <properties>
+        <orion.run.arguments></orion.run.arguments>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion</groupId>
@@ -174,6 +178,7 @@
                                 </goals>
                                 <configuration>
                                     <mainClass>pro.deta.orion.App</mainClass>
+                                    <commandlineArgs>${orion.run.arguments}</commandlineArgs>
                                 </configuration>
                             </execution>
                         </executions>

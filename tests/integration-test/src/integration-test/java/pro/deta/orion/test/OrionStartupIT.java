@@ -19,6 +19,7 @@ import pro.deta.orion.acl.OrionAccessControlServiceImpl;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.transport.http.OrionAccessControlSchemaRoute;
@@ -165,6 +166,7 @@ class OrionStartupIT {
         try {
             OrionComponent orionComponent = DaggerOrionComponent.builder()
                     .configurationProvider(() -> configuration)
+                    .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .build();
             OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
@@ -197,6 +199,7 @@ class OrionStartupIT {
 
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .serverIdentityCapability(ServerIdentityCapability.unavailable())
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();
@@ -214,6 +217,7 @@ class OrionStartupIT {
     private static StartedOrion startServerWithConfig(OrionConfiguration orionConfiguration) {
         OrionComponent orionComponent = DaggerOrionComponent.builder()
                 .configurationProvider(() -> orionConfiguration)
+                .runtimeOptions(OrionRuntimeOptions.defaults())
                 .serverIdentityCapability(ServerIdentityCapability.unavailable())
                 .build();
         OrionApplicationLifecycle lifecycle = orionComponent.orionApplicationLifecycle();

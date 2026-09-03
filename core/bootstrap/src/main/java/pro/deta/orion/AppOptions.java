@@ -1,5 +1,7 @@
 package pro.deta.orion;
 
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
+
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -12,6 +14,7 @@ record AppOptions(
         Command command,
         String configurationLocation,
         boolean helpRequested,
+        boolean resetRootPassword,
         List<String> applicationArguments,
         Path verificationArtifact,
         Path releasePublicKey,
@@ -52,7 +55,7 @@ record AppOptions(
                 return parseServiceCommand(Command.STATUS, args, 1);
             }
             if ("help".equals(args[0])) {
-                return commandOptions(Command.RUN, null, true);
+                return commandOptions(Command.RUN, null, true, false);
             }
         }
 
@@ -73,6 +76,7 @@ record AppOptions(
 
                 Options for run, start, and restart:
                   -c, --config <location>  Read configuration from a file path or classpath:// resource.
+                  --reset-root-pass        Generate and persist a new privileged root password.
                   -h, --help               Show this help.
 
                 Use "orion verify --help" for signature verification options.
@@ -109,10 +113,17 @@ record AppOptions(
     private static AppOptions parseRun(Command command, String[] args, int startIndex) {
         String configurationLocation = null;
         boolean helpRequested = false;
+        boolean resetRootPassword = false;
         for (int i = startIndex; i < args.length; i++) {
             String arg = args[i];
             switch (arg) {
                 case "--help", "-h" -> helpRequested = true;
+                case "--reset-root-pass" -> {
+                    if (resetRootPassword) {
+                        throw new IllegalArgumentException("Root password reset is already requested");
+                    }
+                    resetRootPassword = true;
+                }
                 case "--config", "-c" -> {
                     i++;
                     if (i >= args.length) {
@@ -135,7 +146,8 @@ record AppOptions(
         return commandOptions(
                 command,
                 configurationLocation,
-                helpRequested);
+                helpRequested,
+                resetRootPassword);
     }
 
     private static AppOptions parseServiceCommand(Command command, String[] args, int startIndex) {
@@ -149,7 +161,7 @@ record AppOptions(
             }
         }
 
-        return commandOptions(command, null, helpRequested);
+        return commandOptions(command, null, helpRequested, false);
     }
 
     private static AppOptions parseVerify(String[] args, int startIndex, Map<String, String> environment) {
@@ -181,6 +193,7 @@ record AppOptions(
                 Command.VERIFY,
                 null,
                 helpRequested,
+                false,
                 List.of(),
                 artifact,
                 publicKey,
@@ -192,15 +205,21 @@ record AppOptions(
         );
     }
 
+    OrionRuntimeOptions runtimeOptions() {
+        return new OrionRuntimeOptions(resetRootPassword);
+    }
+
     private static AppOptions commandOptions(
             Command command,
             String configurationLocation,
-            boolean helpRequested) {
+            boolean helpRequested,
+            boolean resetRootPassword) {
         return new AppOptions(
                 command,
                 configurationLocation,
                 helpRequested,
-                applicationArguments(configurationLocation),
+                resetRootPassword,
+                applicationArguments(command, configurationLocation, resetRootPassword),
                 null,
                 null,
                 null,
@@ -211,11 +230,17 @@ record AppOptions(
         );
     }
 
-    private static List<String> applicationArguments(String configurationLocation) {
+    private static List<String> applicationArguments(
+            Command command,
+            String configurationLocation,
+            boolean resetRootPassword) {
         List<String> arguments = new ArrayList<>();
         if (configurationLocation != null) {
             arguments.add("--config");
             arguments.add(configurationLocation);
+        }
+        if (resetRootPassword && (command == Command.START || command == Command.RESTART)) {
+            arguments.add("--reset-root-pass");
         }
         return List.copyOf(arguments);
     }

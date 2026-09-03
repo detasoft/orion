@@ -56,6 +56,29 @@ class AppOptionsTest {
     }
 
     @Test
+    void parsesRootPasswordResetForDefaultAndExplicitRun() {
+        for (String[] arguments : java.util.List.of(
+                new String[]{"--reset-root-pass"},
+                new String[]{"run", "--reset-root-pass"})) {
+            AppOptions options = AppOptions.parse(arguments);
+
+            assertEquals(AppOptions.Command.RUN, options.command());
+            assertTrue(options.runtimeOptions().resetRootPassword());
+            assertTrue(options.applicationArguments().isEmpty());
+        }
+    }
+
+    @Test
+    void forwardsRootPasswordResetForServiceCommands() {
+        for (String command : java.util.List.of("start", "restart")) {
+            AppOptions options = AppOptions.parse(new String[]{command, "--reset-root-pass"});
+
+            assertTrue(options.runtimeOptions().resetRootPassword());
+            assertEquals(java.util.List.of("--reset-root-pass"), options.applicationArguments());
+        }
+    }
+
+    @Test
     void parsesStartCommandWithApplicationOptions() {
         AppOptions options = AppOptions.parse(new String[]{"start", "--config", "config.yml"});
 
@@ -157,6 +180,7 @@ class AppOptionsTest {
         assertTrue(usage.contains("start"));
         assertTrue(usage.contains("restart"));
         assertTrue(usage.contains("verify"));
+        assertTrue(usage.contains("--reset-root-pass"));
         assertFalse(usage.contains("Usage: orion verify [options]"));
     }
 
@@ -185,6 +209,24 @@ class AppOptionsTest {
                 () -> AppOptions.parse(new String[]{"--config", "one.yml", "--config", "two.yml"}));
 
         assertEquals("Configuration location is already specified", error.getMessage());
+    }
+
+    @Test
+    void rejectsDuplicateRootPasswordReset() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> AppOptions.parse(new String[]{"--reset-root-pass", "--reset-root-pass"}));
+
+        assertEquals("Root password reset is already requested", error.getMessage());
+    }
+
+    @Test
+    void rejectsRootPasswordResetForUnsupportedCommands() {
+        for (String command : java.util.List.of("stop", "status", "verify")) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> AppOptions.parse(new String[]{command, "--reset-root-pass"}, Map.of()));
+        }
     }
 
     @Test

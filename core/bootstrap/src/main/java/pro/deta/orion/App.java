@@ -77,6 +77,7 @@ public class App {
                     configuration, Map.copyOf(System.getenv()))) {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
                         .configurationProvider(() -> configuration)
+                        .runtimeOptions(options.runtimeOptions())
                         .serverIdentityCapability(serverIdentity)
                         .build();
                 return run(orionComponent.orionApplicationLifecycle(), true);

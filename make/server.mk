@@ -1,4 +1,5 @@
 ORION_ROOT ?= $(CURDIR)/orion_root
+ORION_ARGS ?=
 ORION_SSH_HOST ?= localhost
 ORION_SSH_PORT ?= 8022
 ORION_HTTP_HOST ?= localhost
@@ -64,10 +65,12 @@ enroll-admin-key: admin-key
 	@printf 'Admin SSH key enrolled: %s\n' "$(ORION_SSH_KEY)"
 
 run-server: require-key-material-password admin-key
-	$(MAVEN) -pl core/bootstrap -am -Prun-server process-classes
+	$(MAVEN) -pl core/bootstrap -am -Prun-server \
+		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
 
 # Scenario:
 # 1. Export ORION_KEY_MATERIAL_PASSWORD, then start the server: make run-server
+#    To recover the root user and password: make run-server ORION_ARGS=--reset-root-pass
 # 2. Enroll the generated admin key with the generated Orion root password.
 # 3. Issue a temporary admin token and export it into the current shell:
 #      eval "$$(make -s issue-token)"

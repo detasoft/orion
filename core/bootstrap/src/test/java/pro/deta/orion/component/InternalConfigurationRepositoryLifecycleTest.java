@@ -21,12 +21,14 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.KeyUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
@@ -41,7 +43,9 @@ import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.ERR;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
+import static pro.deta.orion.lifecycle.state.StandardStateDefinition.NEW;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
 class InternalConfigurationRepositoryLifecycleTest {
@@ -99,6 +103,349 @@ class InternalConfigurationRepositoryLifecycleTest {
         }
 
         assertThat(processOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
+    }
+
+    @Test
+    void resetFlagUsesDefaultCreationWhenTheAclIsMissing() throws Exception {
+        OrionConfiguration configuration = configuration();
+        ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        OrionComponent component = component(configuration, new OrionRuntimeOptions(true));
+        OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
+        try {
+            System.setOut(new PrintStream(processOutput, true, StandardCharsets.UTF_8));
+            assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+            char[] rootPassword = component.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create());
+            assertAuthenticated(component, "root", new String(rootPassword));
+        } finally {
+            System.setOut(originalOut);
+            assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        assertThat(processOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
+    }
+
+    @Test
+    void resetsExistingRootPasswordAndPreservesItsAccessAndSshKeys() throws Exception {
+        OrionConfiguration configuration = configuration();
+        KeyPair rootKey = keyPair();
+        String rootOpenSshKey = PublicKeyEntry.toString(rootKey.getPublic());
+        String oldPassword;
+        String versionBeforeReset;
+        AccessControl beforeReset;
+
+        OrionComponent first = component(configuration);
+        OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
+        try {
+            assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
+            oldPassword = new String(first.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create()));
+            first.orionAccessControlService().addKeyToUser("root", rootOpenSshKey);
+            first.orionAccessControlService().createOrUpdateUser(user("alice"));
+            AccessControlDraft draft = new XmlService().deserialize(new ByteArrayInputStream(
+                    first.orionAccessControlService().accessControlConfigurationFile())).toDraft();
+            AccessControlDraft.User root = draft.getUsers().stream()
+                    .filter(candidate -> "root".equalsIgnoreCase(candidate.getId()))
+                    .findFirst()
+                    .orElseThrow();
+            root.setFirst("Recovery");
+            root.setLast("Administrator");
+            root.setEmail("recovery-root@example.test");
+            root.addCredential(
+                    AccessControl.CredentialType.SHA1,
+                    new OrionPasswordHashingService().calculateHash(
+                            PasswordHashingAlgorithm.SHA1,
+                            "legacy-root-password".toCharArray()));
+            root.addCredential(
+                    AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY,
+                    "legacy-jwt-key",
+                    "legacy-jwt-public-key");
+            root.addGrant("ROOT_DIRECT")
+                    .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING);
+            first.orionAccessControlService().saveAccessControlConfigurationFile(
+                    accessControlBytes(draft.toAccessControl()));
+            beforeReset = new XmlService().deserialize(new ByteArrayInputStream(
+                    first.orionAccessControlService().accessControlConfigurationFile()));
+            versionBeforeReset = repository(first)
+                    .loadFiles(CONFIGURATION_REF, List.of(ACL_PATH))
+                    .version()
+                    .orElseThrow();
+        } finally {
+            assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        ByteArrayOutputStream resetOutput = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        String newPassword;
+        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
+        try {
+            System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
+            assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
+            newPassword = new String(reset.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create()));
+
+            assertThat(newPassword).isNotEqualTo(oldPassword);
+            assertThat(reset.orionAccessControlService().authenticateUser(
+                    "root",
+                    oldPassword.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(reset.orionAccessControlService().authenticateUser(
+                    "root",
+                    "legacy-root-password".getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertAuthenticated(reset, "root", newPassword);
+            assertSshAuthenticated(reset, "root", rootKey);
+            assertThat(reset.orionAccessControlService().userExists("alice")).isTrue();
+
+            GitRepositoryFileSnapshot snapshot = repository(reset).loadFiles(
+                    CONFIGURATION_REF,
+                    List.of(ACL_PATH));
+            assertThat(snapshot.version()).isPresent();
+            assertThat(snapshot.version().orElseThrow()).isNotEqualTo(versionBeforeReset);
+            AccessControl acl = new XmlService().deserialize(
+                    new ByteArrayInputStream(snapshot.files().get(ACL_PATH)));
+            AccessControl.User root = acl.getUsers().stream()
+                    .filter(user -> "root".equalsIgnoreCase(user.getId()))
+                    .findFirst()
+                    .orElseThrow();
+            AccessControl.User rootBeforeReset = beforeReset.getUsers().stream()
+                    .filter(user -> "root".equalsIgnoreCase(user.getId()))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(root.getFirst()).isEqualTo(rootBeforeReset.getFirst());
+            assertThat(root.getLast()).isEqualTo(rootBeforeReset.getLast());
+            assertThat(root.getEmail()).isEqualTo(rootBeforeReset.getEmail());
+            assertThat(root.getRoles()).containsExactly("ROOT");
+            assertThat(root.getGrants()).containsExactlyElementsOf(rootBeforeReset.getGrants());
+            assertThat(acl.getRoles()).containsExactlyElementsOf(beforeReset.getRoles());
+            assertThat(acl.getGrants()).containsExactlyElementsOf(beforeReset.getGrants());
+            assertThat(root.getCredentials())
+                    .filteredOn(credential -> credential.getType() == AccessControl.CredentialType.ARGON2)
+                    .hasSize(1);
+            assertThat(root.getCredentials())
+                    .filteredOn(credential -> credential.getType() == AccessControl.CredentialType.SHA1)
+                    .isEmpty();
+            assertThat(root.getCredentials())
+                    .filteredOn(credential ->
+                            credential.getType() == AccessControl.CredentialType.OPENSSH_PUBLIC_KEY)
+                    .extracting(AccessControl.Credential::getValue)
+                    .containsExactly(rootOpenSshKey);
+            assertThat(root.getCredentials())
+                    .filteredOn(credential ->
+                            credential.getType() == AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY)
+                    .containsExactly(new AccessControl.Credential(
+                            AccessControl.CredentialType.JWT_SIGNING_PUBLIC_KEY,
+                            "legacy-jwt-key",
+                            "legacy-jwt-public-key"));
+        } finally {
+            System.setOut(originalOut);
+            assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        assertThat(resetOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
+
+        OrionComponent restarted = component(configuration);
+        OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
+        try {
+            assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertAuthenticated(restarted, "root", newPassword);
+            assertSshAuthenticated(restarted, "root", rootKey);
+        } finally {
+            assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+    }
+
+    @Test
+    void recreatesMissingRootWithCanonicalFullPrivileges() throws Exception {
+        OrionConfiguration configuration = configuration();
+        OrionComponent first = component(configuration);
+        OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
+        try {
+            assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
+            first.orionAccessControlService().saveAccessControlConfigurationFile(missingRootAclBytes());
+            assertThat(first.orionAccessControlService().userExists("root")).isFalse();
+            assertAuthenticated(first, "alice", "alice-password");
+        } finally {
+            assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        ByteArrayOutputStream resetOutput = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        String newPassword;
+        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
+        try {
+            System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
+            assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
+            newPassword = new String(reset.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create()));
+            assertAuthenticated(reset, "root", newPassword);
+            assertAuthenticated(reset, "alice", "alice-password");
+
+            AccessControl recovered = new XmlService().deserialize(new ByteArrayInputStream(
+                    reset.orionAccessControlService().accessControlConfigurationFile()));
+            assertThat(recovered.getUsers())
+                    .extracting(AccessControl.User::getId)
+                    .containsExactlyInAnyOrder("alice", "root");
+            AccessControl.User root = recovered.getUsers().stream()
+                    .filter(user -> "root".equalsIgnoreCase(user.getId()))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(root.getEmail()).isEqualTo("root@orion.pro");
+            assertThat(root.getRoles()).containsExactly("ROOT");
+            assertThat(root.getCredentials())
+                    .extracting(AccessControl.Credential::getType)
+                    .containsExactly(AccessControl.CredentialType.ARGON2);
+
+            AccessControl canonical = ACLUtil.generateDefaultAccessControl(
+                    "unused-password-hash",
+                    AccessControl.CredentialType.ARGON2);
+            for (AccessControl.Role expected : canonical.getRoles()) {
+                assertThat(recovered.getRoles())
+                        .filteredOn(role -> expected.getId().equals(role.getId()))
+                        .containsExactly(expected);
+            }
+            for (AccessControl.Grant expected : canonical.getGrants()) {
+                assertThat(recovered.getGrants())
+                        .filteredOn(grant -> expected.getId().equals(grant.getId()))
+                        .containsExactly(expected);
+            }
+            assertThat(recovered.getRoles())
+                    .extracting(AccessControl.Role::getId)
+                    .contains("ALICE");
+            assertThat(recovered.getGrants())
+                    .extracting(AccessControl.Grant::getId)
+                    .contains("ALICE_READ");
+        } finally {
+            System.setOut(originalOut);
+            assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        assertThat(resetOutput.toString(StandardCharsets.UTF_8)).containsOnlyOnce("---ROOT PASSWORD: ");
+
+        OrionComponent restarted = component(configuration);
+        OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
+        try {
+            assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertAuthenticated(restarted, "root", newPassword);
+            assertAuthenticated(restarted, "alice", "alice-password");
+        } finally {
+            assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+    }
+
+    @Test
+    void resetsRootInItsConfiguredAclFileWithoutDuplicatingSecondaryEntries() throws Exception {
+        String secondaryPath = "config/root.xml";
+        OrionConfiguration configuration = configuration();
+        configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_PATH, secondaryPath));
+        byte[] primaryAcl = aclBytes("alice", "alice-password");
+        byte[] secondaryAcl = defaultAclBytes("old-root-password");
+        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        NativeGitRepository repository = reset.nativeGitRepositoryProvider()
+                .create(REPOSITORY_NAME)
+                .valueOrFailure("configuration repository");
+        repository.saveFiles(
+                CONFIGURATION_REF,
+                Map.of(ACL_PATH, primaryAcl, secondaryPath, secondaryAcl),
+                "seed split ACL",
+                GitCommitAuthor.EMPTY);
+
+        OrionApplicationLifecycle lifecycle = reset.orionApplicationLifecycle();
+        String newPassword;
+        try {
+            assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
+            newPassword = new String(reset.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create()));
+            assertAuthenticated(reset, "root", newPassword);
+            assertAuthenticated(reset, "alice", "alice-password");
+            assertThat(reset.orionAccessControlService().authenticateUser(
+                    "root",
+                    "old-root-password".getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+
+            GitRepositoryFileSnapshot snapshot = repository.loadFiles(
+                    CONFIGURATION_REF,
+                    List.of(ACL_PATH, secondaryPath));
+            assertThat(snapshot.files().get(ACL_PATH)).isEqualTo(primaryAcl);
+            assertThat(usersAcross(snapshot, ACL_PATH, secondaryPath))
+                    .extracting(AccessControl.User::getId)
+                    .containsExactlyInAnyOrder("alice", "root");
+        } finally {
+            assertThat(lifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+    }
+
+    @Test
+    void resetsRootPasswordThroughFileAclStorage() throws Exception {
+        Path aclDirectory = tempDir.resolve("file-acl");
+        Path aclFile = aclDirectory.resolve(ACL_PATH);
+        Files.createDirectories(aclFile.getParent());
+        Files.write(aclFile, defaultAclBytes("old-root-password"));
+        OrionConfiguration configuration = configuration();
+        configuration.getBootstrap().getAccessControl().setLocation(aclDirectory.toUri().toString());
+        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
+        String newPassword;
+        try {
+            assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
+            newPassword = new String(reset.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create()));
+            assertAuthenticated(reset, "root", newPassword);
+            assertThat(reset.orionAccessControlService().authenticateUser(
+                    "root",
+                    "old-root-password".getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+        } finally {
+            assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        OrionComponent restarted = component(configuration);
+        OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
+        try {
+            assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertAuthenticated(restarted, "root", newPassword);
+        } finally {
+            assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+    }
+
+    @Test
+    void refusesToResetAmbiguousRootUsersWithoutPersistingOrPrintingPassword() throws Exception {
+        OrionConfiguration configuration = configuration();
+        OrionComponent first = component(configuration);
+        OrionApplicationLifecycle firstLifecycle = first.orionApplicationLifecycle();
+        String versionBeforeReset;
+        try {
+            assertThat(firstLifecycle.runApplication()).isEqualTo(RUNNING);
+            first.orionAccessControlService().saveAccessControlConfigurationFile(duplicateRootAclBytes());
+            versionBeforeReset = repository(first)
+                    .loadFiles(CONFIGURATION_REF, List.of(ACL_PATH))
+                    .version()
+                    .orElseThrow();
+        } finally {
+            assertThat(firstLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        ByteArrayOutputStream resetOutput = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true));
+        OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
+        try {
+            System.setOut(new PrintStream(resetOutput, true, StandardCharsets.UTF_8));
+            assertThat(resetLifecycle.runApplication()).isEqualTo(ERR);
+            assertThat(reset.runtimeStateMachine().childStatuses().get("transports").state())
+                    .isEqualTo(NEW);
+            assertThat(repository(reset).loadFiles(CONFIGURATION_REF, List.of(ACL_PATH)).version())
+                    .contains(versionBeforeReset);
+        } finally {
+            System.setOut(originalOut);
+            assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        assertThat(resetOutput.toString(StandardCharsets.UTF_8)).doesNotContain("---ROOT PASSWORD: ");
     }
 
     @Test
@@ -285,9 +632,23 @@ class InternalConfigurationRepositoryLifecycleTest {
 
     private static OrionComponent component(
             OrionConfiguration configuration,
+            OrionRuntimeOptions runtimeOptions) {
+        return component(configuration, runtimeOptions, ServerIdentityCapability.unavailable());
+    }
+
+    private static OrionComponent component(
+            OrionConfiguration configuration,
+            ServerIdentityCapability serverIdentity) {
+        return component(configuration, OrionRuntimeOptions.defaults(), serverIdentity);
+    }
+
+    private static OrionComponent component(
+            OrionConfiguration configuration,
+            OrionRuntimeOptions runtimeOptions,
             ServerIdentityCapability serverIdentity) {
         return DaggerOrionComponent.builder()
                 .configurationProvider(() -> configuration)
+                .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(serverIdentity)
                 .build();
     }
@@ -339,8 +700,67 @@ class InternalConfigurationRepositoryLifecycleTest {
         AccessControlDraft draft = new AccessControlDraft();
         draft.getUsers().add(ACLUtil.createUser(userId, userId + "@example.test")
                 .addCredential(AccessControl.CredentialType.SHA1, hash));
+        return accessControlBytes(draft.toAccessControl());
+    }
+
+    private static byte[] missingRootAclBytes() throws Exception {
+        OrionPasswordHashingService hashingService = new OrionPasswordHashingService();
+        String hash = hashingService.calculateHash(
+                PasswordHashingAlgorithm.SHA1,
+                "alice-password".toCharArray());
+        AccessControlDraft draft = new AccessControlDraft();
+        draft.getUsers().add(ACLUtil.createUser("alice", "alice@example.test")
+                .addCredential(AccessControl.CredentialType.SHA1, hash)
+                .addRole("ALICE"));
+        draft.getRoles().add(ACLUtil.createRole("ALICE").addGrantReference("ALICE_READ"));
+        draft.getGrants().add(ACLUtil.createGrant("ALICE_READ")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "alice/*")
+                .addKey(AccessControl.GrantKey.READ, "true"));
+        draft.getRoles().add(ACLUtil.createRole("ROOT").addGrantReference("APPLICATION_CONTROL"));
+        draft.getGrants().add(ACLUtil.createGrant("CONNECT")
+                .addKey(AccessControl.GrantKey.NETWORK_SOURCE, "192.0.2.1"));
+        draft.getGrants().add(ACLUtil.createGrant("ALL_REPOSITORY")
+                .addKey(AccessControl.GrantKey.REPOSITORY, "restricted")
+                .addKey(AccessControl.GrantKey.READ, "false"));
+        draft.getGrants().add(ACLUtil.createGrant("APPLICATION_CONTROL")
+                .addKey(AccessControl.GrantKey.ADMIN, "false"));
+        return accessControlBytes(draft.toAccessControl());
+    }
+
+    private static byte[] duplicateRootAclBytes() throws Exception {
+        AccessControlDraft draft = new AccessControlDraft();
+        draft.getUsers().add(ACLUtil.createUser("root", "first-root@example.test")
+                .addCredential(AccessControl.CredentialType.SHA1, "first-hash"));
+        draft.getUsers().add(ACLUtil.createUser("ROOT", "second-root@example.test")
+                .addCredential(AccessControl.CredentialType.SHA1, "second-hash"));
+        return accessControlBytes(draft.toAccessControl());
+    }
+
+    private static byte[] defaultAclBytes(String password) throws Exception {
+        OrionPasswordHashingService hashingService = new OrionPasswordHashingService();
+        String hash = hashingService.calculateHash(
+                PasswordHashingAlgorithm.SHA1,
+                password.toCharArray());
+        return accessControlBytes(ACLUtil.generateDefaultAccessControl(
+                hash,
+                AccessControl.CredentialType.SHA1));
+    }
+
+    private static List<AccessControl.User> usersAcross(
+            GitRepositoryFileSnapshot snapshot,
+            String... paths) throws Exception {
+        List<AccessControl.User> users = new java.util.ArrayList<>();
+        XmlService xmlService = new XmlService();
+        for (String path : paths) {
+            AccessControl acl = xmlService.deserialize(new ByteArrayInputStream(snapshot.files().get(path)));
+            users.addAll(acl.getUsers());
+        }
+        return List.copyOf(users);
+    }
+
+    private static byte[] accessControlBytes(AccessControl accessControl) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        new XmlService().serialize(draft.toAccessControl(), output);
+        new XmlService().serialize(accessControl, output);
         return output.toByteArray();
     }
 

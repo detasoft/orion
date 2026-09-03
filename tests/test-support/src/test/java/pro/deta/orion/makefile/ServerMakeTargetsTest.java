@@ -222,6 +222,30 @@ class ServerMakeTargetsTest {
         assertThat(Files.readString(capture)).isEqualTo(password);
     }
 
+    @Test
+    void runServerForwardsOrionArguments() throws Exception {
+        Path capture = tempDir.resolve("maven-arguments");
+        Path bin = Files.createDirectory(tempDir.resolve("maven-arguments-bin"));
+        Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
+        createExecutable(bin.resolve("mvn"), """
+                #!/bin/sh
+                printf 'arg=%s\n' "$@" > "$CAPTURE_FILE"
+                """);
+        ProcessBuilder builder = make(
+                "run-server",
+                "ORION_SSH_KEY=" + identity,
+                "ORION_ARGS=--reset-root-pass",
+                "MAVEN=mvn");
+        configureFakeCommand(builder, bin, capture);
+        builder.environment().put("ORION_KEY_MATERIAL_PASSWORD", "test-store-password");
+
+        Process process = builder.start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+        assertThat(process.waitFor()).as(output).isZero();
+        assertThat(Files.readAllLines(capture)).contains("arg=-Dorion.run.arguments=--reset-root-pass");
+    }
+
     private void configureFakeCommand(ProcessBuilder builder, Path bin, Path capture) {
         builder.environment().put("CAPTURE_FILE", capture.toString());
         builder.environment().put(

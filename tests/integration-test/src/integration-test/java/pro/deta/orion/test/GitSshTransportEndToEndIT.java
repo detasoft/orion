@@ -33,6 +33,7 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.component.DaggerOrionComponent;
 import pro.deta.orion.component.OrionComponent;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -700,6 +701,7 @@ class GitSshTransportEndToEndIT {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
             OrionComponent component = DaggerOrionComponent.builder()
                     .configurationProvider(() -> configuration)
+                    .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(identity.capability())
                     .build();
             OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
