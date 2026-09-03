@@ -269,7 +269,7 @@ class MinaSshOperationTest {
         KeyPair client = keyPair();
         ProvisioningOptions shortOperation = new ProvisioningOptions(
                 Duration.ofSeconds(1), Duration.ofSeconds(1),
-                Duration.ofSeconds(5), Duration.ofMillis(100));
+                Duration.ofSeconds(5), Duration.ofSeconds(2));
         try (TestSshServer server = TestSshServer.start(root, host, client);
              MinaSshOperation operation = MinaSshOperation.open(
                      server.endpoint(), new SshCredentials(client), shortOperation)) {

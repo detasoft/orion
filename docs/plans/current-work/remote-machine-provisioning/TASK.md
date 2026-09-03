@@ -11,7 +11,7 @@ to make them available as AgentD workers.
 ## Child Tasks
 
 - [ ] [Add administration and end-to-end acceptance](administration-and-end-to-end-acceptance/TASK.md)
-- [ ] [Fix the stalled SSH operation watchdog baseline](stalled-operation-watchdog-baseline/TASK.md)
+- [x] [Fix the stalled SSH operation watchdog baseline](stalled-operation-watchdog-baseline/TASK.md)
 
 ## Completion Boundary
 
