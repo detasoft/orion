@@ -7,8 +7,9 @@ credentials, including explicit forced lockout and safe root-generation handling
 
 **Architecture:** Carry immutable SSH authentication facts from Mina into `SecurityContext`, while keeping command
 handlers independent of Mina sessions and channels. Add narrow typed ACL query/mutation results, update the exact ACL
-file under the existing reload lock, and compose a dedicated credential catalog into the SSH command tree. A forced
-last-key removal places root in a durable locked state that only `--reset-root-pass` can repair.
+file under the existing reload lock, and use the loaded Git version as a compare-and-set precondition for native ACL
+saves. Compose a dedicated credential catalog into the SSH command tree. A forced last-key removal places root in a
+durable locked state that only `--reset-root-pass` can repair.
 
 **Tech Stack:** Java 21, Apache Mina SSHD 2.13.2, Orion command core, Orion ACL snapshots/XML v2, Dagger, JUnit 5,
 AssertJ, Maven.
@@ -138,7 +139,71 @@ git add core/authorization
 git commit -m "Define SSH credential management contracts"
 ```
 
-### Task 3: Implement atomic credential listing and addition
+### Task 3: Enforce native ACL snapshot versions
+
+**Files:**
+
+- Create: `git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/GitRepositoryConcurrentUpdateException.java`
+- Modify: `git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/NativeGitRepository.java`
+- Modify: `git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/NativeRepositoryFileSaver.java`
+- Modify: `git/git-native-storage/src/test/java/pro/deta/orion/git/nativestorage/NativeGitRepositoryTest.java`
+- Create: `core/acl/src/main/java/pro/deta/orion/acl/storage/AccessControlConcurrentUpdateException.java`
+- Modify: `core/acl/src/main/java/pro/deta/orion/acl/storage/AccessControlStorage.java`
+- Modify: `connectors/acl-storage/src/main/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorage.java`
+- Modify: `connectors/acl-storage/src/test/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorageTest.java`
+
+**Step 1: Write failing conditional native-save tests**
+
+Save and load version one, write version two through the existing unconditional API, then attempt to save files with
+version one's commit ID as the expected version. Assert a dedicated `GitRepositoryConcurrentUpdateException`, an
+unchanged branch ref at version two, and unchanged version-two contents. Also prove a successful conditional save
+uses the expected commit as its parent and preserves files not included in the update.
+
+**Step 2: Write failing ACL-storage version tests**
+
+Load an `AccessControlSnapshot`, advance the configured ref with different ACL and unrelated-file contents, and save
+the stale snapshot. Require `AccessControlConcurrentUpdateException`; reload and verify neither file from the winning
+commit was overwritten. Assert that a snapshot with an empty version still uses the existing unconditional path so
+initial native ACL creation remains supported.
+
+**Step 3: Verify RED**
+
+Run outside the sandbox:
+
+```sh
+mvn test -Pdev -T 4 -q -pl git/git-native-storage -am \
+  -Dtest=NativeGitRepositoryTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
+mvn test -Pdev -T 4 -q -pl connectors/acl-storage -am \
+  -Dtest=NativeGitAccessControlStorageTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+Expected: FAIL because native saves currently resolve the branch at save time and ignore
+`AccessControlSnapshot.version()`.
+
+**Step 4: Implement exact-version compare-and-set**
+
+Add a conditional `NativeGitRepository.saveFilesIfVersion(...)` path. It must parse the expected commit ID, read and
+overlay that exact commit's tree, create a child commit, and update the configured ref with the expected commit ID as
+the compare-and-set old value. Map `RefUpdateResult.STALE` to the dedicated checked concurrent-update exception.
+Keep the existing unconditional `saveFiles(...)` behavior and callers unchanged.
+
+When `AccessControlSnapshot.version()` is present, `NativeGitAccessControlStorage.save(...)` must use the conditional
+path and translate the native stale exception to `AccessControlConcurrentUpdateException`. When the version is empty,
+retain the existing unconditional path for initial creation and versionless storage behavior. Other Git/storage
+failures retain their current failure boundary.
+
+**Step 5: Verify GREEN and commit**
+
+Repeat the Task 3 focused tests, then:
+
+```sh
+git add git/git-native-storage core/acl connectors/acl-storage
+git commit -m "Enforce native ACL snapshot versions"
+```
+
+### Task 4: Implement atomic credential listing and addition
 
 **Files:**
 
@@ -179,8 +244,9 @@ deduplicate by encoded bytes. Under `reloadLock`, load the current `AccessContro
 case-insensitive user across drafts, mutate only its draft, preserve snapshot version and every other file, then
 use strict save-and-reload activation.
 
-Map expected parse, validation, lookup, version, save, and reload failures into the typed results. Do not use
-exceptions as expected command control flow. Log no full pasted or candidate key.
+Map expected parse, validation, lookup, save, and reload failures into the typed results. In particular, translate
+`AccessControlConcurrentUpdateException` to `CONCURRENT_UPDATE`; do not use an expected storage race as command
+control-flow exception beyond that storage boundary. Log no full pasted or candidate key.
 
 Refactor `addSshKeysToUser` to delegate to `addSshCredentials`; retain its existing public behavior for successful
 password-authenticated enrollment and convert a typed failure to the existing exceptional boundary only where a
@@ -188,14 +254,14 @@ legacy caller cannot consume a typed result.
 
 **Step 5: Verify GREEN and commit**
 
-Repeat the Task 3 focused tests, then:
+Repeat the Task 4 focused tests, then:
 
 ```sh
 git add core/acl core/bootstrap/src/test/java/pro/deta/orion/component/InternalConfigurationRepositoryLifecycleTest.java
 git commit -m "Add atomic SSH credential queries and additions"
 ```
 
-### Task 4: Implement removal and durable root lock
+### Task 5: Implement removal and durable root lock
 
 **Files:**
 
@@ -235,7 +301,7 @@ remains, remove only the selected key and preserve the current generation on the
 
 **Step 4: Verify RED, implement, and verify GREEN**
 
-Use the same Task 3 commands. Generate and clear the random marker preimage exactly like other generated secrets;
+Use the same Task 4 commands. Generate and clear the random marker preimage exactly like other generated secrets;
 use a distinct reserved locked-generation key-ID prefix so the marker is never mistaken for the printable recovery
 password shape.
 
@@ -246,7 +312,7 @@ git add core/acl core/bootstrap/src/test/java/pro/deta/orion/component/InternalC
 git commit -m "Add safe SSH credential removal"
 ```
 
-### Task 5: Carry current-key and proved-candidate facts into commands
+### Task 6: Carry current-key and proved-candidate facts into commands
 
 **Files:**
 
@@ -301,7 +367,7 @@ git add net/git-transport core/authorization
 git commit -m "Expose SSH authentication facts to commands"
 ```
 
-### Task 6: Add the `/auth/key` command catalog
+### Task 7: Add the `/auth/key` command catalog
 
 **Files:**
 
@@ -356,7 +422,7 @@ git add net/git-transport core/command
 git commit -m "Add SSH credential commands"
 ```
 
-### Task 7: Prove exec, terminal, persistence, and isolation behavior
+### Task 8: Prove exec, terminal, persistence, and isolation behavior
 
 **Files:**
 
@@ -406,7 +472,7 @@ git add README.md net/git-transport/src/test tests/integration-test/src/integrat
 git commit -m "Verify SSH credential management"
 ```
 
-### Task 8: Verify and return for orchestrated review
+### Task 9: Verify and return for orchestrated review
 
 **Files:**
 
@@ -425,7 +491,7 @@ Expected: no whitespace errors and only task-owned files.
 
 **Step 2: Repeat all focused verification**
 
-Run every focused command from Tasks 1 through 7 outside the sandbox. Expected: PASS.
+Run every focused command from Tasks 1 through 8 outside the sandbox. Expected: PASS.
 
 **Step 3: Run development and commit verification**
 

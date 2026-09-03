@@ -38,6 +38,16 @@ roles, grants, passwords, or unrelated credentials. The ACL implementation
 parses keys before mutation and performs each change atomically under its
 existing reload lock.
 
+The reload lock serializes callers in one process, but it cannot exclude a
+reset or another Orion process writing the native ACL repository. A native ACL
+snapshot's Git commit version is therefore also its write precondition. The
+native repository builds the replacement commit from that exact commit and
+updates the configured ref with compare-and-set against the same object ID. If
+the ref has advanced, the save reports a dedicated concurrent-update outcome
+and leaves the newer ref and its files untouched. Snapshots without a version
+retain the existing unconditional save behavior, which is needed for initial
+creation and local-file storage.
+
 All operations identify the target user from the authenticated
 `SecurityContext`. The command syntax contains no user selector, so a caller
 cannot use these commands to inspect or edit another principal.
@@ -151,14 +161,22 @@ They do not expose candidate keys or key material.
   result values rather than expected control-flow exceptions.
 - Save and activate one ACL update per successful add or removal.
 - Do not partially add or remove when one requested item is invalid.
+- For versioned native snapshots, build and compare-and-set from the exact
+  loaded version rather than resolving the branch again at save time.
 - A concurrent reset or credential update wins according to the stored ACL
-  version; the losing operation reports failure rather than overwriting it.
+  version; the losing operation reports `CONCURRENT_UPDATE` rather than
+  overwriting it.
+- Keep versionless local and initial-creation saves on their existing path;
+  their in-process credential mutations remain serialized by the reload lock.
 
 ## Testing
 
 Authorization and ACL tests cover listing, algorithms, canonical fingerprints,
 duplicate and malformed stored keys, idempotent addition, invalid pasted keys,
 unambiguous candidate selection, ACL isolation, and concurrent-state failures.
+Native storage tests advance the configuration ref after loading a snapshot,
+then prove a stale conditional save is rejected and cannot replace either the
+newer ACL bytes or unrelated files from the winning commit.
 
 Removal tests cover missing and ambiguous prefixes, duplicate records, current
 key removal, last-key refusal, forced non-root lockout, generation preservation
