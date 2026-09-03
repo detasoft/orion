@@ -12,6 +12,7 @@ explicit follow-up slices over the same command and result abstractions.
 
 ## Child Tasks
 
+- [ ] [Make root recovery enrollment one-time](root-recovery-enrollment/TASK.md)
 - [ ] [Add SSH credential commands](credential-commands/TASK.md)
 - [ ] [Add read-only domain commands](read-only-domain-commands/TASK.md)
 - [ ] [Add querying and automation renderers](query-and-output/TASK.md)
