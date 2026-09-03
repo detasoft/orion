@@ -1,9 +1,7 @@
 ---
 name: orion-review-orchestrator
 description: >-
-  Run an Orion task pool sequentially with one gpt-5.6-sol/medium worker in a
-  dedicated worktree while the primary agent only coordinates and reviews.
-  Use when the user asks for review-gated subagent execution over a task
+  Use when the user asks for review-gated subagent execution over an Orion task
   subtree, an explicit task list, or tasks introduced by a commit.
 ---
 
@@ -11,14 +9,16 @@ description: >-
 
 ## Purpose
 
-Keep the primary agent in coordinator/reviewer mode. Give one leaf task at a
-time to a fresh implementation worker, route every review finding back to that
-worker, and stop at a user gate before transferring the reviewed commit to
-`main`. After the user permits or confirms the transfer, finish integration and
-start the next ready task automatically.
+Keep the primary agent in coordinator/reviewer mode, with ownership of ordinary
+implementation-plan documents on `main`. Give one leaf task at a time to a
+fresh implementation worker, route every review finding back to that worker,
+and stop at a user gate before transferring the reviewed commit to `main`.
+After the user permits or confirms the transfer, finish integration and start
+the next ready task automatically.
 
 Never have two implementation workers active at once. The primary agent may
-inspect and orchestrate, but must not implement fixes or edit the task branch.
+inspect, orchestrate, and update plans on `main` as described below, but must
+not implement fixes or edit the task branch.
 
 ## Required Repository Guidance
 
@@ -67,6 +67,34 @@ Select only an unclaimed, dependency-ready leaf. A claimed prerequisite is a
 blocker; do not skip ahead to dependent work. If no ready leaf remains, either
 report the pool complete or name the exact blocking task.
 
+## Prepare the Plan on Main
+
+Before launching a worker, decide whether the selected task needs a new or
+updated ordinary implementation plan under `docs/plans/`. The primary
+orchestrator owns that plan change; the implementation worker does not.
+
+When a plan change is needed:
+
+1. Confirm the shared `main` worktree is clean, has no Git operation in
+   progress, and still contains no claim for the selected task. If the plan
+   overlaps unrelated or user-owned changes, stop and report the conflict.
+2. Edit only the relevant ordinary plan documents in the shared `main`
+   worktree. Do not claim the task or edit its `TASK.md` on `main`.
+3. Commit the plan-only change directly on `main` with a concise one-line
+   subject. Follow `AGENTS.md`; in particular, do not run tests for a
+   documentation-only commit.
+4. Re-check that `main` is clean, scan task ownership again, and record the new
+   exact `main` HEAD as the worker base.
+
+If no plan change is needed, use the current clean committed `main` HEAD.
+
+After worker launch, a worker that finds a material plan gap must pause and
+report it instead of editing the plan in its task worktree. The primary updates
+and commits the plan on `main`, then tells the same worker to rebase its task
+branch onto that exact new `main` commit without merging. The worker rechecks
+the task worktree and resumes only after the rebase succeeds. Apply the same
+rule to plan corrections discovered during review.
+
 ## Launch One Worker
 
 Spawn a fresh worker for the selected leaf with:
@@ -78,25 +106,28 @@ Spawn a fresh worker for the selected leaf with:
 - only the context needed for this task rather than the whole review thread,
   supplied explicitly in the worker prompt.
 
-Tell the worker that it owns every mutation for the task, including task claim,
+Tell the worker that it owns every task-branch mutation, including task claim,
 worktree setup, implementation, tests, commits, review fixes, final squash,
-integration after approval, and cleanup. The primary agent owns selection,
-review, and user communication only.
+integration after approval, and cleanup. It must treat ordinary implementation
+plans as orchestrator-owned inputs and report required plan changes rather than
+editing them. The primary agent owns selection, plan maintenance on `main`,
+review, and user communication.
 
 The worker must:
 
 1. Read `AGENTS.md`, the selected task node, its parent nodes, referenced plans,
    and applicable local rules.
-2. Create a dedicated branch and worktree from the current committed `main`
-   HEAD without changing or including the shared working tree. Use a
+2. Create a dedicated branch and worktree from the exact plan-updated committed
+   `main` HEAD supplied by the primary without changing or including the shared
+   working tree. Use a
    collision-free `codex/<task-slug>` branch and `.worktrees/<task-slug>` path,
    unless an existing workflow-owned branch and worktree are being resumed.
 3. Inside that worktree, claim the selected task according to
    `orion-task-runner`. Make the isolated documentation-only claim commit before
-   implementation and do not include unrelated files. When starting upcoming
-   work, perform the required task-tree move as part of that isolated
-   start/claim change. Do not put this pre-review claim commit directly on
-   `main`; it will be included in the branch's final squash.
+   implementation and do not include plan changes or unrelated files. When
+   starting upcoming work, perform the required task-tree move as part of that
+   isolated start/claim change. Do not put this pre-review claim commit directly
+   on `main`; it will be included in the branch's final squash.
 4. Until the user gate, perform every subsequent command and edit in that
    worktree. Preserve all unrelated shared-workspace state.
 5. Implement production behavior and tests under `AGENTS.md`, run focused
