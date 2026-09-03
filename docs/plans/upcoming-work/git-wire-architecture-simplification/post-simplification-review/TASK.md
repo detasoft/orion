@@ -1,7 +1,8 @@
 # Re-audit the Simplified Git Wire Architecture
 
 Status: todo
-Depends on: all preceding sibling tasks
+Depends on: all preceding sibling tasks,
+[native Git storage architecture review](../../git-native-storage-architecture-review/TASK.md)
 Baseline: [Git parser architecture simplification review](../../../../reviews/2026-09-03-git-parser-architecture-simplification.md)
 
 Repeat the read-only architecture simplification review only after the object
@@ -10,8 +11,10 @@ capability policy tasks are complete.
 
 ## Scope
 
-- Re-run `architecture-simplifier` over `git-parser`, `git-native-storage`,
-  `git-client`, `net/git-transport`, and the native Git HTTP integration.
+- Re-run `architecture-simplifier` over `git-parser`, `git-client`,
+  `net/git-transport`, and the native Git HTTP integration. Reuse the native
+  storage review and inspect `git-native-storage` here only where needed to
+  verify cross-module integration and regressions.
 - Verify every accepted baseline finding against source, Maven dependency
   graphs, tests, and bootstrap composition points.
 - Inspect the completed blocking output path for additional removable state,

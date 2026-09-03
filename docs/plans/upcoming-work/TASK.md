@@ -12,6 +12,7 @@ tasks may be ready at the same time.
 - [ ] [Add hierarchical Orion configuration](hierarchical-orion-configuration/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)
 - [ ] [Implement external Git repository synchronization](external-git-repository-sync/TASK.md)
+- [ ] [Review native Git storage architecture](git-native-storage-architecture-review/TASK.md)
 - [ ] [Externalize repository storage](externalized-repository-storage/TASK.md)
 - [ ] [Simplify Git client architecture](git-client-architecture-simplification/TASK.md)
 - [ ] [Simplify Git wire architecture](git-wire-architecture-simplification/TASK.md)

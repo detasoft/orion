@@ -1,6 +1,7 @@
 # Externalize Repository Storage
 
 Status: todo
+Depends on: [native Git storage architecture review](../git-native-storage-architecture-review/TASK.md)
 
 Move repository contents behind a storage abstraction so production deployments
 are not required to keep Git objects, refs, packs, and indexes directly in the
