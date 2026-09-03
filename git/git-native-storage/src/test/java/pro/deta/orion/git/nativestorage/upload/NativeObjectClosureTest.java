@@ -318,6 +318,44 @@ class NativeObjectClosureTest {
         assertThat(result.unshallowBoundaries()).containsExactly(baseCommit);
     }
 
+    @Test
+    void identifiesEqualAndLinearCommitAncestry() {
+        GitObjectId root = writeCommit(writeBlobTree("root.txt", "root"), null, "root");
+        GitObjectId child = writeCommit(writeBlobTree("child.txt", "child"), root, "child");
+
+        assertThat(closure.isAncestor(root, root)).isTrue();
+        assertThat(closure.isAncestor(root, child)).isTrue();
+        assertThat(closure.isAncestor(child, root)).isFalse();
+    }
+
+    @Test
+    void findsNearestMergeBaseForDivergedTips() {
+        GitObjectId root = writeCommit(writeBlobTree("root.txt", "root"), null, "root");
+        GitObjectId left = writeCommit(writeBlobTree("left.txt", "left"), root, "left");
+        GitObjectId right = writeCommit(writeBlobTree("right.txt", "right"), root, "right");
+
+        assertThat(closure.mergeBase(left, right)).contains(root);
+        assertThat(closure.mergeBase(left, root)).contains(root);
+    }
+
+    @Test
+    void hasNoMergeBaseForUnrelatedHistories() {
+        GitObjectId left = writeCommit(writeBlobTree("left.txt", "left"), null, "left");
+        GitObjectId right = writeCommit(writeBlobTree("right.txt", "right"), null, "right");
+
+        assertThat(closure.mergeBase(left, right)).isEmpty();
+    }
+
+    @Test
+    void treatsIncompleteCommitHistoryAsUnrelated() {
+        GitObjectId root = writeCommit(writeBlobTree("root.txt", "root"), null, "root");
+        GitObjectId missing = GitObjectId.of("f".repeat(40));
+
+        assertThat(closure.isAncestor(missing, root)).isFalse();
+        assertThat(closure.isAncestor(root, missing)).isFalse();
+        assertThat(closure.mergeBase(root, missing)).isEmpty();
+    }
+
     private GitObjectId writeCommit(GitObjectId tree, GitObjectId parent, String message) {
         return writeCommitInternal(
                 tree,

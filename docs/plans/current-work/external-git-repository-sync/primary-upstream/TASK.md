@@ -1,6 +1,8 @@
 # Implement Primary Upstream Synchronization
 
 Status: todo
+Owner: codex, session 6e3b, paused 2026-09-04 01:25 Europe/Amsterdam;
+next: implement serialized outbound processing, retry, and minute audits.
 Depends on: completed repository and mirror configuration foundation
 
 Attach one reserved `upstream` remote, reconcile compatible state when Orion

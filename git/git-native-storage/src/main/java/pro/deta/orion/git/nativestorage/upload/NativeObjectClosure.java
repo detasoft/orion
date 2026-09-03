@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -149,6 +150,72 @@ public final class NativeObjectClosure {
             }
         }
         return foundRoot;
+    }
+
+    public boolean isAncestor(
+            GitObjectId ancestor,
+            GitObjectId descendant) {
+        Objects.requireNonNull(ancestor, "ancestor");
+        Objects.requireNonNull(descendant, "descendant");
+        if (!isCommit(ancestor) || !isCommit(descendant)) {
+            return false;
+        }
+        return commitDistances(descendant).containsKey(ancestor);
+    }
+
+    public Optional<GitObjectId> mergeBase(
+            GitObjectId first,
+            GitObjectId second) {
+        Objects.requireNonNull(first, "first");
+        Objects.requireNonNull(second, "second");
+        if (!isCommit(first) || !isCommit(second)) {
+            return Optional.empty();
+        }
+        Map<GitObjectId, Integer> firstDistances = commitDistances(first);
+        Map<GitObjectId, Integer> secondDistances = commitDistances(second);
+        GitObjectId nearest = null;
+        int nearestDistance = Integer.MAX_VALUE;
+        for (Map.Entry<GitObjectId, Integer> entry : firstDistances.entrySet()) {
+            Integer secondDistance = secondDistances.get(entry.getKey());
+            if (secondDistance == null) {
+                continue;
+            }
+            int distance = entry.getValue() + secondDistance;
+            if (distance < nearestDistance
+                    || distance == nearestDistance
+                    && (nearest == null
+                    || entry.getKey().value().compareTo(nearest.value()) < 0)) {
+                nearest = entry.getKey();
+                nearestDistance = distance;
+            }
+        }
+        return Optional.ofNullable(nearest);
+    }
+
+    private boolean isCommit(GitObjectId objectId) {
+        LooseObject object = objectReader.apply(objectId).orElse(null);
+        return object != null && object.type() == ObjectType.COMMIT;
+    }
+
+    private Map<GitObjectId, Integer> commitDistances(GitObjectId root) {
+        Map<GitObjectId, Integer> distances = new LinkedHashMap<>();
+        ArrayDeque<CommitAtDistance> pending = new ArrayDeque<>();
+        pending.addLast(new CommitAtDistance(root, 0));
+        while (!pending.isEmpty()) {
+            CommitAtDistance current = pending.removeFirst();
+            if (distances.containsKey(current.objectId())) {
+                continue;
+            }
+            LooseObject object = objectReader.apply(current.objectId()).orElse(null);
+            if (object == null || object.type() != ObjectType.COMMIT) {
+                continue;
+            }
+            distances.put(current.objectId(), current.distance());
+            for (GitObjectId parent : commitReferences(object.data()).parents()) {
+                pending.addLast(new CommitAtDistance(parent, current.distance() + 1));
+            }
+        }
+        return distances;
     }
 
     private void applyObjectFilter(
@@ -615,6 +682,11 @@ public final class NativeObjectClosure {
     private record ShallowPendingObject(
             GitObjectId objectId,
             int remainingDepth) {
+    }
+
+    private record CommitAtDistance(
+            GitObjectId objectId,
+            int distance) {
     }
 
     private record CommitReferences(

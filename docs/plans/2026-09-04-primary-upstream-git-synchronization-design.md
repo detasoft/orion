@@ -187,10 +187,3 @@ remote outage and Orion restart, detects an out-of-band remote change within
 one audit interval, exposes the tracking ref for manual reconciliation, and
 returns to `ACTIVE` after explicit retry. Local repository use remains
 available throughout every remote failure and conflict.
-
-## Existing Baseline Failure
-
-The new worktree baseline consistently fails
-`MinaSshOperationTest#wholeOperationWatchdogClosesAStalledSession` with an SSH
-provisioning operation timeout. This unrelated failure is recorded in its own
-task node and is not part of Git synchronization implementation.

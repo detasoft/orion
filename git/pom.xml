@@ -18,6 +18,7 @@
         <module>git-parser</module>
         <module>git-native-storage</module>
         <module>git-client</module>
+        <module>git-sync</module>
     </modules>
 
     <dependencies>
