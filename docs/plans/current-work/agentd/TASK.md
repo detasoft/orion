@@ -22,7 +22,6 @@ the AgentD lifecycle.
 
 ## Child Tasks
 
-- [ ] [Read session journals](journal-reader/TASK.md)
 - [ ] [Synchronize and resume journal events](journal-sync/TASK.md)
 - [ ] [Route server session commands](command-orchestration/TASK.md)
 - [ ] [Redact session launch failure diagnostics](diagnostic-secret-redaction/TASK.md)
