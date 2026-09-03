@@ -14,3 +14,8 @@ Stop Orion-owned private keys from being scattered across independent files.
   files as active storage.
 - Define node-local versus cluster-wide placement for every migrated purpose.
 - Verify reload and rotation behavior for each consumer.
+
+## Child Tasks
+
+- [ ] [Remove committed ACME test material](remove-committed-acme-test-material/TASK.md)
+- [ ] [Move ACME keys into the material store](acme-key-material/TASK.md)
