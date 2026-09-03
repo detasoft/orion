@@ -45,6 +45,7 @@
     <acme4j.version>3.5.0</acme4j.version>
     <sshd.version>2.13.2</sshd.version>
     <eddsa.version>0.3.0</eddsa.version>
+    <zstd-jni.version>1.5.7-11</zstd-jni.version>
     <maven-shade-plugin.version>3.5.0</maven-shade-plugin.version>
     <maven-antrun-plugin.version>3.1.0</maven-antrun-plugin.version>
     <build-helper-maven-plugin.version>3.6.0</build-helper-maven-plugin.version>
@@ -71,6 +72,7 @@
     <module>bom</module>
     <module>session-host</module>
     <module>agent-protocol</module>
+    <module>agent-session-server</module>
     <module>agentd</module>
     <module>agent-provisioning</module>
     <module>core</module>
@@ -102,6 +104,11 @@
         <groupId>org.apache.commons</groupId>
         <artifactId>commons-compress</artifactId>
         <version>1.27.1</version>
+      </dependency>
+      <dependency>
+        <groupId>com.github.luben</groupId>
+        <artifactId>zstd-jni</artifactId>
+        <version>${zstd-jni.version}</version>
       </dependency>
       <dependency>
         <groupId>org.junit</groupId>
