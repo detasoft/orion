@@ -1,8 +1,9 @@
 # Replicate Session Journals over HTTP/2
 
 Status: todo
-Depends on: completed server Agent protocol contracts,
-../journal-storage/TASK.md
+Depends on: completed server Agent protocol contracts and journal storage.
+
+- Owner: codex, session 9f26e6fe, started 2026-09-04 02:27 Europe/Amsterdam.
 
 Accept one current logical replication stream per session and resume directly
 from the durable server journal after every reconnect.
@@ -24,6 +25,11 @@ from the durable server journal after every reconnect.
   before requesting any replacement history.
 - Use HTTP/2 flow control for storage backpressure and allow fair concurrent
   catch-up of live and completed sessions with disposable physical streams.
+- Obtain an already established agent context through an interface. Leave
+  authentication, connection takeover, and session ownership to
+  `control-and-registries`.
+- Tolerate overlapping physical replication streams for one logical session;
+  durable storage remains their only coordination authority.
 - Test disconnect at multiple persistence boundaries, acknowledgement timing,
   reconnect resume, duplicate and conflicting records, gaps, unknown events,
   and server restart.
