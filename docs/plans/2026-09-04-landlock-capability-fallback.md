@@ -152,7 +152,26 @@ git diff --check
 
 Expected: fallback, invalid-grant, metadata, and CLI tests pass; formatting check is clean.
 
-**Step 4: Verify the real old-kernel path**
+**Step 4: Cover every fatal native boundary**
+
+Add a small private test seam through the same decision functions used by production preparation and child
+restriction. Inject failures at compatibility, ruleset creation, rule addition, `restrict_self`, and incomplete
+enforcement. Assert that only compatibility produces an unenforced success; every later failure returns an error.
+Do not replace the production Landlock boundary with a general abstraction or expose test-only API.
+
+Add a Rust metadata-reader regression that changes the canonical fixture's `unavailablePolicy` to legacy `fail`,
+reads it, and asserts `SandboxUnavailablePolicy::Fail`. This guards reader compatibility while writers use the fixed
+new value.
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+```
+
+Expected: every injected fatal stage and the legacy metadata reader pass.
+
+**Step 5: Verify the real old-kernel path**
 
 Copy the task source to `root@gw.ntechs.ru:30022`, build with the existing hermetic Rust and Zig toolchains, and run
 the exact unsupported-Landlock process test on kernel 5.4:
@@ -166,7 +185,7 @@ Then invoke the built host with a valid compiled policy and `/usr/bin/true`. Exp
 exit code 0, one warning in stderr, and metadata with `requested: true`, `enforcement: none`, and
 `unavailablePolicy: run-unsandboxed`.
 
-**Step 5: Commit the coupled native change**
+**Step 6: Commit the coupled native change**
 
 ```bash
 git add session-host
@@ -242,7 +261,39 @@ git add agentd/src/main/java/pro/deta/orion/agentd/runtime \
 git commit -m "Remove AgentD Landlock fallback selection"
 ```
 
-### Task 4: Verify, squash, transfer, and close the task
+### Task 4: Remove transition-only negative checks
+
+**Files:**
+
+- Modify: `session-host/src/cli.rs`
+- Modify: `agentd/src/test/java/pro/deta/orion/agentd/runtime/NativeRuntimeTest.java`
+
+**Step 1: Remove the legacy negative assertions**
+
+After the native and AgentD behavior changes are committed, remove the parser assertion whose only purpose is to
+reject `--sandbox-unavailable` and the launcher assertion whose only purpose is to prove that option absent. The
+successful policy parse and generated command tests retain the replacement behavior coverage without permanently
+asserting that the previous concept is absent.
+
+**Step 2: Run focused verification**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+make run-test MODULE=agentd TEST='NativeRuntimeTest'
+```
+
+Expected: both suites pass.
+
+**Step 3: Commit the negative-test cleanup separately**
+
+```bash
+git add session-host/src/cli.rs agentd/src/test/java/pro/deta/orion/agentd/runtime/NativeRuntimeTest.java
+git commit -m "Remove legacy Landlock mode checks"
+```
+
+### Task 5: Verify, squash, transfer, and close the task
 
 **Files:**
 
