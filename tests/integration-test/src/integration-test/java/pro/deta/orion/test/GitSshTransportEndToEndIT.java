@@ -441,6 +441,143 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void authenticatedUserCanManageOwnSshCredentials() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+        String rootToken = issueTokenOverSsh(startedOrion, startedOrion.serverIdentityKey(), 3_600);
+        createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, "project");
+        String trustedFingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(
+                TRUSTED_USER_KEY.getPublic());
+        String candidateFingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(
+                UNKNOWN_USER_KEY.getPublic());
+
+        SshCommandResult initial = executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "/auth/key ls");
+        assertThat(initial.exitStatus()).isZero();
+        assertThat(initial.output()).contains(trustedFingerprint, "true");
+
+        SshCommandResult selected = executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                List.of(UNKNOWN_USER_KEY, TRUSTED_USER_KEY),
+                "/auth/key add candidates=all");
+        assertThat(selected.exitStatus()).isZero();
+        assertThat(executeCommandOverSsh(
+                startedOrion, USERNAME, UNKNOWN_USER_KEY, "/auth/key ls").output())
+                .contains(candidateFingerprint, "true");
+
+        KeyPair pasted = KeyUtils.generateRSAKeyPair().valueOrFailure("pasted key");
+        String pastedFingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(
+                pasted.getPublic());
+        String pastedValue = PublicKeyEntry.toString(pasted.getPublic());
+        SshCommandResult pastedAdd = executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                TRUSTED_USER_KEY,
+                "/auth/key add key='" + pastedValue + "'");
+        assertThat(pastedAdd.exitStatus()).isZero();
+        assertThat(executeCommandOverSsh(startedOrion, USERNAME, pasted, "/auth/key ls").output())
+                .contains(pastedFingerprint, "true");
+        assertThat(executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                TRUSTED_USER_KEY,
+                "/auth/key add key='" + pastedValue + "'").output())
+                .contains("already exists");
+
+        SshCommandResult rootList = executeCommandOverSsh(
+                startedOrion, "root", startedOrion.serverIdentityKey(), "/auth/key ls");
+        assertThat(rootList.output()).doesNotContain(
+                trustedFingerprint,
+                candidateFingerprint,
+                pastedFingerprint);
+
+        List<SshCommandResult> sameSession = executeCommandsOverSsh(
+                startedOrion,
+                USERNAME,
+                UNKNOWN_USER_KEY,
+                List.of("/auth/key rm " + candidateFingerprint, "/auth/key ls"));
+        assertThat(sameSession.get(0).output()).contains("connection remains active");
+        assertThat(sameSession.get(1).exitStatus()).isZero();
+        assertThatThrownBy(() -> executeCommandOverSsh(
+                startedOrion, USERNAME, UNKNOWN_USER_KEY, "/auth/key ls"))
+                .isInstanceOf(IOException.class);
+
+        assertThat(executeCommandOverSsh(
+                startedOrion, USERNAME, pasted, "/auth/key rm " + trustedFingerprint).exitStatus())
+                .isZero();
+        SshCommandResult lastWithoutForce = executeCommandOverSsh(
+                startedOrion, USERNAME, pasted, "/auth/key rm " + pastedFingerprint);
+        assertThat(lastWithoutForce.exitStatus()).isEqualTo(2);
+        assertThat(lastWithoutForce.error()).contains("requires --force");
+        assertThat(executeCommandOverSsh(
+                startedOrion, USERNAME, pasted, "/auth/key rm " + pastedFingerprint + " --force").exitStatus())
+                .isZero();
+        assertThatThrownBy(() -> executeCommandOverSsh(
+                startedOrion, USERNAME, pasted, "/auth/key ls"))
+                .isInstanceOf(IOException.class);
+    }
+
+    @Test
+    void forcedLastRootKeyRemovalRequiresResetRecovery() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        KeyPair recoveredRootKey = KeyUtils.generateRSAKeyPair().valueOrFailure("recovered root key");
+        startedOrion = startFreshOrion(orionRoot);
+        KeyPair oldRootKey = startedOrion.serverIdentityKey();
+        String rootToken = issueTokenOverSsh(startedOrion, oldRootKey, 3_600);
+        createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, "project");
+        String userToken = executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "issue-token 600").output().trim();
+        String rootFingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(
+                oldRootKey.getPublic());
+
+        assertThat(executeCommandOverSsh(
+                startedOrion,
+                "root",
+                oldRootKey,
+                "/auth/key rm " + rootFingerprint + " --force").exitStatus())
+                .isZero();
+        assertThat(startedOrion.accessControlService().authenticateToken(
+                rootToken.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Failure.class);
+        assertThat(startedOrion.accessControlService().authenticateToken(
+                userToken.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+        assertThatThrownBy(() -> executeStateOverSsh(startedOrion, oldRootKey))
+                .isInstanceOf(IOException.class);
+        assertThat(executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "/auth/key ls").exitStatus())
+                .isZero();
+
+        startedOrion.stop();
+        startedOrion = null;
+        startedOrion = startExistingOrion(orionRoot);
+        assertThatThrownBy(() -> executeStateOverSsh(startedOrion, oldRootKey))
+                .isInstanceOf(IOException.class);
+        assertThat(executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "/auth/key ls").exitStatus())
+                .isZero();
+
+        startedOrion.stop();
+        startedOrion = null;
+        startedOrion = startOrion(e2eConfiguration(orionRoot), new OrionRuntimeOptions(true));
+        char[] rootPassword = startedOrion.accessControlService()
+                .plainRootToken(PlainRootTokenAccessForTests.create());
+        try {
+            assertThat(enrollKeyAndExecuteOverSsh(
+                    startedOrion,
+                    "root",
+                    rootPassword,
+                    recoveredRootKey,
+                    "enroll-key"))
+                    .contains("Root SSH key enrolled");
+            assertThat(executeStateOverSsh(startedOrion, recoveredRootKey)).contains("orion: RUNNING");
+        } finally {
+            Arrays.fill(rootPassword, '\0');
+        }
+    }
+
+    @Test
     void unknownSshExecCommandReturnsStableFailure() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
@@ -929,7 +1066,33 @@ class GitSshTransportEndToEndIT {
             String username,
             KeyPair keyPair,
             String command) throws Exception {
+        return executeCommandOverSsh(orion, username, List.of(keyPair), command);
+    }
+
+    private static SshCommandResult executeCommandOverSsh(
+            StartedOrion orion,
+            String username,
+            List<KeyPair> keyPairs,
+            String command) throws Exception {
+        return executeCommandsOverSsh(orion, username, keyPairs, List.of(command)).getFirst();
+    }
+
+    private static List<SshCommandResult> executeCommandsOverSsh(
+            StartedOrion orion,
+            String username,
+            KeyPair keyPair,
+            List<String> commands) throws Exception {
+        return executeCommandsOverSsh(orion, username, List.of(keyPair), commands);
+    }
+
+    private static List<SshCommandResult> executeCommandsOverSsh(
+            StartedOrion orion,
+            String username,
+            List<KeyPair> keyPairs,
+            List<String> commands) throws Exception {
         SshClient client = SshClient.setUpDefaultClient();
+        client.setAgentFactory(null);
+        client.setKeyIdentityProvider(KeyIdentityProvider.EMPTY_KEYS_PROVIDER);
         client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
         client.start();
         try (ClientSession session = client.connect(
@@ -938,22 +1101,27 @@ class GitSshTransportEndToEndIT {
                         orion.configuration().getTransport().getSsh().getPort())
                 .verify(10, TimeUnit.SECONDS)
                 .getSession()) {
-            session.addPublicKeyIdentity(keyPair);
+            for (KeyPair keyPair : keyPairs) {
+                session.addPublicKeyIdentity(keyPair);
+            }
             session.auth().verify(10, TimeUnit.SECONDS);
 
-            ByteArrayOutputStream output = new ByteArrayOutputStream();
-            ByteArrayOutputStream error = new ByteArrayOutputStream();
-            try (ClientChannel channel = session.createExecChannel(command)) {
-                channel.setOut(output);
-                channel.setErr(error);
-                channel.open().verify(10, TimeUnit.SECONDS);
-                channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(10));
-                return new SshCommandResult(
-                        channel.getExitStatus(),
-                        new String(output.toByteArray(), StandardCharsets.UTF_8),
-                        new String(error.toByteArray(), StandardCharsets.UTF_8)
-                );
+            List<SshCommandResult> results = new java.util.ArrayList<>(commands.size());
+            for (String command : commands) {
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                ByteArrayOutputStream error = new ByteArrayOutputStream();
+                try (ClientChannel channel = session.createExecChannel(command)) {
+                    channel.setOut(output);
+                    channel.setErr(error);
+                    channel.open().verify(10, TimeUnit.SECONDS);
+                    channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(10));
+                    results.add(new SshCommandResult(
+                            channel.getExitStatus(),
+                            new String(output.toByteArray(), StandardCharsets.UTF_8),
+                            new String(error.toByteArray(), StandardCharsets.UTF_8)));
+                }
             }
+            return List.copyOf(results);
         } finally {
             client.stop();
         }

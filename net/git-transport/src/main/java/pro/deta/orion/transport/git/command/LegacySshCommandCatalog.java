@@ -29,18 +29,21 @@ public final class LegacySshCommandCatalog {
     private final AggregateStateMachine runtimeStateMachine;
     private final NativeGitRepositoryProvider repositoryProvider;
     private final Runnable shutdownAction;
+    private final SshCredentialCommandCatalog sshCredentialCommandCatalog;
 
     @Inject
     public LegacySshCommandCatalog(
             OrionProvider orionProvider,
             OrionAccessControlService accessControlService,
             @Named("runtime") AggregateStateMachine runtimeStateMachine,
-            NativeGitRepositoryProvider repositoryProvider) {
+            NativeGitRepositoryProvider repositoryProvider,
+            SshCredentialCommandCatalog sshCredentialCommandCatalog) {
         this(
                 accessControlService,
                 runtimeStateMachine,
                 repositoryProvider,
-                () -> orionProvider.getOrionApplicationLifecycle().beginShutdown());
+                () -> orionProvider.getOrionApplicationLifecycle().beginShutdown(),
+                sshCredentialCommandCatalog);
     }
 
     LegacySshCommandCatalog(
@@ -48,14 +51,32 @@ public final class LegacySshCommandCatalog {
             AggregateStateMachine runtimeStateMachine,
             NativeGitRepositoryProvider repositoryProvider,
             Runnable shutdownAction) {
+        this(
+                accessControlService,
+                runtimeStateMachine,
+                repositoryProvider,
+                shutdownAction,
+                new SshCredentialCommandCatalog(accessControlService));
+    }
+
+    private LegacySshCommandCatalog(
+            OrionAccessControlService accessControlService,
+            AggregateStateMachine runtimeStateMachine,
+            NativeGitRepositoryProvider repositoryProvider,
+            Runnable shutdownAction,
+            SshCredentialCommandCatalog sshCredentialCommandCatalog) {
         this.accessControlService = Objects.requireNonNull(accessControlService, "accessControlService");
         this.runtimeStateMachine = Objects.requireNonNull(runtimeStateMachine, "runtimeStateMachine");
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
         this.shutdownAction = Objects.requireNonNull(shutdownAction, "shutdownAction");
+        this.sshCredentialCommandCatalog = Objects.requireNonNull(
+                sshCredentialCommandCatalog,
+                "sshCredentialCommandCatalog");
     }
 
     public CommandNode commandTree() {
         return CommandNode.builder()
+                .child("auth", sshCredentialCommandCatalog.commandTree().children().get("auth"))
                 .action(tokenDefinition("issue-token"))
                 .action(tokenDefinition("token"))
                 .action(adminDefinition("state", this::lifecycleStatus))

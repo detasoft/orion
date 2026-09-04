@@ -6,6 +6,8 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.SshCredential;
+import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
@@ -89,6 +91,15 @@ class LegacySshCommandCatalogTest {
     }
 
     @Test
+    void composesAuthenticatedCredentialCommandsUnderAuthKey() {
+        assertThat(dispatch("/auth/key ls", user(List.of())))
+                .isEqualTo(new CommandResult.Rows(
+                        List.of("algorithm", "fingerprint", "current"),
+                        List.of(List.of("ssh-rsa", "SHA256:key", "false"))));
+        assertThat(accessControl.listUsers).containsExactly("operator");
+    }
+
+    @Test
     void loggingAuditPayloadCannotContainSensitiveResultValues() {
         CommandAuditRecord record = new CommandAuditRecord(
                 "operator",
@@ -141,6 +152,13 @@ class LegacySshCommandCatalogTest {
 
     private static final class RecordingAccessControlService implements OrionAccessControlService {
         private final java.util.ArrayList<Long> expiries = new java.util.ArrayList<>();
+        private final java.util.ArrayList<String> listUsers = new java.util.ArrayList<>();
+
+        @Override
+        public SshCredentialListResult listSshCredentials(String userId) {
+            listUsers.add(userId);
+            return SshCredentialListResult.success(List.of(new SshCredential("ssh-rsa", "SHA256:key")));
+        }
 
         @Override
         public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {

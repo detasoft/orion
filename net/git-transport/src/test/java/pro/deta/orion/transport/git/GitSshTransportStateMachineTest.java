@@ -16,13 +16,17 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SshCredential;
+import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandDispatcher;
+import pro.deta.orion.command.CommandLineParser;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
@@ -31,6 +35,7 @@ import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
+import pro.deta.orion.transport.git.command.SshCredentialCommandCatalog;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.ConfigurationContext;
 
@@ -157,6 +162,45 @@ class GitSshTransportStateMachineTest {
         }
     }
 
+    @Test
+    void realExecAndInteractiveShellUseCurrentCredentialCommands() throws Exception {
+        KeyPair keyPair = keyPair();
+        service = service(0, new RecordingAccessControlService(keyPair));
+        service.onStart();
+
+        try (SshClient client = client(List.of(UserAuthPublicKeyFactory.INSTANCE));
+             ClientSession session = connect(client, service.boundPort(), "alice")) {
+            session.addPublicKeyIdentity(keyPair);
+            session.auth().verify(5, TimeUnit.SECONDS);
+            try (ClientChannel exec = session.createExecChannel("/auth/key ls")) {
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                exec.setOut(output);
+                exec.setErr(new ByteArrayOutputStream());
+                exec.open().verify(5, TimeUnit.SECONDS);
+                exec.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), TimeUnit.SECONDS.toMillis(5));
+                assertEquals(0, exec.getExitStatus());
+                assertTrue(output.toString(StandardCharsets.UTF_8).contains("true"));
+            }
+
+            try (ClientChannel shell = session.createShellChannel()) {
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                PipedInputStream shellInput = new PipedInputStream();
+                try (PipedOutputStream clientInput = new PipedOutputStream(shellInput)) {
+                    shell.setIn(shellInput);
+                    shell.setOut(output);
+                    shell.setErr(new ByteArrayOutputStream());
+                    shell.open().verify(5, TimeUnit.SECONDS);
+                    awaitOccurrences(output, "@orion", 1);
+                    clientInput.write("/auth/key ls\r".getBytes(StandardCharsets.UTF_8));
+                    clientInput.flush();
+                    awaitContains(output, "true");
+                    clientInput.write("quit\r".getBytes(StandardCharsets.UTF_8));
+                    clientInput.flush();
+                }
+            }
+        }
+    }
+
     private static void awaitContains(ByteArrayOutputStream output, String expected) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (!output.toString(StandardCharsets.UTF_8).contains(expected)) {
@@ -202,19 +246,17 @@ class GitSshTransportStateMachineTest {
         configuration.getTransport().getSsh().setPort(port);
         ConfigurationContext configurationContext = new ConfigurationContext(configuration);
         SshHostKeyService hostKeyService = new SshHostKeyService(configurationContext);
-        CommandDispatcher dispatcher =
-                request -> new CommandResult.Failure(
-                        CommandFailureCode.UNKNOWN_COMMAND,
-                        "Unknown command",
-                        List.of());
+        CommandDispatcher dispatcher = new DefaultCommandDispatcher(
+                new CommandLineParser(),
+                new SshCredentialCommandCatalog(accessControlService).commandTree());
+        executor = new OrionExecutor(2, new OrionThreadFactory());
         SshCommandFactory commandFactory = new SshCommandFactory(
-                null,
+                executor,
                 dispatcher,
                 new PlainCommandRenderer(),
                 null,
                 null,
                 accessControlService);
-        executor = new OrionExecutor(2, new OrionThreadFactory());
         OrionShell shell = new OrionShell(
                 dispatcher,
                 new CommandNavigator(CommandNode.builder().build()),
@@ -282,6 +324,16 @@ class GitSshTransportStateMachineTest {
 
         private RecordingAccessControlService(KeyPair acceptedKey) {
             this.acceptedKey = acceptedKey;
+        }
+
+        @Override
+        public SshCredentialListResult listSshCredentials(String userId) {
+            if (!"alice".equals(userId) || acceptedKey == null) {
+                return SshCredentialListResult.success(List.of());
+            }
+            return SshCredentialListResult.success(List.of(new SshCredential(
+                    org.apache.sshd.common.config.keys.KeyUtils.getKeyType(acceptedKey.getPublic()),
+                    org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(acceptedKey.getPublic()))));
         }
 
         @Override

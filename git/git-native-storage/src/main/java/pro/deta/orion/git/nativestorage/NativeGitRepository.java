@@ -116,6 +116,20 @@ public class NativeGitRepository implements AutoCloseable {
         new NativeRepositoryFileSaver(this).saveFiles(branch, files, message, author);
     }
 
+    public void saveFilesIfVersion(
+            String branch,
+            String expectedVersion,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws GitOperationException {
+        new NativeRepositoryFileSaver(this).saveFilesIfVersion(
+                branch,
+                expectedVersion,
+                files,
+                message,
+                author);
+    }
+
     public String defaultHead() {
         return defaultHead;
     }

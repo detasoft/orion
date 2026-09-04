@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
@@ -31,6 +32,7 @@ import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSelection;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -622,6 +624,108 @@ class NativeGitRepositoryTest {
                 .containsEntry(
                         "nested/acl.xml",
                         "nested acl".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void conditionalFileSaveRejectsAStaleVersionWithoutReplacingWinningContent() throws Exception {
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        repository.saveFiles(
+                "main",
+                Map.of("orion.xml", "version one".getBytes(StandardCharsets.UTF_8)),
+                "version one",
+                GitCommitAuthor.EMPTY);
+        String versionOne = repository.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+        repository.saveFiles(
+                "main",
+                Map.of(
+                        "orion.xml", "version two".getBytes(StandardCharsets.UTF_8),
+                        "winner.txt", "winner".getBytes(StandardCharsets.UTF_8)),
+                "version two",
+                GitCommitAuthor.EMPTY);
+        String versionTwo = repository.refs().get("refs/heads/main");
+
+        assertThatThrownBy(() -> repository.saveFilesIfVersion(
+                "main",
+                versionOne,
+                Map.of("orion.xml", "stale".getBytes(StandardCharsets.UTF_8)),
+                "stale",
+                GitCommitAuthor.EMPTY)).isInstanceOf(GitRepositoryConcurrentUpdateException.class);
+
+        assertThat(repository.refs().get("refs/heads/main")).isEqualTo(versionTwo);
+        assertThat(repository.loadFiles("main", List.of("orion.xml", "winner.txt")).files())
+                .containsEntry("orion.xml", "version two".getBytes(StandardCharsets.UTF_8))
+                .containsEntry("winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void conditionalFileSaveRejectsStaleVersionAcrossProviders(@TempDir Path rootDirectory) throws Exception {
+        FileNativeGitRepositoryProvider firstProvider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository first = firstProvider.create("demo.git").valueOrFailure("repository");
+        first.saveFiles(
+                "main",
+                Map.of("orion.xml", "version one".getBytes(StandardCharsets.UTF_8)),
+                "version one",
+                GitCommitAuthor.EMPTY);
+        FileNativeGitRepositoryProvider secondProvider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository second = secondProvider.find("demo.git").valueOrFailure("repository");
+        String versionOne = second.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+        first.saveFiles(
+                "main",
+                Map.of(
+                        "orion.xml", "version two".getBytes(StandardCharsets.UTF_8),
+                        "winner.txt", "winner".getBytes(StandardCharsets.UTF_8)),
+                "version two",
+                GitCommitAuthor.EMPTY);
+        String versionTwo = first.refs().get("refs/heads/main");
+
+        assertThatThrownBy(() -> second.saveFilesIfVersion(
+                "main",
+                versionOne,
+                Map.of("orion.xml", "stale".getBytes(StandardCharsets.UTF_8)),
+                "stale",
+                GitCommitAuthor.EMPTY)).isInstanceOf(GitRepositoryConcurrentUpdateException.class);
+
+        assertThat(second.refs().get("refs/heads/main")).isEqualTo(versionTwo);
+        assertThat(second.loadFiles("main", List.of("orion.xml", "winner.txt")).files())
+                .containsEntry("orion.xml", "version two".getBytes(StandardCharsets.UTF_8))
+                .containsEntry("winner.txt", "winner".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void conditionalFileSaveBuildsFromExpectedVersionAndPreservesItsOtherFiles() throws Exception {
+        NativeGitRepository repository = new NativeGitRepository(
+                "demo.git",
+                new LooseRefStore(),
+                new LooseObjectStore(),
+                "refs/heads/main");
+        repository.saveFiles(
+                "main",
+                Map.of(
+                        "orion.xml", "version one".getBytes(StandardCharsets.UTF_8),
+                        "preserved.txt", "preserved".getBytes(StandardCharsets.UTF_8)),
+                "version one",
+                GitCommitAuthor.EMPTY);
+        String expectedVersion = repository.loadFiles("main", List.of("orion.xml")).version().orElseThrow();
+
+        repository.saveFilesIfVersion(
+                "main",
+                expectedVersion,
+                Map.of("orion.xml", "version two".getBytes(StandardCharsets.UTF_8)),
+                "version two",
+                GitCommitAuthor.EMPTY);
+
+        GitRepositoryFileSnapshot saved = repository.loadFiles(
+                "main",
+                List.of("orion.xml", "preserved.txt"));
+        assertThat(saved.version()).hasValue(repository.refs().get("refs/heads/main"));
+        assertThat(saved.version().orElseThrow()).isNotEqualTo(expectedVersion);
+        assertThat(saved.files())
+                .containsEntry("orion.xml", "version two".getBytes(StandardCharsets.UTF_8))
+                .containsEntry("preserved.txt", "preserved".getBytes(StandardCharsets.UTF_8));
     }
 
     @Test

@@ -40,6 +40,7 @@ import pro.deta.orion.net.io.InputStreamBufferedByteInput;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
+import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.util.stream.*;
 
 import java.io.*;
@@ -187,6 +188,8 @@ public class SshCommandFactory implements CommandFactory {
             }
             SecurityContext securityContext = SecurityContext.createContext()
                     .withUserIdentity(identity)
+                    .withSshConnectionCredentials(
+                            OrionSshAuthenticator.connectionCredentials(channel.getSession()))
                     .withRequestId(requestId);
             CommandCancellation cancellation = () -> cancelled.get() || Thread.currentThread().isInterrupted();
             CommandContext context = new CommandContext(
@@ -374,6 +377,8 @@ public class SshCommandFactory implements CommandFactory {
         }
         return SecurityContext.createContext()
                 .withUserIdentity(userIdentity)
+                .withSshConnectionCredentials(
+                        OrionSshAuthenticator.connectionCredentials(channelSession.getSession()))
                 .withRequestId(channelSession.getSession().toString());
     }
 

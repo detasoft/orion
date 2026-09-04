@@ -7,6 +7,8 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -200,6 +202,52 @@ class LooseRefStoreTest {
     }
 
     @Test
+    void longLivedStoreRefreshesExternallyUpdatedRefs(@TempDir Path repositoryDirectory) {
+        LooseRefStore reader = new LooseRefStore(repositoryDirectory);
+        LooseRefStore writer = new LooseRefStore(repositoryDirectory);
+
+        writer.update("refs/heads/main", NULL_ID, SHA1_A);
+
+        assertThat(reader.read("refs/heads/main")).contains(GitObjectId.of(SHA1_A));
+        assertThat(reader.snapshot()).containsEntry("refs/heads/main", SHA1_A);
+    }
+
+    @Test
+    void staleStoreCannotReplaceExternallyUpdatedRef(@TempDir Path repositoryDirectory) throws Exception {
+        LooseRefStore first = new LooseRefStore(repositoryDirectory);
+        LooseRefStore second = new LooseRefStore(repositoryDirectory);
+        first.update("refs/heads/main", NULL_ID, SHA1_A);
+        second.read("refs/heads/main");
+        first.update("refs/heads/main", SHA1_A, SHA1_B);
+
+        RefUpdateResult result = second.update("refs/heads/main", SHA1_A, SHA1_C);
+
+        assertThat(result).isEqualTo(RefUpdateResult.STALE);
+        assertThat(first.read("refs/heads/main")).contains(GitObjectId.of(SHA1_B));
+        assertThat(Files.readString(repositoryDirectory.resolve("refs/heads/main")).trim())
+                .isEqualTo(SHA1_B);
+    }
+
+    @Test
+    void concurrentStoresAcceptExactlyOneUpdate(@TempDir Path repositoryDirectory) throws Exception {
+        LooseRefStore first = new LooseRefStore(repositoryDirectory);
+        LooseRefStore second = new LooseRefStore(repositoryDirectory);
+        first.update("refs/heads/main", NULL_ID, SHA1_A);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var firstResult = executor.submit(() -> updateAfterStart(first, ready, start, SHA1_B));
+            var secondResult = executor.submit(() -> updateAfterStart(second, ready, start, SHA1_C));
+            ready.await();
+            start.countDown();
+
+            assertThat(List.of(firstResult.get(), secondResult.get()))
+                    .containsExactlyInAnyOrder(RefUpdateResult.FAST_FORWARD, RefUpdateResult.STALE);
+        }
+        assertThat(first.read("refs/heads/main").orElseThrow().value()).isIn(SHA1_B, SHA1_C);
+    }
+
+    @Test
     void removesPersistedRefOnDelete(@TempDir Path repositoryDirectory) {
         LooseRefStore writer = new LooseRefStore(repositoryDirectory);
         writer.update("refs/heads/main", NULL_ID, SHA1_A);
@@ -228,5 +276,15 @@ class LooseRefStoreTest {
         LooseRefStore reader = new LooseRefStore(repositoryDirectory);
 
         assertThat(reader.snapshot()).isEmpty();
+    }
+
+    private static RefUpdateResult updateAfterStart(
+            LooseRefStore store,
+            CountDownLatch ready,
+            CountDownLatch start,
+            String newId) throws InterruptedException {
+        ready.countDown();
+        start.await();
+        return store.update("refs/heads/main", SHA1_A, newId);
     }
 }

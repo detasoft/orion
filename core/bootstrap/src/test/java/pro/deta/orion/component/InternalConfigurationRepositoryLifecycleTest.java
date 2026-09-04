@@ -9,6 +9,8 @@ import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
+import pro.deta.orion.auth.SshCredentialFailureCode;
+import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
@@ -670,6 +672,86 @@ class InternalConfigurationRepositoryLifecycleTest {
             assertEnrolledKeys(restarted, "alice", firstOpenSshKey, secondOpenSshKey);
         } finally {
             assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+    }
+
+    @Test
+    void forcedLastRootKeyRemovalRemainsLockedUntilExplicitReset() throws Exception {
+        OrionConfiguration configuration = configuration();
+        TestServerIdentity serverIdentity = new TestServerIdentity(keyPair(), List.of());
+        KeyPair rootKey = keyPair();
+        KeyPair aliceKey = keyPair();
+        String rootToken;
+        String aliceToken;
+
+        OrionComponent initial = component(configuration, new OrionRuntimeOptions(true), serverIdentity);
+        OrionApplicationLifecycle initialLifecycle = initial.orionApplicationLifecycle();
+        try {
+            assertThat(initialLifecycle.runApplication()).isEqualTo(RUNNING);
+            char[] recoveryPassword = initial.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create());
+            SshKeyEnrollmentAuthentication enrollment = initial.orionAccessControlService()
+                    .authenticateSshKeyEnrollment(
+                            "root",
+                            new String(recoveryPassword).getBytes(StandardCharsets.UTF_8));
+            String generation = ((SshKeyEnrollmentAuthentication.Success) enrollment)
+                    .rootRecoveryGeneration()
+                    .orElseThrow();
+            assertThat(initial.orionAccessControlService().completeRootSshKeyEnrollment(
+                    generation,
+                    List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
+                    .isInstanceOf(SshKeyEnrollmentResult.Success.class);
+            initial.orionAccessControlService().createOrUpdateUser(user("alice"));
+            initial.orionAccessControlService().addKeyToUser(
+                    "alice",
+                    PublicKeyEntry.toString(aliceKey.getPublic()));
+            rootToken = issueTokenForSshKey(initial, "root", rootKey);
+            aliceToken = issueTokenForSshKey(initial, "alice", aliceKey);
+
+            String rootFingerprint = org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(rootKey.getPublic());
+            assertThat(initial.orionAccessControlService().removeSshCredential("root", rootFingerprint, true))
+                    .isInstanceOf(SshCredentialUpdateResult.Success.class);
+            assertSshAuthenticationFailed(initial, "root", rootKey);
+            assertThat(initial.orionAccessControlService().authenticateToken(
+                    rootToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+        } finally {
+            assertThat(initialLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        OrionComponent restarted = component(configuration, serverIdentity);
+        OrionApplicationLifecycle restartedLifecycle = restarted.orionApplicationLifecycle();
+        try {
+            assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
+            assertSshAuthenticationFailed(restarted, "root", rootKey);
+            assertSshAuthenticated(restarted, "alice", aliceKey);
+            assertThat(restarted.orionAccessControlService().authenticateToken(
+                    rootToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(restarted.orionAccessControlService().authenticateToken(
+                    aliceToken.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(AuthenticationResult.Success.class);
+            assertThat(restarted.orionAccessControlService().addSshCredentials(
+                    "root",
+                    List.of(PublicKeyEntry.toString(keyPair().getPublic()))))
+                    .isInstanceOfSatisfying(
+                            SshCredentialUpdateResult.Failure.class,
+                            failure -> assertThat(failure.code()).isEqualTo(SshCredentialFailureCode.ROOT_LOCKED));
+        } finally {
+            assertThat(restartedLifecycle.shutdownApplication()).isEqualTo(FIN);
+        }
+
+        OrionComponent reset = component(configuration, new OrionRuntimeOptions(true), serverIdentity);
+        OrionApplicationLifecycle resetLifecycle = reset.orionApplicationLifecycle();
+        try {
+            assertThat(resetLifecycle.runApplication()).isEqualTo(RUNNING);
+            char[] password = reset.orionAccessControlService()
+                    .plainRootToken(PlainRootTokenAccessForTests.create());
+            assertRecoveryPasswordOnly(reset, new String(password));
+            assertSshAuthenticationFailed(reset, "root", rootKey);
+            assertSshAuthenticated(reset, "alice", aliceKey);
+        } finally {
+            assertThat(resetLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
     }
 

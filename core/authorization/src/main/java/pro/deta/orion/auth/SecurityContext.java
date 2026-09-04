@@ -37,6 +37,8 @@ public class SecurityContext {
 
     private UserIdentity userIdentity = ANONYMOUS;
     private String requestId;
+    @ToString.Exclude
+    private SshConnectionCredentials sshConnectionCredentials = SshConnectionCredentials.empty();
 
     public static SecurityContext createContext() {
         return new SecurityContext();
@@ -62,5 +64,16 @@ public class SecurityContext {
     public SecurityContext withUserIdentity(UserIdentity userIdentity) {
         this.userIdentity = Objects.requireNonNullElse(userIdentity, ANONYMOUS);
         return this;
+    }
+
+    public SecurityContext withSshConnectionCredentials(SshConnectionCredentials sshConnectionCredentials) {
+        this.sshConnectionCredentials = Objects.requireNonNullElse(
+                sshConnectionCredentials,
+                SshConnectionCredentials.empty());
+        return this;
+    }
+
+    public SshConnectionCredentials getSshConnectionCredentials() {
+        return sshConnectionCredentials;
     }
 }

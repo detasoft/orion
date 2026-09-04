@@ -2,6 +2,7 @@ package pro.deta.orion.acl.storage;
 
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
+import pro.deta.orion.git.nativestorage.GitRepositoryConcurrentUpdateException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -52,11 +53,27 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
         Objects.requireNonNull(snapshot, "snapshot");
         Objects.requireNonNull(request, "request");
         try {
-            repository.saveFiles(
-                    configurationRef,
-                    snapshot.files(),
-                    request.message(),
-                    new GitCommitAuthor(request.author().getUsername(), request.author().getEmail()));
+            GitCommitAuthor author = new GitCommitAuthor(
+                    request.author().getUsername(),
+                    request.author().getEmail());
+            if (snapshot.version().isPresent()) {
+                repository.saveFilesIfVersion(
+                        configurationRef,
+                        snapshot.version().orElseThrow(),
+                        snapshot.files(),
+                        request.message(),
+                        author);
+            } else {
+                repository.saveFiles(
+                        configurationRef,
+                        snapshot.files(),
+                        request.message(),
+                        author);
+            }
+        } catch (GitRepositoryConcurrentUpdateException error) {
+            throw new AccessControlConcurrentUpdateException(
+                    "ACL configuration changed concurrently",
+                    error);
         } catch (GitOperationException error) {
             throw new IllegalStateException("Cannot save ACL to native repository " + repository.name(), error);
         }

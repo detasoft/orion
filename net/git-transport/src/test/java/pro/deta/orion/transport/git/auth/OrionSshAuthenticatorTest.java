@@ -16,6 +16,7 @@ import org.apache.sshd.common.keyprovider.MappedKeyPairProvider;
 import org.apache.sshd.common.util.buffer.Buffer;
 import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.auth.UserAuthFactory;
+import org.apache.sshd.server.session.ServerSession;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.OrionAccessControlService;
@@ -23,6 +24,7 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
+import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 
@@ -251,6 +253,61 @@ class OrionSshAuthenticatorTest {
         }
     }
 
+    @Test
+    void exposesImmutableCurrentKeyAndProvedCandidatesAfterAuthentication() throws Exception {
+        KeyPair current = keyPair();
+        KeyPair firstCandidate = keyPair();
+        KeyPair secondCandidate = keyPair();
+        RecordingAccessControlService accessControl = new RecordingAccessControlService();
+        accessControl.addUser("alice", current.getPublic());
+        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+        ServerSession session = serverSession();
+
+        assertThat(authenticator.authenticate("alice", firstCandidate.getPublic(), session)).isTrue();
+        assertThat(authenticator.completePublicKeyAttempt(session)).isFalse();
+        assertThat(authenticator.authenticate("alice", secondCandidate.getPublic(), session)).isTrue();
+        assertThat(authenticator.completePublicKeyAttempt(session)).isFalse();
+        assertThat(authenticator.authenticate("alice", current.getPublic(), session)).isTrue();
+        assertThat(authenticator.completePublicKeyAttempt(session)).isTrue();
+
+        SshConnectionCredentials credentials = OrionSshAuthenticator.connectionCredentials(session);
+        assertThat(credentials.authenticatedKeyFingerprint())
+                .contains(KeyUtils.getFingerPrint(current.getPublic()));
+        assertThat(credentials.candidatePublicKeys()).containsExactly(
+                PublicKeyEntry.toString(firstCandidate.getPublic()),
+                PublicKeyEntry.toString(secondCandidate.getPublic()));
+        assertThatThrownBy(() -> credentials.candidatePublicKeys().add("ssh-rsa changed"))
+                .isInstanceOf(UnsupportedOperationException.class);
+
+        ServerSession otherSession = serverSession();
+        assertThat(OrionSshAuthenticator.connectionCredentials(otherSession))
+                .isEqualTo(SshConnectionCredentials.empty());
+    }
+
+    @Test
+    void passwordAuthenticationHasNoCurrentKeyAndRetainsAllCandidates() throws Exception {
+        KeyPair selected = keyPair();
+        KeyPair unselected = keyPair();
+        RecordingAccessControlService accessControl = new RecordingAccessControlService();
+        accessControl.addUser("alice");
+        OrionSshAuthenticator authenticator = new OrionSshAuthenticator(accessControl);
+        ServerSession session = serverSession();
+        for (KeyPair candidate : List.of(selected, unselected)) {
+            assertThat(authenticator.authenticate("alice", candidate.getPublic(), session)).isTrue();
+            assertThat(authenticator.completePublicKeyAttempt(session)).isFalse();
+        }
+
+        OrionSshAuthenticator.PasswordAuthentication password =
+                authenticator.authenticatePassword(session, "alice", "correct-password");
+        assertThat(authenticator.completePasswordAuthentication(session, "alice", password, "1")).isTrue();
+
+        SshConnectionCredentials credentials = OrionSshAuthenticator.connectionCredentials(session);
+        assertThat(credentials.authenticatedKeyFingerprint()).isEmpty();
+        assertThat(credentials.candidatePublicKeys()).containsExactly(
+                PublicKeyEntry.toString(selected.getPublic()),
+                PublicKeyEntry.toString(unselected.getPublic()));
+    }
+
     private static final UserAuthPublicKeyFactory PROBE_ONLY_FACTORY = new UserAuthPublicKeyFactory() {
         @Override
         public UserAuthPublicKey createUserAuth(ClientSession session) {
@@ -338,6 +395,26 @@ class OrionSshAuthenticatorTest {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
         return generator.generateKeyPair();
+    }
+
+    private static ServerSession serverSession() {
+        Map<AttributeRepository.AttributeKey<?>, Object> attributes = new LinkedHashMap<>();
+        return (ServerSession) java.lang.reflect.Proxy.newProxyInstance(
+                ServerSession.class.getClassLoader(),
+                new Class<?>[]{ServerSession.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getAttribute" -> attributes.get(args[0]);
+                    case "setAttribute" -> attributes.put(
+                            (AttributeRepository.AttributeKey<?>) args[0], args[1]);
+                    case "removeAttribute" -> attributes.remove(args[0]);
+                    case "computeAttributeIfAbsent" -> attributes.computeIfAbsent(
+                            (AttributeRepository.AttributeKey<?>) args[0],
+                            ignored -> ((java.util.function.Function<?, ?>) args[1]).apply(null));
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    case "toString" -> "test-session";
+                    default -> null;
+                });
     }
 
     private final class Fixture implements AutoCloseable {

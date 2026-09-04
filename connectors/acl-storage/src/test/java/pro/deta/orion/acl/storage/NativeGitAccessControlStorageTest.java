@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NativeGitAccessControlStorageTest {
     private static final String ACL_PATH = "config/orion.xml";
@@ -98,6 +99,57 @@ class NativeGitAccessControlStorageTest {
                 new AccessControlSaveRequest("third", UserEmail.EMPTY));
 
         assertThat(changes).hasValue(2);
+    }
+
+    @Test
+    void staleVersionedSaveCannotOverwriteWinningAclOrUnrelatedFiles(@TempDir Path rootDirectory) throws Exception {
+        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitAccessControlStorage storage = new NativeGitAccessControlStorage(config(), provider);
+        storage.save(
+                AccessControlSnapshot.singleFile(ACL_PATH, bytes("version one")),
+                new AccessControlSaveRequest("version one", UserEmail.EMPTY));
+        AccessControlSnapshot stale = storage.load().valueOrFailure("version one");
+        NativeGitRepository repository = provider.find("internal/configuration").valueOrFailure("repository");
+        repository.saveFiles(
+                "refs/heads/configuration",
+                Map.of(ACL_PATH, bytes("version two"), "winner.txt", bytes("winner")),
+                "version two",
+                GitCommitAuthor.EMPTY);
+        String winningVersion = repository.refs().get("refs/heads/configuration");
+
+        assertThatThrownBy(() -> storage.save(
+                stale,
+                new AccessControlSaveRequest("stale", UserEmail.EMPTY)))
+                .isInstanceOf(AccessControlConcurrentUpdateException.class);
+
+        assertThat(repository.refs().get("refs/heads/configuration")).isEqualTo(winningVersion);
+        assertThat(repository.loadFiles(
+                "refs/heads/configuration",
+                List.of(ACL_PATH, "winner.txt")).files())
+                .containsEntry(ACL_PATH, bytes("version two"))
+                .containsEntry("winner.txt", bytes("winner"));
+    }
+
+    @Test
+    void versionlessSaveRetainsUnconditionalInitialCreationPath(@TempDir Path rootDirectory) throws Exception {
+        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("internal/configuration").valueOrFailure("repository");
+        repository.saveFiles(
+                "refs/heads/configuration",
+                Map.of("winner.txt", bytes("winner")),
+                "winner",
+                GitCommitAuthor.EMPTY);
+        NativeGitAccessControlStorage storage = new NativeGitAccessControlStorage(config(), provider);
+
+        storage.save(
+                AccessControlSnapshot.singleFile(ACL_PATH, bytes("created")),
+                new AccessControlSaveRequest("created", UserEmail.EMPTY));
+
+        assertThat(repository.loadFiles(
+                "refs/heads/configuration",
+                List.of(ACL_PATH, "winner.txt")).files())
+                .containsEntry(ACL_PATH, bytes("created"))
+                .containsEntry("winner.txt", bytes("winner"));
     }
 
     private static OrionConfiguration.BootstrapAccessControlConfig config() {

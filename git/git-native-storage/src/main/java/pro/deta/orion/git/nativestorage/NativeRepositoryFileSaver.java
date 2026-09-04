@@ -31,6 +31,26 @@ final class NativeRepositoryFileSaver {
         Objects.requireNonNull(files, "files");
         String branchRefName = branchRefName(branch);
         Optional<GitObjectId> parent = resolveBranch(branch);
+        saveFiles(branchRefName, parent, files, message, author);
+    }
+
+    void saveFilesIfVersion(
+            String branch,
+            String expectedVersion,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws GitOperationException {
+        Objects.requireNonNull(files, "files");
+        GitObjectId expected = GitObjectId.of(Objects.requireNonNull(expectedVersion, "expectedVersion"));
+        saveFiles(branchRefName(branch), Optional.of(expected), files, message, author);
+    }
+
+    private void saveFiles(
+            String branchRefName,
+            Optional<GitObjectId> parent,
+            Map<String, byte[]> files,
+            String message,
+            GitCommitAuthor author) throws GitOperationException {
         TreeMap<String, GitObjectId> treeEntries = new TreeMap<>();
         if (parent.isPresent()) {
             readTreeEntries(rootTreeId(parent.get()), "", treeEntries);
@@ -46,7 +66,8 @@ final class NativeRepositoryFileSaver {
         String expectedOldId = parent.map(GitObjectId::value).orElse(NULL_ID);
         RefUpdateResult result = repository.updateRef(branchRefName, expectedOldId, commitId.value());
         if (result == RefUpdateResult.STALE) {
-            throw new GitOperationException("Cannot update branch " + branchRefName + ": " + result);
+            throw new GitRepositoryConcurrentUpdateException(
+                    "Cannot update branch " + branchRefName + ": " + result);
         }
         populateDefaultHeadIfMissing(commitId);
     }

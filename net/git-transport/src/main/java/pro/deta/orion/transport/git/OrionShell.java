@@ -20,6 +20,7 @@ import pro.deta.orion.command.terminal.InteractiveTerminal;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.transport.git.ssh.CloseOnDestroyCommand;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
+import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -194,6 +195,8 @@ public final class OrionShell implements ShellFactory {
             UserIdentity identity = channel.getSession().getAttribute(SSH_AUTHENTICATED_USER);
             SecurityContext securityContext = SecurityContext.createContext()
                     .withUserIdentity(identity)
+                    .withSshConnectionCredentials(
+                            OrionSshAuthenticator.connectionCredentials(channel.getSession()))
                     .withRequestId(requestId);
             return new InteractiveTerminal.Connection(
                     securityContext,

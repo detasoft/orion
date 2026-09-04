@@ -49,6 +49,15 @@ class DefaultCommandDispatcherTest {
         assertFailure(
                 dispatch("/repository ls page=2", CommandPath.root()),
                 CommandFailureCode.INVALID_ARGUMENTS);
+        assertFailure(
+                dispatch("flag --undeclared", CommandPath.root()),
+                CommandFailureCode.INVALID_ARGUMENTS);
+    }
+
+    @Test
+    void dispatchesDeclaredBooleanFlagsAsNamedParameters() {
+        assertThat(dispatch("flag --force", CommandPath.root()))
+                .isEqualTo(new CommandResult.Message("force=true"));
     }
 
     @Test
@@ -145,6 +154,8 @@ class DefaultCommandDispatcherTest {
                         new CommandResult.ObjectValue(Map.of("state", "running"))))
                 .action(definition("exit", 0, 0, Set.of(), invocation ->
                         new CommandResult.Exit(5, "stopped")))
+                .action(definition("flag", 0, 0, Set.of("force"), invocation ->
+                        new CommandResult.Message("force=" + invocation.arguments().named().get("force"))))
                 .action(definition("explode", 0, 0, Set.of(), invocation -> {
                     throw new Exception("sensitive failure detail");
                 }))

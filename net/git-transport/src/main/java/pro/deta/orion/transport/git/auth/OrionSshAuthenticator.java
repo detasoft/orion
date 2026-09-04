@@ -9,6 +9,7 @@ import org.apache.sshd.server.session.ServerSession;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
+import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.auth.UserIdentity;
 
 import jakarta.inject.Inject;
@@ -30,6 +31,8 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
     private static final AttributeRepository.AttributeKey<PendingPublicKeyAttempt> PENDING_PUBLIC_KEY =
             new AttributeRepository.AttributeKey<>();
     private static final AttributeRepository.AttributeKey<LinkedHashMap<String, PublicKey>> PROVED_PUBLIC_KEYS =
+            new AttributeRepository.AttributeKey<>();
+    private static final AttributeRepository.AttributeKey<String> AUTHENTICATED_KEY_FINGERPRINT =
             new AttributeRepository.AttributeKey<>();
     private static final AttributeRepository.AttributeKey<Boolean> KEYBOARD_INTERACTIVE_FAILED =
             new AttributeRepository.AttributeKey<>();
@@ -64,6 +67,7 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             return false;
         }
         if (attempt.identity() != null) {
+            session.setAttribute(AUTHENTICATED_KEY_FINGERPRINT, fingerprint(attempt.key()));
             session.setAttribute(SSH_AUTHENTICATED_USER, attempt.identity());
             return true;
         }
@@ -128,6 +132,7 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
             return false;
         }
         if (authentication.candidates().isEmpty() && authentication.rootRecoveryGeneration() == null) {
+            session.removeAttribute(AUTHENTICATED_KEY_FINGERPRINT);
             session.setAttribute(SSH_AUTHENTICATED_USER, authentication.identity());
             return true;
         }
@@ -143,7 +148,7 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
                     authentication.rootRecoveryGeneration(),
                     selectedKeys);
         }
-        session.removeAttribute(PROVED_PUBLIC_KEYS);
+        session.removeAttribute(AUTHENTICATED_KEY_FINGERPRINT);
         session.setAttribute(SSH_AUTHENTICATED_USER, authentication.identity());
         return true;
     }
@@ -235,6 +240,11 @@ public final class OrionSshAuthenticator implements PublickeyAuthenticator {
     private static List<PublicKey> provedCandidates(ServerSession session) {
         Map<String, PublicKey> candidates = session.getAttribute(PROVED_PUBLIC_KEYS);
         return candidates == null ? List.of() : List.copyOf(candidates.values());
+    }
+
+    public static SshConnectionCredentials connectionCredentials(ServerSession session) {
+        String authenticatedFingerprint = session.getAttribute(AUTHENTICATED_KEY_FINGERPRINT);
+        return new SshConnectionCredentials(authenticatedFingerprint, serializeKeys(provedCandidates(session)));
     }
 
     private static String fingerprint(PublicKey key) {

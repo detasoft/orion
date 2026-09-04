@@ -54,6 +54,22 @@ class CommandLineParserTest {
     }
 
     @Test
+    void parsesStandaloneLongBooleanFlagsAsNamedParameters() {
+        ParsedCommand parsed = success("/auth/key rm SHA256:abc --force", CommandPath.root());
+
+        assertThat(parsed.positionalArguments()).containsExactly("SHA256:abc");
+        assertThat(parsed.namedParameters()).containsExactly(Map.entry("force", "true"));
+    }
+
+    @Test
+    void rejectsInvalidDuplicateAndPostWhereFlags() {
+        assertFailure("/auth/key rm SHA256:abc --", CommandPath.root(), "flag");
+        assertFailure("/auth/key rm SHA256:abc --=value", CommandPath.root(), "flag");
+        assertFailure("/auth/key rm SHA256:abc --force --force", CommandPath.root(), "duplicate");
+        assertFailure("/auth/key rm SHA256:abc where state=active --force", CommandPath.root(), "predicate");
+    }
+
+    @Test
     void tokenizesQuotesEscapesAndLiteralShellMetacharactersWithoutExecutingThem() {
         ParsedCommand parsed = success(
                 "/repository show 'two words' \"double quoted\" escaped\\ value expression='a|b;$(x)>*.txt'",

@@ -62,6 +62,15 @@ class AuditingCommandDispatcherTest {
     }
 
     @Test
+    void recordsDeclaredBooleanFlagsAsVisibleNamedValues() {
+        CommandResult result = dispatcher.dispatch(request("configure --force"));
+
+        assertThat(result).isEqualTo(new CommandResult.Message("configured"));
+        assertThat(records).singleElement().extracting(CommandAuditRecord::parameters)
+                .isEqualTo(Map.of("force", "true"));
+    }
+
+    @Test
     void recordsExpectedFailureCancellationAndHandlerException() {
         dispatcher.dispatch(request("unknown"));
         cancelled.set(true);
@@ -180,7 +189,7 @@ class AuditingCommandDispatcherTest {
                 "configure",
                 0,
                 0,
-                Set.of("public", "secret"),
+                Set.of("public", "secret", "force"),
                 Set.of("secret"),
                 Set.of(),
                 context -> true,

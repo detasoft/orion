@@ -23,6 +23,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
+import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandNode;
@@ -31,6 +32,7 @@ import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
+import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -39,9 +41,12 @@ import java.io.OutputStream;
 import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPairGenerator;
+import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -93,6 +98,12 @@ class OrionShellTest {
         assertThat(first.context().presentation().ansi()).isTrue();
         assertThat(first.context().presentation().terminalColumns()).isEqualTo(40);
         assertThat(first.context().securityContext().getUserIdentity().getUserId()).isEqualTo("operator");
+        SshConnectionCredentials credentialFacts =
+                first.context().securityContext().getSshConnectionCredentials();
+        assertThat(credentialFacts.authenticatedKeyFingerprint()).contains("SHA256:current");
+        assertThat(credentialFacts.candidatePublicKeys()).hasSize(1);
+        assertThat(first.context().auditMetadata().toString())
+                .doesNotContain(credentialFacts.candidatePublicKeys().getFirst());
         assertThat(output.commandCompleted.await(2, TimeUnit.SECONDS)).isTrue();
 
         environment.values.put(Environment.ENV_COLUMNS, "120");
@@ -285,7 +296,30 @@ class OrionShellTest {
                     case "equals" -> proxy == args[0];
                     default -> defaultValue(method.getReturnType());
                 });
+        installCredentialFacts(session);
         return new TestChannelSession(session);
+    }
+
+    private static void installCredentialFacts(ServerSession session) {
+        try {
+            var currentField = OrionSshAuthenticator.class.getDeclaredField("AUTHENTICATED_KEY_FINGERPRINT");
+            currentField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            AttributeRepository.AttributeKey<String> current =
+                    (AttributeRepository.AttributeKey<String>) currentField.get(null);
+            var candidatesField = OrionSshAuthenticator.class.getDeclaredField("PROVED_PUBLIC_KEYS");
+            candidatesField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            AttributeRepository.AttributeKey<LinkedHashMap<String, PublicKey>> candidates =
+                    (AttributeRepository.AttributeKey<LinkedHashMap<String, PublicKey>>) candidatesField.get(null);
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            PublicKey candidate = generator.generateKeyPair().getPublic();
+            session.setAttribute(current, "SHA256:current");
+            session.setAttribute(candidates, new LinkedHashMap<>(Map.of("candidate", candidate)));
+        } catch (ReflectiveOperationException | java.security.GeneralSecurityException exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     private static Object defaultValue(Class<?> type) {

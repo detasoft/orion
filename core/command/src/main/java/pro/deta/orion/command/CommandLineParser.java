@@ -55,6 +55,16 @@ public final class CommandLineParser {
                 }
                 continue;
             }
+            if (token.text().startsWith("--")) {
+                String flag = token.text().substring(2);
+                if (flag.isBlank() || flag.indexOf('=') >= 0) {
+                    return failure("Invalid boolean flag", token.position());
+                }
+                if (named.putIfAbsent(flag, "true") != null) {
+                    return failure("Duplicate named parameter: " + flag, token.position());
+                }
+                continue;
+            }
             int equals = token.text().indexOf('=');
             if (equals < 0) {
                 positional.add(token.text());

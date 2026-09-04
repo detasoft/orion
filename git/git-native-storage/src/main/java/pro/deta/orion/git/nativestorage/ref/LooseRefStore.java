@@ -5,50 +5,71 @@ import pro.deta.orion.git.nativestorage.GitObjectId;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.FileChannel;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 public final class LooseRefStore {
     private static final String NULL_ID = "0".repeat(40);
+    private static final String LOCK_FILE = "orion-loose-refs.lock";
+    private static final ConcurrentMap<Path, ReentrantLock> REPOSITORY_LOCKS = new ConcurrentHashMap<>();
 
     private final Map<String, String> refs = new HashMap<>();
+    private final Object inMemoryLock = new Object();
     private final Path repositoryDirectory;
+    private final ReentrantLock repositoryLock;
 
     public LooseRefStore() {
         this.repositoryDirectory = null;
+        this.repositoryLock = null;
     }
 
     public LooseRefStore(Path repositoryDirectory) {
-        this.repositoryDirectory = Objects.requireNonNull(
-                repositoryDirectory,
-                "repositoryDirectory").toAbsolutePath().normalize();
-        createDirectories(this.repositoryDirectory.resolve("refs"));
-        loadRefs();
+        Path normalized = Objects.requireNonNull(repositoryDirectory, "repositoryDirectory")
+                .toAbsolutePath()
+                .normalize();
+        createDirectories(normalized.resolve("refs"));
+        this.repositoryDirectory = canonicalPath(normalized);
+        this.repositoryLock = REPOSITORY_LOCKS.computeIfAbsent(
+                this.repositoryDirectory,
+                ignored -> new ReentrantLock());
+        withRepositoryLock(() -> {
+            refreshRefs();
+            return null;
+        });
     }
 
-    public synchronized Optional<GitObjectId> read(String refName) {
+    public Optional<GitObjectId> read(String refName) {
         Objects.requireNonNull(refName, "refName");
-        String value = refs.get(refName);
-        return Optional.ofNullable(value).map(GitObjectId::of);
+        return withCurrentRefs(() -> Optional.ofNullable(refs.get(refName)).map(GitObjectId::of));
     }
 
-    public synchronized Map<String, String> snapshot() {
-        return Map.copyOf(refs);
+    public Map<String, String> snapshot() {
+        return withCurrentRefs(() -> Map.copyOf(refs));
     }
 
-    public synchronized RefUpdateResult update(String refName, String expectedOldId, String newId) {
+    public RefUpdateResult update(String refName, String expectedOldId, String newId) {
         Objects.requireNonNull(refName, "refName");
         Objects.requireNonNull(expectedOldId, "expectedOldId");
         Objects.requireNonNull(newId, "newId");
+        return withCurrentRefs(() -> updateCurrentRefs(refName, expectedOldId, newId));
+    }
+
+    private RefUpdateResult updateCurrentRefs(String refName, String expectedOldId, String newId) {
         Map<String, String> updatedRefs = new HashMap<>(refs);
         RefUpdateResult result = applyUpdate(
                 updatedRefs,
@@ -64,10 +85,13 @@ public final class LooseRefStore {
         return result;
     }
 
-    public synchronized List<RefUpdateResult> updateAll(List<Update> updates, Runnable beforeUpdates) {
+    public List<RefUpdateResult> updateAll(List<Update> updates, Runnable beforeUpdates) {
         Objects.requireNonNull(updates, "updates");
         Objects.requireNonNull(beforeUpdates, "beforeUpdates");
+        return withCurrentRefs(() -> updateAllCurrentRefs(updates, beforeUpdates));
+    }
 
+    private List<RefUpdateResult> updateAllCurrentRefs(List<Update> updates, Runnable beforeUpdates) {
         Map<String, String> updatedRefs = new HashMap<>(refs);
         List<RefUpdateResult> results = new ArrayList<>(updates.size());
         boolean anyStale = false;
@@ -93,7 +117,7 @@ public final class LooseRefStore {
         return List.copyOf(results);
     }
 
-    public synchronized List<RefUpdateResult> updateAllIndependently(
+    public List<RefUpdateResult> updateAllIndependently(
             List<Update> updates,
             Runnable beforeUpdates) {
         Objects.requireNonNull(updates, "updates");
@@ -110,16 +134,15 @@ public final class LooseRefStore {
         return List.copyOf(results);
     }
 
-    private void loadRefs() {
-        if (repositoryDirectory == null) {
-            return;
-        }
+    private void refreshRefs() {
+        Map<String, String> loadedRefs = new HashMap<>();
         Path refsDirectory = repositoryDirectory.resolve("refs");
-        if (!Files.isDirectory(refsDirectory)) {
-            return;
-        }
         try {
-            loadRefs(refsDirectory);
+            if (Files.isDirectory(refsDirectory)) {
+                loadRefs(refsDirectory, loadedRefs);
+            }
+            refs.clear();
+            refs.putAll(loadedRefs);
         } catch (IOException error) {
             throw new UncheckedIOException(
                     "Failed to load loose Git refs",
@@ -127,12 +150,12 @@ public final class LooseRefStore {
         }
     }
 
-    private void loadRefs(Path directory) throws IOException {
+    private void loadRefs(Path directory, Map<String, String> loadedRefs) throws IOException {
         try (DirectoryStream<Path> entries =
                      Files.newDirectoryStream(directory)) {
             for (Path entry : entries) {
                 if (Files.isDirectory(entry)) {
-                    loadRefs(entry);
+                    loadRefs(entry, loadedRefs);
                 } else if (Files.isRegularFile(entry)) {
                     if (entry.getFileName().toString().contains(".tmp-")) {
                         continue;
@@ -144,7 +167,7 @@ public final class LooseRefStore {
                     String objectId = Files.readString(
                             entry,
                             StandardCharsets.US_ASCII).trim();
-                    refs.put(refName, objectId);
+                    loadedRefs.put(refName, objectId);
                 }
             }
         }
@@ -254,6 +277,47 @@ public final class LooseRefStore {
             throw new UncheckedIOException(
                     "Failed to create directory: " + path,
                     error);
+        }
+    }
+
+    private <T> T withCurrentRefs(Supplier<T> action) {
+        if (repositoryDirectory == null) {
+            synchronized (inMemoryLock) {
+                return action.get();
+            }
+        }
+        return withRepositoryLock(() -> {
+            refreshRefs();
+            return action.get();
+        });
+    }
+
+    private <T> T withRepositoryLock(Supplier<T> action) {
+        repositoryLock.lock();
+        try {
+            if (repositoryLock.getHoldCount() > 1) {
+                return action.get();
+            }
+            Path lockPath = repositoryDirectory.resolve(LOCK_FILE);
+            try (FileChannel channel = FileChannel.open(
+                    lockPath,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.WRITE);
+                 var ignored = channel.lock()) {
+                return action.get();
+            } catch (IOException error) {
+                throw new UncheckedIOException("Failed to lock loose Git refs", error);
+            }
+        } finally {
+            repositoryLock.unlock();
+        }
+    }
+
+    private static Path canonicalPath(Path path) {
+        try {
+            return path.toRealPath();
+        } catch (IOException error) {
+            throw new UncheckedIOException("Failed to resolve repository directory", error);
         }
     }
 

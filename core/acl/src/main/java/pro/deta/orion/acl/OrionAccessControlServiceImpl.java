@@ -7,6 +7,7 @@ import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.acl.storage.AccessControlStorage;
+import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSaveRequest;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -19,6 +20,10 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.PlainRootTokenAccess;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
+import pro.deta.orion.auth.SshCredential;
+import pro.deta.orion.auth.SshCredentialFailureCode;
+import pro.deta.orion.auth.SshCredentialListResult;
+import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -54,6 +59,7 @@ import static pro.deta.orion.util.Result.Failure.generalFailure;
 public class OrionAccessControlServiceImpl implements OrionAccessControlService, ServiceLifecycleStateMachineAdapter.ServiceLifecycle {
     private static final String ROOT_USER_ID = "root";
     private static final String ROOT_AUTH_GENERATION_PREFIX = "root-auth-generation:";
+    private static final String ROOT_LOCKED_GENERATION_PREFIX = "root-auth-locked:";
 
     private final XmlService xmlService = new XmlService();
     private final AccessControlStorage accessControlStorage;
@@ -184,7 +190,237 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     @Override
     public void addSshKeysToUser(String username, List<String> publicKeys) {
-        new AccessControlWriter().addSshKeysToUser(username, publicKeys);
+        switch (addSshCredentials(username, publicKeys)) {
+            case SshCredentialUpdateResult.Success ignored -> {
+            }
+            case SshCredentialUpdateResult.Failure failure -> {
+                if (failure.code() == SshCredentialFailureCode.INVALID_KEY) {
+                    throw new IllegalArgumentException("Invalid SSH public key", failure.throwable());
+                }
+                throw new IllegalStateException(
+                        "SSH key enrollment failed: " + failure.reason(),
+                        failure.throwable());
+            }
+        }
+    }
+
+    @Override
+    public SshCredentialListResult listSshCredentials(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return SshCredentialListResult.failure(
+                    SshCredentialFailureCode.USER_NOT_FOUND,
+                    "User is not available");
+        }
+        synchronized (reloadLock) {
+            return switch (accessControlStorage.load()) {
+                case Result.Failure<AccessControlSnapshot> failure -> SshCredentialListResult.failure(
+                        SshCredentialFailureCode.PERSISTENCE_FAILED,
+                        "Cannot load SSH credentials",
+                        failure.throwable());
+                case Result.Success<AccessControlSnapshot>(var snapshot) -> listSshCredentials(snapshot, userId);
+            };
+        }
+    }
+
+    private SshCredentialListResult listSshCredentials(AccessControlSnapshot snapshot, String userId) {
+        try {
+            UserLocation location = findUserLocation(accessControlDrafts(snapshot), userId);
+            if (location == null) {
+                return SshCredentialListResult.failure(
+                        SshCredentialFailureCode.USER_NOT_FOUND,
+                        "User is not available");
+            }
+            return SshCredentialListResult.success(sshCredentials(location.user()).descriptors());
+        } catch (InvalidStoredSshKeyException e) {
+            return SshCredentialListResult.failure(
+                    SshCredentialFailureCode.INVALID_STORED_KEY,
+                    "Stored SSH credential is invalid",
+                    e);
+        } catch (RuntimeException e) {
+            return SshCredentialListResult.failure(
+                    SshCredentialFailureCode.PERSISTENCE_FAILED,
+                    "Cannot load SSH credentials",
+                    e);
+        }
+    }
+
+    @Override
+    public SshCredentialUpdateResult addSshCredentials(String userId, List<String> publicKeys) {
+        List<PublicKey> parsedKeys;
+        try {
+            parsedKeys = parseAndDeduplicatePublicKeys(publicKeys);
+        } catch (RuntimeException e) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.INVALID_KEY,
+                    "SSH public key is invalid",
+                    List.of(),
+                    e);
+        }
+        if (userId == null || userId.isBlank()) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.USER_NOT_FOUND,
+                    "User is not available");
+        }
+
+        synchronized (reloadLock) {
+            return switch (accessControlStorage.load()) {
+                case Result.Failure<AccessControlSnapshot> failure -> SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.PERSISTENCE_FAILED,
+                        "Cannot load SSH credentials",
+                        List.of(),
+                        failure.throwable());
+                case Result.Success<AccessControlSnapshot>(var snapshot) -> addSshCredentials(
+                        snapshot,
+                        userId,
+                        parsedKeys);
+            };
+        }
+    }
+
+    private SshCredentialUpdateResult addSshCredentials(
+            AccessControlSnapshot snapshot,
+            String userId,
+            List<PublicKey> publicKeys) {
+        try {
+            Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
+            UserLocation location = findUserLocation(drafts, userId);
+            if (location == null) {
+                return SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.USER_NOT_FOUND,
+                        "User is not available");
+            }
+            if (isLockedRoot(location.user())) {
+                return SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.ROOT_LOCKED,
+                        "Root SSH credentials are locked");
+            }
+            ParsedSshCredentials existing = sshCredentials(location.user());
+            boolean changed = addMissingPublicKeys(location.user(), existing, publicKeys);
+            if (!changed) {
+                return SshCredentialUpdateResult.success(existing.descriptors(), false);
+            }
+            saveCredentialDraft(snapshot, location, "add SSH credentials");
+            return SshCredentialUpdateResult.success(sshCredentials(location.user()).descriptors(), true);
+        } catch (InvalidStoredSshKeyException e) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.INVALID_STORED_KEY,
+                    "Stored SSH credential is invalid",
+                    List.of(),
+                    e);
+        } catch (AccessControlConcurrentUpdateException e) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.CONCURRENT_UPDATE,
+                    "Access control changed concurrently",
+                    List.of(),
+                    e);
+        } catch (RuntimeException e) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.PERSISTENCE_FAILED,
+                    "Cannot save SSH credentials",
+                    List.of(),
+                    e);
+        }
+    }
+
+    @Override
+    public SshCredentialUpdateResult removeSshCredential(
+            String userId,
+            String fingerprintPrefix,
+            boolean force) {
+        if (userId == null || userId.isBlank()) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.USER_NOT_FOUND,
+                    "User is not available");
+        }
+        String prefix = Objects.requireNonNullElse(fingerprintPrefix, "").trim();
+        if (prefix.isEmpty()) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.MISSING_MATCH,
+                    "SSH credential fingerprint prefix is required");
+        }
+        synchronized (reloadLock) {
+            return switch (accessControlStorage.load()) {
+                case Result.Failure<AccessControlSnapshot> failure -> SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.PERSISTENCE_FAILED,
+                        "Cannot load SSH credentials",
+                        List.of(),
+                        failure.throwable());
+                case Result.Success<AccessControlSnapshot>(var snapshot) -> removeSshCredential(
+                        snapshot,
+                        userId,
+                        prefix,
+                        force);
+            };
+        }
+    }
+
+    private SshCredentialUpdateResult removeSshCredential(
+            AccessControlSnapshot snapshot,
+            String userId,
+            String fingerprintPrefix,
+            boolean force) {
+        try {
+            UserLocation location = findUserLocation(accessControlDrafts(snapshot), userId);
+            if (location == null) {
+                return SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.USER_NOT_FOUND,
+                        "User is not available");
+            }
+            ParsedSshCredentials existing = sshCredentials(location.user());
+            List<ParsedSshCredential> matches = new ArrayList<>();
+            for (ParsedSshCredential credential : existing.byEncodedKey().values()) {
+                if (credential.descriptor().fingerprint().startsWith(fingerprintPrefix)) {
+                    matches.add(credential);
+                }
+            }
+            if (matches.isEmpty()) {
+                return SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.MISSING_MATCH,
+                        "No SSH credential matches the fingerprint prefix");
+            }
+            if (matches.size() > 1) {
+                List<String> candidates = new ArrayList<>();
+                for (ParsedSshCredential match : matches) {
+                    candidates.add(match.descriptor().fingerprint());
+                }
+                candidates.sort(String::compareTo);
+                return SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.AMBIGUOUS_MATCH,
+                        "SSH credential fingerprint prefix is ambiguous",
+                        candidates,
+                        null);
+            }
+            if (existing.byEncodedKey().size() == 1 && !force) {
+                return SshCredentialUpdateResult.failure(
+                        SshCredentialFailureCode.LAST_KEY_REQUIRES_FORCE,
+                        "Removing the last SSH credential requires force");
+            }
+
+            removePublicKey(location.user(), matches.getFirst().publicKey());
+            if (existing.byEncodedKey().size() == 1 && isRoot(location.user().getId())) {
+                lockRoot(location.user());
+            }
+            saveCredentialDraft(snapshot, location, "remove SSH credential");
+            return SshCredentialUpdateResult.success(sshCredentials(location.user()).descriptors(), true);
+        } catch (InvalidStoredSshKeyException e) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.INVALID_STORED_KEY,
+                    "Stored SSH credential is invalid",
+                    List.of(),
+                    e);
+        } catch (AccessControlConcurrentUpdateException e) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.CONCURRENT_UPDATE,
+                    "Access control changed concurrently",
+                    List.of(),
+                    e);
+        } catch (RuntimeException e) {
+            return SshCredentialUpdateResult.failure(
+                    SshCredentialFailureCode.PERSISTENCE_FAILED,
+                    "Cannot remove SSH credential",
+                    List.of(),
+                    e);
+        }
     }
 
     @Override
@@ -201,6 +437,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public AuthenticationResult authenticateUser(String userName, byte[] encodedData) {
         Result<AccessControl.User> user = findSingleUser(userName);
         if (user instanceof Result.Success<AccessControl.User>(var u)) {
+            if (isLockedRoot(u)) {
+                return AuthenticationResult.failure("authentication failed");
+            }
             if (rootRecoveryGeneration(u) != null) {
                 log.warn("Attempt to use the root recovery password outside SSH key enrollment.");
                 return AuthenticationResult.failure("authentication failed");
@@ -218,6 +457,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             byte[] credential) {
         Result<AccessControl.User> user = findSingleUser(userName);
         if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
+                && !isLockedRoot(matchedUser)
                 && performPasswordAuthentication(matchedUser, credential)) {
             String recoveryGeneration = rootRecoveryGeneration(matchedUser);
             if (isGenerationAwareRoot(matchedUser) && recoveryGeneration == null) {
@@ -302,6 +542,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     public AuthenticationResult authenticateSshUser(String userName, byte[] encodedPublicKey) {
         Result<AccessControl.User> user = findSingleUser(userName);
         if (user instanceof Result.Success<AccessControl.User>(var matchedUser)
+                && !isLockedRoot(matchedUser)
                 && performPublicKeyAuthentication(matchedUser, encodedPublicKey)) {
             return createUserIdentity(matchedUser);
         }
@@ -315,7 +556,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         AccessControl currentAccessControl = accessControl.get();
         if (currentAccessControl != null) {
             for (AccessControl.User user : currentAccessControl.getUsers()) {
-                if (performPublicKeyAuthentication(user, encodedPublicKey)) {
+                if (!isLockedRoot(user) && performPublicKeyAuthentication(user, encodedPublicKey)) {
                     matchingUsers.add(user);
                 }
             }
@@ -336,6 +577,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             case JwtAccessTokenService.VerificationResult.Success(var subject, var authenticationGeneration) -> {
                 Result<AccessControl.User> user = findSingleUser(subject);
                 if (user instanceof Result.Success<AccessControl.User>(var u)) {
+                    if (isLockedRoot(u)) {
+                        yield AuthenticationResult.failure("authentication failed");
+                    }
                     String currentGeneration = rootAuthenticationGeneration(u);
                     if (isGenerationAwareRoot(u)
                             && (currentGeneration == null || !currentGeneration.equals(authenticationGeneration))) {
@@ -371,6 +615,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         if (!(user instanceof Result.Success<AccessControl.User>(var currentUser))) {
             return TokenIssueResult.failure("user is not available for token issue");
+        }
+        if (isLockedRoot(currentUser)) {
+            return TokenIssueResult.failure("root authentication is locked");
         }
         String authenticationGeneration = rootAuthenticationGeneration(currentUser);
         if (isGenerationAwareRoot(currentUser) && authenticationGeneration == null) {
@@ -448,9 +695,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void requestToUpdate() {
         synchronized (reloadLock) {
-            switch (loadAccessControl()) {
-                case Result.Success<AccessControl>(var ac) -> prepareAndUpdateAccessControl(ac);
-                case Result.Failure<AccessControl> f ->
+            switch (loadValidatedAccessControlSnapshot()) {
+                case Result.Success<AccessControlSnapshot>(var snapshot) ->
+                        prepareAndUpdateAccessControl(snapshot);
+                case Result.Failure<AccessControlSnapshot> f ->
                         log.error("Retaining the last valid ACL after reload failure: [{}] {}",
                                 f.code(), f.message(), f.throwable());
             }
@@ -591,18 +839,36 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         };
     }
 
-    private void prepareAndUpdateAccessControl(AccessControl ac) {
-        AccessControl preparedAccessControl = ac;
-        AccessControlDraft draft = ac.toDraft();
-        if (synchronizeInternalServerKeysToRoot(draft)) {
-            preparedAccessControl = draft.toAccessControl();
-            saveAccessControl(preparedAccessControl, "add internal server keys to root", UserEmail.EMPTY);
+    private void prepareAndUpdateAccessControl(AccessControlSnapshot loadedSnapshot) {
+        AccessControlSnapshot preparedSnapshot = loadedSnapshot;
+        Map<String, AccessControlDraft> drafts = accessControlDrafts(loadedSnapshot);
+        List<RootLocation> roots = rootLocations(drafts);
+        if (roots.size() == 1 && synchronizeInternalServerKeysToRoot(roots.getFirst().user())) {
+            RootLocation root = roots.getFirst();
+            Map<String, byte[]> updatedFiles = new LinkedHashMap<>(loadedSnapshot.files());
+            updatedFiles.put(
+                    root.path(),
+                    serializeAccessControlConfiguration(root.draft().toAccessControl()));
+            accessControlStorage.save(
+                    new AccessControlSnapshot(updatedFiles, loadedSnapshot.version()),
+                    new AccessControlSaveRequest("add internal server keys to root", UserEmail.EMPTY));
+            preparedSnapshot = switch (loadValidatedAccessControlSnapshot()) {
+                case Result.Success<AccessControlSnapshot>(var snapshot) -> snapshot;
+                case Result.Failure<AccessControlSnapshot> failure -> throw new IllegalStateException(
+                        "Cannot reload ACL after internal server-key synchronization: [" + failure.code() + "] "
+                                + failure.message(),
+                        failure.throwable());
+            };
         }
-        updateAccessControl(preparedAccessControl);
+        updateAccessControl(accessControlFrom(preparedSnapshot).valueOrFailure("prepared access control"));
     }
 
     private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft draft) {
         AccessControlDraft.User rootUser = findRootUser(draft);
+        return rootUser != null && synchronizeInternalServerKeysToRoot(rootUser);
+    }
+
+    private boolean synchronizeInternalServerKeysToRoot(AccessControlDraft.User rootUser) {
         if (rootUser == null || isGenerationAwareRoot(rootUser)) {
             return false;
         }
@@ -718,7 +984,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         for (AccessControl.Credential credential : user.getCredentials()) {
             if (credential.getKeyId() != null
-                    && credential.getKeyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)) {
+                    && (credential.getKeyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)
+                    || credential.getKeyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX))) {
                 return true;
             }
         }
@@ -731,7 +998,8 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
         for (AccessControlDraft.Credential credential : user.getCredentials()) {
             if (credential.getKeyId() != null
-                    && credential.getKeyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)) {
+                    && (credential.getKeyId().startsWith(ROOT_AUTH_GENERATION_PREFIX)
+                    || credential.getKeyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX))) {
                 return true;
             }
         }
@@ -755,6 +1023,130 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         for (AccessControlDraft.Credential credential : user.getCredentials()) {
             if (credential.getType() == OPENSSH_PUBLIC_KEY
                     && publicKeysAreEqual(credential.getValue(), publicKey.getEncoded())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private UserLocation findUserLocation(Map<String, AccessControlDraft> drafts, String userId) {
+        UserLocation matched = null;
+        for (Map.Entry<String, AccessControlDraft> entry : drafts.entrySet()) {
+            for (AccessControlDraft.User user : entry.getValue().getUsers()) {
+                if (user.getId() != null && user.getId().equalsIgnoreCase(userId)) {
+                    if (matched != null) {
+                        throw new IllegalStateException("More than one user matches the requested id");
+                    }
+                    matched = new UserLocation(entry.getKey(), entry.getValue(), user);
+                }
+            }
+        }
+        return matched;
+    }
+
+    private ParsedSshCredentials sshCredentials(AccessControlDraft.User user) {
+        Map<String, ParsedSshCredential> credentials = new LinkedHashMap<>();
+        for (AccessControlDraft.Credential credential : user.getCredentials()) {
+            if (credential.getType() != OPENSSH_PUBLIC_KEY) {
+                continue;
+            }
+            PublicKey publicKey;
+            try {
+                publicKey = KeyUtils.readPublicKeyFromString(credential.getValue());
+            } catch (RuntimeException e) {
+                throw new InvalidStoredSshKeyException(e);
+            }
+            String encoded = Base64.getEncoder().encodeToString(publicKey.getEncoded());
+            credentials.putIfAbsent(encoded, new ParsedSshCredential(
+                    publicKey,
+                    new SshCredential(
+                            org.apache.sshd.common.config.keys.KeyUtils.getKeyType(publicKey),
+                            org.apache.sshd.common.config.keys.KeyUtils.getFingerPrint(publicKey))));
+        }
+        List<SshCredential> descriptors = new ArrayList<>();
+        for (ParsedSshCredential credential : credentials.values()) {
+            descriptors.add(credential.descriptor());
+        }
+        descriptors.sort(Comparator.comparing(SshCredential::fingerprint));
+        return new ParsedSshCredentials(credentials, descriptors);
+    }
+
+    private boolean addMissingPublicKeys(
+            AccessControlDraft.User user,
+            ParsedSshCredentials existing,
+            List<PublicKey> publicKeys) {
+        boolean changed = false;
+        String generation = rootAuthenticationGeneration(user);
+        Set<String> known = new HashSet<>(existing.byEncodedKey().keySet());
+        for (PublicKey publicKey : publicKeys) {
+            String encoded = Base64.getEncoder().encodeToString(publicKey.getEncoded());
+            if (!known.add(encoded)) {
+                continue;
+            }
+            String canonical = PublicKeyEntry.toString(publicKey);
+            if (generation == null) {
+                user.addCredential(OPENSSH_PUBLIC_KEY, canonical);
+            } else {
+                user.addCredential(OPENSSH_PUBLIC_KEY, generationKeyId(generation), canonical);
+            }
+            changed = true;
+        }
+        return changed;
+    }
+
+    private void removePublicKey(AccessControlDraft.User user, PublicKey publicKey) {
+        byte[] encoded = publicKey.getEncoded();
+        user.getCredentials().removeIf(credential -> credential.getType() == OPENSSH_PUBLIC_KEY
+                && publicKeysAreEqual(credential.getValue(), encoded));
+    }
+
+    private void lockRoot(AccessControlDraft.User root) {
+        char[] markerSecret = orionPasswordHashingService.generateRandomString(32);
+        try {
+            String markerHash = orionPasswordHashingService.calculateHash(ARGON2, markerSecret);
+            root.addCredential(
+                    AccessControl.CredentialType.ARGON2,
+                    ROOT_LOCKED_GENERATION_PREFIX + UUID.randomUUID(),
+                    markerHash);
+        } finally {
+            Arrays.fill(markerSecret, '\0');
+        }
+    }
+
+    private void saveCredentialDraft(
+            AccessControlSnapshot snapshot,
+            UserLocation location,
+            String operation) {
+        Map<String, byte[]> files = new LinkedHashMap<>(snapshot.files());
+        files.put(location.path(), serializeAccessControlConfiguration(location.draft().toAccessControl()));
+        saveAccessControlSnapshotAndReload(
+                new AccessControlSnapshot(files, snapshot.version()),
+                operation + " for " + location.user().getId(),
+                new UserEmail(
+                        location.user().getId(),
+                        Objects.requireNonNullElse(location.user().getEmail(), "")));
+    }
+
+    private static boolean isLockedRoot(AccessControlDraft.User user) {
+        if (!isRoot(user.getId())) {
+            return false;
+        }
+        for (AccessControlDraft.Credential credential : user.getCredentials()) {
+            if (credential.getKeyId() != null
+                    && credential.getKeyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isLockedRoot(AccessControl.User user) {
+        if (!isRoot(user.getId())) {
+            return false;
+        }
+        for (AccessControl.Credential credential : user.getCredentials()) {
+            if (credential.getKeyId() != null
+                    && credential.getKeyId().startsWith(ROOT_LOCKED_GENERATION_PREFIX)) {
                 return true;
             }
         }
@@ -925,9 +1317,40 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     private class AccessControlWriter {
         private void createOrUpdateUser(AccessControlUserUpdate userUpdate) {
             validateUserUpdate(userUpdate);
-            AccessControlDraft draft = accessControl.get().toDraft();
-            draft.getUsers().removeIf(user -> user.getId() != null && user.getId().equalsIgnoreCase(userUpdate.id()));
+            UserEmail author = new UserEmail(userUpdate.id(), userUpdate.email());
+            synchronized (reloadLock) {
+                AccessControlSnapshot snapshot = switch (loadValidatedAccessControlSnapshot()) {
+                    case Result.Success<AccessControlSnapshot>(var loaded) -> loaded;
+                    case Result.Failure<AccessControlSnapshot> failure -> throw new IllegalStateException(
+                            "Cannot load ACL for user update: [" + failure.code() + "] " + failure.message(),
+                            failure.throwable());
+                };
+                Map<String, AccessControlDraft> drafts = accessControlDrafts(snapshot);
+                UserLocation existing = findUserLocation(drafts, userUpdate.id());
+                AccessControlDraft owningDraft;
+                String owningPath;
+                if (existing == null) {
+                    owningDraft = primaryDraft(drafts);
+                    owningPath = accessControlStorage.primaryPath();
+                } else {
+                    owningDraft = existing.draft();
+                    owningPath = existing.path();
+                    owningDraft.getUsers().remove(existing.user());
+                }
+                owningDraft.getUsers().add(userFrom(userUpdate));
+                Map<String, byte[]> updatedFiles = new LinkedHashMap<>(snapshot.files());
+                updatedFiles.put(
+                        owningPath,
+                        serializeAccessControlConfiguration(owningDraft.toAccessControl()));
+                saveAccessControlSnapshotAndReload(
+                        new AccessControlSnapshot(updatedFiles, snapshot.version()),
+                        "createOrUpdateUser() " + userUpdate.id(),
+                        author);
+            }
+            requestAclUpdateAndWait(author + " createOrUpdateUser() " + userUpdate.id());
+        }
 
+        private AccessControlDraft.User userFrom(AccessControlUserUpdate userUpdate) {
             AccessControlDraft.User user = ACLUtil.createUser(userUpdate.id(), userUpdate.email());
             for (AccessControlCredentialUpdate credential : userUpdate.credentials()) {
                 user.addCredential(credential.type(), credential.keyId(), credential.value());
@@ -935,73 +1358,7 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             for (AccessControlRepositoryGrantUpdate repositoryGrant : userUpdate.repositories()) {
                 addRepositoryGrant(user, repositoryGrant);
             }
-
-            draft.getUsers().add(user);
-            AccessControl ac = draft.toAccessControl();
-            saveAccessControlAndRequestUpdate(ac, "createOrUpdateUser() " + userUpdate.id(), new UserEmail(userUpdate.id(), userUpdate.email()));
-        }
-
-        private void addSshKeysToUser(String username, List<String> publicKeys) {
-            List<PublicKey> parsedKeys = parsePublicKeys(publicKeys);
-            boolean changed;
-            UserEmail author;
-            synchronized (reloadLock) {
-                AccessControlDraft draft = accessControl.get().toDraft();
-                AccessControlDraft.User user = findUserById(draft, username);
-                changed = addMissingPublicKeys(user, parsedKeys);
-                author = new UserEmail(username, user.getEmail());
-                if (changed) {
-                    AccessControl updatedAccessControl = draft.toAccessControl();
-                    saveAccessControl(updatedAccessControl, "addSshKeysToUser() to " + username, author);
-                    updateAccessControl(updatedAccessControl);
-                }
-            }
-            if (changed) {
-                requestAclUpdateAndWait(author + " addSshKeysToUser() to " + username);
-            }
-        }
-
-        private List<PublicKey> parsePublicKeys(List<String> publicKeys) {
-            if (publicKeys == null || publicKeys.isEmpty()) {
-                throw new IllegalArgumentException("At least one SSH public key is required");
-            }
-            List<PublicKey> parsedKeys = new ArrayList<>();
-            for (String publicKey : publicKeys) {
-                try {
-                    parsedKeys.add(KeyUtils.readPublicKeyFromString(publicKey));
-                } catch (RuntimeException e) {
-                    throw new IllegalArgumentException("Invalid SSH public key", e);
-                }
-            }
-            return parsedKeys;
-        }
-
-        private boolean addMissingPublicKeys(AccessControlDraft.User user, List<PublicKey> parsedKeys) {
-            boolean changed = false;
-            String generation = rootAuthenticationGeneration(user);
-            for (PublicKey parsedKey : parsedKeys) {
-                if (!hasPublicKeyCredential(user, parsedKey)) {
-                    String encodedKey = PublicKeyEntry.toString(parsedKey);
-                    if (generation == null) {
-                        user.addCredential(OPENSSH_PUBLIC_KEY, encodedKey);
-                    } else {
-                        user.addCredential(OPENSSH_PUBLIC_KEY, generationKeyId(generation), encodedKey);
-                    }
-                    changed = true;
-                }
-            }
-            return changed;
-        }
-
-        private AccessControlDraft.User findUserById(AccessControlDraft draft, String username) {
-            List<AccessControlDraft.User> users = draft.getUsers().stream().filter(u -> u.getId() != null && u.getId().equalsIgnoreCase(username)).toList();
-            if (users.size() > 1) {
-                throw new IllegalStateException("More than a single user found.");
-            } else if (users.isEmpty()) {
-                throw new IllegalStateException("No users found.");
-            } else {
-                return users.get(0);
-            }
+            return user;
         }
 
         private void addRepositoryGrant(AccessControlDraft.User user, AccessControlRepositoryGrantUpdate repositoryGrant) {
@@ -1057,13 +1414,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private Result<AccessControl> loadAccessControl() {
-        return switch (accessControlStorage.load()) {
-            case Result.Success<AccessControlSnapshot>(var snapshot) -> accessControlFrom(snapshot);
-            case Result.Failure<AccessControlSnapshot> failure -> new Result.Failure<>(failure);
-        };
-    }
-
     private Result<AccessControlSnapshot> loadValidatedAccessControlSnapshot() {
         return switch (accessControlStorage.load()) {
             case Result.Success<AccessControlSnapshot>(var snapshot) -> switch (accessControlFrom(snapshot)) {
@@ -1105,11 +1455,6 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         }
     }
 
-    private void saveAccessControlAndRequestUpdate(AccessControl accessControl, String message, UserEmail author) {
-        saveAccessControl(accessControl, message, author);
-        requestAclUpdateAndWait(author + " " + message);
-    }
-
     private void saveAccessControlAndReload(AccessControl accessControl, String message, UserEmail author) {
         saveAccessControl(accessControl, message, author);
         reloadAccessControlOrThrow(author + " " + message);
@@ -1125,9 +1470,9 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
 
     private void reloadAccessControlOrThrow(String initiator) {
         synchronized (reloadLock) {
-            switch (loadAccessControl()) {
-                case Result.Success<AccessControl>(var loaded) -> prepareAndUpdateAccessControl(loaded);
-                case Result.Failure<AccessControl> failure -> throw new IllegalStateException(
+            switch (loadValidatedAccessControlSnapshot()) {
+                case Result.Success<AccessControlSnapshot>(var loaded) -> prepareAndUpdateAccessControl(loaded);
+                case Result.Failure<AccessControlSnapshot> failure -> throw new IllegalStateException(
                         "Cannot reload ACL after " + initiator + ": [" + failure.code() + "] "
                                 + failure.message(),
                         failure.throwable());
@@ -1139,6 +1484,30 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
             String path,
             AccessControlDraft draft,
             AccessControlDraft.User user) {
+    }
+
+    private record UserLocation(
+            String path,
+            AccessControlDraft draft,
+            AccessControlDraft.User user) {
+    }
+
+    private record ParsedSshCredential(PublicKey publicKey, SshCredential descriptor) {
+    }
+
+    private record ParsedSshCredentials(
+            Map<String, ParsedSshCredential> byEncodedKey,
+            List<SshCredential> descriptors) {
+        private ParsedSshCredentials {
+            byEncodedKey = Map.copyOf(byEncodedKey);
+            descriptors = List.copyOf(descriptors);
+        }
+    }
+
+    private static final class InvalidStoredSshKeyException extends RuntimeException {
+        private InvalidStoredSshKeyException(Throwable cause) {
+            super(cause);
+        }
     }
 
 }

@@ -6,6 +6,9 @@ import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
+import pro.deta.orion.auth.SshCredentialFailureCode;
+import pro.deta.orion.auth.SshCredentialListResult;
+import pro.deta.orion.auth.SshCredentialUpdateResult;
 
 import java.util.List;
 
@@ -13,6 +16,27 @@ public interface OrionAccessControlService {
     void addKeyToUser(String username, String publicKey);
 
     void addSshKeysToUser(String username, List<String> publicKeys);
+
+    default SshCredentialListResult listSshCredentials(String userId) {
+        return SshCredentialListResult.failure(
+                SshCredentialFailureCode.PERSISTENCE_FAILED,
+                "SSH credential listing is unavailable");
+    }
+
+    default SshCredentialUpdateResult addSshCredentials(String userId, List<String> publicKeys) {
+        return SshCredentialUpdateResult.failure(
+                SshCredentialFailureCode.PERSISTENCE_FAILED,
+                "SSH credential addition is unavailable");
+    }
+
+    default SshCredentialUpdateResult removeSshCredential(
+            String userId,
+            String fingerprintPrefix,
+            boolean force) {
+        return SshCredentialUpdateResult.failure(
+                SshCredentialFailureCode.PERSISTENCE_FAILED,
+                "SSH credential removal is unavailable");
+    }
 
     void createOrUpdateUser(AccessControlUserUpdate userUpdate);
 

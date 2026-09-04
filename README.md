@@ -200,6 +200,32 @@ curl http://localhost:8000/api/admin/routes \
 For scripts that need the raw JWT value instead of an `export` command, use
 `make -s issue-token-raw`.
 
+Authenticated SSH users can manage only their own SSH public keys through the
+exec or interactive command interface:
+
+```text
+/auth/key ls
+/auth/key add candidates=all
+/auth/key add candidates=<fingerprint-prefix,...>
+/auth/key add key='<OpenSSH-public-key>'
+/auth/key rm <fingerprint-prefix>
+/auth/key rm <fingerprint-prefix> --force
+```
+
+`ls` reports algorithms, SHA-256 fingerprints, and whether a key authenticated
+the current connection; it never prints public-key material. Candidate keys are
+keys proved during the same SSH connection. Select all of them or use unique,
+case-sensitive fingerprint prefixes. A pasted key is audit-redacted.
+
+Removing the key used for the current connection does not disconnect that
+connection, but the key is rejected on the next connection. Removing the last
+SSH key requires `--force`; doing so can lock an ordinary key-only user out
+until an administrator repairs its ACL or the user authenticates by another
+configured method. For root, forced last-key removal durably disables root SSH,
+password, and token authentication. Normal restarts preserve that lock; only
+starting Orion with `--reset-root-pass` restores the one-time root key recovery
+flow.
+
 The configuration JSON schema is public and does not require an admin token:
 
 ```sh
