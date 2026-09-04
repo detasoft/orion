@@ -1,7 +1,9 @@
 # Coordinate Session Termination
 
 Status: todo
-Depends on: ../process-control-and-pty-closure/TASK.md
+Depends on:
+[process control and PTY closure](../process-control-and-pty-closure/TASK.md),
+[explicit journal durability](../journal-durability/TASK.md)
 
 Keep the framed `TERMINATE` request as the normal session shutdown path while
 providing process-level `SIGTERM` to `session-host` as a control-socket-independent
@@ -30,11 +32,14 @@ manual fallback.
   manual signal; never rely on an unverified, potentially recycled PID.
 - Cover normal protocol termination, host-directed `SIGTERM`, mixed and repeated
   triggers, an unavailable or blocked control path, PID reuse protection, one
-  escalation deadline, complete process reaping, and final journal durability.
+  escalation deadline, complete process reaping, and use of the journal's final
+  durable barrier.
 
 ## Boundary
 
 This task owns termination entry points and coordination. Addressed `SIGNAL`
 requests and process-list semantics remain in
 `../process-control-and-pty-closure/TASK.md`; Linux cgroup, pidfd, and descendant
-delivery mechanics remain in `../linux-process-tree-control/TASK.md`.
+delivery mechanics remain in `../linux-process-tree-control/TASK.md`; the
+journal durability API and final sync guarantee remain in
+`../journal-durability/TASK.md`.
