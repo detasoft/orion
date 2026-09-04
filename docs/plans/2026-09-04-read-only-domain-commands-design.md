@@ -45,19 +45,22 @@ real adapters in their owning task trees.
 
 Add a small operator query package in `net/git-transport`, separate from the command catalog. Its sealed result has:
 
-- `Available<T>` with a non-null immutable value;
+- `AvailableSnapshot<T>` with a defensively copied immutable list;
+- `AvailableValue<T>` restricted to the immutable scalar-value contract used by system resources;
 - `Unavailable` with a stable source identifier;
 - `Failed` with a source identifier and cause retained for diagnostics but not rendered to users.
 
 Immutable views cover repositories, organizations and their users/repositories, sessions, proxies, system resources,
-and lifecycle services. IDs are canonical path selectors. Optional display names are aliases only; they never replace
-IDs. Views carry only the ownership or repository association needed by authorization.
+and lifecycle services. IDs are canonical path selectors and are validated as parser-addressable single segments.
+Optional display names are aliases only; they never replace IDs and are accepted only when they are safe single path
+segments. Views carry only the ownership or repository association needed by authorization.
 
 The default implementation provides:
 
 - repositories from `NativeGitRepositoryProvider`, including canonical name, default head, and ref count;
 - system resources from a narrow runtime-metrics capability;
-- recursive lifecycle service status from `AggregateStateMachine.status()`;
+- recursive lifecycle service status from `AggregateStateMachine.status()`, paired with exact direct-child machine
+  lookup rather than recursive name lookup;
 - explicit unavailable results for organization, session, and proxy sources until those services are wired.
 
 The runtime-metrics capability is injectable so tests do not assert machine-specific values.
@@ -94,9 +97,10 @@ computed state, and terminal flag.
 
 ## Scoped Resolution and Availability
 
-Extend scoped resource catalogs so candidate lookup can report available, unavailable, or failed rather than only a
-list. Propagate those states through `ScopedResourceResolver`, `CommandNavigator`, and `DefaultCommandDispatcher`.
-Static and dynamic commands therefore return the same stable `SERVICE_UNAVAILABLE` result when a source is absent.
+Extend scoped resource catalogs so candidate lookup can report available, unavailable, access denied, or failed
+rather than only a list. Propagate those states through `ScopedResourceResolver`, `CommandNavigator`,
+`DefaultCommandDispatcher`, and interactive path-only navigation. Static and dynamic commands therefore return the
+same stable failure when a source is absent, access is rejected before resolution, or lookup fails.
 
 Resolution order stays unchanged: exact canonical ID, unique visible ID prefix, then exact visible display name.
 Ambiguity returns only canonical IDs that the current user is allowed to see. Navigation and completion use the same

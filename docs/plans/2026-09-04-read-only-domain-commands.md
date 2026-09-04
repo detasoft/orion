@@ -56,6 +56,7 @@ Add failing tests for an immutable sealed result with these shapes:
 sealed interface ScopedResourceCatalogResult<T> {
     record Available<T>(List<ScopedResourceCandidate<T>> candidates) implements ScopedResourceCatalogResult<T> {}
     record Unavailable<T>(String source) implements ScopedResourceCatalogResult<T> {}
+    record AccessDenied<T>(String reason) implements ScopedResourceCatalogResult<T> {}
     record Failed<T>(String source, Throwable throwable) implements ScopedResourceCatalogResult<T> {}
 }
 ```
@@ -74,9 +75,10 @@ Add failing resolver tests proving that:
 - unavailable and failed results are propagated without converting them to an empty list;
 - visibility and completion do not return candidates from unavailable or failed sources.
 
-Add corresponding `Unavailable` and `Failed` variants to `ScopedResourceResolution` and `CommandNavigation`.
-`CommandNavigator.locate` and `navigate` propagate them. `visibleEntries` and completion return no dynamic entries
-for either state and do not throw.
+Add corresponding `Unavailable`, `AccessDenied`, and `Failed` variants to `ScopedResourceResolution` and
+`CommandNavigation`. `CommandNavigator.locate` and `navigate` propagate them. `visibleEntries` and completion return
+no dynamic entries for any unavailable, denied, or failed state and do not throw. Interactive path-only navigation
+renders the same sanitized failure codes as dispatcher execution.
 
 **Step 3: Specify dispatcher failures**
 
@@ -84,6 +86,7 @@ Add `SERVICE_UNAVAILABLE` to `CommandFailureCode`. Test that dispatcher navigati
 
 - `CommandNavigation.Unavailable` to `SERVICE_UNAVAILABLE` with the generic message
   `Resource service is unavailable`;
+- `CommandNavigation.AccessDenied` to `ACCESS_DENIED` with the generic message `Access denied`;
 - `CommandNavigation.Failed` to `HANDLER_FAILED` with `Resource lookup failed`;
 - neither source identifier nor throwable message appears in the result.
 
@@ -127,9 +130,10 @@ git commit -m "Propagate command resource availability"
 
 **Step 1: Specify query result and view contracts**
 
-Add failing tests for `OperatorQueryResult<T>` with `Available`, `Unavailable`, and `Failed` variants. Require immutable
-non-null available values, a non-blank stable source name for unavailable/failed results, and a non-null cause only
-for `Failed`.
+Add failing tests for `OperatorQueryResult<T>` with `AvailableSnapshot`, scalar `AvailableValue`, `Unavailable`, and
+`Failed` variants. `AvailableSnapshot` must defensively copy its list, and `AvailableValue` must be type-bounded so a
+list-valued source cannot bypass snapshotting. Require non-null available values, a non-blank stable source name for
+unavailable/failed results, and a non-null cause only for `Failed`.
 
 Define public nested records in `OperatorDomainViews` so the package has one coherent vocabulary:
 
@@ -143,8 +147,8 @@ SystemResourceView: availableProcessors, heapUsedBytes, heapCommittedBytes, heap
 ServiceView: id, name, state, computedState, terminal
 ```
 
-Validate non-blank IDs and required strings, non-negative counts, and copy optionals/collections. `toString()` must
-not include throwable details or any future secret-bearing source state.
+Validate parser-addressable single-segment IDs and aliases, required strings, and non-negative counts, and copy
+optionals/collections. `toString()` must not include throwable details or any future secret-bearing source state.
 
 `OperatorDomainSource` exposes one query per collection plus system resources. Organization-local users and
 repositories accept the canonical organization ID, never a display name.
@@ -165,7 +169,8 @@ The default source adapts:
 - `NativeGitRepositoryProvider.repositoryNames()` and `find()` for repositories;
 - an injected `RuntimeMetrics` for processor and heap values;
 - `AggregateStateMachine.status()` for a recursively flattened lifecycle service list whose IDs are hierarchical
-  slash-free path tokens joined with `.` and whose display name is the state-machine name.
+  slash-free path tokens joined with `.`, whose display name is the state-machine name, and whose machine is obtained
+  by exact direct-child key rather than recursive name lookup.
 
 If one listed repository cannot be opened, return `Failed("repository", cause)` for the whole snapshot rather than a
 partial list. Catch only the provider/result boundary needed to translate failure; do not catch VM errors.
