@@ -47,6 +47,29 @@ Claimed means occupied by another session or person. Never select, continue,
 update, or replace the owner of a claimed task unless the user explicitly names
 that task and asks to take it over.
 
+### Simplification Priority
+
+After honoring the user's explicit task or pool, ownership, and dependency
+order, prefer a dependency-ready current-work leaf whose primary result is safe
+deletion or consolidation over an additive leaf at the same selection stage.
+This preference takes precedence over parent-file order. Treat removal as safe
+when it preserves required runtime behavior and every explicitly preserved
+wire or persisted contract.
+
+Plan replacements as an atomic move to one canonical production path. Update
+all real in-repository consumers and delete the old internal API, state,
+configuration, branch, and legacy-only tests in the same task. Do not add or
+retain deprecated aliases, adapters, compatibility shims, dual read/write
+paths, migration modes, feature flags, or fallback paths for the replaced
+model. Tests and hypothetical future or external consumers do not justify a
+second production path.
+
+When a persisted or wire contract must remain stable, preserve it through the
+single new implementation rather than keeping the old internal API. If direct
+deletion would remove required current functionality, keep that functionality
+in the canonical path; do not solve the conflict by preserving two ways to do
+the same operation.
+
 For a generic request such as "take a new task", prefer this order:
 
 1. The first unclaimed unchecked task under `docs/plans/current-work/`.

@@ -49,6 +49,19 @@
   `SendResult.Failed` and its continuation transition. Do not use `throw new`
   exceptions as expected `Output` control flow.
 - When replacing one behavior or concept with another, do not add or keep tests whose only purpose is to assert that the previous behavior is absent. Remove those legacy negative checks in a separate commit after the behavior-change commit.
+- When replacing an internal API, behavior, or concept, update every real
+  in-repository consumer and delete the old path in the same task. Do not
+  introduce or retain deprecated aliases, adapters, compatibility shims, dual
+  read/write paths, migration modes, or feature flags for the old model. Tests
+  are not consumers: preserve meaningful behavior coverage through the single
+  replacement API and remove legacy-only coverage under the separate-commit
+  rule above.
+- Prefer a model in which each operation has one canonical production path. If
+  code, state, configuration, coordination, or an API can be removed without
+  losing required runtime behavior or an explicitly preserved wire/persisted
+  contract, removing it is the highest implementation and task-selection
+  priority. Hypothetical future or external consumers are not a reason to
+  preserve an old internal API.
 - Prefer ordinary loops and straightforward control flow over Java Stream API unless streams make the code noticeably more readable.
 - Keep source-code lines at or below 112 characters. In exceptional cases where
   a line barely does not fit, up to 135 characters is acceptable.
