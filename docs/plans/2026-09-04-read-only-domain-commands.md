@@ -28,6 +28,8 @@ JUnit 5, AssertJ, Maven.
   a non-path data field. Register a display name as a path alias only when it is one non-special path segment.
 - Global lists and object fields have deterministic ordering. Do not expose exception messages, internal file paths,
   grant expressions, candidate objects, or inaccessible-resource counts.
+- Escape backslashes and control characters in structured row/object presentation so each value remains within its
+  field and interactive output cannot contain source-provided terminal controls. Keep legacy message formatting.
 - Keep existing `state`, `status`, `repositories`, token, and `/auth/key` behavior compatible.
 - Do not implement query predicates, pagination, JSON, streaming, session attachment, or a new general expression
   language in this task.
@@ -148,7 +150,8 @@ ServiceView: id, name, state, computedState, terminal
 ```
 
 Validate parser-addressable single-segment IDs and aliases, required strings, and non-negative counts, and copy
-optionals/collections. `toString()` must not include throwable details or any future secret-bearing source state.
+optionals/collections. Every query-result `toString()` must be metadata-only and must not include values, collection
+sizes, throwable details, or any future secret-bearing source state.
 
 `OperatorDomainSource` exposes one query per collection plus system resources. Organization-local users and
 repositories accept the canonical organization ID, never a display name.
@@ -309,6 +312,10 @@ git commit -m "Add ACL-filtered domain commands"
 - Modify: `net/git-transport/src/test/java/pro/deta/orion/transport/git/command/LegacySshCommandCatalogTest.java`
 - Modify: `net/git-transport/src/test/java/pro/deta/orion/transport/git/OrionShellTest.java`
 - Modify: `net/git-transport/src/test/java/pro/deta/orion/transport/git/ssh/SshCommandFactoryTest.java`
+- Modify: `core/command/src/main/java/pro/deta/orion/command/render/PlainCommandRenderer.java`
+- Modify: `core/command/src/main/java/pro/deta/orion/command/terminal/TerminalCommandRenderer.java`
+- Modify: `core/command/src/test/java/pro/deta/orion/command/render/PlainCommandRendererTest.java`
+- Modify: `core/command/src/test/java/pro/deta/orion/command/terminal/TerminalCommandRendererTest.java`
 - Modify: `tests/integration-test/src/test/java/pro/deta/orion/test/GitSshTransportEndToEndIT.java`
 - Modify: `README.md`
 
@@ -324,7 +331,9 @@ Bind `DefaultRuntimeMetrics` and `DefaultOperatorDomainSource` as singletons in 
 
 Extend frontend tests so the same authenticated identity and fixture source produce equal `CommandResult` values for
 plain exec and interactive dispatch. Assert no ANSI/prompt is added to exec output and navigator completion exposes
-only authorized dynamic resources.
+only authorized dynamic resources. Feed structured fields containing CR, LF, tab, backslash, ESC, and other control
+characters through both renderers; require escaped one-record-per-line exec output and no source-provided terminal
+controls in interactive output. Do not change the legacy multi-line `Message` contract.
 
 Add an end-to-end case for production-backed commands that logs in as a named user, executes `whoami` and an allowed
 repository list through SSH exec, and exercises `whoami` from a PTY shell. Preserve Git upload/receive coverage and
@@ -342,7 +351,7 @@ Run outside the sandbox:
 
 ```sh
 make run-test MODULE=core/command \
-  TEST='ScopedResourceResolverTest,CommandNavigatorTest,DefaultCommandDispatcherTest'
+  TEST='ScopedResourceResolverTest,CommandNavigatorTest,DefaultCommandDispatcherTest,PlainCommandRendererTest,TerminalCommandRendererTest'
 make run-test MODULE=net/git-transport \
   TEST='OperatorDomainContractsTest,DefaultOperatorDomainSourceTest,ReadOnlyDomainCommandCatalogTest,LegacySshCommandCatalogTest,OrionShellTest,SshCommandFactoryTest'
 make run-test MODULE=tests/integration-test \

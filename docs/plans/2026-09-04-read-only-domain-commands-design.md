@@ -39,6 +39,8 @@ real adapters in their owning task trees.
 - A denied exact selector is indistinguishable from a missing resource.
 - A backend outage is distinct from an empty collection and from a missing resource.
 - Handlers return `Rows`, `ObjectValue`, or a stable failure; presentation remains in existing renderers.
+- Renderers encode control characters and backslashes in structured row/object fields so source values cannot forge
+  records or inject terminal control sequences; intentionally multi-line legacy messages keep their existing form.
 - The task adds no filtering grammar, pagination, JSON output, streaming, or session attachment.
 
 ## Query Contracts
@@ -49,6 +51,9 @@ Add a small operator query package in `net/git-transport`, separate from the com
 - `AvailableValue<T>` restricted to the immutable scalar-value contract used by system resources;
 - `Unavailable` with a stable source identifier;
 - `Failed` with a source identifier and cause retained for diagnostics but not rendered to users.
+
+Every query-result variant has metadata-only diagnostic text; `toString()` never reveals values, hidden collection
+sizes, exception details, or other pre-ACL source state.
 
 Immutable views cover repositories, organizations and their users/repositories, sessions, proxies, system resources,
 and lifecycle services. IDs are canonical path selectors and are validated as parser-addressable single segments.
