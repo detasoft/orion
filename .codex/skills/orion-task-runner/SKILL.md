@@ -126,6 +126,13 @@ update the owner line with a short status line:
   - Owner: codex, session SESSION_ID, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
 ```
 
-In the final response, name the selected task path, summarize code changes,
-list verification run, and mention any unrelated pre-existing working tree
-changes.
+When closing a completed task, include both fields explicitly in the final
+response:
+
+```text
+Task: <task name>
+Path: <path to the task's TASK.md>
+```
+
+Also summarize code changes, list verification run, and mention any unrelated
+pre-existing working tree changes.
