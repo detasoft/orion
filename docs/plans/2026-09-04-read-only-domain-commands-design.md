@@ -112,8 +112,10 @@ Every command first requires an authenticated named user.
 - An organization is visible only when the user is an application administrator, is a member represented by that
   organization's user view, or can read at least one repository in that organization.
 - Organization-local users are visible only to application administrators or as the caller's own user entry.
-- Session and proxy views are visible to application administrators, their owner where applicable, or callers with
-  read access to the associated repository.
+- Session views are visible to application administrators, their owner, or callers with read access to the
+  associated repository. Proxy views are repository-scoped rather than user-owned: they are visible to application
+  administrators or callers with read access to the associated repository; a proxy without a repository association
+  is visible only to application administrators.
 - System resource and lifecycle service commands require application-admin access.
 
 Exact lookup applies the same rule as listing. Source failures and access denials are sanitized before rendering and

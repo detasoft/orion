@@ -251,8 +251,9 @@ Do not infer membership from string prefixes in the catalog. Use the fixture/sou
 Add fixture tests for `/session ls`, `/session/<selector> show`, and `/proxy ls`:
 
 - admin sees all;
-- owner sees their sessions/proxies;
-- a caller with repository read access sees associated entries;
+- a session owner sees their sessions;
+- a caller with repository read access sees associated sessions and proxies;
+- a proxy without an associated repository is visible only to an administrator;
 - unrelated entries are filtered before resolution, counts, and ambiguity;
 - rows are sorted by canonical ID and have stable fields from the design;
 - an absent source returns `SERVICE_UNAVAILABLE`; an unexpected failure returns `HANDLER_FAILED` without the cause.
