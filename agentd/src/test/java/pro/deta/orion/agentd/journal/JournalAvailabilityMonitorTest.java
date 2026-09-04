@@ -42,7 +42,7 @@ class JournalAvailabilityMonitorTest {
     Path temporaryDirectory;
 
     @Test
-    void returnsEveryFilesystemEventAndOverflowWithoutDroppingTheirKinds() throws Exception {
+    void coalescesAllEventsFromAWatchKeyIntoOneRescan() throws Exception {
         FakeWatchKey key = new FakeWatchKey(true, List.of(
                 new FakeWatchEvent(StandardWatchEventKinds.ENTRY_CREATE, Path.of("00000001.cbor")),
                 new FakeWatchEvent(StandardWatchEventKinds.ENTRY_MODIFY, Path.of("00000001.cbor")),
@@ -53,71 +53,27 @@ class JournalAvailabilityMonitorTest {
                 new JournalAvailabilityMonitor.WatchServiceEvents(watchService, () -> key, key);
         JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(events, Duration.ofSeconds(1));
 
-        assertThat(monitor.await()).isEqualTo(new JournalAvailabilityMonitor.Trigger(
-                JournalAvailabilityMonitor.TriggerKind.CREATED,
-                Optional.of(Path.of("00000001.cbor"))));
-        assertThat(monitor.await()).isEqualTo(new JournalAvailabilityMonitor.Trigger(
-                JournalAvailabilityMonitor.TriggerKind.MODIFIED,
-                Optional.of(Path.of("00000001.cbor"))));
-        assertThat(monitor.await()).isEqualTo(new JournalAvailabilityMonitor.Trigger(
-                JournalAvailabilityMonitor.TriggerKind.DELETED,
-                Optional.of(Path.of("00000001.cbor"))));
-        assertThat(monitor.await()).isEqualTo(new JournalAvailabilityMonitor.Trigger(
-                JournalAvailabilityMonitor.TriggerKind.OVERFLOW,
-                Optional.empty()));
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
+        assertThat(watchService.timedPolls()).hasValue(1);
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
+        assertThat(watchService.timedPolls()).hasValue(2);
     }
 
     @Test
-    void requiresAPresentRelativePathForEntryTriggers() {
-        List<JournalAvailabilityMonitor.TriggerKind> entryKinds = List.of(
-                JournalAvailabilityMonitor.TriggerKind.CREATED,
-                JournalAvailabilityMonitor.TriggerKind.MODIFIED,
-                JournalAvailabilityMonitor.TriggerKind.DELETED);
-
-        for (JournalAvailabilityMonitor.TriggerKind kind : entryKinds) {
-            assertThatThrownBy(() -> new JournalAvailabilityMonitor.Trigger(kind, Optional.empty()))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> new JournalAvailabilityMonitor.Trigger(
-                    kind,
-                    Optional.of(temporaryDirectory)))
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
-    }
-
-    @Test
-    void rejectsPathsForNonEntryTriggers() {
-        List<JournalAvailabilityMonitor.TriggerKind> pathlessKinds = List.of(
-                JournalAvailabilityMonitor.TriggerKind.OVERFLOW,
-                JournalAvailabilityMonitor.TriggerKind.TIMEOUT,
-                JournalAvailabilityMonitor.TriggerKind.WATCH_RESTORED,
-                JournalAvailabilityMonitor.TriggerKind.WATCH_UNAVAILABLE,
-                JournalAvailabilityMonitor.TriggerKind.CLOSED);
-
-        for (JournalAvailabilityMonitor.TriggerKind kind : pathlessKinds) {
-            assertThatThrownBy(() -> new JournalAvailabilityMonitor.Trigger(
-                    kind,
-                    Optional.of(Path.of("00000001.cbor"))))
-                    .isInstanceOf(IllegalArgumentException.class);
-        }
-    }
-
-    @Test
-    void reportsOverflowWhenAnEntryEventHasAnUnusablePathContext() throws Exception {
+    void treatsAnUnusablePathContextAsARescan() throws Exception {
         FakeWatchKey key = new FakeWatchKey(true, List.of(
                 new FakeWatchEvent<>(StandardWatchEventKinds.ENTRY_CREATE, null),
                 new FakeWatchEvent<>(StandardWatchEventKinds.ENTRY_MODIFY, temporaryDirectory)));
+        FakeWatchService watchService = new FakeWatchService(key);
         JournalAvailabilityMonitor.EventSource events = new JournalAvailabilityMonitor.WatchServiceEvents(
-                new FakeWatchService(key),
+                watchService,
                 () -> key,
                 key);
         JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(events, Duration.ofSeconds(1));
 
-        assertThat(monitor.await()).isEqualTo(new JournalAvailabilityMonitor.Trigger(
-                JournalAvailabilityMonitor.TriggerKind.OVERFLOW,
-                Optional.empty()));
-        assertThat(monitor.await()).isEqualTo(new JournalAvailabilityMonitor.Trigger(
-                JournalAvailabilityMonitor.TriggerKind.OVERFLOW,
-                Optional.empty()));
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
+        assertThat(watchService.timedPolls()).hasValue(2);
     }
 
     @Test
@@ -125,7 +81,7 @@ class JournalAvailabilityMonitorTest {
         Duration tooLarge = Duration.ofSeconds(Long.MAX_VALUE);
 
         assertThatThrownBy(() -> new JournalAvailabilityMonitor(
-                new RecordingEvents(JournalAvailabilityMonitor.timeout()),
+                new RecordingEvents(JournalAvailabilityMonitor.Wakeup.RESCAN),
                 tooLarge))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("pollInterval is too large")
@@ -134,12 +90,12 @@ class JournalAvailabilityMonitorTest {
 
     @Test
     void usesAnExactOneHundredMillisecondDefaultAndReturnsPeriodicTimeout() throws Exception {
-        RecordingEvents events = new RecordingEvents(JournalAvailabilityMonitor.timeout());
+        RecordingEvents events = new RecordingEvents(JournalAvailabilityMonitor.Wakeup.RESCAN);
         JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(events);
 
-        JournalAvailabilityMonitor.Trigger trigger = monitor.await();
+        JournalAvailabilityMonitor.Wakeup trigger = monitor.await();
 
-        assertThat(trigger).isEqualTo(JournalAvailabilityMonitor.timeout());
+        assertThat(trigger).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
         assertThat(events.lastInterval()).isEqualTo(Duration.ofMillis(100));
     }
 
@@ -157,7 +113,7 @@ class JournalAvailabilityMonitorTest {
                 invalid);
         JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(events, Duration.ofSeconds(1));
 
-        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.watchRestored());
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
         assertThat(registrations).hasValue(1);
     }
 
@@ -175,9 +131,9 @@ class JournalAvailabilityMonitorTest {
                 invalid);
         JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(events, Duration.ofSeconds(1));
 
-        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.watchUnavailable());
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
         assertThat(registrations).hasValue(1);
-        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.watchUnavailable());
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
         assertThat(registrations).hasValue(2);
         assertThat(watchService.lastPollInterval()).isEqualTo(Duration.ofSeconds(1));
         assertThat(watchService.timedPolls()).hasValue(2);
@@ -188,16 +144,16 @@ class JournalAvailabilityMonitorTest {
         BlockingEvents events = new BlockingEvents();
         JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(events, Duration.ofSeconds(30));
 
-        JournalAvailabilityMonitor.Trigger first;
+        JournalAvailabilityMonitor.Wakeup first;
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<JournalAvailabilityMonitor.Trigger> waiting = executor.submit(monitor::await);
+            Future<JournalAvailabilityMonitor.Wakeup> waiting = executor.submit(monitor::await);
             events.awaitEntered();
             monitor.close();
             first = waiting.get(1, TimeUnit.SECONDS);
         }
 
-        assertThat(first).isEqualTo(JournalAvailabilityMonitor.closed());
-        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.closed());
+        assertThat(first).isEqualTo(JournalAvailabilityMonitor.Wakeup.CLOSED);
+        assertThat(monitor.await()).isEqualTo(JournalAvailabilityMonitor.Wakeup.CLOSED);
     }
 
     @Test
@@ -222,7 +178,7 @@ class JournalAvailabilityMonitorTest {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
              JournalAvailabilityMonitor monitor = new JournalAvailabilityMonitor(temporaryDirectory)) {
             Future<WakeupRead> following = executor.submit(() -> {
-                JournalAvailabilityMonitor.Trigger wakeup = monitor.await();
+                JournalAvailabilityMonitor.Wakeup wakeup = monitor.await();
                 JournalReadPage completed = reader.readPage(
                         temporaryDirectory,
                         position.lastEventId(),
@@ -238,30 +194,25 @@ class JournalAvailabilityMonitorTest {
         }
 
         assertThat(partial.boundary()).isEqualTo(JournalReadBoundary.INCOMPLETE_TAIL);
-        assertThat(result.wakeup().kind()).isIn(
-                JournalAvailabilityMonitor.TriggerKind.MODIFIED,
-                JournalAvailabilityMonitor.TriggerKind.TIMEOUT);
-        if (result.wakeup().kind() == JournalAvailabilityMonitor.TriggerKind.MODIFIED) {
-            assertThat(result.wakeup().relativePath()).contains(Path.of("00000001.cbor"));
-        }
+        assertThat(result.wakeup()).isEqualTo(JournalAvailabilityMonitor.Wakeup.RESCAN);
         assertThat(result.page().records()).extracting(SessionEventRecord::eventId)
                 .containsExactly(new EventId(1));
         assertThat(result.page().boundary()).isEqualTo(JournalReadBoundary.COMPLETE);
     }
 
-    private record WakeupRead(JournalAvailabilityMonitor.Trigger wakeup, JournalReadPage page) {
+    private record WakeupRead(JournalAvailabilityMonitor.Wakeup wakeup, JournalReadPage page) {
     }
 
     private static final class RecordingEvents implements JournalAvailabilityMonitor.EventSource {
-        private final JournalAvailabilityMonitor.Trigger trigger;
+        private final JournalAvailabilityMonitor.Wakeup trigger;
         private final AtomicReference<Duration> lastInterval = new AtomicReference<>();
 
-        RecordingEvents(JournalAvailabilityMonitor.Trigger trigger) {
+        RecordingEvents(JournalAvailabilityMonitor.Wakeup trigger) {
             this.trigger = trigger;
         }
 
         @Override
-        public JournalAvailabilityMonitor.Trigger await(Duration interval) {
+        public JournalAvailabilityMonitor.Wakeup await(Duration interval) {
             lastInterval.set(interval);
             return trigger;
         }
@@ -280,10 +231,10 @@ class JournalAvailabilityMonitorTest {
         private final CountDownLatch closed = new CountDownLatch(1);
 
         @Override
-        public JournalAvailabilityMonitor.Trigger await(Duration interval) throws InterruptedException {
+        public JournalAvailabilityMonitor.Wakeup await(Duration interval) throws InterruptedException {
             entered.countDown();
             closed.await();
-            return JournalAvailabilityMonitor.timeout();
+            return JournalAvailabilityMonitor.Wakeup.RESCAN;
         }
 
         void awaitEntered() throws InterruptedException {

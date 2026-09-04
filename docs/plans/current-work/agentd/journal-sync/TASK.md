@@ -11,7 +11,7 @@ forward durable commit acknowledgements to `session-host` for safe retention.
 ## Dependencies
 
 - Completed AgentD HTTP/2 transport and session discovery.
-- [Paged journal reader](../paged-journal-reader/TASK.md).
+- Completed paged journal reader.
 - Native-host `ACK_JOURNAL` compatibility contract from
   the [control-journal idempotency design](../../../2026-09-03-native-control-journal-idempotency-design.md).
 

@@ -31,35 +31,20 @@ import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public final class FileSystemSessionJournalReader implements SessionJournalReader {
+public final class FileSystemSessionJournalReader {
     private static final Pattern SEGMENT_NAME = Pattern.compile("([0-9]{8})\\.cbor(\\.zst)?");
     private static final int READ_BUFFER_BYTES = 16 * 1024;
     private static final long MAX_DECOMPRESSED_SEGMENT_BYTES = 512L * 1024 * 1024;
-    private final Consumer<Path> beforePositionedRead;
+    private final Consumer<Path> beforeSegmentRead;
 
     public FileSystemSessionJournalReader() {
-        this(ignored -> {
-        });
+        this(ignored -> { });
     }
 
-    FileSystemSessionJournalReader(Consumer<Path> beforePositionedRead) {
-        this.beforePositionedRead = Objects.requireNonNull(
-                beforePositionedRead,
-                "beforePositionedRead");
+    FileSystemSessionJournalReader(Consumer<Path> beforeSegmentRead) {
+        this.beforeSegmentRead = Objects.requireNonNull(beforeSegmentRead, "beforeSegmentRead");
     }
 
-    @Override
-    public JournalReadResult readAfter(Path sessionDirectory, Optional<EventId> cursor) {
-        Objects.requireNonNull(sessionDirectory, "sessionDirectory");
-        Objects.requireNonNull(cursor, "cursor");
-        Accumulator accumulator = readSnapshot(sessionDirectory, cursor);
-        if (accumulator.staleSnapshot) {
-            accumulator = readSnapshot(sessionDirectory, cursor);
-        }
-        return accumulator.result();
-    }
-
-    @Override
     public JournalReadPage readPage(
             Path sessionDirectory,
             Optional<EventId> cursor,
@@ -125,7 +110,7 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
                 Optional<PageResume> resume = resume(segments, oldest, oldestFile, supplied);
                 if (resume.isPresent()) {
                     PageResume selected = resume.orElseThrow();
-                    beforePositionedRead.accept(segments.get(selected.segmentIndex()).path());
+                    beforeSegmentRead.accept(segments.get(selected.segmentIndex()).path());
                     accumulator.resume(supplied);
                     scanPageSegments(
                             segments,
@@ -150,14 +135,42 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         return accumulator;
     }
 
-    private static void readPageFromCursor(
+    private void readPageFromCursor(
             List<Segment> segments,
             PageAccumulator accumulator
     ) {
-        List<Optional<EventId>> firstEventIds = new ArrayList<>();
-        EventId previousFirst = null;
-        EventId availableFirst = null;
-        for (int index = 0; index < segments.size(); index++) {
+        Segment oldest = segments.getFirst();
+        FirstEvent oldestFirst = readFirstEvent(oldest, segments.size() == 1 && !oldest.compressed());
+        if (oldestFirst.issue().isPresent()) {
+            recordFirstEventIssue(accumulator, oldestFirst);
+            return;
+        }
+        Optional<EventId> oldestEventId = oldestFirst.eventId();
+        if (oldestEventId.isEmpty()) {
+            if (segments.size() > 1) {
+                accumulator.issue = new JournalReadIssue.Layout(
+                        Optional.of(oldest.path()),
+                        "closed journal segment must not be empty");
+                return;
+            }
+            scanPageSegments(segments, 0, 0, segments.size(), accumulator);
+            return;
+        }
+        EventId availableFirst = oldestEventId.orElseThrow();
+        accumulator.first = availableFirst;
+        if (accumulator.cursor.isEmpty()) {
+            scanPageSegments(segments, 0, 0, segments.size(), accumulator);
+            return;
+        }
+        EventId requested = accumulator.cursor.orElseThrow();
+        if (requested.compareTo(availableFirst) < 0) {
+            accumulator.gapFirst = availableFirst;
+            return;
+        }
+
+        int start = 0;
+        EventId previousFirst = availableFirst;
+        for (int index = 1; index < segments.size(); index++) {
             Segment segment = segments.get(index);
             boolean active = index + 1 == segments.size() && !segment.compressed();
             FirstEvent firstEvent = readFirstEvent(segment, active);
@@ -166,8 +179,6 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
                     accumulator.discardAsStale(firstEvent.issue().orElseThrow());
                     return;
                 }
-                accumulator.first = availableFirst;
-                int start = startSegment(firstEventIds, accumulator.cursor);
                 scanPageSegments(segments, start, 0, index, accumulator);
                 if (accumulator.issue == null) {
                     accumulator.issue = firstEvent.issue().orElseThrow();
@@ -190,15 +201,22 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
                     return;
                 }
                 previousFirst = currentFirst;
-                if (availableFirst == null) {
-                    availableFirst = currentFirst;
+                if (currentFirst.compareTo(requested) > 0) {
+                    break;
                 }
+                start = index;
             }
-            firstEventIds.add(firstEventId);
         }
-        accumulator.first = availableFirst;
-        int start = startSegment(firstEventIds, accumulator.cursor);
         scanPageSegments(segments, start, 0, segments.size(), accumulator);
+    }
+
+    private static void recordFirstEventIssue(PageAccumulator accumulator, FirstEvent firstEvent) {
+        JournalReadIssue issue = firstEvent.issue().orElseThrow();
+        if (firstEvent.staleSnapshot()) {
+            accumulator.discardAsStale(issue);
+        } else {
+            accumulator.issue = issue;
+        }
     }
 
     private static Optional<PageResume> resume(
@@ -440,83 +458,6 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         return new PageAccept(completeOffset, true);
     }
 
-    private static Accumulator readSnapshot(Path sessionDirectory, Optional<EventId> cursor) {
-        Accumulator accumulator = new Accumulator(cursor);
-        List<Segment> segments;
-        try {
-            segments = segments(sessionDirectory);
-        } catch (IOException exception) {
-            accumulator.issue = new JournalReadIssue.Io(Optional.empty(), detail(exception));
-            return accumulator;
-        }
-        Optional<String> layoutIssue = layoutIssue(segments);
-        if (layoutIssue.isPresent()) {
-            accumulator.issue = new JournalReadIssue.Layout(Optional.empty(), layoutIssue.orElseThrow());
-            return accumulator;
-        }
-        List<Optional<EventId>> firstEventIds = new ArrayList<>();
-        EventId previousFirst = null;
-        EventId availableFirst = null;
-        for (int index = 0; index < segments.size(); index++) {
-            Segment segment = segments.get(index);
-            boolean active = index + 1 == segments.size() && !segment.compressed();
-            FirstEvent firstEvent = readFirstEvent(segment, active);
-            if (firstEvent.issue().isPresent()) {
-                if (firstEvent.staleSnapshot()) {
-                    accumulator.discardAsStale(firstEvent.issue().orElseThrow());
-                    return accumulator;
-                }
-                accumulator.first = availableFirst;
-                int start = startSegment(firstEventIds, cursor);
-                scanSegments(segments, start, index, accumulator);
-                if (accumulator.issue == null) {
-                    accumulator.issue = firstEvent.issue().orElseThrow();
-                }
-                return accumulator;
-            }
-            Optional<EventId> firstEventId = firstEvent.eventId();
-            if (firstEventId.isEmpty() && index + 1 < segments.size()) {
-                accumulator.issue = new JournalReadIssue.Layout(
-                        Optional.of(segment.path()),
-                        "closed journal segment must not be empty");
-                return accumulator;
-            }
-            if (firstEventId.isPresent()) {
-                EventId currentFirst = firstEventId.orElseThrow();
-                if (previousFirst != null && currentFirst.compareTo(previousFirst) <= 0) {
-                    accumulator.issue = new JournalReadIssue.EventOrder(
-                            Optional.of(segment.path()),
-                            "journal segment first event IDs must be strictly increasing");
-                    return accumulator;
-                }
-                previousFirst = currentFirst;
-                if (availableFirst == null) {
-                    availableFirst = currentFirst;
-                }
-            }
-            firstEventIds.add(firstEventId);
-        }
-        accumulator.first = availableFirst;
-        int start = startSegment(firstEventIds, cursor);
-        scanSegments(segments, start, segments.size(), accumulator);
-        return accumulator;
-    }
-
-    private static void scanSegments(
-            List<Segment> segments,
-            int start,
-            int end,
-            Accumulator accumulator
-    ) {
-        for (int index = start; index < end; index++) {
-            Segment segment = segments.get(index);
-            boolean active = index + 1 == segments.size() && !segment.compressed();
-            if (!readSegment(segment, active, accumulator)) {
-                return;
-            }
-        }
-    }
-
     private static List<Segment> segments(Path directory) throws IOException {
         Map<Long, SegmentCandidates> candidates = new TreeMap<>();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory)) {
@@ -563,22 +504,8 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         return Optional.empty();
     }
 
-    private static int startSegment(List<Optional<EventId>> firstEventIds, Optional<EventId> cursor) {
-        if (cursor.isEmpty()) {
-            return 0;
-        }
-        EventId requested = cursor.orElseThrow();
-        int start = 0;
-        for (int index = 0; index < firstEventIds.size(); index++) {
-            Optional<EventId> first = firstEventIds.get(index);
-            if (first.isPresent() && first.orElseThrow().compareTo(requested) <= 0) {
-                start = index;
-            }
-        }
-        return start;
-    }
-
-    private static FirstEvent readFirstEvent(Segment segment, boolean active) {
+    private FirstEvent readFirstEvent(Segment segment, boolean active) {
+        beforeSegmentRead.accept(segment.path());
         SessionEventDecoder decoder = new SessionEventDecoder(AgentProtocolLimits.journalDefaults());
         byte[] buffer = new byte[READ_BUFFER_BYTES];
         try (InputStream input = open(segment)) {
@@ -619,44 +546,6 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
             return FirstEvent.failed(issue(segment.path(), terminal.exception()));
         } catch (IOException exception) {
             return FirstEvent.failed(ioIssue(segment, exception), exception instanceof NoSuchFileException);
-        }
-    }
-
-    private static boolean readSegment(Segment segment, boolean active, Accumulator accumulator) {
-        SessionEventDecoder decoder = new SessionEventDecoder(AgentProtocolLimits.journalDefaults());
-        byte[] buffer = new byte[READ_BUFFER_BYTES];
-        long decodedBytes = 0;
-        try (InputStream input = open(segment)) {
-            int length;
-            while ((length = input.read(buffer)) >= 0) {
-                if (length == 0) {
-                    continue;
-                }
-                decodedBytes += length;
-                if (segment.compressed() && decodedBytes > MAX_DECOMPRESSED_SEGMENT_BYTES) {
-                    accumulator.issue = new JournalReadIssue.Limit(
-                            Optional.of(segment.path()),
-                            "decompressed journal segment exceeds 512 MiB");
-                    return false;
-                }
-                SequenceDecodeResult<SessionEventRecord> decoded = decoder.accept(
-                        ByteBuffer.wrap(buffer, 0, length));
-                if (!accept(decoded, segment.path(), accumulator)) {
-                    return false;
-                }
-            }
-            if (active && decoder.pendingBytes() > 0) {
-                accumulator.ignoredIncompleteTail = true;
-                return true;
-            }
-            return accept(decoder.finish(), segment.path(), accumulator);
-        } catch (IOException exception) {
-            if (exception instanceof NoSuchFileException) {
-                accumulator.discardAsStale(ioIssue(segment, exception));
-                return false;
-            }
-            accumulator.issue = ioIssue(segment, exception);
-            return false;
         }
     }
 
@@ -722,29 +611,6 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         return new JournalReadIssue.Io(Optional.of(segment.path()), detail(exception));
     }
 
-    private static boolean accept(
-            SequenceDecodeResult<SessionEventRecord> result,
-            Path segment,
-            Accumulator accumulator
-    ) {
-        for (SequenceDecodeResult.Outcome<SessionEventRecord> outcome : result.outcomes()) {
-            if (outcome instanceof SequenceDecodeResult.Decoded<SessionEventRecord> decoded) {
-                if (!accumulator.accept(decoded.value(), segment)) {
-                    return false;
-                }
-            } else if (outcome instanceof SequenceDecodeResult.Rejected<SessionEventRecord> rejected) {
-                accumulator.issue = issue(segment, rejected.issue().exception());
-                return false;
-            }
-        }
-        if (result.terminalIssue().isPresent()) {
-            SequenceDecodeIssue.Terminal terminal = result.terminalIssue().orElseThrow();
-            accumulator.issue = issue(segment, terminal.exception());
-            return false;
-        }
-        return true;
-    }
-
     private static JournalReadIssue issue(Path segment, AgentProtocolException exception) {
         if (exception.reason() == AgentProtocolException.Reason.LIMIT_EXCEEDED) {
             return new JournalReadIssue.Limit(Optional.of(segment), detail(exception));
@@ -802,69 +668,14 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         private Path compressed;
     }
 
-    private static final class Accumulator {
-        private final Optional<EventId> cursor;
-        private final List<SessionEventRecord> records = new ArrayList<>();
-        private EventId first;
-        private EventId last;
-        private JournalReadIssue issue;
-        private boolean ignoredIncompleteTail;
-        private boolean staleSnapshot;
-
-        private Accumulator(Optional<EventId> cursor) {
-            this.cursor = cursor;
-        }
-
-        private boolean accept(SessionEventRecord record, Path segment) {
-            EventId eventId = record.eventId();
-            if (eventId.value() == 0 || last != null && eventId.compareTo(last) <= 0) {
-                issue = new JournalReadIssue.EventOrder(
-                        Optional.of(segment),
-                        "journal event IDs must be nonzero and strictly increasing");
-                return false;
-            }
-            if (first == null) {
-                first = eventId;
-            }
-            last = eventId;
-            if (cursor.isEmpty() || eventId.compareTo(cursor.orElseThrow()) > 0) {
-                records.add(record);
-            }
-            return true;
-        }
-
-        private void discardAsStale(JournalReadIssue staleIssue) {
-            records.clear();
-            first = null;
-            last = null;
-            ignoredIncompleteTail = false;
-            issue = staleIssue;
-            staleSnapshot = true;
-        }
-
-        private JournalReadResult result() {
-            EventId confirmedFirst = last == null ? null : first;
-            Optional<JournalCursorGap> gap = cursor
-                    .filter(requested -> confirmedFirst != null && requested.compareTo(confirmedFirst) < 0)
-                    .map(requested -> new JournalCursorGap(requested, confirmedFirst));
-            return new JournalReadResult(
-                    records,
-                    Optional.ofNullable(confirmedFirst),
-                    Optional.ofNullable(last),
-                    gap,
-                    ignoredIncompleteTail,
-                    Optional.ofNullable(issue));
-        }
-    }
-
     private static final class PageAccumulator {
         private final Optional<EventId> cursor;
         private final JournalReadLimits limits;
         private final List<SessionEventRecord> records = new ArrayList<>();
         private long encodedBytes;
         private EventId first;
-        private EventId last;
         private EventId orderLast;
+        private EventId gapFirst;
         private JournalReadIssue issue;
         private boolean incompleteTail;
         private boolean pageLimit;
@@ -876,6 +687,7 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         private long checkpointOffset;
         private Optional<EventId> checkpointLogicalEventId;
         private Optional<EventId> checkpointPhysicalEventId;
+        private boolean firstRecordInSegment;
 
         private PageAccumulator(Optional<EventId> cursor, JournalReadLimits limits) {
             this.cursor = cursor;
@@ -891,19 +703,16 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
 
         private void resume(JournalReadPosition position) {
             first = position.firstAvailableEventId().orElse(null);
-            last = position.previousPhysicalEventId().orElse(null);
-            orderLast = last;
+            orderLast = position.previousPhysicalEventId().orElse(null);
             checkpointLogicalEventId = position.lastEventId();
             checkpointPhysicalEventId = position.previousPhysicalEventId();
         }
 
         private void beginSegment(Segment segment, SegmentFile file, long offset) {
-            if (pageLimit) {
-                return;
-            }
             checkpointSegment = segment;
             checkpointFile = file;
             checkpointOffset = offset;
+            firstRecordInSegment = offset == 0;
         }
 
         private boolean accept(
@@ -914,26 +723,31 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         ) {
             EventId eventId = record.eventId();
             if (eventId.value() == 0 || orderLast != null && eventId.compareTo(orderLast) <= 0) {
+                if (firstRecordInSegment && orderLast != null) {
+                    records.clear();
+                    encodedBytes = 0;
+                }
                 issue = new JournalReadIssue.EventOrder(
                         Optional.of(segment.path()),
                         "journal event IDs must be nonzero and strictly increasing");
                 return false;
             }
-            orderLast = eventId;
-            if (first == null) {
-                first = eventId;
-            }
-            last = eventId;
+            firstRecordInSegment = false;
             if (cursor.isPresent() && eventId.compareTo(cursor.orElseThrow()) <= 0) {
-                if (!pageLimit) {
-                    checkpoint(segment, file, completeOffset, cursor, eventId);
+                orderLast = eventId;
+                if (first == null) {
+                    first = eventId;
                 }
+                checkpoint(segment, file, completeOffset, cursor, eventId);
                 return true;
             }
             int recordBytes = record.encodedRecord().size();
-            if (!pageLimit
-                    && records.size() < limits.maxRecords()
+            if (records.size() < limits.maxRecords()
                     && recordBytes <= limits.maxEncodedBytes() - encodedBytes) {
+                orderLast = eventId;
+                if (first == null) {
+                    first = eventId;
+                }
                 records.add(record);
                 encodedBytes += recordBytes;
                 checkpoint(
@@ -942,10 +756,15 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
                         completeOffset,
                         Optional.of(eventId),
                         eventId);
+                if (records.size() == limits.maxRecords()
+                        || encodedBytes == limits.maxEncodedBytes()) {
+                    pageLimit = true;
+                    return false;
+                }
                 return true;
             }
             pageLimit = true;
-            return true;
+            return false;
         }
 
         private void checkpoint(
@@ -966,11 +785,11 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
             records.clear();
             encodedBytes = 0;
             first = null;
-            last = null;
             orderLast = null;
             issue = staleIssue;
             incompleteTail = false;
             pageLimit = false;
+            gapFirst = null;
             staleSnapshot = true;
             checkpointSegment = null;
             checkpointFile = null;
@@ -980,10 +799,11 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
         }
 
         private JournalReadPage result() {
-            EventId confirmedFirst = last == null ? null : first;
+            EventId confirmedFirst = orderLast == null ? null : first;
+            EventId availableFirst = gapFirst == null ? confirmedFirst : gapFirst;
             Optional<JournalCursorGap> gap = cursor
-                    .filter(requested -> confirmedFirst != null && requested.compareTo(confirmedFirst) < 0)
-                    .map(requested -> new JournalCursorGap(requested, confirmedFirst));
+                    .filter(ignored -> gapFirst != null)
+                    .map(requested -> new JournalCursorGap(requested, gapFirst));
             JournalReadBoundary boundary;
             Optional<JournalReadIssue> resultIssue = Optional.empty();
             if (gap.isPresent()) {
@@ -999,10 +819,9 @@ public final class FileSystemSessionJournalReader implements SessionJournalReade
                 boundary = JournalReadBoundary.COMPLETE;
             }
             return new JournalReadPage(
-                    records,
-                    Optional.ofNullable(confirmedFirst),
-                    Optional.ofNullable(last),
-                    position(confirmedFirst),
+                    gap.isPresent() ? List.of() : records,
+                    Optional.ofNullable(availableFirst),
+                    gap.isPresent() ? Optional.empty() : position(confirmedFirst),
                     boundary,
                     gap,
                     resultIssue);

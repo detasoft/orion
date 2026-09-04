@@ -22,7 +22,6 @@ the AgentD lifecycle.
 
 ## Child Tasks
 
-- [ ] [Keep one paged journal reader](paged-journal-reader/TASK.md)
 - [ ] [Synchronize and resume journal events](journal-sync/TASK.md)
 - [ ] [Route server session commands](command-orchestration/TASK.md)
 - [ ] [Run AgentD as a local interactive terminal](local-terminal/TASK.md)
