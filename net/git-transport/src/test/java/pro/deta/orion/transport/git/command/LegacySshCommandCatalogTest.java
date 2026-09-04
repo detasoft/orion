@@ -15,6 +15,7 @@ import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandLineParser;
+import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandPath;
 import pro.deta.orion.command.CommandPresentation;
 import pro.deta.orion.command.CommandRequest;
@@ -27,6 +28,9 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.StateMachineDefinition;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
+import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
+import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
+import pro.deta.orion.transport.git.command.read.OperatorQueryResult;
 import pro.deta.orion.util.Result;
 
 import java.util.List;
@@ -39,14 +43,16 @@ import static pro.deta.orion.schema.acl.AccessControl.TRUE_STRING;
 class LegacySshCommandCatalogTest {
     private final RecordingAccessControlService accessControl = new RecordingAccessControlService();
     private final AtomicBoolean shutdown = new AtomicBoolean();
+    private final CommandNode commandTree = new LegacySshCommandCatalog(
+            accessControl,
+            new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
+            new RepositoryProvider(),
+            () -> shutdown.set(true),
+            new ReadOnlyDomainCommandCatalog(new DomainSource()))
+            .commandTree();
     private final CommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
-            new LegacySshCommandCatalog(
-                    accessControl,
-                    new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
-                    new RepositoryProvider(),
-                    () -> shutdown.set(true))
-                    .commandTree());
+            commandTree);
 
     @Test
     void tokenAliasesIssueTokensWithPositiveExpiry() {
@@ -100,6 +106,31 @@ class LegacySshCommandCatalogTest {
     }
 
     @Test
+    void composesReadOnlyDomainTreeAlongsideLegacyAliases() {
+        assertThat(commandTree.children().keySet())
+                .containsExactly("auth", "repository", "organization", "session", "proxy", "system");
+        assertThat(commandTree.actions().keySet())
+                .containsExactly(
+                        "whoami",
+                        "issue-token",
+                        "token",
+                        "state",
+                        "status",
+                        "repositories",
+                        "shutdown");
+
+        assertThat(dispatch("whoami", user(List.of())))
+                .isEqualTo(new CommandResult.ObjectValue(Map.of("userId", "operator")));
+        assertThat(dispatch("/repository ls", user(List.of(grant(
+                AccessControl.GrantKey.REPOSITORY,
+                "project")))))
+                .isEqualTo(new CommandResult.Rows(
+                        List.of("id", "name", "defaultHead", "refCount"),
+                        List.of(List.of("project", "project", "refs/heads/main", "1"))));
+        assertFailure(dispatch("/organization ls", user(List.of())), CommandFailureCode.SERVICE_UNAVAILABLE);
+    }
+
+    @Test
     void loggingAuditPayloadCannotContainSensitiveResultValues() {
         CommandAuditRecord record = new CommandAuditRecord(
                 "operator",
@@ -140,8 +171,12 @@ class LegacySshCommandCatalogTest {
     }
 
     private static AccessControl.Grant grant(AccessControl.GrantKey key) {
+        return grant(key, TRUE_STRING);
+    }
+
+    private static AccessControl.Grant grant(AccessControl.GrantKey key, String value) {
         return new AccessControlDraft.Grant("test", new java.util.ArrayList<>())
-                .addKey(key, TRUE_STRING)
+                .addKey(key, value)
                 .toAccessControl();
     }
 
@@ -244,6 +279,57 @@ class LegacySshCommandCatalogTest {
         @Override
         public Result<NativeGitRepository> create(String repositoryName) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    private static final class DomainSource implements OperatorDomainSource {
+        @Override
+        public OperatorQueryResult<List<OperatorDomainViews.RepositoryView>> repositories() {
+            return new OperatorQueryResult.AvailableSnapshot<>(List.of(new OperatorDomainViews.RepositoryView(
+                    "project",
+                    java.util.Optional.of("project"),
+                    "project",
+                    "refs/heads/main",
+                    1,
+                    java.util.Optional.empty())));
+        }
+
+        @Override
+        public OperatorQueryResult<List<OperatorDomainViews.OrganizationView>> organizations() {
+            return new OperatorQueryResult.Unavailable<>("organization");
+        }
+
+        @Override
+        public OperatorQueryResult<List<OperatorDomainViews.UserView>> organizationUsers(
+                String organizationId) {
+            return new OperatorQueryResult.Unavailable<>("organization");
+        }
+
+        @Override
+        public OperatorQueryResult<List<OperatorDomainViews.RepositoryView>> organizationRepositories(
+                String organizationId) {
+            return new OperatorQueryResult.Unavailable<>("organization");
+        }
+
+        @Override
+        public OperatorQueryResult<List<OperatorDomainViews.SessionView>> sessions() {
+            return new OperatorQueryResult.Unavailable<>("session");
+        }
+
+        @Override
+        public OperatorQueryResult<List<OperatorDomainViews.ProxyView>> proxies() {
+            return new OperatorQueryResult.Unavailable<>("proxy");
+        }
+
+        @Override
+        public OperatorQueryResult<OperatorDomainViews.SystemResourceView> systemResources() {
+            return new OperatorQueryResult.AvailableValue<>(
+                    new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
+        }
+
+        @Override
+        public OperatorQueryResult<List<OperatorDomainViews.ServiceView>> services() {
+            return new OperatorQueryResult.AvailableSnapshot<>(List.of());
         }
     }
 }

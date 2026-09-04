@@ -226,6 +226,46 @@ password, and token authentication. Normal restarts preserve that lock; only
 starting Orion with `--reset-root-pass` restores the one-time root key recovery
 flow.
 
+### Read-only SSH commands
+
+Named SSH users can inspect Orion through the same command tree in exec and
+interactive sessions:
+
+```text
+whoami
+/repository ls
+/repository/<id-or-name> show
+/organization ls
+/organization/<id-or-name>/user ls
+/organization/<id-or-name>/repository ls
+/session ls
+/session/<id-or-name> show
+/proxy ls
+/system resource
+/system/service ls
+```
+
+Repository rows contain `id`, `name`, `defaultHead`, and `refCount`; repository
+objects additionally contain the backing `repositoryName`. Session rows and
+objects contain `id`, `name`, `state`, `ownerId`, and `repositoryName`. Proxy
+rows contain `id`, `name`, `state`, `repositoryName`, and `remote`. System
+resources report processor and heap byte counts. Service rows contain `id`,
+`name`, `state`, `computedState`, and `terminal`.
+
+Dynamic selectors resolve in this order: exact canonical ID, unique authorized
+ID prefix, then exact authorized display name. Every collection and selector
+is filtered using the concrete resource's ACL before rows, ambiguity candidates,
+navigation entries, or completion candidates are produced. Administrators can
+inspect every resource. Other users see readable repositories, their own or
+repository-associated sessions, and repository-associated proxies. System
+resources and lifecycle services are administrator-only.
+
+An available source with no entries returns an empty table. A domain whose
+runtime adapter is not installed returns `SERVICE_UNAVAILABLE`; an unexpected
+backend failure returns a sanitized `HANDLER_FAILED`. Organization, session,
+and proxy adapters are supplied by their owning runtime subsystems and are not
+fabricated by scanning configuration or storage files.
+
 The configuration JSON schema is public and does not require an admin token:
 
 ```sh

@@ -7,6 +7,7 @@ public enum CommandAction {
     SHOW("show"),
     ADD("add"),
     REMOVE("rm"),
+    RESOURCE("resource"),
     ATTACH("attach"),
     MONITOR("monitor");
 

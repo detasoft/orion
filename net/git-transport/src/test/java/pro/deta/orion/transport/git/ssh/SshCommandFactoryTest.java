@@ -14,11 +14,19 @@ import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandFailureCode;
+import pro.deta.orion.command.CommandLineParser;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
+import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.transport.git.command.ReadOnlyDomainCommandCatalog;
+import pro.deta.orion.transport.git.command.read.DefaultOperatorDomainSource;
+import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
@@ -90,6 +98,44 @@ class SshCommandFactoryTest {
         assertFalse(request.context().auditMetadata().toString()
                 .contains(credentialFacts.candidatePublicKeys().getFirst()));
         assertEquals(Map.of("transport", "ssh", "requestType", "exec"), request.context().auditMetadata());
+    }
+
+    @Test
+    void readOnlyDomainExecRendersPlainOutputWithoutPromptOrAnsi() throws Exception {
+        DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
+                new InMemoryNativeGitRepositoryProvider(),
+                new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
+                () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
+        DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
+                new CommandLineParser(),
+                new ReadOnlyDomainCommandCatalog(source).commandTree());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteArrayOutputStream error = new ByteArrayOutputStream();
+
+        ExitOutcome exit = run(factory(dispatcher), channel(true), "whoami", output, error);
+
+        assertEquals(0, exit.code());
+        assertEquals("userId=operator\n", output.toString(StandardCharsets.UTF_8));
+        assertEquals("", error.toString(StandardCharsets.UTF_8));
+        assertFalse(output.toString(StandardCharsets.UTF_8).contains("\u001b["));
+        assertFalse(output.toString(StandardCharsets.UTF_8).contains("@orion] >"));
+    }
+
+    @Test
+    void execEscapesHostileStructuredFields() throws Exception {
+        CommandDispatcher dispatcher = ignored -> new CommandResult.ObjectValue(Map.of(
+                "repositoryName", "evil\r\n\t\u001b\\name"));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        ExitOutcome exit = run(
+                factory(dispatcher),
+                channel(true),
+                "/repository/evil show",
+                output,
+                new ByteArrayOutputStream());
+
+        assertEquals(0, exit.code());
+        assertEquals("repositoryName=evil\\r\\n\\t\\u001B\\\\name\n", output.toString(StandardCharsets.UTF_8));
     }
 
     @Test

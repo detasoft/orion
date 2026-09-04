@@ -148,6 +148,40 @@ class StateMachineTest {
     }
 
     @Test
+    void stateMachineFindsDirectChildrenByExactKeyDespiteRecursiveNameCollisions() {
+        StateMachine nestedCollision = StateMachineDefinition.define()
+                .name("nested-collision")
+                .build()
+                .newStateMachine();
+        StateMachine branch = StateMachineDefinition.define()
+                .name("branch")
+                .child("target", nestedCollision)
+                .build()
+                .newStateMachine();
+        StateMachine directTarget = StateMachineDefinition.define()
+                .name("direct-target")
+                .build()
+                .newStateMachine();
+        StateMachine sameAsRootName = StateMachineDefinition.define()
+                .name("same-as-root-name")
+                .build()
+                .newStateMachine();
+        StateMachine root = StateMachineDefinition.define()
+                .name("root")
+                .child("branch", branch)
+                .child("target", directTarget)
+                .child("root", sameAsRootName)
+                .build()
+                .newStateMachine();
+
+        assertThat(root.directChild("target")).isSameAs(directTarget);
+        assertThat(root.directChild("root")).isSameAs(sameAsRootName);
+        assertThatThrownBy(() -> root.directChild("missing"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Direct child state machine not found: missing");
+    }
+
+    @Test
     void aggregateRawStateMachineAccessorIsNotPublic() throws NoSuchMethodException {
         Method accessor = AggregateStateMachine.class.getDeclaredMethod("stateMachine");
 

@@ -49,7 +49,7 @@ public final class PlainCommandRenderer {
             if (index > 0) {
                 output.append('\t');
             }
-            output.append(row.get(index));
+            output.append(StructuredValueEscaper.escape(row.get(index)));
         }
         output.append('\n');
     }
@@ -57,9 +57,9 @@ public final class PlainCommandRenderer {
     private static String renderObject(CommandResult.ObjectValue objectValue) {
         StringBuilder output = new StringBuilder();
         for (Map.Entry<String, String> field : objectValue.fields().entrySet()) {
-            output.append(field.getKey())
+            output.append(StructuredValueEscaper.escape(field.getKey()))
                     .append('=')
-                    .append(field.getValue())
+                    .append(StructuredValueEscaper.escape(field.getValue()))
                     .append('\n');
         }
         return output.toString();
@@ -81,7 +81,7 @@ public final class PlainCommandRenderer {
 
     private static int exitCode(CommandFailureCode code) {
         return switch (code) {
-            case HANDLER_FAILED -> 1;
+            case HANDLER_FAILED, SERVICE_UNAVAILABLE -> 1;
             case INVALID_SYNTAX, INVALID_ARGUMENTS -> 2;
             case MISSING_RESOURCE -> 3;
             case AMBIGUOUS_RESOURCE -> 4;

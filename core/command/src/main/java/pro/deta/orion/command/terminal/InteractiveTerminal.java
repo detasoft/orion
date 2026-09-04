@@ -296,6 +296,21 @@ public final class InteractiveTerminal implements AutoCloseable {
                     CommandFailureCode.MISSING_RESOURCE,
                     "Resource was not found",
                     List.of()));
+        } else if (navigation instanceof CommandNavigation.Unavailable) {
+            render(new CommandResult.Failure(
+                    CommandFailureCode.SERVICE_UNAVAILABLE,
+                    "Resource service is unavailable",
+                    List.of()));
+        } else if (navigation instanceof CommandNavigation.AccessDenied) {
+            render(new CommandResult.Failure(
+                    CommandFailureCode.ACCESS_DENIED,
+                    "Access denied",
+                    List.of()));
+        } else if (navigation instanceof CommandNavigation.Failed) {
+            render(new CommandResult.Failure(
+                    CommandFailureCode.HANDLER_FAILED,
+                    "Resource lookup failed",
+                    List.of()));
         } else {
             render(new CommandResult.Failure(
                     CommandFailureCode.UNKNOWN_PATH,

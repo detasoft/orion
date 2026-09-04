@@ -118,6 +118,15 @@ public final class CommandNavigator {
             if (resolution instanceof ScopedResourceResolution.Ambiguous<?> ambiguous) {
                 return new CommandNavigation.Ambiguous(ambiguous.candidateIds());
             }
+            if (resolution instanceof ScopedResourceResolution.Unavailable<?> unavailable) {
+                return new CommandNavigation.Unavailable(unavailable.source());
+            }
+            if (resolution instanceof ScopedResourceResolution.AccessDenied<?> denied) {
+                return new CommandNavigation.AccessDenied(denied.reason());
+            }
+            if (resolution instanceof ScopedResourceResolution.Failed<?> failed) {
+                return new CommandNavigation.Failed(failed.source(), failed.throwable());
+            }
             ScopedResourceResolution.Resolved<?> resolved = (ScopedResourceResolution.Resolved<?>) resolution;
             canonical.add(resolved.candidate().id());
             resources.add(resolved.candidate().value());

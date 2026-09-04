@@ -12,7 +12,6 @@ explicit follow-up slices over the same command and result abstractions.
 
 ## Child Tasks
 
-- [ ] [Add read-only domain commands](read-only-domain-commands/TASK.md)
 - [ ] [Add querying and automation renderers](query-and-output/TASK.md)
 - [ ] [Add streaming commands and monitoring](streaming-monitoring/TASK.md)
 - [ ] [Add the session-host PTY gateway](session-host-pty-gateway/TASK.md)

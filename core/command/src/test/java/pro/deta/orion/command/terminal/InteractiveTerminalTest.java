@@ -10,6 +10,8 @@ import pro.deta.orion.command.CommandPath;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandNavigator;
+import pro.deta.orion.command.resource.ScopedResourceCatalogResult;
+import pro.deta.orion.command.resource.ScopedResourceResolver;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -38,12 +40,16 @@ class InteractiveTerminalTest {
             requests.add(request);
             return new CommandResult.Message("handled: " + request.commandLine());
         };
-        CountDownLatch resultDelivered = new CountDownLatch(1);
+        CountDownLatch promptDelivered = new CountDownLatch(1);
+        AtomicBoolean resultDelivered = new AtomicBoolean();
         ByteArrayOutputStream output = new ByteArrayOutputStream() {
             @Override
             public void write(byte[] bytes, int offset, int length) {
-                if (new String(bytes, offset, length, StandardCharsets.UTF_8).contains("handled:")) {
-                    resultDelivered.countDown();
+                String value = new String(bytes, offset, length, StandardCharsets.UTF_8);
+                if (value.contains("handled:")) {
+                    resultDelivered.set(true);
+                } else if (resultDelivered.get() && value.contains("[alice@orion] > ")) {
+                    promptDelivered.countDown();
                 }
                 super.write(bytes, offset, length);
             }
@@ -57,7 +63,7 @@ class InteractiveTerminalTest {
         client.write("/session\r?\r..\rhelp\rtouch /tmp/x; echo $(id) | cat >x `id`\r"
                 .getBytes(StandardCharsets.UTF_8));
         client.flush();
-        assertThat(resultDelivered.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(promptDelivered.await(5, TimeUnit.SECONDS)).isTrue();
         client.write("quit\r".getBytes(StandardCharsets.UTF_8));
         client.flush();
         reader.join(TimeUnit.SECONDS.toMillis(5));
@@ -349,6 +355,43 @@ class InteractiveTerminalTest {
                 new FailingOutputStream(),
                 tree());
         assertThat(failed.run(input(""))).isEqualTo(1);
+    }
+
+    @Test
+    void rendersSanitizedUnavailableAndFailedPathOnlyNavigation() {
+        RuntimeException cause = new RuntimeException("sensitive failure");
+
+        assertPathNavigationFailure(
+                new ScopedResourceCatalogResult.Unavailable<>("sensitive source"),
+                "SERVICE_UNAVAILABLE: Resource service is unavailable",
+                "sensitive source");
+        assertPathNavigationFailure(
+                new ScopedResourceCatalogResult.Failed<>("sensitive source", cause),
+                "HANDLER_FAILED: Resource lookup failed",
+                "sensitive failure");
+    }
+
+    private static void assertPathNavigationFailure(
+            ScopedResourceCatalogResult<String> result,
+            String expected,
+            String sensitive) {
+        CommandNode root = CommandNode.builder()
+                .child("repository", CommandNode.builder()
+                        .dynamicChild(
+                                new ScopedResourceResolver<>((ignored, parents) -> result, true),
+                                CommandNode.builder().build())
+                        .build())
+                .build();
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        AtomicBoolean dispatched = new AtomicBoolean();
+        InteractiveTerminal terminal = terminal(request -> {
+            dispatched.set(true);
+            return new CommandResult.Message("unexpected");
+        }, directExecutor(), output, root);
+
+        assertThat(terminal.run(input("/repository/item\r\u0004"))).isZero();
+        assertThat(output.toString(StandardCharsets.UTF_8)).contains(expected).doesNotContain(sensitive);
+        assertThat(dispatched).isFalse();
     }
 
     private static InteractiveTerminal terminal(

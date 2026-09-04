@@ -25,14 +25,22 @@ import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.command.CommandDispatcher;
+import pro.deta.orion.command.CommandLineParser;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.DefaultCommandDispatcher;
+import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
 import pro.deta.orion.transport.git.auth.RootSshKeyEnrollmentSession;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
+import pro.deta.orion.lifecycle.state.AggregateStateMachine;
+import pro.deta.orion.lifecycle.state.StateMachineDefinition;
+import pro.deta.orion.transport.git.command.ReadOnlyDomainCommandCatalog;
+import pro.deta.orion.transport.git.command.read.DefaultOperatorDomainSource;
+import pro.deta.orion.transport.git.command.read.OperatorDomainViews;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -119,6 +127,72 @@ class OrionShellTest {
         assertThat(exit.calls.get()).isEqualTo(1);
         assertThat(output.value()).contains("\u001b[2K");
         assertThat(environment.removes.get()).isEqualTo(1);
+    }
+
+    @Test
+    void interactiveShellDispatchesTheReadOnlyWhoamiCommand() throws Exception {
+        DefaultOperatorDomainSource source = new DefaultOperatorDomainSource(
+                new InMemoryNativeGitRepositoryProvider(),
+                new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
+                () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
+        CommandNode tree = new ReadOnlyDomainCommandCatalog(source).commandTree();
+        DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(new CommandLineParser(), tree);
+        OrionShell shell = shell(dispatcher, new CommandNavigator(tree));
+        TestChannelSession channel = channel();
+        AsyncInput input = new AsyncInput(new ArrayList<>());
+        ControllableOutput output = new ControllableOutput(true);
+        ExitRecorder exit = new ExitRecorder();
+        Command command = configuredAsync(
+                shell.createShell(channel),
+                input,
+                output,
+                new ControllableOutput(true),
+                exit);
+
+        command.start(channel, new MutableEnvironment("xterm", "80"));
+        assertThat(input.reading.await(2, TimeUnit.SECONDS)).isTrue();
+        input.send("whoami\r");
+        awaitOutputContains(output, "userId=operator");
+        input.send("quit\r");
+
+        assertThat(exit.completed.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(output.value()).contains("userId=operator", "[operator@orion] > ");
+    }
+
+    @Test
+    void interactiveShellEscapesHostileStructuredFields() throws Exception {
+        CommandDispatcher dispatcher = ignored -> new CommandResult.Rows(
+                List.of("repositoryName"),
+                List.of(List.of("evil\r\n\t\u001b\\name")));
+        OrionShell shell = shell(dispatcher);
+        TestChannelSession channel = channel();
+        AsyncInput input = new AsyncInput(new ArrayList<>());
+        ControllableOutput output = new ControllableOutput(true);
+        ExitRecorder exit = new ExitRecorder();
+        Command command = configuredAsync(
+                shell.createShell(channel),
+                input,
+                output,
+                new ControllableOutput(true),
+                exit);
+
+        command.start(channel, new MutableEnvironment("dumb", "80"));
+        assertThat(input.reading.await(2, TimeUnit.SECONDS)).isTrue();
+        input.send("/repository/evil show\r");
+        awaitOutputContains(output, "evil\\r\\n\\t\\u001B\\\\name");
+        input.send("quit\r");
+
+        assertThat(exit.completed.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(output.value()).doesNotContain("evil\r\n", "\u001b\\name");
+    }
+
+    private static void awaitOutputContains(ControllableOutput output, String expected)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!output.value().contains(expected) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(output.value()).contains(expected);
     }
 
     @Test
@@ -258,9 +332,13 @@ class OrionShellTest {
     }
 
     private OrionShell shell(CommandDispatcher dispatcher) {
+        return shell(dispatcher, new CommandNavigator(CommandNode.builder().build()));
+    }
+
+    private OrionShell shell(CommandDispatcher dispatcher, CommandNavigator navigator) {
         return new OrionShell(
                 dispatcher,
-                new CommandNavigator(CommandNode.builder().build()),
+                navigator,
                 executor);
     }
 

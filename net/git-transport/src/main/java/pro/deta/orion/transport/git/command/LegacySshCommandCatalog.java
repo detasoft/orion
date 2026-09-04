@@ -30,6 +30,7 @@ public final class LegacySshCommandCatalog {
     private final NativeGitRepositoryProvider repositoryProvider;
     private final Runnable shutdownAction;
     private final SshCredentialCommandCatalog sshCredentialCommandCatalog;
+    private final ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog;
 
     @Inject
     public LegacySshCommandCatalog(
@@ -37,26 +38,30 @@ public final class LegacySshCommandCatalog {
             OrionAccessControlService accessControlService,
             @Named("runtime") AggregateStateMachine runtimeStateMachine,
             NativeGitRepositoryProvider repositoryProvider,
-            SshCredentialCommandCatalog sshCredentialCommandCatalog) {
+            SshCredentialCommandCatalog sshCredentialCommandCatalog,
+            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog) {
         this(
                 accessControlService,
                 runtimeStateMachine,
                 repositoryProvider,
                 () -> orionProvider.getOrionApplicationLifecycle().beginShutdown(),
-                sshCredentialCommandCatalog);
+                sshCredentialCommandCatalog,
+                readOnlyDomainCommandCatalog);
     }
 
     LegacySshCommandCatalog(
             OrionAccessControlService accessControlService,
             AggregateStateMachine runtimeStateMachine,
             NativeGitRepositoryProvider repositoryProvider,
-            Runnable shutdownAction) {
+            Runnable shutdownAction,
+            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog) {
         this(
                 accessControlService,
                 runtimeStateMachine,
                 repositoryProvider,
                 shutdownAction,
-                new SshCredentialCommandCatalog(accessControlService));
+                new SshCredentialCommandCatalog(accessControlService),
+                readOnlyDomainCommandCatalog);
     }
 
     private LegacySshCommandCatalog(
@@ -64,7 +69,8 @@ public final class LegacySshCommandCatalog {
             AggregateStateMachine runtimeStateMachine,
             NativeGitRepositoryProvider repositoryProvider,
             Runnable shutdownAction,
-            SshCredentialCommandCatalog sshCredentialCommandCatalog) {
+            SshCredentialCommandCatalog sshCredentialCommandCatalog,
+            ReadOnlyDomainCommandCatalog readOnlyDomainCommandCatalog) {
         this.accessControlService = Objects.requireNonNull(accessControlService, "accessControlService");
         this.runtimeStateMachine = Objects.requireNonNull(runtimeStateMachine, "runtimeStateMachine");
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
@@ -72,11 +78,22 @@ public final class LegacySshCommandCatalog {
         this.sshCredentialCommandCatalog = Objects.requireNonNull(
                 sshCredentialCommandCatalog,
                 "sshCredentialCommandCatalog");
+        this.readOnlyDomainCommandCatalog = Objects.requireNonNull(
+                readOnlyDomainCommandCatalog,
+                "readOnlyDomainCommandCatalog");
     }
 
     public CommandNode commandTree() {
-        return CommandNode.builder()
-                .child("auth", sshCredentialCommandCatalog.commandTree().children().get("auth"))
+        CommandNode readOnly = readOnlyDomainCommandCatalog.commandTree();
+        CommandNode.Builder builder = CommandNode.builder()
+                .child("auth", sshCredentialCommandCatalog.commandTree().children().get("auth"));
+        for (var child : readOnly.children().entrySet()) {
+            builder.child(child.getKey(), child.getValue());
+        }
+        for (CommandDefinition action : readOnly.actions().values()) {
+            builder.action(action);
+        }
+        return builder
                 .action(tokenDefinition("issue-token"))
                 .action(tokenDefinition("token"))
                 .action(adminDefinition("state", this::lifecycleStatus))

@@ -47,6 +47,25 @@ class PlainCommandRendererTest {
     }
 
     @Test
+    void escapesStructuredKeysAndValuesWithoutChangingMessageSemantics() {
+        String hostile = "line\\break\r\n\t\u001b\u0000\u0085";
+        CommandResult.Rows rows = new CommandResult.Rows(
+                List.of(hostile),
+                List.of(List.of(hostile)));
+        Map<String, String> fields = new LinkedHashMap<>();
+        fields.put(hostile, hostile);
+
+        assertThat(renderer.render(rows).stdout()).isEqualTo(
+                "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085\n"
+                        + "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085\n");
+        assertThat(renderer.render(new CommandResult.ObjectValue(fields)).stdout()).isEqualTo(
+                "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085="
+                        + "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085\n");
+        assertThat(renderer.render(new CommandResult.Message("first\nsecond")).stdout())
+                .isEqualTo("first\nsecond\n");
+    }
+
+    @Test
     void explicitExitPreservesCodeAndWritesMessageToStderr() {
         assertThat(renderer.render(new CommandResult.Exit(7, "stopped")))
                 .isEqualTo(new RenderedCommand("", "stopped\n", 7));

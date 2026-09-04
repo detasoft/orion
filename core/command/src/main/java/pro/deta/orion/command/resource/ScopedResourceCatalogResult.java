@@ -1,33 +1,24 @@
-package pro.deta.orion.command;
+package pro.deta.orion.command.resource;
 
 import java.util.List;
 import java.util.Objects;
 
-public sealed interface CommandNavigation {
-    record Located(CommandLocation location) implements CommandNavigation {
-        public Located {
-            Objects.requireNonNull(location, "location");
-        }
-    }
-
-    record Missing() implements CommandNavigation {}
-
-    record UnknownPath() implements CommandNavigation {}
-
-    record Ambiguous(List<String> candidates) implements CommandNavigation {
-        public Ambiguous {
+public sealed interface ScopedResourceCatalogResult<T> {
+    record Available<T>(List<ScopedResourceCandidate<T>> candidates)
+            implements ScopedResourceCatalogResult<T> {
+        public Available {
             Objects.requireNonNull(candidates, "candidates");
             candidates = List.copyOf(candidates);
         }
     }
 
-    record Unavailable(String source) implements CommandNavigation {
+    record Unavailable<T>(String source) implements ScopedResourceCatalogResult<T> {
         public Unavailable {
             source = requireSource(source);
         }
     }
 
-    record AccessDenied(String reason) implements CommandNavigation {
+    record AccessDenied<T>(String reason) implements ScopedResourceCatalogResult<T> {
         public AccessDenied {
             Objects.requireNonNull(reason, "reason");
             if (reason.isBlank()) {
@@ -36,7 +27,7 @@ public sealed interface CommandNavigation {
         }
     }
 
-    record Failed(String source, Throwable throwable) implements CommandNavigation {
+    record Failed<T>(String source, Throwable throwable) implements ScopedResourceCatalogResult<T> {
         public Failed {
             source = requireSource(source);
             Objects.requireNonNull(throwable, "throwable");

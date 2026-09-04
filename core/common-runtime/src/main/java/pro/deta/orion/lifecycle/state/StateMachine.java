@@ -74,6 +74,15 @@ public final class StateMachine {
                 .orElseThrow(() -> new IllegalArgumentException("State machine not found: " + name));
     }
 
+    public StateMachine directChild(String key) {
+        requireName(key);
+        StateMachine child = children.get(key);
+        if (child == null) {
+            throw new IllegalArgumentException("Direct child state machine not found: " + key);
+        }
+        return child;
+    }
+
     public Optional<StateMachine> findMachine(String name) {
         requireName(name);
         if (name.equals(this.name())) {

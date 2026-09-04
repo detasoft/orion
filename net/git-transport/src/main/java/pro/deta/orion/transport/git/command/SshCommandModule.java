@@ -11,6 +11,10 @@ import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.audit.AuditingCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
+import pro.deta.orion.transport.git.command.read.DefaultOperatorDomainSource;
+import pro.deta.orion.transport.git.command.read.DefaultRuntimeMetrics;
+import pro.deta.orion.transport.git.command.read.OperatorDomainSource;
+import pro.deta.orion.transport.git.command.read.RuntimeMetrics;
 
 @Module
 public final class SshCommandModule {
@@ -26,6 +30,18 @@ public final class SshCommandModule {
     @Singleton
     static PlainCommandRenderer plainCommandRenderer() {
         return new PlainCommandRenderer();
+    }
+
+    @Provides
+    @Singleton
+    static RuntimeMetrics runtimeMetrics(DefaultRuntimeMetrics metrics) {
+        return metrics;
+    }
+
+    @Provides
+    @Singleton
+    static OperatorDomainSource operatorDomainSource(DefaultOperatorDomainSource source) {
+        return source;
     }
 
     @Provides

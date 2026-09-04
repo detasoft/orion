@@ -3,6 +3,7 @@ package pro.deta.orion.command.terminal;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.render.RenderedCommand;
+import pro.deta.orion.command.render.StructuredValueEscaper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,9 +15,7 @@ public final class TerminalCommandRenderer {
         if (!(result instanceof CommandResult.Rows rows) || !rectangular(rows) || !fits(rows, width)) {
             return plain.render(result);
         }
-        List<List<String>> allRows = new ArrayList<>();
-        allRows.add(rows.columns());
-        allRows.addAll(rows.values());
+        List<List<String>> allRows = escapedRows(rows);
         int[] widths = widths(allRows, rows.columns().size());
         StringBuilder output = new StringBuilder();
         for (List<String> row : allRows) {
@@ -46,9 +45,7 @@ public final class TerminalCommandRenderer {
         if (terminalWidth <= 0 || rows.columns().isEmpty()) {
             return false;
         }
-        List<List<String>> allRows = new ArrayList<>();
-        allRows.add(rows.columns());
-        allRows.addAll(rows.values());
+        List<List<String>> allRows = escapedRows(rows);
         int[] widths = widths(allRows, rows.columns().size());
         int required = Math.max(0, widths.length - 1) * 2;
         for (int width : widths) {
@@ -65,5 +62,22 @@ public final class TerminalCommandRenderer {
             }
         }
         return widths;
+    }
+
+    private static List<List<String>> escapedRows(CommandResult.Rows rows) {
+        List<List<String>> escaped = new ArrayList<>();
+        escaped.add(escapeRow(rows.columns()));
+        for (List<String> row : rows.values()) {
+            escaped.add(escapeRow(row));
+        }
+        return escaped;
+    }
+
+    private static List<String> escapeRow(List<String> row) {
+        List<String> escaped = new ArrayList<>(row.size());
+        for (String value : row) {
+            escaped.add(StructuredValueEscaper.escape(value));
+        }
+        return escaped;
     }
 }

@@ -79,6 +79,15 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
                     "Resource selector is ambiguous",
                     ambiguous.candidates());
         }
+        if (navigation instanceof CommandNavigation.Unavailable) {
+            return failure(CommandFailureCode.SERVICE_UNAVAILABLE, "Resource service is unavailable");
+        }
+        if (navigation instanceof CommandNavigation.AccessDenied) {
+            return failure(CommandFailureCode.ACCESS_DENIED, "Access denied");
+        }
+        if (navigation instanceof CommandNavigation.Failed) {
+            return failure(CommandFailureCode.HANDLER_FAILED, "Resource lookup failed");
+        }
         CommandLocation location = ((CommandNavigation.Located) navigation).location();
         CommandNode node = location.node();
 

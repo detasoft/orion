@@ -5,6 +5,7 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.command.resource.ScopedResourceCandidate;
 import pro.deta.orion.command.resource.ScopedResourceCatalog;
+import pro.deta.orion.command.resource.ScopedResourceCatalogResult;
 import pro.deta.orion.command.resource.ScopedResourceResolver;
 
 import java.util.List;
@@ -101,6 +102,42 @@ class DefaultCommandDispatcherTest {
         assertThat(((CommandResult.Failure) result).message()).doesNotContain("sensitive failure detail");
     }
 
+    @Test
+    void mapsUnavailableAndFailedResourceLookupsToSanitizedFailures() {
+        RuntimeException cause = new RuntimeException("sensitive lookup detail");
+
+        CommandResult unavailable = dispatcherWithCatalog(
+                (ignored, parents) -> new ScopedResourceCatalogResult.Unavailable<>("secret-source"))
+                .dispatch(new CommandRequest("/repository/item show", context(CommandPath.root())));
+        CommandResult failed = dispatcherWithCatalog(
+                (ignored, parents) -> new ScopedResourceCatalogResult.Failed<>("secret-source", cause))
+                .dispatch(new CommandRequest("/repository/item show", context(CommandPath.root())));
+
+        assertThat(unavailable).isEqualTo(new CommandResult.Failure(
+                CommandFailureCode.SERVICE_UNAVAILABLE,
+                "Resource service is unavailable",
+                List.of()));
+        assertThat(failed).isEqualTo(new CommandResult.Failure(
+                CommandFailureCode.HANDLER_FAILED,
+                "Resource lookup failed",
+                List.of()));
+        assertThat(unavailable.toString()).doesNotContain("secret-source", "sensitive lookup detail");
+        assertThat(failed.toString()).doesNotContain("secret-source", "sensitive lookup detail");
+    }
+
+    @Test
+    void mapsPreResolutionAccessDenialToSanitizedFailure() {
+        CommandResult denied = dispatcherWithCatalog(
+                (ignored, parents) -> new ScopedResourceCatalogResult.AccessDenied<>("sensitive reason"))
+                .dispatch(new CommandRequest("/repository/item show", context(CommandPath.root())));
+
+        assertThat(denied).isEqualTo(new CommandResult.Failure(
+                CommandFailureCode.ACCESS_DENIED,
+                "Access denied",
+                List.of()));
+        assertThat(denied.toString()).doesNotContain("sensitive reason");
+    }
+
     private CommandResult dispatch(String commandLine, CommandPath currentPath) {
         return dispatcher.dispatch(new CommandRequest(commandLine, context(currentPath)));
     }
@@ -125,10 +162,11 @@ class DefaultCommandDispatcherTest {
                     return new CommandResult.ObjectValue(Map.of("name", name));
                 }))
                 .build();
-        ScopedResourceCatalog<String> catalog = (context, parents) -> List.of(
-                candidate("alpha1", "alpha"),
-                candidate("alpha2", "another-alpha"),
-                candidate("denied", "hidden", false));
+        ScopedResourceCatalog<String> catalog = (context, parents) ->
+                new ScopedResourceCatalogResult.Available<>(List.of(
+                        candidate("alpha1", "alpha"),
+                        candidate("alpha2", "another-alpha"),
+                        candidate("denied", "hidden", false)));
         CommandNode repositories = CommandNode.builder()
                 .action(definition("ls", 0, 0, Set.of(), invocation ->
                         new CommandResult.Rows(List.of("name"), List.of(List.of("alpha")))))
@@ -170,6 +208,19 @@ class DefaultCommandDispatcherTest {
                         invocation -> AccessDecision.allow("allowed independently"),
                         invocation -> new CommandResult.Message("visible")))
                 .build();
+    }
+
+    private static DefaultCommandDispatcher dispatcherWithCatalog(ScopedResourceCatalog<String> catalog) {
+        CommandDefinition show = definition(
+                "show", 0, 0, Set.of(), ignored -> new CommandResult.Message("shown"));
+        CommandNode root = CommandNode.builder()
+                .child("repository", CommandNode.builder()
+                        .dynamicChild(
+                                new ScopedResourceResolver<>(catalog, true),
+                                CommandNode.builder().action(show).build())
+                        .build())
+                .build();
+        return new DefaultCommandDispatcher(new CommandLineParser(), root);
     }
 
     private static CommandDefinition definition(

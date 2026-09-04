@@ -594,6 +594,66 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
+    void namedUserCanRunReadOnlyDomainCommandsOverExecAndShell() throws Exception {
+        Path orionRoot = tempDir.resolve("orion-root");
+        startedOrion = startFreshOrion(orionRoot);
+        String rootToken = issueTokenOverSsh(startedOrion, startedOrion.serverIdentityKey(), 3_600);
+        createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, "project");
+        startedOrion.gitRepositoryProvider().create("project").valueOrFailure("create project");
+
+        SshCommandResult whoami = executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "whoami");
+        SshCommandResult repositories = executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "/repository ls");
+        SshCommandResult arbitrary = executeCommandOverSsh(
+                startedOrion, USERNAME, TRUSTED_USER_KEY, "definitely-not-an-orion-command");
+
+        assertThat(whoami.exitStatus()).isZero();
+        assertThat(whoami.output()).isEqualTo("userId=" + USERNAME + "\n");
+        assertThat(repositories.exitStatus()).isZero();
+        assertThat(repositories.output().lines()).containsExactly(
+                "id\tname\tdefaultHead\trefCount",
+                "project\tproject\trefs/heads/main\t0");
+        assertThat(repositories.output()).doesNotContain("\u001b[", "@orion] >");
+        assertThat(arbitrary.exitStatus()).isEqualTo(127);
+        assertThat(arbitrary.error()).isEqualTo("UNKNOWN_COMMAND: Unknown command\n");
+
+        SshClient client = SshClient.setUpDefaultClient();
+        client.setServerKeyVerifier((clientSession, remoteAddress, serverKey) -> true);
+        client.start();
+        try (ClientSession session = client.connect(
+                        USERNAME,
+                        startedOrion.configuration().getTransport().getSsh().getAddress(),
+                        startedOrion.configuration().getTransport().getSsh().getPort())
+                .verify(10, TimeUnit.SECONDS)
+                .getSession()) {
+            session.addPublicKeyIdentity(TRUSTED_USER_KEY);
+            session.auth().verify(10, TimeUnit.SECONDS);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            PipedInputStream terminalInput = new PipedInputStream();
+            try (PipedOutputStream clientInput = new PipedOutputStream(terminalInput);
+                 ChannelShell channel = session.createShellChannel()) {
+                channel.setPtyType("xterm-256color");
+                channel.setIn(terminalInput);
+                channel.setOut(output);
+                channel.setErr(new ByteArrayOutputStream());
+                channel.open().verify(10, TimeUnit.SECONDS);
+                awaitContains(output, "[" + USERNAME + "@orion] > ");
+                send(clientInput, "whoami\r");
+                awaitContains(output, "userId=" + USERNAME);
+                send(clientInput, "quit\r");
+                assertThat(channel.waitFor(
+                                EnumSet.of(ClientChannelEvent.CLOSED),
+                                TimeUnit.SECONDS.toMillis(10)))
+                        .contains(ClientChannelEvent.CLOSED);
+                assertThat(channel.getExitStatus()).isZero();
+            }
+        } finally {
+            client.stop();
+        }
+    }
+
+    @Test
     void interactivePtyEditsCompletesAndNeverStartsAnOperatingSystemShell() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         Path marker = tempDir.resolve("interactive-shell-marker");

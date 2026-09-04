@@ -22,20 +22,34 @@ public final class ScopedResourceResolver<T> {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(parentResources, "parentResources");
         Objects.requireNonNull(selector, "selector");
-        List<ScopedResourceCandidate<T>> candidates = candidates(context, parentResources);
-
+        ScopedResourceCatalogResult<T> catalogResult = candidates(context, parentResources);
+        if (catalogResult instanceof ScopedResourceCatalogResult.Unavailable<T> unavailable) {
+            return new ScopedResourceResolution.Unavailable<>(unavailable.source());
+        }
+        if (catalogResult instanceof ScopedResourceCatalogResult.AccessDenied<T> denied) {
+            return new ScopedResourceResolution.AccessDenied<>(denied.reason());
+        }
+        if (catalogResult instanceof ScopedResourceCatalogResult.Failed<T> failed) {
+            return new ScopedResourceResolution.Failed<>(failed.source(), failed.throwable());
+        }
+        List<ScopedResourceCandidate<T>> candidates =
+                ((ScopedResourceCatalogResult.Available<T>) catalogResult).candidates();
+        List<ScopedResourceCandidate<T>> allowed = new ArrayList<>();
         for (ScopedResourceCandidate<T> candidate : candidates) {
+            if (candidate.accessDecision().allowed()) {
+                allowed.add(candidate);
+            }
+        }
+
+        for (ScopedResourceCandidate<T> candidate : allowed) {
             if (candidate.id().equals(selector)) {
-                if (candidate.accessDecision().allowed()) {
-                    return new ScopedResourceResolution.Resolved<>(candidate);
-                }
-                return new ScopedResourceResolution.Missing<>();
+                return new ScopedResourceResolution.Resolved<>(candidate);
             }
         }
 
         List<ScopedResourceCandidate<T>> prefixMatches = new ArrayList<>();
-        for (ScopedResourceCandidate<T> candidate : candidates) {
-            if (candidate.accessDecision().allowed() && candidate.id().startsWith(selector)) {
+        for (ScopedResourceCandidate<T> candidate : allowed) {
+            if (candidate.id().startsWith(selector)) {
                 prefixMatches.add(candidate);
             }
         }
@@ -46,9 +60,8 @@ public final class ScopedResourceResolver<T> {
 
         if (namesEnabled) {
             List<ScopedResourceCandidate<T>> nameMatches = new ArrayList<>();
-            for (ScopedResourceCandidate<T> candidate : candidates) {
-                if (candidate.accessDecision().allowed()
-                        && candidate.name().filter(selector::equals).isPresent()) {
+            for (ScopedResourceCandidate<T> candidate : allowed) {
+                if (candidate.name().filter(selector::equals).isPresent()) {
                     nameMatches.add(candidate);
                 }
             }
@@ -60,8 +73,12 @@ public final class ScopedResourceResolver<T> {
     public List<ScopedResourceCandidate<T>> visible(CommandContext context, List<Object> parentResources) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(parentResources, "parentResources");
+        ScopedResourceCatalogResult<T> catalogResult = candidates(context, parentResources);
+        if (!(catalogResult instanceof ScopedResourceCatalogResult.Available<T> available)) {
+            return List.of();
+        }
         List<ScopedResourceCandidate<T>> visible = new ArrayList<>();
-        for (ScopedResourceCandidate<T> candidate : candidates(context, parentResources)) {
+        for (ScopedResourceCandidate<T> candidate : available.candidates()) {
             if (candidate.accessDecision().allowed()) {
                 visible.add(candidate);
             }
@@ -73,10 +90,12 @@ public final class ScopedResourceResolver<T> {
         return namesEnabled;
     }
 
-    private List<ScopedResourceCandidate<T>> candidates(
+    private ScopedResourceCatalogResult<T> candidates(
             CommandContext context,
             List<Object> parentResources) {
-        return List.copyOf(catalog.candidates(context, List.copyOf(parentResources)));
+        return Objects.requireNonNull(
+                catalog.candidates(context, List.copyOf(parentResources)),
+                "catalog result");
     }
 
     private static <T> ScopedResourceResolution<T> matched(List<ScopedResourceCandidate<T>> matches) {

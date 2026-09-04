@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.command.resource.ScopedResourceCandidate;
+import pro.deta.orion.command.resource.ScopedResourceCatalogResult;
 import pro.deta.orion.command.resource.ScopedResourceResolver;
 
 import java.util.List;
@@ -61,7 +62,8 @@ class CommandNavigatorTest {
     @Test
     void hidesDynamicNamesWhenTheResolverDisablesNameSelection() {
         ScopedResourceResolver<String> identifiersOnly = new ScopedResourceResolver<>(
-                (ignored, parents) -> List.of(candidate("acme-123", "acme", "value", true)),
+                (ignored, parents) -> new ScopedResourceCatalogResult.Available<>(
+                        List.of(candidate("acme-123", "acme", "value", true))),
                 false);
         CommandNode root = CommandNode.builder()
                 .dynamicChild(identifiersOnly, CommandNode.builder().build())
@@ -72,6 +74,20 @@ class CommandNavigatorTest {
         assertThat(identifiersOnlyNavigator.visibleEntries(context, location)).containsExactly("acme-123/");
         assertThat(identifiersOnlyNavigator.complete(context, CommandPath.root(), "a", 1).candidates())
                 .containsExactly("acme-123/");
+    }
+
+    @Test
+    void propagatesUnavailableAndFailedNavigationAndHidesDynamicEntries() {
+        RuntimeException cause = new RuntimeException("sensitive");
+        assertUnavailableNavigation(
+                (ignored, parents) -> new ScopedResourceCatalogResult.Unavailable<>("organization"),
+                new CommandNavigation.Unavailable("organization"));
+        assertUnavailableNavigation(
+                (ignored, parents) -> new ScopedResourceCatalogResult.Failed<>("organization", cause),
+                new CommandNavigation.Failed("organization", cause));
+        assertUnavailableNavigation(
+                (ignored, parents) -> new ScopedResourceCatalogResult.AccessDenied<>("sensitive reason"),
+                new CommandNavigation.AccessDenied("sensitive reason"));
     }
 
     @Test
@@ -135,6 +151,24 @@ class CommandNavigatorTest {
         assertThat(result.candidates()).doesNotContain("hidden/", "amber-456/");
     }
 
+    @Test
+    void deniedExactIdDoesNotAffectVisibleAmbiguityOrCompletion() {
+        ScopedResourceResolver<String> resources = new ScopedResourceResolver<>(
+                (ignored, parents) -> new ScopedResourceCatalogResult.Available<>(List.of(
+                        candidate("alpha", "hidden", "secret", false),
+                        candidate("alpha-one", "one", "one", true),
+                        candidate("alpha-two", "two", "two", true))),
+                true);
+        CommandNavigator filtered = new CommandNavigator(CommandNode.builder()
+                .dynamicChild(resources, CommandNode.builder().build())
+                .build());
+
+        assertThat(filtered.locate(context, CommandPath.absolute(List.of("alpha"))))
+                .isEqualTo(new CommandNavigation.Ambiguous(List.of("alpha-one", "alpha-two")));
+        assertThat(filtered.complete(context, CommandPath.root(), "alpha", 5).candidates())
+                .containsExactly("alpha-one/", "alpha-two/");
+    }
+
     private void assertCompletion(
             CommandPath path,
             String line,
@@ -180,10 +214,10 @@ class CommandNavigatorTest {
         CommandDefinition hidden = definition("secret", false);
         CommandNode resource = CommandNode.builder().action(definition("show", true)).build();
         ScopedResourceResolver<String> organizations = new ScopedResourceResolver<>(
-                (ignored, parents) -> List.of(
+                (ignored, parents) -> new ScopedResourceCatalogResult.Available<>(List.of(
                         candidate("acme-123", "acme", "acme-value", true),
                         candidate("alpha-789", "alpha", "alpha-value", true),
-                        candidate("amber-456", "hidden", "hidden-value", false)),
+                        candidate("amber-456", "hidden", "hidden-value", false))),
                 true);
         CommandNode organization = CommandNode.builder().dynamicChild(organizations, resource).build();
         CommandNode session = CommandNode.builder().action(list).action(hidden).build();
@@ -193,6 +227,21 @@ class CommandNavigatorTest {
                 .action(definition("whoami", true))
                 .action(definition("shutdown", false))
                 .build();
+    }
+
+    private void assertUnavailableNavigation(
+            pro.deta.orion.command.resource.ScopedResourceCatalog<String> catalog,
+            CommandNavigation expected) {
+        CommandNode dynamicNode = CommandNode.builder()
+                .dynamicChild(new ScopedResourceResolver<>(catalog, true), CommandNode.builder().build())
+                .build();
+        CommandNavigator dynamicNavigator = new CommandNavigator(dynamicNode);
+        CommandLocation root = located(dynamicNavigator.locate(context, CommandPath.root()));
+
+        assertThat(dynamicNavigator.locate(context, CommandPath.absolute(List.of("entry"))))
+                .isEqualTo(expected);
+        assertThat(dynamicNavigator.visibleEntries(context, root)).isEmpty();
+        assertThat(dynamicNavigator.complete(context, CommandPath.root(), "e", 1).candidates()).isEmpty();
     }
 
     private static CommandDefinition definition(String action, boolean visible) {

@@ -44,4 +44,16 @@ class TerminalCommandRendererTest {
         assertThat(renderer.render(wider, 80).stdout()).isEqualTo("NAME\nfirst\trunning\n");
         assertThat(renderer.render(shorter, 80).stdout()).isEqualTo("NAME\tSTATE\nfirst\n");
     }
+
+    @Test
+    void measuresAndRendersEscapedStructuredValues() {
+        CommandResult.Rows rows = new CommandResult.Rows(
+                List.of("NAME", "STATE"),
+                List.of(List.of("a\nb", "x\u001b\\y")));
+
+        assertThat(renderer.render(rows, 16).stdout())
+                .isEqualTo("NAME  STATE\na\\nb  x\\u001B\\\\y\n");
+        assertThat(renderer.render(rows, 15).stdout())
+                .isEqualTo("NAME\tSTATE\na\\nb\tx\\u001B\\\\y\n");
+    }
 }
