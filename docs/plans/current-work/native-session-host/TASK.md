@@ -22,6 +22,7 @@ commands, and survives independently of `agentd`.
 
 ## Child Tasks
 
+- [ ] [Reduce the journal writer API](journal-writer-api/TASK.md)
 - [ ] [Harden Linux process-tree control](linux-process-tree-control/TASK.md)
 - [ ] [Expose process control and PTY closure](process-control-and-pty-closure/TASK.md)
 - [ ] [Coordinate session termination](termination-coordination/TASK.md)
