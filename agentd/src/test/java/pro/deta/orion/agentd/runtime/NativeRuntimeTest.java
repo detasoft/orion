@@ -205,8 +205,7 @@ class NativeRuntimeTest {
                 "xterm-256color",
                 Optional.empty(),
                 new SessionSpec.Sandbox(
-                        Optional.of(temporaryDirectory.resolve("missing-policy")),
-                        SessionSpec.Unavailable.FAIL));
+                        Optional.of(temporaryDirectory.resolve("missing-policy"))));
         NativeRuntime runtime = runtime(
                 directory -> manifest(directory, 4242),
                 directory -> JournalObservation.READABLE,
@@ -228,7 +227,7 @@ class NativeRuntimeTest {
                 spec().sessionId(), spec().startCommandId(), spec().command(), spec().workspace(),
                 spec().environment(),
                 spec().columns(), spec().rows(), spec().terminalType(), spec().colorTerminal(),
-                new SessionSpec.Sandbox(Optional.of(source), SessionSpec.Unavailable.FAIL));
+                new SessionSpec.Sandbox(Optional.of(source)));
         NativeRuntime runtime = runtime(
                 directory -> manifest(directory, 4242),
                 directory -> JournalObservation.READABLE,
@@ -496,7 +495,7 @@ class NativeRuntimeTest {
                 spec().sessionId(), spec().startCommandId(), spec().command(), spec().workspace(),
                 spec().environment(),
                 spec().columns(), spec().rows(), spec().terminalType(), spec().colorTerminal(),
-                new SessionSpec.Sandbox(Optional.of(policy), SessionSpec.Unavailable.FAIL));
+                new SessionSpec.Sandbox(Optional.of(policy)));
     }
 
     private static SessionManifest manifest(Path directory, long hostPid) {

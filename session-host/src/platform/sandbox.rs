@@ -1,4 +1,4 @@
-use crate::cli::{SandboxUnavailable, SessionOptions};
+use crate::cli::SessionOptions;
 use crate::host::HostError;
 use crate::sandbox::{self, CompiledPolicy};
 
@@ -20,28 +20,34 @@ impl PreparedSandbox {
         let policy = sandbox::load(path)?;
         #[cfg(target_os = "linux")]
         {
-            let rules = open_rules(&policy).map_err(|error| HostError::Policy(error.detail))?;
-            match prepare_linux(rules) {
-                Ok(ruleset) => Ok(Self {
+            let rules = open_rules(&policy).map_err(HostError::Policy)?;
+            match classify_ruleset_result(prepare_linux(rules)) {
+                Ok(Preparation::Enforced(ruleset)) => Ok(Self {
                     policy: Some(policy),
                     ruleset: Some(ruleset),
                 }),
-                Err(error) if options.sandbox_unavailable == SandboxUnavailable::RunUnsandboxed
-                    && error.unavailable => Ok(Self {
+                Ok(Preparation::Unenforced { detail }) => {
+                    eprintln!(
+                        "session-host: warning: Landlock ABI 9 is unavailable; \
+                         running without filesystem restrictions: {}",
+                        detail
+                    );
+                    Ok(Self {
                         policy: Some(policy),
                         ruleset: None,
-                    }),
-                Err(error) => Err(HostError::Policy(error.detail)),
+                    })
+                }
+                Err(error) => Err(HostError::Policy(error.to_string())),
             }
         }
         #[cfg(not(target_os = "linux"))]
         {
             validate_rules(&policy)?;
-            if options.sandbox_unavailable == SandboxUnavailable::RunUnsandboxed {
-                Ok(Self { policy: Some(policy) })
-            } else {
-                Err(HostError::Policy("Landlock is unavailable on this platform".to_owned()))
-            }
+            eprintln!(
+                "session-host: warning: Landlock ABI 9 is unavailable; \
+                 running without filesystem restrictions: Landlock is unavailable on this platform"
+            );
+            Ok(Self { policy: Some(policy) })
         }
     }
 
@@ -71,10 +77,13 @@ impl PreparedSandbox {
             let status = ruleset
                 .set_compatibility(CompatLevel::HardRequirement)
                 .restrict_self()
-                .map_err(|_| ())?;
-            if status.ruleset != RulesetStatus::FullyEnforced || !status.no_new_privs {
-                return Err(());
-            }
+                .map(|status| {
+                    (
+                        status.ruleset == RulesetStatus::FullyEnforced,
+                        status.no_new_privs,
+                    )
+                });
+            finish_restriction(status)?;
         }
         Ok(())
     }
@@ -89,54 +98,60 @@ struct OpenedRule {
 }
 
 #[cfg(target_os = "linux")]
-struct PrepareError {
-    unavailable: bool,
-    detail: String,
-}
-
-#[cfg(any(target_os = "linux", test))]
-#[derive(Clone, Copy)]
-enum PrepareStage {
-    Compatibility,
-    CreateRuleset,
-    OpenRule,
-    AddRule,
-}
-
-#[cfg(any(target_os = "linux", test))]
-fn unavailable_at(stage: PrepareStage) -> bool {
-    matches!(stage, PrepareStage::Compatibility)
+enum Preparation<T> {
+    Enforced(T),
+    Unenforced { detail: String },
 }
 
 #[cfg(target_os = "linux")]
-fn prepare_linux(rules: Vec<OpenedRule>) -> Result<landlock::RulesetCreated, PrepareError> {
+fn classify_ruleset_result<T>(
+    result: Result<T, landlock::RulesetError>,
+) -> Result<Preparation<T>, landlock::RulesetError> {
+    use landlock::{AccessError, CompatError, HandleAccessError, HandleAccessesError, RulesetError};
+
+    match result {
+        Ok(value) => Ok(Preparation::Enforced(value)),
+        Err(
+            error @ RulesetError::HandleAccesses(HandleAccessesError::Fs(
+                HandleAccessError::Compat(CompatError::Access(
+                    AccessError::Incompatible { .. } | AccessError::PartiallyCompatible { .. },
+                )),
+            )),
+        ) => Ok(Preparation::Unenforced {
+            detail: error.to_string(),
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn finish_restriction<E>(result: Result<(bool, bool), E>) -> Result<(), ()> {
+    match result {
+        Ok((true, true)) => Ok(()),
+        Ok(_) | Err(_) => Err(()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_linux(
+    rules: Vec<OpenedRule>,
+) -> Result<landlock::RulesetCreated, landlock::RulesetError> {
     use landlock::{
         ABI, Access, AccessFs, CompatLevel, Compatible, PathBeneath, Ruleset, RulesetAttr,
         RulesetCreatedAttr,
     };
     let builder = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
-        .handle_access(AccessFs::from_all(ABI::V9))
-        .map_err(|error| PrepareError {
-            unavailable: unavailable_at(PrepareStage::Compatibility),
-            detail: error.to_string(),
-        })?;
-    let mut ruleset = builder.create().map_err(|error| PrepareError {
-        unavailable: unavailable_at(PrepareStage::CreateRuleset),
-        detail: error.to_string(),
-    })?;
+        .handle_access(AccessFs::from_all(ABI::V9))?;
+    let mut ruleset = builder.create()?;
     for rule in rules {
-        ruleset = ruleset.add_rule(PathBeneath::new(rule.file, access(rule.rights)))
-            .map_err(|error| PrepareError {
-                unavailable: unavailable_at(PrepareStage::AddRule),
-                detail: error.to_string(),
-            })?;
+        ruleset = ruleset.add_rule(PathBeneath::new(rule.file, access(rule.rights)))?;
     }
     Ok(ruleset)
 }
 
 #[cfg(target_os = "linux")]
-fn open_rules(policy: &CompiledPolicy) -> Result<Vec<OpenedRule>, PrepareError> {
+fn open_rules(policy: &CompiledPolicy) -> Result<Vec<OpenedRule>, String> {
     use std::os::unix::fs::OpenOptionsExt;
 
     let mut opened = Vec::with_capacity(policy.rules.len());
@@ -145,12 +160,12 @@ fn open_rules(policy: &CompiledPolicy) -> Result<Vec<OpenedRule>, PrepareError> 
             .read(true)
             .custom_flags(libc::O_PATH | libc::O_CLOEXEC | libc::O_NOFOLLOW)
             .open(&rule.path)
-            .map_err(|error| invalid_rule(&rule.path, error.to_string()))?;
+            .map_err(|error| invalid_rule_detail(&rule.path, &error.to_string()))?;
         let metadata = file
             .metadata()
-            .map_err(|error| invalid_rule(&rule.path, error.to_string()))?;
+            .map_err(|error| invalid_rule_detail(&rule.path, &error.to_string()))?;
         validate_rule_type(rule.rights, &metadata)
-            .map_err(|detail| invalid_rule(&rule.path, detail))?;
+            .map_err(|detail| invalid_rule_detail(&rule.path, &detail))?;
         opened.push(OpenedRule {
             file,
             rights: rule.rights,
@@ -178,14 +193,6 @@ fn validate_rule_type(rights: u64, metadata: &std::fs::Metadata) -> Result<(), S
         return Err("directory-only rights require a directory".to_owned());
     }
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn invalid_rule(path: &std::path::Path, detail: String) -> PrepareError {
-    PrepareError {
-        unavailable: false,
-        detail: invalid_rule_detail(path, &detail),
-    }
 }
 
 fn invalid_rule_detail(path: &std::path::Path, detail: &str) -> String {
@@ -219,14 +226,66 @@ fn access(mask: u64) -> landlock::BitFlags<landlock::AccessFs> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PrepareStage, selected_access, unavailable_at};
+    use super::{finish_restriction, selected_access};
+
+    #[cfg(target_os = "linux")]
+    use super::{Preparation, classify_ruleset_result};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn only_filesystem_abi_incompatibility_selects_unenforced_preparation() {
+        use landlock::{
+            AccessError, AccessFs, AddRuleError, AddRulesError, BitFlags, CompatError,
+            CreateRulesetError, HandleAccessError, HandleAccessesError, RulesetError,
+        };
+
+        fn filesystem_handle_access(error: AccessError<AccessFs>) -> RulesetError {
+            RulesetError::HandleAccesses(HandleAccessesError::Fs(HandleAccessError::Compat(
+                CompatError::Access(error),
+            )))
+        }
+
+        let empty = BitFlags::<AccessFs>::EMPTY;
+        for error in [
+            AccessError::Incompatible { access: empty },
+            AccessError::PartiallyCompatible {
+                access: empty,
+                incompatible: empty,
+            },
+        ] {
+            let compatibility =
+                classify_ruleset_result::<()>(Err(filesystem_handle_access(error))).unwrap();
+            assert!(matches!(compatibility, Preparation::Unenforced { .. }));
+        }
+
+        for error in [
+            AccessError::Empty,
+            AccessError::Unknown {
+                access: empty,
+                unknown: empty,
+            },
+        ] {
+            assert!(
+                classify_ruleset_result::<()>(Err(filesystem_handle_access(error))).is_err()
+            );
+        }
+
+        for error in [
+            RulesetError::CreateRuleset(CreateRulesetError::MissingHandledAccess),
+            RulesetError::AddRules(AddRulesError::Fs(AddRuleError::Compat(
+                CompatError::Access(AccessError::Empty),
+            ))),
+        ] {
+            assert!(classify_ruleset_result::<()>(Err(error)).is_err());
+        }
+    }
 
     #[test]
-    fn only_compatibility_detection_can_enable_unsandboxed_fallback() {
-        assert!(unavailable_at(PrepareStage::Compatibility));
-        assert!(!unavailable_at(PrepareStage::CreateRuleset));
-        assert!(!unavailable_at(PrepareStage::OpenRule));
-        assert!(!unavailable_at(PrepareStage::AddRule));
+    fn restriction_failure_and_incomplete_enforcement_remain_fatal() {
+        assert!(finish_restriction::<()>(Err(())).is_err());
+        assert!(finish_restriction::<()>(Ok((false, true))).is_err());
+        assert!(finish_restriction::<()>(Ok((true, false))).is_err());
+        assert_eq!(finish_restriction::<()>(Ok((true, true))), Ok(()));
     }
 
     #[test]

@@ -218,7 +218,8 @@ Each step is independently reversible except a published binary-format change.
 - Preserve raw PTY bytes and strictly increasing journal timestamps.
 - Preserve payload-length checks before allocation and CRC validation before accepting records.
 - Preserve input-UUID deduplication unless its delivery contract is deliberately replaced.
-- Preserve fail-closed behavior when a requested sandbox is unavailable.
+- Preserve automatic warning fallback only when Landlock ABI 9 is unavailable; policy, grant-path, ruleset,
+  rule-application, incomplete-enforcement, and child-restriction failures remain fail-closed.
 - Preserve Linux descendant identity checks and the explicitly documented macOS limitations. These protect real
   process-ownership invariants even though their implementation is substantial.
 

@@ -11,12 +11,6 @@ pub const DEFAULT_ROWS: u16 = 50;
 pub const DEFAULT_TERM: &str = "xterm-256color";
 pub const DEFAULT_MAX_UNACKNOWLEDGED_OPERATIONS: usize = 4096;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SandboxUnavailable {
-    Fail,
-    RunUnsandboxed,
-}
-
 #[derive(Debug, Eq, PartialEq)]
 pub struct SessionOptions {
     pub session_id: String,
@@ -28,7 +22,6 @@ pub struct SessionOptions {
     pub term: String,
     pub colorterm: Option<String>,
     pub sandbox_policy: Option<PathBuf>,
-    pub sandbox_unavailable: SandboxUnavailable,
     pub journal_segment_bytes: u64,
     pub journal_max_bytes: u64,
     pub max_unacknowledged_operations: usize,
@@ -91,7 +84,6 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
     let mut term = None;
     let mut colorterm = None;
     let mut sandbox_policy = None;
-    let mut sandbox_unavailable = None;
     let mut journal_segment_bytes = None;
     let mut journal_max_bytes = None;
     let mut max_unacknowledged_operations = None;
@@ -128,7 +120,6 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
                 term: term.unwrap_or_else(|| DEFAULT_TERM.to_owned()),
                 colorterm,
                 sandbox_policy,
-                sandbox_unavailable: sandbox_unavailable.unwrap_or(SandboxUnavailable::Fail),
                 journal_segment_bytes,
                 journal_max_bytes,
                 max_unacknowledged_operations,
@@ -160,9 +151,6 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
                 set_once(&mut colorterm, parse_environment_value(value, option)?, option)?
             }
             "--sandbox-policy" => set_once(&mut sandbox_policy, PathBuf::from(value), option)?,
-            "--sandbox-unavailable" => {
-                set_once(&mut sandbox_unavailable, parse_sandbox_unavailable(value)?, option)?
-            }
             "--journal-segment-bytes" => {
                 set_once(&mut journal_segment_bytes, parse_journal_bytes(value, option)?, option)?
             }
@@ -269,16 +257,6 @@ fn parse_environment_value(value: &OsStr, option: &str) -> Result<String, ParseE
     Ok(value.to_owned())
 }
 
-fn parse_sandbox_unavailable(value: &OsStr) -> Result<SandboxUnavailable, ParseError> {
-    match value.to_str() {
-        Some("fail") => Ok(SandboxUnavailable::Fail),
-        Some("run-unsandboxed") => Ok(SandboxUnavailable::RunUnsandboxed),
-        _ => Err(ParseError::new(
-            "--sandbox-unavailable must be fail or run-unsandboxed",
-        )),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,8 +308,6 @@ mod tests {
             "truecolor",
             "--sandbox-policy",
             "/policy.json",
-            "--sandbox-unavailable",
-            "run-unsandboxed",
             "--journal-segment-bytes",
             "4096",
             "--journal-max-bytes",
@@ -344,25 +320,22 @@ mod tests {
         ]))
         .unwrap();
 
-        assert_eq!(
-            command,
-            Command::Run(SessionOptions {
-                session_id: "019d-session".to_owned(),
-                start_command_id: "command.start".to_owned(),
-                session_dir: PathBuf::from("/sessions/019d-session"),
-                cwd: PathBuf::from("/work/project"),
-                cols: 180,
-                rows: 60,
-                term: "xterm-test".to_owned(),
-                colorterm: Some("truecolor".to_owned()),
-                sandbox_policy: Some(PathBuf::from("/policy.json")),
-                sandbox_unavailable: SandboxUnavailable::RunUnsandboxed,
-                journal_segment_bytes: 4096,
-                journal_max_bytes: 16384,
-                max_unacknowledged_operations: 8192,
-                command: strings(&["bash", "-l"]),
-            })
-        );
+        let Command::Run(options) = command else {
+            panic!("expected run command");
+        };
+        assert_eq!(options.session_id, "019d-session");
+        assert_eq!(options.start_command_id, "command.start");
+        assert_eq!(options.session_dir, PathBuf::from("/sessions/019d-session"));
+        assert_eq!(options.cwd, PathBuf::from("/work/project"));
+        assert_eq!(options.cols, 180);
+        assert_eq!(options.rows, 60);
+        assert_eq!(options.term, "xterm-test");
+        assert_eq!(options.colorterm.as_deref(), Some("truecolor"));
+        assert_eq!(options.sandbox_policy, Some(PathBuf::from("/policy.json")));
+        assert_eq!(options.journal_segment_bytes, 4096);
+        assert_eq!(options.journal_max_bytes, 16384);
+        assert_eq!(options.max_unacknowledged_operations, 8192);
+        assert_eq!(options.command, strings(&["bash", "-l"]));
     }
 
     #[test]
@@ -388,7 +361,6 @@ mod tests {
         assert_eq!(options.cols, DEFAULT_COLS);
         assert_eq!(options.rows, DEFAULT_ROWS);
         assert_eq!(options.term, DEFAULT_TERM);
-        assert_eq!(options.sandbox_unavailable, SandboxUnavailable::Fail);
         assert_eq!(options.journal_segment_bytes, DEFAULT_JOURNAL_SEGMENT_BYTES);
         assert_eq!(options.journal_max_bytes, DEFAULT_JOURNAL_MAX_BYTES);
         assert_eq!(options.max_unacknowledged_operations, 4096);
@@ -460,6 +432,7 @@ mod tests {
             invalid_size.unwrap_err().to_string(),
             "--cols must be between 1 and 65535"
         );
+
     }
 
     #[test]

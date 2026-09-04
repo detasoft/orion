@@ -128,7 +128,7 @@ fn landlock_restricts_child_and_grandchild_without_restricting_host() {
     fs::write(&policy, encode_policy(&rules)).unwrap();
 
     if current_landlock_abi() < 9 {
-        assert_unsupported_landlock_modes(&directory, &policy);
+        assert_unsupported_landlock_falls_back(&directory, &policy);
         return;
     }
 
@@ -180,7 +180,7 @@ fn landlock_restricts_child_and_grandchild_without_restricting_host() {
 }
 
 #[test]
-fn invalid_grants_are_fatal_even_with_unsandboxed_fallback() {
+fn invalid_grants_remain_fatal_when_landlock_is_unavailable() {
     let directory = DirectoryGuard::new(temporary_directory("landlock-invalid-grant"));
     fs::create_dir_all(directory.path()).unwrap();
     let target = directory.path().join("target");
@@ -206,8 +206,6 @@ fn invalid_grants_are_fatal_even_with_unsandboxed_fallback() {
             .args([
                 "--sandbox-policy",
                 policy.to_str().unwrap(),
-                "--sandbox-unavailable",
-                "run-unsandboxed",
                 "--",
                 "/bin/sh",
                 "-c",
@@ -232,55 +230,62 @@ fn current_landlock_abi() -> i64 {
 }
 
 #[cfg(target_os = "linux")]
-fn assert_unsupported_landlock_modes(directory: &Path, policy: &Path) {
+fn assert_unsupported_landlock_falls_back(directory: &Path, policy: &Path) {
     let base = base_arguments(directory, "landlock-unsupported", "xterm-256color", 80, 24);
-    let failed = Command::new(env!("CARGO_BIN_EXE_session-host"))
+    let output = Command::new(env!("CARGO_BIN_EXE_session-host"))
         .args(&base)
         .args(["--sandbox-policy", policy.to_str().unwrap(), "--", "/bin/sh", "-c", "exit 0"])
         .output()
         .unwrap();
-    assert_eq!(failed.status.code(), Some(70));
-    let fallback = Command::new(env!("CARGO_BIN_EXE_session-host"))
-        .args(&base)
-        .args([
-            "--sandbox-policy",
-            policy.to_str().unwrap(),
-            "--sandbox-unavailable",
-            "run-unsandboxed",
-            "--",
-            "/bin/sh",
-            "-c",
-            "exit 0",
-        ])
-        .output()
-        .unwrap();
-    assert!(fallback.status.success(), "{}", String::from_utf8_lossy(&fallback.stderr));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("warning: Landlock ABI 9 is unavailable; running without filesystem restrictions")
+    );
+    let metadata = journal::read_metadata(directory).unwrap();
+    assert!(metadata.sandbox.requested);
+    assert_eq!(metadata.sandbox.enforcement, journal::SandboxEnforcement::None);
+    assert_eq!(
+        metadata.sandbox.unavailable_policy,
+        journal::SandboxUnavailablePolicy::RunUnsandboxed
+    );
 }
 
 #[cfg(not(target_os = "linux"))]
 #[test]
-fn requested_landlock_policy_fails_closed_or_uses_explicit_fallback() {
+fn requested_landlock_policy_falls_back_when_landlock_is_unavailable() {
     let directory = DirectoryGuard::new(temporary_directory("sandbox-unavailable"));
     fs::create_dir_all(directory.path()).unwrap();
     let policy = directory.path().join("policy.cbor");
     fs::write(&policy, encode_policy(&[(directory.path().to_path_buf(), 12)])).unwrap();
-    let base = base_arguments(directory.path(), "sandbox-unavailable", "xterm", 80, 24);
-    let failed = Command::new(env!("CARGO_BIN_EXE_session-host"))
-        .args(&base)
-        .args(["--sandbox-policy", policy.to_str().unwrap(), "--", "/usr/bin/true"])
-        .output()
-        .unwrap();
-    assert_eq!(failed.status.code(), Some(70));
-    let fallback = Command::new(env!("CARGO_BIN_EXE_session-host"))
-        .args(&base)
+    let output = Command::new(env!("CARGO_BIN_EXE_session-host"))
+        .args(base_arguments(
+            directory.path(),
+            "sandbox-unavailable",
+            "xterm",
+            80,
+            24,
+        ))
         .args([
-            "--sandbox-policy", policy.to_str().unwrap(), "--sandbox-unavailable",
-            "run-unsandboxed", "--", "/usr/bin/true",
+            "--sandbox-policy",
+            policy.to_str().unwrap(),
+            "--",
+            "/usr/bin/true",
         ])
         .output()
         .unwrap();
-    assert!(fallback.status.success(), "{}", String::from_utf8_lossy(&fallback.stderr));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("warning: Landlock ABI 9 is unavailable; running without filesystem restrictions")
+    );
     let metadata = journal::read_metadata(directory.path()).unwrap();
+    assert!(metadata.sandbox.requested);
+    assert_eq!(metadata.sandbox.enforcement, journal::SandboxEnforcement::None);
+    assert_eq!(
+        metadata.sandbox.unavailable_policy,
+        journal::SandboxUnavailablePolicy::RunUnsandboxed
+    );
     assert_eq!(metadata.sandbox.policy_version, Some(1));
     assert_eq!(metadata.sandbox.handled_rights, Some(131_071));
     assert_eq!(metadata.sandbox.rules.len(), 1);

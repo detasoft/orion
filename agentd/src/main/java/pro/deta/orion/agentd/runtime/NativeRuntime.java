@@ -307,12 +307,6 @@ public final class NativeRuntime implements SessionRuntime {
         option(command, "--term", spec.terminalType());
         spec.colorTerminal().ifPresent(value -> option(command, "--colorterm", value));
         compiledPolicy.ifPresent(policy -> option(command, "--sandbox-policy", policy.toString()));
-        if (compiledPolicy.isPresent()) {
-            String unavailable = spec.sandbox().unavailable() == SessionSpec.Unavailable.FAIL
-                    ? "fail"
-                    : "run-unsandboxed";
-            option(command, "--sandbox-unavailable", unavailable);
-        }
         command.add("--");
         command.addAll(spec.command());
         return List.copyOf(command);

@@ -291,9 +291,10 @@ active journal writer; it does not read those facts from metadata. The removed
 `latestEventId` fields are not part of the metadata v1 manifest contract.
 
 `sandbox` contains boolean `requested`, enum `enforcement` (`none`, `landlock`,
-or `future`), enum `unavailablePolicy` (`fail` or `run-unsandboxed`), and arrays
-`readWritePaths` and `readOnlyPaths` of UTF-8 paths. `control` contains enum
-`transport` (`unix-domain-socket` or `named-pipe`) and its endpoint.
+or `future`), compatibility enum `unavailablePolicy`, and arrays `readWritePaths`
+and `readOnlyPaths` of UTF-8 paths. Writers use the fixed value
+`run-unsandboxed`; readers continue to accept the legacy `fail` value. `control`
+contains enum `transport` (`unix-domain-socket` or `named-pipe`) and its endpoint.
 
 Sandbox metadata may additionally contain `policyVersion`, `handledRights`,
 and ordered `rules`. Each rule has an absolute `path` and a `rights` array using
@@ -315,7 +316,6 @@ session-host \
   [--cols 160] [--rows 50] \
   [--term xterm-256color] [--colorterm truecolor] \
   [--sandbox-policy PATH] \
-  [--sandbox-unavailable fail|run-unsandboxed] \
   [--journal-segment-bytes 67108864] \
   [--journal-max-bytes 1073741824] \
   [--max-unacknowledged-operations 4096] \
@@ -335,8 +335,11 @@ to 67,108,864 bytes (64 MiB), and the physical journal maximum defaults to
 target. The unacknowledged-operation limit is a positive decimal entry count
 and defaults to 4096.
 
-Duplicate and unknown options are errors. A requested sandbox defaults to
-fail-closed when unavailable. `--help` and `--version` are standalone actions.
+Duplicate and unknown options are errors. When Landlock ABI 9 is unavailable,
+a requested sandbox emits a warning and starts without filesystem restrictions.
+Policy decoding, grant-path validation, ruleset construction, rule application,
+incomplete enforcement, and child restriction failures remain fatal. `--help`
+and `--version` are standalone actions.
 
 ## Compiled Landlock Policy v1
 

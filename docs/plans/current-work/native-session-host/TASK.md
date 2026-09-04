@@ -31,4 +31,3 @@ commands, and survives independently of `agentd`.
 - [ ] [Add ordered harness event ingress](harness-events/TASK.md)
 - [ ] [Implement the Windows ConPTY host](windows-host/TASK.md)
 - [ ] [Package targets and verify end-to-end acceptance](release-and-acceptance/TASK.md)
-- [ ] [Run without restrictions when Landlock is unavailable](landlock-capability-fallback/TASK.md)

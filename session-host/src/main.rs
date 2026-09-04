@@ -20,7 +20,6 @@ Options:
   --term VALUE                 TERM value (default: xterm-256color)
   --colorterm VALUE            Optional COLORTERM value
   --sandbox-policy PATH        Filesystem sandbox policy
-  --sandbox-unavailable MODE   fail or run-unsandboxed (default: fail)
   --journal-segment-bytes N    Journal segment size (default: 67108864)
   --journal-max-bytes N        Total journal size limit (default: 1073741824)
   --max-unacknowledged-operations N

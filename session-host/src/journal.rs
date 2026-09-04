@@ -3813,7 +3813,7 @@ mod tests {
             sandbox: SandboxMetadata {
                 requested: false,
                 enforcement: SandboxEnforcement::None,
-                unavailable_policy: SandboxUnavailablePolicy::Fail,
+                unavailable_policy: SandboxUnavailablePolicy::RunUnsandboxed,
                 read_write_paths: vec![],
                 read_only_paths: vec![],
                 policy_version: None,
@@ -3854,6 +3854,23 @@ mod tests {
         fs::write(directory.join(METADATA_NAME), serde_json::to_vec(&value).unwrap()).unwrap();
 
         assert_eq!(read_metadata(&directory).unwrap().session_id, "019d-session-fixture");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn metadata_reader_accepts_legacy_fail_unavailable_policy() {
+        let directory = temporary_directory("legacy-fail-metadata");
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../protocol/fixtures/metadata-v1.json"
+        ))
+        .unwrap();
+        value["sandbox"]["unavailablePolicy"] = serde_json::json!("fail");
+        fs::write(directory.join(METADATA_NAME), serde_json::to_vec(&value).unwrap()).unwrap();
+
+        assert_eq!(
+            read_metadata(&directory).unwrap().sandbox.unavailable_policy,
+            SandboxUnavailablePolicy::Fail
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 }

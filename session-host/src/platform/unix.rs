@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::PlatformKind;
 use super::sandbox::PreparedSandbox;
-use crate::cli::{SandboxUnavailable, SessionOptions};
+use crate::cli::SessionOptions;
 use crate::control_journal::{Admission, LiveOperationLedger, OperationIdentity};
 use crate::host::{
     self, ERROR_INVALID_REQUEST, ERROR_INVALID_STATE, ERROR_IO, ERROR_POLICY,
@@ -362,10 +362,7 @@ fn initial_metadata(
             } else {
                 SandboxEnforcement::None
             },
-            unavailable_policy: match options.sandbox_unavailable {
-                SandboxUnavailable::Fail => SandboxUnavailablePolicy::Fail,
-                SandboxUnavailable::RunUnsandboxed => SandboxUnavailablePolicy::RunUnsandboxed,
-            },
+            unavailable_policy: SandboxUnavailablePolicy::RunUnsandboxed,
             read_write_paths,
             read_only_paths,
             policy_version: policy.map(|policy| policy.version),

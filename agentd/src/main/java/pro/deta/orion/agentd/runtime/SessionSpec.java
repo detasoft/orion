@@ -32,19 +32,13 @@ public record SessionSpec(
         Objects.requireNonNull(sandbox, "sandbox");
     }
 
-    public record Sandbox(Optional<Path> policy, Unavailable unavailable) {
+    public record Sandbox(Optional<Path> policy) {
         public Sandbox {
             policy = Objects.requireNonNull(policy, "policy");
-            Objects.requireNonNull(unavailable, "unavailable");
         }
 
         public static Sandbox none() {
-            return new Sandbox(Optional.empty(), Unavailable.FAIL);
+            return new Sandbox(Optional.empty());
         }
-    }
-
-    public enum Unavailable {
-        FAIL,
-        RUN_UNSANDBOXED
     }
 }
