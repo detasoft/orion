@@ -7,9 +7,9 @@ public final class AgentProtocolDecoder {
     private final CborSequenceParser<AgentMessage> sequence;
 
     public AgentProtocolDecoder(AgentProtocolLimits limits) {
-        Objects.requireNonNull(limits, "limits");
-        AgentProtocolCodec codec = new AgentProtocolCodec(limits);
-        sequence = new CborSequenceParser<>(limits, codec::decode);
+        AgentProtocolLimits messageLimits = Objects.requireNonNull(limits, "limits").agentMessageLimits();
+        AgentProtocolCodec codec = new AgentProtocolCodec(messageLimits);
+        sequence = new CborSequenceParser<>(messageLimits, codec::decode);
     }
 
     public SequenceDecodeResult<AgentMessage> accept(ByteBuffer data) {

@@ -162,6 +162,30 @@ class AgentProtocolCodecTest {
     }
 
     @Test
+    void journalLimitsDoNotWidenAgentProtocolCodecFrames() {
+        AgentProtocolLimits limits = AgentProtocolLimits.journalDefaults();
+        byte[] oversized = oversizedUnknownAgentMessage();
+
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(() -> new AgentProtocolCodec(limits).decode(oversized))
+                .extracting(AgentProtocolException::reason)
+                .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
+        assertThat(limits.maxFrameBytes()).isEqualTo(AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES);
+    }
+
+    @Test
+    void journalLimitsDoNotWidenIncrementalAgentProtocolFrames() {
+        SequenceDecodeResult<AgentMessage> result = new AgentProtocolDecoder(
+                AgentProtocolLimits.journalDefaults()).accept(ByteBuffer.wrap(oversizedUnknownAgentMessage()));
+
+        assertThat(result.outcomes()).isEmpty();
+        assertThat(result.terminalIssue())
+                .get()
+                .extracting(issue -> issue.exception().reason())
+                .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
+    }
+
+    @Test
     void mapEncodingIsCanonical() throws Exception {
         Map<String, String> first = new LinkedHashMap<>();
         first.put("z-last", "2");
@@ -366,6 +390,15 @@ class AgentProtocolCodecTest {
                 Optional.empty(),
                 Optional.empty(),
                 "");
+    }
+
+    private static byte[] oversizedUnknownAgentMessage() {
+        int payloadBytes = AgentProtocolLimits.DEFAULT_MAX_FRAME_BYTES;
+        ByteBuffer encoded = ByteBuffer.allocate(payloadBytes + 9);
+        encoded.put((byte) 0x82);
+        encoded.put((byte) 0x19).putShort((short) 0x7ffe);
+        encoded.put((byte) 0x5a).putInt(payloadBytes);
+        return encoded.array();
     }
 
     private static byte[] concatenate(List<AgentMessage> messages) throws AgentProtocolException {

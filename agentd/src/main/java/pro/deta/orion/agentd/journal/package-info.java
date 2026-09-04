@@ -1,2 +1,2 @@
-/** Session journal cursors, readers, watchers, and synchronization pumps. */
+/** Stateless journal snapshots, bounded incremental following, and availability notifications for AgentD. */
 package pro.deta.orion.agentd.journal;

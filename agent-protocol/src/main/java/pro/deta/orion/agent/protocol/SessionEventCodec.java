@@ -85,7 +85,7 @@ public final class SessionEventCodec {
         if (to - from > limits.maxMessageBytes()) {
             throw new AgentProtocolException(LIMIT_EXCEEDED, "Session event exceeds configured limit");
         }
-        int itemLength = CborItemScanner.itemLength(encoded, from, to, limits);
+        int itemLength = CborItemScanner.itemLengthWithStringLimits(encoded, from, to, limits);
         if (itemLength < 0 || itemLength != to - from) {
             throw new AgentProtocolException(MALFORMED_CBOR, "Session event must be one complete CBOR item");
         }

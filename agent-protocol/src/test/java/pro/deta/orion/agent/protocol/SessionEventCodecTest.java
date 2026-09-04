@@ -120,6 +120,158 @@ class SessionEventCodecTest {
     }
 
     @Test
+    void incrementallyDecodesTheMaximumJournalPayload() throws Exception {
+        AgentProtocolLimits limits = AgentProtocolLimits.journalDefaults();
+        byte[] payload = new byte[AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES];
+        SessionEventCodec codec = new SessionEventCodec(limits);
+        byte[] encoded = codec.encode(
+                new EventId(1),
+                new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(payload)));
+        SessionEventDecoder decoder = new SessionEventDecoder(limits);
+        int firstChunkSize = encoded.length / 2;
+
+        assertThat(encoded.length).isGreaterThan(AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES);
+        assertThat(decoder.accept(ByteBuffer.wrap(encoded, 0, firstChunkSize)).outcomes()).isEmpty();
+        SequenceDecodeResult<SessionEventRecord> result = decoder.accept(
+                ByteBuffer.wrap(encoded, firstChunkSize, encoded.length - firstChunkSize));
+
+        assertThat(result.outcomes())
+                .singleElement()
+                .isInstanceOf(SequenceDecodeResult.Decoded.class);
+        assertThat(result.terminalIssue()).isEmpty();
+        assertThat(decoder.pendingBytes()).isZero();
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(() -> codec.encode(
+                        new EventId(2),
+                        new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(
+                                new byte[AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES + 1]))))
+                .extracting(AgentProtocolException::reason)
+                .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
+    }
+
+    @Test
+    void structurallyRejectsJournalPayloadAboveTheBinaryLimit() {
+        int payloadBytes = AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES + 1;
+        ByteBuffer encoded = ByteBuffer.allocate(payloadBytes + 10);
+        encoded.put((byte) 0x83);
+        encoded.put((byte) 0x01);
+        encoded.put((byte) 0x19).putShort((short) SessionEventType.PTY_OUTPUT);
+        encoded.put((byte) 0x5a).putInt(payloadBytes);
+
+        assertThat(encoded.array().length)
+                .isLessThan(AgentProtocolLimits.HARD_MAX_JOURNAL_RECORD_BYTES);
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(() -> new SessionEventCodec(
+                        AgentProtocolLimits.journalDefaults()).decode(encoded.array()))
+                .extracting(AgentProtocolException::reason)
+                .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
+    }
+
+    @Test
+    void structurallyEnforcesStringLimitsInsideOpaquePayloads() {
+        AgentProtocolLimits limits = new AgentProtocolLimits(64, 8, 4, 4, 8);
+        SessionEventCodec codec = new SessionEventCodec(limits);
+
+        for (byte[] encoded : List.of(
+                Hex.parse("8301197ffe450102030405"),
+                Hex.parse("8301197ffe656162636465"))) {
+            assertThatExceptionOfType(AgentProtocolException.class)
+                    .isThrownBy(() -> codec.decode(encoded))
+                    .extracting(AgentProtocolException::reason)
+                    .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
+        }
+    }
+
+    @Test
+    void encodeOpaquePreservesRawValuesAtStringLimits() throws Exception {
+        SessionEventCodec codec = new SessionEventCodec(smallStringLimits());
+
+        for (byte[] raw : rawValuesAtStringLimits()) {
+            byte[] encoded = codec.encodeOpaque(
+                    new EventId(1),
+                    0x7ffe,
+                    ProtocolBytes.copyOf(raw),
+                    List.of(ProtocolBytes.copyOf(raw)));
+            byte[] expected = concatenate(List.of(Hex.parse("8401197ffe"), raw, raw));
+            SessionEventRecord decoded = codec.decode(encoded);
+
+            assertThat(encoded).containsExactly(expected);
+            assertThat(decoded.encodedPayload().toByteArray()).containsExactly(raw);
+            assertThat(decoded.trailingFieldCount()).isOne();
+        }
+    }
+
+    @Test
+    void encodeOpaqueRejectsPayloadValuesAboveStringLimits() {
+        SessionEventCodec codec = new SessionEventCodec(smallStringLimits());
+
+        for (byte[] raw : rawValuesAboveStringLimits()) {
+            byte[] encoded = concatenate(List.of(Hex.parse("8301197ffe"), raw));
+            assertLimitExceeded(() -> codec.decode(encoded));
+            assertLimitExceeded(() -> codec.encodeOpaque(
+                    new EventId(1),
+                    0x7ffe,
+                    ProtocolBytes.copyOf(raw),
+                    List.of()));
+        }
+    }
+
+    @Test
+    void encodeOpaqueRejectsTrailingValuesAboveStringLimits() {
+        SessionEventCodec codec = new SessionEventCodec(smallStringLimits());
+
+        for (byte[] raw : rawValuesAboveStringLimits()) {
+            byte[] encoded = concatenate(List.of(Hex.parse("8401197ffef6"), raw));
+            assertLimitExceeded(() -> codec.decode(encoded));
+            assertLimitExceeded(() -> codec.encodeOpaque(
+                    new EventId(1),
+                    0x7ffe,
+                    ProtocolBytes.copyOf(Hex.parse("f6")),
+                    List.of(ProtocolBytes.copyOf(raw))));
+        }
+    }
+
+    @Test
+    void encodeOpaqueEnforcesCompleteRecordNestingForPayload() throws Exception {
+        SessionEventCodec codec = new SessionEventCodec(nestingLimits());
+        byte[] atLimit = Hex.parse("8100");
+        byte[] aboveLimit = Hex.parse("818100");
+
+        byte[] encoded = codec.encodeOpaque(
+                new EventId(1),
+                0x7ffe,
+                ProtocolBytes.copyOf(atLimit),
+                List.of());
+
+        assertThat(codec.decode(encoded).encodedPayload().toByteArray()).containsExactly(atLimit);
+        assertLimitExceeded(() -> codec.encodeOpaque(
+                new EventId(1),
+                0x7ffe,
+                ProtocolBytes.copyOf(aboveLimit),
+                List.of()));
+    }
+
+    @Test
+    void encodeOpaqueEnforcesCompleteRecordNestingForTrailingFields() throws Exception {
+        SessionEventCodec codec = new SessionEventCodec(nestingLimits());
+        byte[] atLimit = Hex.parse("8100");
+        byte[] aboveLimit = Hex.parse("818100");
+
+        byte[] encoded = codec.encodeOpaque(
+                new EventId(1),
+                0x7ffe,
+                ProtocolBytes.copyOf(Hex.parse("f6")),
+                List.of(ProtocolBytes.copyOf(atLimit)));
+
+        assertThat(codec.decode(encoded).trailingFieldCount()).isOne();
+        assertLimitExceeded(() -> codec.encodeOpaque(
+                new EventId(1),
+                0x7ffe,
+                ProtocolBytes.copyOf(Hex.parse("f6")),
+                List.of(ProtocolBytes.copyOf(aboveLimit))));
+    }
+
+    @Test
     void retainsIncompleteTailAndRejectsInvalidCompleteItems() throws Exception {
         byte[] event = CODEC.encode(
                 new EventId(1),
@@ -165,6 +317,37 @@ class SessionEventCodecTest {
             output.writeBytes(item);
         }
         return output.toByteArray();
+    }
+
+    private static AgentProtocolLimits smallStringLimits() {
+        return new AgentProtocolLimits(64, 8, 4, 4, 8);
+    }
+
+    private static AgentProtocolLimits nestingLimits() {
+        return new AgentProtocolLimits(64, 8, 4, 4, 2);
+    }
+
+    private static List<byte[]> rawValuesAtStringLimits() {
+        return List.of(
+                Hex.parse("814401020304"),
+                Hex.parse("816461626364"),
+                Hex.parse("5f420102420304ff"),
+                Hex.parse("7f626162626364ff"));
+    }
+
+    private static List<byte[]> rawValuesAboveStringLimits() {
+        return List.of(
+                Hex.parse("81450102030405"),
+                Hex.parse("81656162636465"),
+                Hex.parse("5f42010243030405ff"),
+                Hex.parse("7f62616263636465ff"));
+    }
+
+    private static void assertLimitExceeded(org.assertj.core.api.ThrowableAssert.ThrowingCallable callable) {
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(callable)
+                .extracting(AgentProtocolException::reason)
+                .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
     }
 
     private static void addDecoded(

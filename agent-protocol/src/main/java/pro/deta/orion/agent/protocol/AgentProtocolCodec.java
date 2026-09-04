@@ -23,7 +23,7 @@ public final class AgentProtocolCodec {
     private final AgentProtocolLimits limits;
 
     public AgentProtocolCodec(AgentProtocolLimits limits) {
-        this.limits = Objects.requireNonNull(limits, "limits");
+        this.limits = Objects.requireNonNull(limits, "limits").agentMessageLimits();
     }
 
     public byte[] encode(AgentMessage message) throws AgentProtocolException {

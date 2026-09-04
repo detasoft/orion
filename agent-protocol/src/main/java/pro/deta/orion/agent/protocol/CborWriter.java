@@ -98,7 +98,7 @@ final class CborWriter {
 
     void raw(ProtocolBytes value) throws AgentProtocolException {
         byte[] encoded = value.toByteArray();
-        int itemLength = CborItemScanner.itemLength(encoded, 0, limits);
+        int itemLength = CborItemScanner.itemLengthWithStringLimits(encoded, 0, encoded.length, limits);
         if (itemLength < 0 || itemLength != encoded.length) {
             throw new AgentProtocolException(
                     AgentProtocolException.Reason.MALFORMED_CBOR,
@@ -113,6 +113,16 @@ final class CborWriter {
             throw new AgentProtocolException(
                     AgentProtocolException.Reason.LIMIT_EXCEEDED,
                     "Encoded CBOR item exceeds configured limit");
+        }
+        int itemLength = CborItemScanner.itemLengthWithStringLimits(
+                result,
+                0,
+                result.length,
+                limits);
+        if (itemLength < 0 || itemLength != result.length) {
+            throw new AgentProtocolException(
+                    AgentProtocolException.Reason.MALFORMED_CBOR,
+                    "Encoded CBOR must contain exactly one complete item");
         }
         return result;
     }

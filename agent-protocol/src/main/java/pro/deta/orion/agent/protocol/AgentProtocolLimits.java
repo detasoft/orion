@@ -8,12 +8,14 @@ public record AgentProtocolLimits(
         int maxNestingDepth
 ) {
     public static final int HARD_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
+    public static final int HARD_MAX_JOURNAL_RECORD_BYTES = HARD_MAX_MESSAGE_BYTES + 4 * 1024;
     public static final int DEFAULT_MAX_MESSAGE_BYTES = HARD_MAX_MESSAGE_BYTES;
     public static final int DEFAULT_MAX_FRAME_BYTES = DEFAULT_MAX_MESSAGE_BYTES;
 
     public AgentProtocolLimits {
-        if (maxMessageBytes < 1 || maxMessageBytes > HARD_MAX_MESSAGE_BYTES) {
-            throw new IllegalArgumentException("maxMessageBytes must be between 1 and 16777216");
+        if (maxMessageBytes < 1 || maxMessageBytes > HARD_MAX_JOURNAL_RECORD_BYTES) {
+            throw new IllegalArgumentException(
+                    "maxMessageBytes must be between 1 and " + HARD_MAX_JOURNAL_RECORD_BYTES);
         }
         if (maxCollectionEntries < 1) {
             throw new IllegalArgumentException("maxCollectionEntries must be positive");
@@ -38,6 +40,15 @@ public record AgentProtocolLimits(
                 64);
     }
 
+    public static AgentProtocolLimits journalDefaults() {
+        return new AgentProtocolLimits(
+                HARD_MAX_JOURNAL_RECORD_BYTES,
+                1_024,
+                256 * 1024,
+                DEFAULT_MAX_MESSAGE_BYTES,
+                64);
+    }
+
     public AgentProtocolLimits withMaxMessageBytes(int value) {
         return new AgentProtocolLimits(
                 value,
@@ -55,6 +66,11 @@ public record AgentProtocolLimits(
     }
 
     public int maxFrameBytes() {
-        return maxMessageBytes;
+        return Math.min(maxMessageBytes, HARD_MAX_MESSAGE_BYTES);
+    }
+
+    AgentProtocolLimits agentMessageLimits() {
+        int frameBytes = maxFrameBytes();
+        return frameBytes == maxMessageBytes ? this : withMaxMessageBytes(frameBytes);
     }
 }

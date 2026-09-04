@@ -8,12 +8,18 @@ final class CborItemScanner {
     private static final int INCOMPLETE = -1;
 
     private final AgentProtocolLimits limits;
+    private final boolean enforceStringLimits;
     private final Deque<Frame> containers = new ArrayDeque<>();
     private int itemStart;
     private int position;
 
     CborItemScanner(AgentProtocolLimits limits) {
+        this(limits, false);
+    }
+
+    private CborItemScanner(AgentProtocolLimits limits, boolean enforceStringLimits) {
         this.limits = Objects.requireNonNull(limits, "limits");
+        this.enforceStringLimits = enforceStringLimits;
     }
 
     static int itemLength(byte[] bytes, int offset, AgentProtocolLimits limits) throws AgentProtocolException {
@@ -22,7 +28,22 @@ final class CborItemScanner {
 
     static int itemLength(byte[] bytes, int offset, int end, AgentProtocolLimits limits)
             throws AgentProtocolException {
-        CborItemScanner scanner = new CborItemScanner(limits);
+        return itemLength(bytes, offset, end, limits, false);
+    }
+
+    static int itemLengthWithStringLimits(byte[] bytes, int offset, int end, AgentProtocolLimits limits)
+            throws AgentProtocolException {
+        return itemLength(bytes, offset, end, limits, true);
+    }
+
+    private static int itemLength(
+            byte[] bytes,
+            int offset,
+            int end,
+            AgentProtocolLimits limits,
+            boolean enforceStringLimits
+    ) throws AgentProtocolException {
+        CborItemScanner scanner = new CborItemScanner(limits, enforceStringLimits);
         scanner.reset(offset);
         int itemEnd = scanner.scan(bytes, end);
         return itemEnd == INCOMPLETE ? INCOMPLETE : itemEnd - offset;
@@ -97,7 +118,7 @@ final class CborItemScanner {
             containers.push(new Frame(Kind.INDEFINITE_STRING, 0, 0, header.majorType));
             return ValueState.OPENED;
         }
-        int length = length(header.argument, limits.maxMessageBytes(), "CBOR string");
+        int length = length(header.argument, stringLimit(header.majorType), "CBOR string");
         long valueEnd = (long) position + length;
         checkItemLength(valueEnd);
         if (valueEnd > end) {
@@ -137,14 +158,29 @@ final class CborItemScanner {
                     AgentProtocolException.Reason.MALFORMED_CBOR,
                     "Indefinite CBOR string contains an invalid chunk");
         }
-        int length = length(chunk.argument, limits.maxMessageBytes(), "CBOR string chunk");
+        int maximum = stringLimit(chunk.majorType);
+        int length = length(chunk.argument, maximum, "CBOR string chunk");
+        long encodedBytes = string.encodedBytes + length;
+        if (encodedBytes > maximum) {
+            throw failure(
+                    AgentProtocolException.Reason.LIMIT_EXCEEDED,
+                    "CBOR string exceeds configured limit");
+        }
         long chunkEnd = (long) chunk.end + length;
         checkItemLength(chunkEnd);
         if (chunkEnd > end) {
             return INCOMPLETE;
         }
+        string.encodedBytes = encodedBytes;
         position = (int) chunkEnd;
         return INCOMPLETE;
+    }
+
+    private int stringLimit(int majorType) {
+        if (!enforceStringLimits) {
+            return limits.maxMessageBytes();
+        }
+        return majorType == 2 ? limits.maxBinaryBytes() : limits.maxStringBytes();
     }
 
     private int closeIndefiniteContainer() throws AgentProtocolException {
@@ -256,6 +292,7 @@ final class CborItemScanner {
         private long remaining;
         private int completedValues;
         private final int stringMajorType;
+        private long encodedBytes;
 
         private Frame(Kind kind, long remaining, int completedValues, int stringMajorType) {
             this.kind = kind;

@@ -6,7 +6,7 @@ import java.util.Optional;
 
 public sealed interface JournalReadIssue permits JournalReadIssue.Io, JournalReadIssue.Layout,
         JournalReadIssue.Decompression, JournalReadIssue.Cbor, JournalReadIssue.Record,
-        JournalReadIssue.EventOrder, JournalReadIssue.Limit {
+        JournalReadIssue.EventOrder, JournalReadIssue.Limit, JournalReadIssue.Position {
     Optional<Path> segment();
 
     String detail();
@@ -49,6 +49,12 @@ public sealed interface JournalReadIssue permits JournalReadIssue.Io, JournalRea
 
     record Limit(Optional<Path> segment, String detail) implements JournalReadIssue {
         public Limit {
+            validate(segment, detail);
+        }
+    }
+
+    record Position(Optional<Path> segment, String detail) implements JournalReadIssue {
+        public Position {
             validate(segment, detail);
         }
     }
