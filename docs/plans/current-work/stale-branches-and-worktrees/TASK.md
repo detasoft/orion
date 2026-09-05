@@ -1,41 +1,16 @@
 # Review stale branches and worktree cleanup candidates
 
-Status: active
+Status: complete
+Report: ../../../reviews/2026-09-05-stale-branches-and-worktrees.md
 
-- [ ] Determine which remaining local branches and worktrees can be removed
-  without losing useful work or interrupting active sessions.
-  - Owner: codex, session stale-review-afc5477a, started 2026-09-05 20:12 Europe/Amsterdam.
+- [x] Compare all six candidates with main, including replacement behavior,
+  regression tests, worktree state and ownership; record evidence and recommendations.
 
-## Candidates
+`work` is eligible for removal. Retain both paused task worktrees until their
+owners release them. Retain the July Git branches for useful regression
+scenarios and `transfer` for unique infrastructure files. The report records
+conditions for later cleanup; no branches or worktrees were deleted.
 
-Snapshot from 2026-09-05; recheck all refs and worktree state before acting.
-
-- [ ] `work`: contained in `main`, no registered worktree.
-- [ ] `codex/primary-upstream-sync-6e3b` and
-  `.worktrees/primary-upstream-sync-6e3b`: contained in `main`, clean at inspection.
-- [ ] `codex/agentd-command-orchestration-d8e4` and
-  `.worktrees/agentd-command-orchestration-d8e4`: contained in `main`, clean at
-  inspection; last commit pauses the task, so verify ownership and preserve
-  unfinished task tracking rather than treating cleanup as task completion.
-- [ ] `codex/git-wire-response-parsers`: last commit 2026-07-27; 50 commits
-  outside `main` ancestry, no registered worktree.
-- [ ] `native-git-client-session-machines`: last commit 2026-07-27; 47 commits
-  outside `main` ancestry, no registered worktree.
-- [ ] `transfer`: last commit 2026-05-11; 129 commits outside `main` ancestry,
-  no registered worktree.
-
-## Review and Safety
-
-- Start with the two July Git branches. Compare behavior and relevant tests
-  against current `main`, accounting for squash/cherry-pick transfers and
-  replacement implementations; ancestry counts alone do not prove missing work.
-- Record per candidate what is integrated, superseded, or still useful, with
-  supporting commit/file references and a retain/remove recommendation.
-- Obtain approval before deleting branches with unique work. Recheck clean
-  worktrees and active ownership immediately before any authorized cleanup.
-- Other worktrees are not cleanup targets in this task: interactive-terminal,
-  journal-durability, linux-process-tree-control, organization-users-roles,
-  query-and-output, and session-replication have unique commits. The Linux
-  worktree also had uncommitted changes at inspection. Do not disturb them.
-- Verify actual worktree paths with `git worktree list`; this checkout uses
-  `.worktrees`, and `.workspaces` was absent at inspection.
+Deletion of unique work requires explicit approval. Recheck refs, local files
+and ownership immediately before any authorized cleanup. Other worktrees
+remain outside this task's scope.
