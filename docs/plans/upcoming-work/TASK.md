@@ -8,7 +8,6 @@ tasks may be ready at the same time.
 
 ## Child Tasks
 
-- [ ] [Review stale branches and worktree cleanup candidates](stale-branches-and-worktrees/TASK.md)
 - [ ] [Harden ACL storage contracts](acl-storage-hardening/TASK.md)
 - [ ] [Harden HTTP core contracts](http-core-hardening/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)

@@ -1,9 +1,10 @@
 # Review stale branches and worktree cleanup candidates
 
-Status: upcoming
+Status: active
 
 - [ ] Determine which remaining local branches and worktrees can be removed
   without losing useful work or interrupting active sessions.
+  - Owner: codex, session stale-review-afc5477a, started 2026-09-05 20:12 Europe/Amsterdam.
 
 ## Candidates
 
