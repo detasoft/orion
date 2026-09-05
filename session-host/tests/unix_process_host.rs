@@ -338,6 +338,14 @@ fn hosts_a_real_tty_and_preserves_raw_output() {
         event_type::PROCESS_EXITED
     );
     assert_eq!(
+        result
+            .events
+            .iter()
+            .filter(|event| event.event_type == event_type::PROCESS_EXITED)
+            .count(),
+        1
+    );
+    assert_eq!(
         &result.events.last().unwrap().payload[0..4],
         &0_i32.to_le_bytes()
     );
@@ -980,6 +988,14 @@ fn restores_default_sigpipe_disposition_in_child() {
         .iter()
         .find(|event| event.event_type == event_type::PROCESS_EXITED)
         .unwrap();
+    assert_eq!(
+        result
+            .events
+            .iter()
+            .filter(|event| event.event_type == event_type::PROCESS_EXITED)
+            .count(),
+        1
+    );
     assert_eq!(&exited.payload[0..4], &i32::MIN.to_le_bytes());
     assert_eq!(&exited.payload[4..8], &(-1_i32).to_le_bytes());
     assert!(!contains(&terminal_output(&result.events), b"SURVIVED"));

@@ -3,7 +3,7 @@
 Status: todo
 Depends on:
 [process control and PTY closure](../process-control-and-pty-closure/TASK.md),
-[explicit journal durability](../journal-durability/TASK.md)
+completed explicit journal durability
 
 Keep the framed `TERMINATE` request as the normal session shutdown path while
 providing process-level `SIGTERM` to `session-host` as a control-socket-independent
@@ -42,4 +42,4 @@ requests and process-list semantics remain in
 `../process-control-and-pty-closure/TASK.md`; Linux cgroup, pidfd, and descendant
 delivery mechanics remain in `../linux-process-tree-control/TASK.md`; the
 journal durability API and final sync guarantee remain in
-`../journal-durability/TASK.md`.
+[the retained journal durability plan](../../../2026-09-05-session-host-explicit-journal-durability.md).

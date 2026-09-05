@@ -23,7 +23,7 @@ use crate::host::{
     ERROR_UNSUPPORTED_MESSAGE, ERROR_UNSUPPORTED_SCHEMA, HostError, OwnedControlFrame,
 };
 use crate::journal::{
-    self, ControlMetadata, ControlTransport, Durability, JournalConfig, JournalWriter, Metadata,
+    self, ControlMetadata, ControlTransport, JournalConfig, JournalWriter, Metadata,
     SandboxEnforcement, SandboxMetadata, SandboxRuleMetadata, SandboxUnavailablePolicy,
 };
 use crate::journal_acknowledgement::{JournalAcknowledgement, validate_received_watermark};
@@ -77,7 +77,7 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
     }
 
-    fs::create_dir_all(&options.session_dir)?;
+    journal::create_session_directory_durably(&options.session_dir)?;
     let endpoint_path = options.session_dir.join(CONTROL_ENDPOINT);
     remove_stale_endpoint(&endpoint_path)?;
     let listener = UnixListener::bind(&endpoint_path)?;
@@ -87,7 +87,6 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     let journal = JournalWriter::create(
         &options.session_dir,
         JournalConfig {
-            durability: Durability::Buffered,
             segment_max_bytes: options.journal_segment_bytes,
             journal_max_bytes: options.journal_max_bytes,
         },
@@ -152,9 +151,7 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         let mut state = lock_state(&state)?;
         state.exit_code = exit_code;
         state.exit_signal = exit_signal;
-        let payload = protocol::process_exited_payload(exit_code, exit_signal);
-        state.append(event_type::PROCESS_EXITED, &payload)?;
-        state.journal.flush()?;
+        state.journal.finish_durably(exit_code)?;
     }
 
     stop.store(true, Ordering::Release);
@@ -231,7 +228,7 @@ fn initialize_after_journal(
         .map_err(|error| HostError::Protocol(error.to_string()))?;
     let started_at = epoch_millis()?;
     let mut metadata = initial_metadata(options, &sandbox, started_at)?;
-    journal::write_metadata(&options.session_dir, &metadata, Durability::Buffered)?;
+    journal::write_metadata(&options.session_dir, &metadata)?;
     let (child_pid, master, descendants) =
         spawn_pty(prepared, options.cols, options.rows, sandbox)?;
     let child_pid_u64 = u64::try_from(child_pid)
@@ -643,10 +640,8 @@ struct SharedState {
 }
 
 impl SharedState {
-    fn append(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
-        let event_id = self.journal.append(event, payload)?;
-        self.journal.flush()?;
-        Ok(event_id)
+    fn append_buffered(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
+        Ok(self.journal.append_buffered(event, payload)?)
     }
 
     fn append_durable(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
@@ -654,11 +649,7 @@ impl SharedState {
     }
 
     fn persist_metadata(&self) -> Result<(), HostError> {
-        journal::write_metadata(
-            self.journal.directory(),
-            &self.metadata,
-            Durability::Buffered,
-        )?;
+        journal::write_metadata(self.journal.directory(), &self.metadata)?;
         Ok(())
     }
 }
@@ -670,7 +661,7 @@ fn copy_pty_output(mut master: File, state: Arc<Mutex<SharedState>>) -> Result<(
             Ok(0) => return Ok(()),
             Ok(length) => {
                 let mut state = lock_state(&state)?;
-                state.append(event_type::PTY_OUTPUT, &buffer[..length])?;
+                state.append_buffered(event_type::PTY_OUTPUT, &buffer[..length])?;
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) if error.raw_os_error() == Some(libc::EIO) => return Ok(()),
@@ -968,7 +959,7 @@ fn apply_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), St
         return Err("child process has exited".to_owned());
     }
     state
-        .append(event_type::PTY_INPUT, payload)
+        .append_buffered(event_type::PTY_INPUT, payload)
         .map_err(|error| error.to_string())?;
     let mut master = state.master.try_clone().map_err(|error| error.to_string())?;
     drop(state);
@@ -985,7 +976,7 @@ fn apply_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), S
         return Err("child process has exited".to_owned());
     }
     state
-        .append(event_type::PTY_RESIZE, payload)
+        .append_buffered(event_type::PTY_RESIZE, payload)
         .map_err(|error| error.to_string())?;
     let dimensions = libc::winsize {
         ws_row: rows as u16,
@@ -1084,7 +1075,7 @@ fn apply_foreground_signal(
     }
     let payload = host::signal_payload(kind, signal);
     state
-        .append(event_type::SIGNAL, &payload)
+        .append_buffered(event_type::SIGNAL, &payload)
         .map_err(|error| error.to_string())?;
     let foreground_group = unsafe { libc::tcgetpgrp(state.master.as_raw_fd()) };
     if foreground_group < 0 {
@@ -1108,7 +1099,7 @@ fn apply_descendant_signal(
     }
     let payload = host::signal_payload(kind, signal);
     state
-        .append(event_type::SIGNAL, &payload)
+        .append_buffered(event_type::SIGNAL, &payload)
         .map_err(|error| error.to_string())?;
     let descendants = Arc::clone(&state.descendants);
     drop(state);

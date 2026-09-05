@@ -78,6 +78,38 @@ size threshold is reached, the writer closes it and creates the next numbered
 segment. A CBOR item is never split between segments, and every new non-empty
 segment begins with one complete record.
 
+## Durability Boundaries
+
+The writer exposes the stable-storage requirement at each operation. Buffered
+appends write ordinary high-volume records without synchronizing the active
+file per record. A buffered record can therefore remain only in the active
+segment and can be part of an incomplete crash tail.
+
+The nearest pre-existing ancestor of a requested session path is the durable
+root assumed by the writer. Before relying on it, startup synchronizes its
+parent to revalidate the ancestor's directory entry. It then creates every
+missing descendant one component at a time and synchronizes its parent before
+proceeding, so failed attempts and concurrent creation cannot leave an
+unpublished entry that a retry accepts as durable. The session directory itself
+is durably reachable before a segment is published.
+
+Every newly created segment is published by synchronizing the journal
+directory. Before rotation publishes its successor, the writer synchronizes
+the complete closed segment. Segment-boundary synchronization is required even
+when the append that triggers rotation is buffered.
+
+A durable append writes its authority record and synchronizes the active
+segment before accepting the event ID. Success means that the complete journal
+prefix through that record is durable across a machine crash, including any
+buffered records that precede it. A failed synchronization rolls the record
+back durably or makes the writer unavailable for further appends.
+
+Normal host completion uses a durable finish operation as the sole writer of
+`PROCESS_EXITED`. If the final record rotates, the writer synchronizes the old
+prefix, publishes the new segment, writes the exit record, and synchronizes
+that record before returning. Maintenance compression and acknowledged
+retention remain separate from these record durability barriers.
+
 ## Segment Ranges and Reading
 
 The journal is self-indexing. A reader determines a segment's start by decoding

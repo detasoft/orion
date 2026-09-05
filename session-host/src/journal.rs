@@ -21,15 +21,8 @@ const MAX_DECOMPRESSED_SEGMENT_LENGTH: u64 = 512 * 1024 * 1024;
 pub const DEFAULT_JOURNAL_SEGMENT_BYTES: u64 = 64 * 1024 * 1024;
 pub const DEFAULT_JOURNAL_MAX_BYTES: u64 = 1024 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Durability {
-    Buffered,
-    EveryRecord,
-}
-
 #[derive(Clone, Debug)]
 pub struct JournalConfig {
-    pub durability: Durability,
     pub segment_max_bytes: u64,
     pub journal_max_bytes: u64,
 }
@@ -37,7 +30,6 @@ pub struct JournalConfig {
 impl Default for JournalConfig {
     fn default() -> Self {
         Self {
-            durability: Durability::Buffered,
             segment_max_bytes: DEFAULT_JOURNAL_SEGMENT_BYTES,
             journal_max_bytes: DEFAULT_JOURNAL_MAX_BYTES,
         }
@@ -50,6 +42,7 @@ pub enum JournalError {
     Configuration(String),
     Format(String),
     Maintenance(String),
+    Finished,
     EventIdExhausted,
     PayloadTooLarge(usize),
 }
@@ -63,6 +56,7 @@ impl std::fmt::Display for JournalError {
             }
             Self::Format(message) => write!(formatter, "invalid journal format: {message}"),
             Self::Maintenance(message) => write!(formatter, "journal maintenance failed: {message}"),
+            Self::Finished => formatter.write_str("journal has already finished"),
             Self::EventIdExhausted => formatter.write_str("journal event ID is exhausted"),
             Self::PayloadTooLarge(length) => {
                 write!(formatter, "journal payload exceeds 16 MiB: {length}")
@@ -99,6 +93,14 @@ trait MaintenanceFileSystem: Send + Sync {
 
 trait RecordFileSync: Send + Sync {
     fn sync_data(&self, file: &File) -> io::Result<()>;
+
+    fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+        sync_directory(directory)
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
+    }
 }
 
 struct RealMaintenanceFileSystem;
@@ -227,6 +229,7 @@ pub struct JournalWriter {
     maintenance: JournalMaintenance,
     record_file_sync: Arc<dyn RecordFileSync>,
     append_failure: Option<String>,
+    finished: bool,
 }
 
 impl JournalWriter {
@@ -276,9 +279,10 @@ impl JournalWriter {
     ) -> Result<Self, JournalError> {
         validate_config(&config)?;
         let directory = directory.as_ref().to_path_buf();
-        fs::create_dir_all(&directory)?;
+        create_session_directory_with_sync(&directory, record_file_sync.as_ref())?;
         let segment_number = FIRST_SEGMENT;
-        let file = create_segment(&directory, segment_number, config.durability)?;
+        let file = create_segment(&directory, segment_number, record_file_sync.as_ref())
+            .map_err(initial_segment_error)?;
         let maintenance = JournalMaintenance::start_with_file_system(
             directory.clone(),
             segment_number,
@@ -296,15 +300,17 @@ impl JournalWriter {
             maintenance,
             record_file_sync,
             append_failure: None,
+            finished: false,
         })
     }
 
-    pub fn append(
+    pub fn append_buffered(
         &mut self,
         event_type: u16,
         payload: &[u8],
     ) -> Result<u64, JournalError> {
-        self.append_with_sync(event_type, payload, false)
+        self.reject_generic_process_exit(event_type)?;
+        self.append_record(event_type, payload, false)
     }
 
     pub fn append_durable(
@@ -312,10 +318,27 @@ impl JournalWriter {
         event_type: u16,
         payload: &[u8],
     ) -> Result<u64, JournalError> {
-        self.append_with_sync(event_type, payload, true)
+        self.reject_generic_process_exit(event_type)?;
+        self.append_record(event_type, payload, true)
     }
 
-    fn append_with_sync(
+    pub fn finish_durably(&mut self, exit_code: i32) -> Result<u64, JournalError> {
+        let payload = protocol::process_exited_payload(exit_code, -1);
+        let event_id = self.append_record(protocol::event_type::PROCESS_EXITED, &payload, true)?;
+        self.finished = true;
+        Ok(event_id)
+    }
+
+    fn reject_generic_process_exit(&self, event_type: u16) -> Result<(), JournalError> {
+        if event_type == protocol::event_type::PROCESS_EXITED {
+            return Err(JournalError::Format(
+                "PROCESS_EXITED must be written with finish_durably".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn append_record(
         &mut self,
         event_type: u16,
         payload: &[u8],
@@ -323,7 +346,7 @@ impl JournalWriter {
     ) -> Result<u64, JournalError> {
         let elapsed = self.session_start.elapsed().as_nanos();
         let raw_event_id = u64::try_from(elapsed).unwrap_or(u64::MAX);
-        self.append_at_with_sync(
+        self.append_at(
             raw_event_id,
             event_type,
             payload,
@@ -338,20 +361,18 @@ impl JournalWriter {
         event_type: u16,
         payload: &[u8],
     ) -> Result<u64, JournalError> {
-        self.append_at_with_sync(raw_event_id, event_type, payload, false)
+        self.append_at(raw_event_id, event_type, payload, false)
     }
 
-    fn append_at_with_sync(
+    fn append_at(
         &mut self,
         raw_event_id: u64,
         event_type: u16,
         payload: &[u8],
         force_sync: bool,
     ) -> Result<u64, JournalError> {
+        self.ensure_accepting_records()?;
         self.maintenance.ensure_running()?;
-        if let Some(message) = &self.append_failure {
-            return Err(JournalError::Maintenance(message.clone()));
-        }
         if payload.len() > MAX_PAYLOAD_LENGTH {
             return Err(JournalError::PayloadTooLarge(payload.len()));
         }
@@ -368,14 +389,13 @@ impl JournalWriter {
             .checked_add(record_length)
             .ok_or_else(|| JournalError::Format("active segment length overflow".to_owned()))?;
         if self.active_length != 0 && next_length > self.config.segment_max_bytes {
-            self.rotate_with_sync(force_sync)?;
+            self.rotate_active_segment()?;
         }
         let initial_length = self.active_length;
-        let synchronize = force_sync || self.config.durability == Durability::EveryRecord;
         if let Err(error) = self.file.write_all(&record) {
-            return Err(self.rollback_failed_append(initial_length, error, synchronize));
+            return Err(self.rollback_failed_append(initial_length, error, force_sync));
         }
-        if synchronize && let Err(error) = self.record_file_sync.sync_data(&self.file)
+        if force_sync && let Err(error) = self.record_file_sync.sync_data(&self.file)
         {
             return Err(self.rollback_failed_append(initial_length, error, true));
         }
@@ -388,29 +408,53 @@ impl JournalWriter {
         Ok(event_id)
     }
 
-    pub fn rotate(&mut self) -> Result<(), JournalError> {
-        self.rotate_with_sync(false)
-    }
-
-    fn rotate_with_sync(&mut self, force_sync: bool) -> Result<(), JournalError> {
-        self.maintenance.ensure_running()?;
+    fn ensure_accepting_records(&self) -> Result<(), JournalError> {
         if let Some(message) = &self.append_failure {
             return Err(JournalError::Maintenance(message.clone()));
         }
-        self.file.flush()?;
-        if force_sync || self.config.durability == Durability::EveryRecord {
-            self.record_file_sync.sync_data(&self.file)?;
+        if self.finished {
+            return Err(JournalError::Finished);
         }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn rotate(&mut self) -> Result<(), JournalError> {
+        self.rotate_active_segment()
+    }
+
+    fn rotate_active_segment(&mut self) -> Result<(), JournalError> {
+        self.ensure_accepting_records()?;
+        self.maintenance.ensure_running()?;
+        self.file.flush()?;
+        self.record_file_sync.sync_data(&self.file)?;
         let number = self
             .segment_number
             .checked_add(1)
             .ok_or_else(|| JournalError::Format("segment number is exhausted".to_owned()))?;
-        let segment_durability = if force_sync {
-            Durability::EveryRecord
-        } else {
-            self.config.durability
+        let file = match create_segment(&self.directory, number, self.record_file_sync.as_ref()) {
+            Ok(file) => file,
+            Err(SegmentCreateError::Create(error))
+                if error.kind() == io::ErrorKind::AlreadyExists =>
+            {
+                return Err(self.poison(format!(
+                    "cannot publish successor segment {number}: it already exists"
+                )));
+            }
+            Err(SegmentCreateError::Create(error)) => return Err(JournalError::Io(error)),
+            Err(SegmentCreateError::Publication { error, cleanup: None }) => {
+                return Err(JournalError::Io(error));
+            }
+            Err(SegmentCreateError::Publication {
+                error,
+                cleanup: Some(cleanup),
+            }) => {
+                return Err(self.poison(format!(
+                    "cannot continue after successor publication failed ({error}) \
+                     and cleanup failed ({cleanup})"
+                )));
+            }
         };
-        let file = create_segment(&self.directory, number, segment_durability)?;
         self.file = file;
         self.segment_number = number;
         self.active_length = 0;
@@ -445,9 +489,9 @@ impl JournalWriter {
         }
     }
 
-    pub fn flush(&mut self) -> Result<(), JournalError> {
-        self.file.flush()?;
-        Ok(())
+    fn poison(&mut self, message: String) -> JournalError {
+        self.append_failure = Some(message.clone());
+        JournalError::Maintenance(message)
     }
 
     pub fn directory(&self) -> &Path {
@@ -699,18 +743,96 @@ fn validate_config(config: &JournalConfig) -> Result<(), JournalError> {
     Ok(())
 }
 
+pub(crate) fn create_session_directory_durably(
+    directory: impl AsRef<Path>,
+) -> Result<(), JournalError> {
+    create_session_directory_with_sync(directory.as_ref(), &RealRecordFileSync)
+}
+
+fn create_session_directory_with_sync(
+    directory: &Path,
+    record_file_sync: &dyn RecordFileSync,
+) -> Result<(), JournalError> {
+    let directory = if directory.is_absolute() {
+        directory.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(directory)
+    };
+    let mut missing = Vec::new();
+    let mut ancestor = directory.as_path();
+    while !ancestor.try_exists()? {
+        missing.push(ancestor.to_path_buf());
+        ancestor = ancestor.parent().ok_or_else(|| {
+            JournalError::Configuration(
+                "session path has no pre-existing ancestor to serve as its durable root".to_owned(),
+            )
+        })?;
+    }
+    if !ancestor.is_dir() {
+        return Err(JournalError::Configuration(format!(
+            "session path ancestor is not a directory: {}",
+            ancestor.display()
+        )));
+    }
+    if let Some(parent) = ancestor.parent() {
+        record_file_sync.sync_directory(parent)?;
+    }
+    for path in missing.into_iter().rev() {
+        match fs::create_dir(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists && path.is_dir() => {}
+            Err(error) => return Err(JournalError::Io(error)),
+        }
+        let parent = path.parent().ok_or_else(|| {
+            JournalError::Configuration("session path component has no parent".to_owned())
+        })?;
+        record_file_sync.sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+enum SegmentCreateError {
+    Create(io::Error),
+    Publication {
+        error: io::Error,
+        cleanup: Option<io::Error>,
+    },
+}
+
+fn initial_segment_error(error: SegmentCreateError) -> JournalError {
+    match error {
+        SegmentCreateError::Create(error)
+        | SegmentCreateError::Publication {
+            error,
+            cleanup: None,
+        } => JournalError::Io(error),
+        SegmentCreateError::Publication {
+            error,
+            cleanup: Some(cleanup),
+        } => JournalError::Maintenance(format!(
+            "initial segment publication failed ({error}) and cleanup failed ({cleanup})"
+        )),
+    }
+}
+
 fn create_segment(
     directory: &Path,
     number: u64,
-    durability: Durability,
-) -> Result<File, JournalError> {
+    record_file_sync: &dyn RecordFileSync,
+) -> Result<File, SegmentCreateError> {
+    let path = segment_path(directory, number);
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(segment_path(directory, number))?;
-    if durability == Durability::EveryRecord {
-        file.sync_data()?;
-        sync_directory(directory)?;
+        .open(&path)
+        .map_err(SegmentCreateError::Create)?;
+    if let Err(error) = record_file_sync.sync_directory(directory) {
+        drop(file);
+        let cleanup = record_file_sync
+            .remove_file(&path)
+            .and_then(|()| record_file_sync.sync_directory(directory))
+            .err();
+        return Err(SegmentCreateError::Publication { error, cleanup });
     }
     Ok(file)
 }
@@ -1466,7 +1588,6 @@ pub fn read_metadata(directory: impl AsRef<Path>) -> Result<Metadata, JournalErr
 pub fn write_metadata(
     directory: impl AsRef<Path>,
     metadata: &Metadata,
-    durability: Durability,
 ) -> Result<(), JournalError> {
     validate_metadata(metadata)?;
     let directory = directory.as_ref();
@@ -1482,14 +1603,8 @@ pub fn write_metadata(
         let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
         file.write_all(&contents)?;
         file.write_all(b"\n")?;
-        if durability == Durability::EveryRecord {
-            file.sync_all()?;
-        }
         drop(file);
         fs::rename(&temporary, directory.join(METADATA_NAME))?;
-        if durability == Durability::EveryRecord {
-            sync_directory(directory)?;
-        }
         Ok(())
     })();
     if write_result.is_err() {
@@ -1553,7 +1668,7 @@ fn valid_dimensions(cols: u16, rows: u16) -> bool {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -1582,6 +1697,34 @@ mod tests {
         calls: AtomicUsize,
     }
 
+    struct FailingTwiceRecordFileSync {
+        calls: AtomicUsize,
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum WriterSyncOperation {
+        Data,
+        Directory(PathBuf),
+        Remove(PathBuf),
+    }
+
+    struct RecordingWriterFileSync {
+        operations: Arc<Mutex<Vec<WriterSyncOperation>>>,
+        directory_calls: AtomicUsize,
+        failing_directory_calls: Vec<usize>,
+    }
+
+    struct ConcurrentDirectoryCreator {
+        target: PathBuf,
+        directory_calls: AtomicUsize,
+    }
+
+    struct FailingDirectoryOnceSync {
+        target: PathBuf,
+        failed: AtomicBool,
+        operations: Arc<Mutex<Vec<WriterSyncOperation>>>,
+    }
+
     impl RecordFileSync for CountingRecordFileSync {
         fn sync_data(&self, file: &File) -> io::Result<()> {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -1598,6 +1741,82 @@ mod tests {
                 ));
             }
             file.sync_data()
+        }
+    }
+
+    impl RecordFileSync for FailingTwiceRecordFileSync {
+        fn sync_data(&self, _file: &File) -> io::Result<()> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call < 2 {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "injected record or rollback sync failure",
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    impl RecordFileSync for RecordingWriterFileSync {
+        fn sync_data(&self, file: &File) -> io::Result<()> {
+            self.operations.lock().unwrap().push(WriterSyncOperation::Data);
+            file.sync_data()
+        }
+
+        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+            self.operations
+                .lock()
+                .unwrap()
+                .push(WriterSyncOperation::Directory(directory.to_path_buf()));
+            let call = self.directory_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.failing_directory_calls.contains(&call) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("injected directory sync failure {call}"),
+                ));
+            }
+            File::open(directory)?.sync_all()
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.operations
+                .lock()
+                .unwrap()
+                .push(WriterSyncOperation::Remove(path.to_path_buf()));
+            fs::remove_file(path)
+        }
+    }
+
+    impl RecordFileSync for ConcurrentDirectoryCreator {
+        fn sync_data(&self, file: &File) -> io::Result<()> {
+            file.sync_data()
+        }
+
+        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+            if self.directory_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                fs::create_dir(&self.target)?;
+            }
+            File::open(directory)?.sync_all()
+        }
+    }
+
+    impl RecordFileSync for FailingDirectoryOnceSync {
+        fn sync_data(&self, file: &File) -> io::Result<()> {
+            file.sync_data()
+        }
+
+        fn sync_directory(&self, directory: &Path) -> io::Result<()> {
+            self.operations
+                .lock()
+                .unwrap()
+                .push(WriterSyncOperation::Directory(directory.to_path_buf()));
+            if directory == self.target && !self.failed.swap(true, Ordering::SeqCst) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "injected session component parent sync failure",
+                ));
+            }
+            File::open(directory)?.sync_all()
         }
     }
 
@@ -1690,10 +1909,20 @@ mod tests {
 
     fn journal_config(segment_max_bytes: u64, journal_max_bytes: u64) -> JournalConfig {
         JournalConfig {
-            durability: Durability::Buffered,
             segment_max_bytes,
             journal_max_bytes,
         }
+    }
+
+    fn recording_writer_sync(
+        operations: Arc<Mutex<Vec<WriterSyncOperation>>>,
+        failing_directory_calls: Vec<usize>,
+    ) -> Arc<RecordingWriterFileSync> {
+        Arc::new(RecordingWriterFileSync {
+            operations,
+            directory_calls: AtomicUsize::new(0),
+            failing_directory_calls,
+        })
     }
 
     fn decode_compressed_segment(directory: &Path, number: u64) -> Vec<u8> {
@@ -1783,10 +2012,9 @@ mod tests {
     }
 
     #[test]
-    fn journal_config_defaults_to_buffered_approved_size_limits() {
+    fn journal_config_defaults_to_approved_size_limits() {
         let config = JournalConfig::default();
 
-        assert_eq!(config.durability, Durability::Buffered);
         assert_eq!(config.segment_max_bytes, 64 * 1024 * 1024);
         assert_eq!(config.journal_max_bytes, 1024 * 1024 * 1024);
     }
@@ -1806,7 +2034,6 @@ mod tests {
         writer
             .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"two")
             .unwrap();
-        writer.flush().unwrap();
         writer.finish_maintenance().unwrap();
 
         assert_eq!(decode_compressed_segment(&directory, 1), first);
@@ -2316,8 +2543,6 @@ mod tests {
         writer
             .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"two")
             .unwrap();
-        writer.flush().unwrap();
-
         assert_eq!(
             fs::read(directory.join("00000001.cbor")).unwrap(),
             [first, second].concat(),
@@ -2343,7 +2568,6 @@ mod tests {
         writer
             .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"next")
             .unwrap();
-        writer.flush().unwrap();
         writer.finish_maintenance().unwrap();
 
         assert_eq!(decode_compressed_segment(&directory, 1), first);
@@ -2381,7 +2605,6 @@ mod tests {
         let second = writer
             .append_at_for_test(0, protocol::event_type::PTY_RESIZE, &protocol::pty_resize_payload(180, 50))
             .unwrap();
-        writer.flush().unwrap();
         writer.finish_maintenance().unwrap();
 
         assert_eq!((first, second), (1, 2));
@@ -2422,8 +2645,6 @@ mod tests {
                 &protocol::process_exited_payload(0, -1),
             )
             .unwrap();
-        writer.flush().unwrap();
-
         let expected = hex_bytes(include_str!("../protocol/fixtures/session-events-v1.hex"));
         assert_eq!(fs::read(directory.join("00000001.cbor")).unwrap(), expected);
         drop(writer);
@@ -2474,8 +2695,6 @@ mod tests {
                 .unwrap(),
             );
         }
-        writer.flush().unwrap();
-
         assert_eq!(
             fs::read(directory.join("00000001.cbor")).unwrap(),
             expected_records.concat(),
@@ -2495,8 +2714,6 @@ mod tests {
                 &payload,
             )
             .unwrap();
-        writer.flush().unwrap();
-
         assert_eq!(
             fs::read(directory.join("00000001.cbor")).unwrap(),
             protocol::encode_session_start_failed(1, "command.start", "exec failed", 17).unwrap()
@@ -2557,7 +2774,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_append_syncs_command_records_under_buffered_policy() {
+    fn durable_append_syncs_command_records() {
         let directory = temporary_directory("durable-command-sync");
         let sync = Arc::new(CountingRecordFileSync {
             calls: AtomicUsize::new(0),
@@ -2569,7 +2786,7 @@ mod tests {
         )
         .unwrap();
         writer
-            .append(protocol::event_type::PTY_OUTPUT, b"buffered")
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"buffered")
             .unwrap();
         assert_eq!(sync.calls.load(Ordering::SeqCst), 0);
 
@@ -2581,6 +2798,416 @@ mod tests {
             .unwrap();
 
         assert_eq!(sync.calls.load(Ordering::SeqCst), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn buffered_append_does_not_sync_a_record_below_the_rotation_limit() {
+        let directory = temporary_directory("explicit-buffered-append");
+        let sync = Arc::new(CountingRecordFileSync {
+            calls: AtomicUsize::new(0),
+        });
+        let mut writer = JournalWriter::create_with_record_file_sync(
+            &directory,
+            JournalConfig::default(),
+            sync.clone(),
+        )
+        .unwrap();
+
+        writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"buffered")
+            .unwrap();
+
+        assert_eq!(sync.calls.load(Ordering::SeqCst), 0);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn writer_durably_creates_each_missing_session_path_component() {
+        let ancestor = temporary_directory("durable-session-path");
+        let session_directory = ancestor.join("sessions").join("one");
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let sync = recording_writer_sync(operations.clone(), Vec::new());
+
+        let writer = JournalWriter::create_with_record_file_sync(
+            &session_directory,
+            JournalConfig::default(),
+            sync,
+        )
+        .unwrap();
+
+        assert_eq!(
+            operations.lock().unwrap().as_slice(),
+            [
+                WriterSyncOperation::Directory(ancestor.parent().unwrap().to_path_buf()),
+                WriterSyncOperation::Directory(ancestor.clone()),
+                WriterSyncOperation::Directory(ancestor.join("sessions")),
+                WriterSyncOperation::Directory(session_directory.clone()),
+            ]
+        );
+        drop(writer);
+        fs::remove_dir_all(ancestor).unwrap();
+    }
+
+    #[test]
+    fn retry_revalidates_a_component_left_by_failed_parent_sync() {
+        let ancestor = temporary_directory("failed-session-path-publication");
+        let session_directory = ancestor.join("sessions").join("one");
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let sync = FailingDirectoryOnceSync {
+            target: ancestor.clone(),
+            failed: AtomicBool::new(false),
+            operations: operations.clone(),
+        };
+
+        assert!(matches!(
+            create_session_directory_with_sync(&session_directory, &sync),
+            Err(JournalError::Io(_))
+        ));
+        assert!(ancestor.join("sessions").is_dir());
+        assert!(!session_directory.exists());
+
+        create_session_directory_with_sync(&session_directory, &sync).unwrap();
+
+        assert!(session_directory.is_dir());
+        assert_eq!(
+            operations.lock().unwrap().as_slice(),
+            [
+                WriterSyncOperation::Directory(ancestor.parent().unwrap().to_path_buf()),
+                WriterSyncOperation::Directory(ancestor.clone()),
+                WriterSyncOperation::Directory(ancestor.clone()),
+                WriterSyncOperation::Directory(ancestor.join("sessions")),
+            ]
+        );
+        fs::remove_dir_all(ancestor).unwrap();
+    }
+
+    #[test]
+    fn concurrent_component_creation_is_published_before_success() {
+        let ancestor = temporary_directory("concurrent-session-path-creation");
+        let session_directory = ancestor.join("session");
+        let sync = ConcurrentDirectoryCreator {
+            target: session_directory.clone(),
+            directory_calls: AtomicUsize::new(0),
+        };
+
+        create_session_directory_with_sync(&session_directory, &sync).unwrap();
+
+        assert!(session_directory.is_dir());
+        assert_eq!(sync.directory_calls.load(Ordering::SeqCst), 2);
+        fs::remove_dir_all(ancestor).unwrap();
+    }
+
+    #[test]
+    fn failed_successor_publication_cleans_up_and_allows_retry() {
+        let directory = temporary_directory("successor-publication-retry");
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let sync = recording_writer_sync(operations, vec![3]);
+        let mut writer = JournalWriter::create_with_record_file_sync(
+            &directory,
+            journal_config(1, u64::MAX),
+            sync,
+        )
+        .unwrap();
+        let prefix_event_id = writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .unwrap();
+
+        assert!(matches!(
+            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"retry"),
+            Err(JournalError::Io(_))
+        ));
+        assert!(!segment_path(&directory, 2).exists());
+        assert_eq!(writer.active_segment_number(), 1);
+        assert_eq!(writer.latest_event_id(), Some(prefix_event_id));
+
+        writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"retry")
+            .unwrap();
+        assert_eq!(writer.active_segment_number(), 2);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_successor_publication_cleanup_poisons_the_writer() {
+        let directory = temporary_directory("successor-publication-poison");
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let sync = recording_writer_sync(operations, vec![3, 4]);
+        let mut writer = JournalWriter::create_with_record_file_sync(
+            &directory,
+            journal_config(1, u64::MAX),
+            sync,
+        )
+        .unwrap();
+        let prefix_event_id = writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .unwrap();
+
+        assert!(matches!(
+            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"rotation"),
+            Err(JournalError::Maintenance(_))
+        ));
+        assert!(!segment_path(&directory, 2).exists());
+        assert!(matches!(
+            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"x"),
+            Err(JournalError::Maintenance(_))
+        ));
+        assert!(matches!(writer.finish_durably(0), Err(JournalError::Maintenance(_))));
+        assert_eq!(writer.active_segment_number(), 1);
+        assert_eq!(writer.latest_event_id(), Some(prefix_event_id));
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn preexisting_successor_poisons_the_writer() {
+        let directory = temporary_directory("preexisting-successor");
+        let mut writer = JournalWriter::create(
+            &directory,
+            journal_config(1, u64::MAX),
+        )
+        .unwrap();
+        writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .unwrap();
+        File::create(segment_path(&directory, 2)).unwrap();
+
+        assert!(matches!(
+            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"rotation"),
+            Err(JournalError::Maintenance(_))
+        ));
+        assert!(matches!(
+            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"x"),
+            Err(JournalError::Maintenance(_))
+        ));
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn buffered_rotation_syncs_the_closed_segment_without_syncing_the_new_record() {
+        let directory = temporary_directory("buffered-rotation-sync");
+        let sync = Arc::new(CountingRecordFileSync {
+            calls: AtomicUsize::new(0),
+        });
+        let mut writer = JournalWriter::create_with_record_file_sync(
+            &directory,
+            journal_config(1, u64::MAX),
+            sync.clone(),
+        )
+        .unwrap();
+        writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"first")
+            .unwrap();
+        assert_eq!(sync.calls.load(Ordering::SeqCst), 0);
+
+        writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"second")
+            .unwrap();
+
+        assert_eq!(writer.active_segment_number(), 2);
+        assert_eq!(sync.calls.load(Ordering::SeqCst), 1);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn durable_append_publishes_segments_and_syncs_the_complete_prefix_in_order() {
+        let directory = temporary_directory("explicit-durable-prefix");
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let record_sync = recording_writer_sync(operations.clone(), Vec::new());
+        let mut writer = JournalWriter::create_with_file_systems(
+            &directory,
+            journal_config(1, u64::MAX),
+            Arc::new(RealMaintenanceFileSystem),
+            record_sync,
+        )
+        .unwrap();
+        writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .unwrap();
+
+        writer
+            .append_durable(
+                protocol::event_type::COMMAND_ACCEPTED,
+                &command_accepted_payload(1, &[0x80]),
+            )
+            .unwrap();
+
+        assert_eq!(
+            operations.lock().unwrap().as_slice(),
+            [
+                WriterSyncOperation::Directory(directory.parent().unwrap().to_path_buf()),
+                WriterSyncOperation::Directory(directory.clone()),
+                WriterSyncOperation::Data,
+                WriterSyncOperation::Directory(directory.clone()),
+                WriterSyncOperation::Data,
+            ]
+        );
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn finish_durably_writes_and_syncs_the_canonical_process_exit_record() {
+        let directory = temporary_directory("durable-finish");
+        let sync = Arc::new(CountingRecordFileSync {
+            calls: AtomicUsize::new(0),
+        });
+        let mut writer = JournalWriter::create_with_record_file_sync(
+            &directory,
+            JournalConfig::default(),
+            sync.clone(),
+        )
+        .unwrap();
+
+        let event_id = writer.finish_durably(37).unwrap();
+
+        assert_eq!(sync.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            fs::read(segment_path(&directory, 1)).unwrap(),
+            protocol::encode_process_exited(event_id, 37)
+        );
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn successful_finish_rejects_every_later_record_without_mutation() {
+        let directory = temporary_directory("terminal-durable-finish");
+        let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
+        let exit_event_id = writer.finish_durably(37).unwrap();
+        let accepted = fs::read(segment_path(&directory, 1)).unwrap();
+
+        assert!(matches!(
+            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"late buffered"),
+            Err(JournalError::Finished)
+        ));
+        assert!(matches!(
+            writer.append_durable(
+                protocol::event_type::COMMAND_RESULT,
+                &command_result_payload(
+                    1,
+                    b"late-result",
+                    protocol::CommandOutcome::Succeeded,
+                    b"",
+                ),
+            ),
+            Err(JournalError::Finished)
+        ));
+        assert!(matches!(writer.finish_durably(38), Err(JournalError::Finished)));
+        assert_eq!(writer.latest_event_id(), Some(exit_event_id));
+        assert_eq!(fs::read(segment_path(&directory, 1)).unwrap(), accepted);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_final_sync_removes_the_exit_record_and_allows_a_correct_retry() {
+        let directory = temporary_directory("failed-durable-finish-sync");
+        let sync = Arc::new(FailingOnceRecordFileSync {
+            calls: AtomicUsize::new(0),
+        });
+        let mut writer = JournalWriter::create_with_record_file_sync(
+            &directory,
+            JournalConfig::default(),
+            sync,
+        )
+        .unwrap();
+
+        assert!(writer.finish_durably(17).is_err());
+        assert!(fs::read(segment_path(&directory, 1)).unwrap().is_empty());
+
+        let event_id = writer.finish_durably(17).unwrap();
+        assert_eq!(
+            fs::read(segment_path(&directory, 1)).unwrap(),
+            protocol::encode_process_exited(event_id, 17)
+        );
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_exit_and_rollback_sync_preserve_prefix_and_poison_the_writer() {
+        let directory = temporary_directory("poisoned-durable-finish-sync");
+        let sync = Arc::new(FailingTwiceRecordFileSync {
+            calls: AtomicUsize::new(0),
+        });
+        let mut writer = JournalWriter::create_with_record_file_sync(
+            &directory,
+            JournalConfig::default(),
+            sync,
+        )
+        .unwrap();
+        writer
+            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, b"preserved prefix")
+            .unwrap();
+        let prefix = fs::read(segment_path(&directory, 1)).unwrap();
+
+        assert!(matches!(writer.finish_durably(17), Err(JournalError::Maintenance(_))));
+        assert_eq!(fs::read(segment_path(&directory, 1)).unwrap(), prefix);
+        assert_eq!(writer.latest_event_id(), Some(1));
+        assert!(matches!(
+            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"late"),
+            Err(JournalError::Maintenance(_))
+        ));
+        assert!(matches!(writer.finish_durably(17), Err(JournalError::Maintenance(_))));
+        assert_eq!(fs::read(segment_path(&directory, 1)).unwrap(), prefix);
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn finish_durably_surfaces_an_exit_append_failure_without_accepting_an_event() {
+        let directory = temporary_directory("failed-durable-finish-append");
+        let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
+        writer.previous_event_id = u64::MAX;
+
+        let error = writer.finish_durably(17).unwrap_err();
+
+        assert!(matches!(error, JournalError::EventIdExhausted));
+        assert_eq!(writer.latest_event_id(), Some(u64::MAX));
+        assert!(fs::read(segment_path(&directory, 1)).unwrap().is_empty());
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn finish_durably_syncs_old_prefix_publishes_new_segment_then_syncs_exit() {
+        let directory = temporary_directory("durable-finish-rotation");
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let record_sync = recording_writer_sync(operations.clone(), Vec::new());
+        let mut writer = JournalWriter::create_with_file_systems(
+            &directory,
+            journal_config(1, u64::MAX),
+            Arc::new(RealMaintenanceFileSystem),
+            record_sync,
+        )
+        .unwrap();
+        writer
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .unwrap();
+
+        let event_id = writer.finish_durably(-9).unwrap();
+
+        assert_eq!(writer.active_segment_number(), 2);
+        assert_eq!(
+            operations.lock().unwrap().as_slice(),
+            [
+                WriterSyncOperation::Directory(directory.parent().unwrap().to_path_buf()),
+                WriterSyncOperation::Directory(directory.clone()),
+                WriterSyncOperation::Data,
+                WriterSyncOperation::Directory(directory.clone()),
+                WriterSyncOperation::Data,
+            ]
+        );
+        assert_eq!(
+            fs::read(segment_path(&directory, 2)).unwrap(),
+            protocol::encode_process_exited(event_id, -9)
+        );
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2597,7 +3224,7 @@ mod tests {
         )
         .unwrap();
         writer
-            .append(protocol::event_type::PTY_OUTPUT, b"buffered prefix")
+            .append_buffered(protocol::event_type::PTY_OUTPUT, b"buffered prefix")
             .unwrap();
 
         writer
@@ -2672,7 +3299,6 @@ mod tests {
                 .unwrap(),
             1,
         );
-        writer.flush().unwrap();
         assert_eq!(
             fs::read(directory.join("00000001.cbor")).unwrap(),
             protocol::encode_signal(1, 1, 0).unwrap(),
@@ -2887,7 +3513,7 @@ mod tests {
                 endpoint: "control.sock".to_owned(),
             },
         };
-        write_metadata(&directory, &metadata, Durability::EveryRecord).unwrap();
+        write_metadata(&directory, &metadata).unwrap();
         let encoded = fs::read_to_string(directory.join(METADATA_NAME)).unwrap();
         for removed in [
             "journalId",

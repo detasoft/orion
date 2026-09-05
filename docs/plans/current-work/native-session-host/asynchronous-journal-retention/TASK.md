@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on:
-[explicit journal durability](../journal-durability/TASK.md),
+completed explicit journal durability,
 completed `ACK_JOURNAL` durability and retention gate
 
 Complete `ACK_JOURNAL` after its permission is durable without holding shared

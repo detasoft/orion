@@ -269,10 +269,9 @@ The status payload is:
 ## Metadata Version 1
 
 `metadata` is UTF-8 JSON with `metadataVersion: 1`. Writers create a complete
-temporary file in the session directory, apply the configured durability
-policy, and atomically replace `metadata`. Readers ignore unknown object
-fields. The checked-in `metadata-v1.json` is the canonical field and formatting
-example.
+temporary file in the session directory and atomically replace `metadata`.
+Readers ignore unknown object fields. The checked-in `metadata-v1.json` is the
+canonical field and formatting example.
 
 Metadata is a session manifest, not a journal index or lifecycle record. It
 contains compatibility versions, session identity, wall-clock creation and
