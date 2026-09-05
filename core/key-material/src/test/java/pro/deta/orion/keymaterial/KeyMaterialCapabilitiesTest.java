@@ -47,12 +47,12 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialAlgorithm.ED25519,
                 1,
                 CLUSTER);
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options(true))) {
+        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
             initial.generateKeyIfMissing(signing, 0);
             initial.save();
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options(false))) {
+        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(reloaded, List.of(signing));
             byte[] payload = "ed25519-payload".getBytes(StandardCharsets.UTF_8);
             byte[] signature = capabilities.signing(signing).sign(payload);
@@ -84,14 +84,14 @@ class KeyMaterialCapabilitiesTest {
                 NODE);
         KeyPair generatedRsa;
         KeyPair generatedEd25519;
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options(true))) {
+        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
             generatedRsa = initial.generateKeyIfMissing(rsaClient, 2048);
             generatedEd25519 = initial.generateKeyIfMissing(ed25519Client, 0);
             initial.generateKeyIfMissing(host, 2048);
             initial.save();
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options(false))) {
+        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(
                     reloaded, List.of(rsaClient, ed25519Client, host));
             KeyPair selectedRsa = capabilities.sshClientKey(rsaClient).keyPair();
@@ -178,12 +178,12 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialAlgorithm.RSA,
                 1,
                 CLUSTER);
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options(true))) {
+        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
             initial.generateKeyIfMissing(original, 2048);
             initial.save();
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options(false))) {
+        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
             KeyMaterialDescriptor changedVersion = descriptor(
                     "server-signing-v1",
                     KeyMaterialPurpose.SERVER_SIGNING,
@@ -215,7 +215,7 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialAlgorithm.RSA,
                 1,
                 KeyMaterialScope.cluster("a/node:b"));
-        try (KeyMaterialService initial = KeyMaterialService.open(store, options(true))) {
+        try (KeyMaterialService initial = KeyMaterialService.open(store, options())) {
             initial.generateKeyIfMissing(clusterMaterial, 2048);
             initial.save();
         }
@@ -228,7 +228,7 @@ class KeyMaterialCapabilitiesTest {
                 KeyMaterialScope.node("a", "b"));
         assertThat(clusterMaterial.scope().canonicalName())
                 .isNotEqualTo(nodeMaterial.scope().canonicalName());
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options(false))) {
+        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
             assertThatThrownBy(() -> KeyMaterialCapabilities.open(reloaded, List.of(nodeMaterial)))
                     .isInstanceOf(Exception.class)
                     .hasMessageContaining("scope");
@@ -278,7 +278,7 @@ class KeyMaterialCapabilitiesTest {
         byte[] plaintext = "database-password".getBytes(StandardCharsets.UTF_8);
         ConfigurationSecretEnvelopeCodec codec = new ConfigurationSecretEnvelopeCodec();
         String serializedEnvelope;
-        try (KeyMaterialService service = KeyMaterialService.open(store, options(true))) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.generateSecretKeyIfMissing(cipher, 256);
             service.save();
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(service, List.of(cipher));
@@ -289,7 +289,7 @@ class KeyMaterialCapabilitiesTest {
             serializedEnvelope = codec.serialize(envelope);
         }
 
-        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options(false))) {
+        try (KeyMaterialService reloaded = KeyMaterialService.open(store, options())) {
             KeyMaterialCapabilities capabilities = KeyMaterialCapabilities.open(reloaded, List.of(cipher));
             ConfigurationSecretEnvelope envelope = codec.parse(serializedEnvelope);
 
@@ -437,7 +437,7 @@ class KeyMaterialCapabilitiesTest {
     }
 
     private static KeyMaterialService service() throws Exception {
-        return KeyMaterialService.open(new InMemoryKeyMaterialContentStore(), options(true));
+        return KeyMaterialService.open(new InMemoryKeyMaterialContentStore(), options());
     }
 
     private static ConfigurationSecretContext context() {
@@ -515,8 +515,8 @@ class KeyMaterialCapabilitiesTest {
         return changed;
     }
 
-    private static KeyMaterialOptions options(boolean createIfMissing) {
-        return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password(), createIfMissing);
+    private static KeyMaterialOptions options() {
+        return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
     }
 
     private static KeyMaterialDescriptor descriptor(

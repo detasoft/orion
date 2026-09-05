@@ -33,7 +33,6 @@ class ServerIdentityMaterialFactoryTest {
             assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
         }
 
-        configuration.getBootstrap().getKeyMaterial().setCreateIfMissing(false);
         try (ServerIdentityMaterial reloaded = ServerIdentityMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"))) {
             assertThat(reloaded.verify("cluster-signing-v2", payload, signature)).isTrue();
@@ -65,7 +64,6 @@ class ServerIdentityMaterialFactoryTest {
                 configuration, Map.of(PASSWORD_ENV, "test-password"))) {
             // Initialize the active alias in a new store.
         }
-        configuration.getBootstrap().getKeyMaterial().setCreateIfMissing(false);
         configuration.getBootstrap()
                 .getKeyMaterial()
                 .getServerSigning()
@@ -108,7 +106,6 @@ class ServerIdentityMaterialFactoryTest {
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getBootstrap().getKeyMaterial().setLocation("security/orion.p12");
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
-        configuration.getBootstrap().getKeyMaterial().setCreateIfMissing(true);
         configuration.getBootstrap().getKeyMaterial().setClusterId("test-cluster");
         configuration.getBootstrap()
                 .getKeyMaterial()

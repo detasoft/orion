@@ -14,7 +14,6 @@ location = "local:orion"
 ref = "refs/heads/main"
 path = "material.p12"
 password = "env:ORION_KEY_MATERIAL_PASSWORD"
-createIfMissing = false
 clusterId = "orion"
 
 [bootstrap.keyMaterial.serverSigning]

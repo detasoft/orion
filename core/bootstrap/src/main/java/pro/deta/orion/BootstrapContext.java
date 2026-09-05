@@ -81,7 +81,7 @@ public final class BootstrapContext implements AutoCloseable {
             ResolvedBootstrapSource materialSource = provider.resolveProvisional(
                     BootstrapRepositorySources.MATERIAL,
                     configuredMaterial,
-                    configuredMaterial.isCreateIfMissing());
+                    true);
             identity = openServerIdentity(
                     configuration,
                     environment,
@@ -94,7 +94,7 @@ public final class BootstrapContext implements AutoCloseable {
             if (identity != null) {
                 identity.close();
             }
-            throw new IllegalStateException(FAILURE_MESSAGE);
+            throw new IllegalStateException(FAILURE_MESSAGE, failure);
         }
     }
 

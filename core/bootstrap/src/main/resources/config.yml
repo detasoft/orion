@@ -13,7 +13,6 @@ bootstrap:
     ref: refs/heads/main
     path: material.p12
     password: env:ORION_KEY_MATERIAL_PASSWORD
-    createIfMissing: false
     clusterId: orion
     serverSigning:
       algorithm: RSA

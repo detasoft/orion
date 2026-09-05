@@ -60,8 +60,7 @@ public final class ServerIdentityMaterialFactory {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
         String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
         SigningMaterialSet signingMaterial = signingMaterial(material);
-        try (KeyMaterialOptions options = resolver.pkcs12Options(
-                password, material.isCreateIfMissing())) {
+        try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
             return ServerIdentityMaterial.open(
                     store,
                     options,

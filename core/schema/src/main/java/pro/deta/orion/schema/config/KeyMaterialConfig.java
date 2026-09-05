@@ -5,7 +5,6 @@ import lombok.Data;
 @Data
 public class KeyMaterialConfig extends BootstrapSourceConfig {
     private String password = "env:ORION_KEY_MATERIAL_PASSWORD";
-    private boolean createIfMissing;
     private String clusterId = "orion";
     private ServerSigningConfig serverSigning = new ServerSigningConfig();
 

@@ -24,13 +24,13 @@ class KeyMaterialServiceTest {
     void createsPkcs12InMemoryStoreAndReloadsPrivateKey() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
-        KeyMaterialService service = KeyMaterialService.open(store, options(true));
+        KeyMaterialService service = KeyMaterialService.open(store, options());
         KeyPair generated = service.generateKeyIfMissing(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
         String savedVersion = service.save();
 
-        KeyMaterialService reloaded = KeyMaterialService.open(store, options(false));
+        KeyMaterialService reloaded = KeyMaterialService.open(store, options());
         KeyPair loaded = reloaded.getKeyPair(KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
         Certificate[] chain = reloaded.getCertificateChain(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS);
@@ -54,7 +54,7 @@ class KeyMaterialServiceTest {
         Path keyStorePath = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
 
-        KeyMaterialService service = KeyMaterialService.open(store, options(true));
+        KeyMaterialService service = KeyMaterialService.open(store, options());
         service.generateKeyIfMissing(
                 KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SSH_HOST_PURPOSE));
@@ -74,7 +74,7 @@ class KeyMaterialServiceTest {
     @Test
     void trustedCertificatesRoundTripSeparatelyFromPrivateKeyEntries() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialService service = KeyMaterialService.open(store, options(true));
+        KeyMaterialService service = KeyMaterialService.open(store, options());
         service.generateKeyIfMissing(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.CA_ISSUER_PURPOSE));
@@ -83,7 +83,7 @@ class KeyMaterialServiceTest {
         service.setTrustedCertificate(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS, issuerCertificate);
         service.save();
 
-        KeyMaterialService reloaded = KeyMaterialService.open(store, options(false));
+        KeyMaterialService reloaded = KeyMaterialService.open(store, options());
         X509Certificate trustedCertificate =
                 reloaded.getTrustedCertificate(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS);
 
@@ -96,7 +96,7 @@ class KeyMaterialServiceTest {
     @Test
     void refusesPrivateKeyWhenCertificateChainHasDifferentPublicKey() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialService service = KeyMaterialService.open(store, options(true));
+        KeyMaterialService service = KeyMaterialService.open(store, options());
 
         KeyPair signingKey = service.generateKeyIfMissing(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
@@ -120,7 +120,7 @@ class KeyMaterialServiceTest {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialService service = KeyMaterialService.open(
                 store,
-                options(true),
+                options(),
                 Map.of(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE, new KeyMaterialSigningKeyConfig(
                         KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                         List.of(KeyMaterialTestConstants.SERVER_SIGNING_2026_04_ALIAS))));
@@ -159,14 +159,14 @@ class KeyMaterialServiceTest {
     void detectsConflictingStoreUpdates() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
-        KeyMaterialService initial = KeyMaterialService.open(store, options(true));
+        KeyMaterialService initial = KeyMaterialService.open(store, options());
         initial.generateKeyIfMissing(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
         initial.save();
 
-        KeyMaterialService first = KeyMaterialService.open(store, options(false));
-        KeyMaterialService second = KeyMaterialService.open(store, options(false));
+        KeyMaterialService first = KeyMaterialService.open(store, options());
+        KeyMaterialService second = KeyMaterialService.open(store, options());
 
         second.generateKeyIfMissing(
                 KeyMaterialTestConstants.SSH_HOST_RSA_2026_05_ALIAS,
@@ -182,18 +182,9 @@ class KeyMaterialServiceTest {
     }
 
     @Test
-    void refusesMissingStoreWhenCreationIsDisabled() {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-
-        assertThatThrownBy(() -> KeyMaterialService.open(store, options(false)))
-                .isInstanceOf(KeyMaterialStoreNotFoundException.class)
-                .hasMessageContaining("does not exist");
-    }
-
-    @Test
     void loadsInlinePkcs12BytesFromContentBase64ResourceStore() throws Exception {
         InMemoryKeyMaterialContentStore writableStore = new InMemoryKeyMaterialContentStore();
-        KeyMaterialService writable = KeyMaterialService.open(writableStore, options(true));
+        KeyMaterialService writable = KeyMaterialService.open(writableStore, options());
         writable.generateKeyIfMissing(
                 KeyMaterialTestConstants.HTTPS_2026_05_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.HTTPS_PURPOSE));
@@ -202,7 +193,7 @@ class KeyMaterialServiceTest {
         byte[] pkcs12Bytes = writableStore.read().orElseThrow().bytes();
         String reference = KeyMaterialTestConstants.contentBase64Reference(pkcs12Bytes);
         KeyMaterialContentStore readOnlyStore = KeyMaterialResourceResolver.standard().resolveStore(reference);
-        KeyMaterialService readOnly = KeyMaterialService.open(readOnlyStore, options(false));
+        KeyMaterialService readOnly = KeyMaterialService.open(readOnlyStore, options());
 
         assertThat(readOnly.containsAlias(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).isTrue();
         assertThat(readOnly.getCertificateChain(KeyMaterialTestConstants.HTTPS_2026_05_ALIAS)).hasSize(1);
@@ -211,7 +202,7 @@ class KeyMaterialServiceTest {
     @Test
     void serviceOwnsAndClearsItsPasswordLifecycle() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialOptions callerOptions = options(true);
+        KeyMaterialOptions callerOptions = options();
         KeyMaterialService service = KeyMaterialService.open(store, callerOptions);
 
         try {
@@ -236,13 +227,13 @@ class KeyMaterialServiceTest {
     }
 
     @Test
-    void corruptExistingStoreIsNeverReplacedByCreateIfMissing() throws Exception {
+    void corruptExistingStoreIsNeverReplaced() throws Exception {
         Path keyStorePath = tempDir.resolve(KeyMaterialTestConstants.KEY_STORE_FILE_NAME);
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
         byte[] corruptBytes = "not-a-pkcs12-store".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         String corruptVersion = store.write(corruptBytes, null);
 
-        try (KeyMaterialOptions options = options(true)) {
+        try (KeyMaterialOptions options = options()) {
             assertThatThrownBy(() -> KeyMaterialService.open(store, options))
                     .isInstanceOf(java.io.IOException.class);
         }
@@ -252,7 +243,7 @@ class KeyMaterialServiceTest {
         assertThat(afterFailure.bytes()).isEqualTo(corruptBytes);
     }
 
-    private static KeyMaterialOptions options(boolean createIfMissing) {
-        return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password(), createIfMissing);
+    private static KeyMaterialOptions options() {
+        return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
     }
 }

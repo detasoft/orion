@@ -20,7 +20,7 @@ class ServerIdentityMaterialTest {
         byte[] signature;
 
         try (ServerIdentityMaterial material = ServerIdentityMaterial.open(
-                store, options(true), signing, 2048)) {
+                store, options(), signing, 2048)) {
             signature = material.sign(payload);
             assertThat(material.activeKeyId()).isEqualTo("server-signing-v1");
             assertThat(material.verify("server-signing-v1", payload, signature)).isTrue();
@@ -28,7 +28,7 @@ class ServerIdentityMaterialTest {
         }
 
         try (ServerIdentityMaterial reloaded = ServerIdentityMaterial.open(
-                store, options(false), signing, 2048)) {
+                store, options(), signing, 2048)) {
             assertThat(reloaded.verify("server-signing-v1", payload, signature)).isTrue();
             assertThat(reloaded.verify("unknown", payload, signature)).isFalse();
         }
@@ -41,7 +41,7 @@ class ServerIdentityMaterialTest {
         KeyMaterialDescriptor active = rsa("server-signing-v2", 2);
         byte[] payload = "retained-jwt".getBytes(StandardCharsets.UTF_8);
         byte[] oldSignature;
-        try (KeyMaterialService service = KeyMaterialService.open(store, options(true))) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.generateKeyIfMissing(old, 2048);
             service.generateKeyIfMissing(active, 2048);
             oldSignature = KeyMaterialCapabilities.open(service, List.of(old, active))
@@ -52,7 +52,7 @@ class ServerIdentityMaterialTest {
 
         SigningMaterialSet signing = new SigningMaterialSet(active, List.of(old));
         try (ServerIdentityMaterial material = ServerIdentityMaterial.open(
-                store, options(false), signing, 2048)) {
+                store, options(), signing, 2048)) {
             byte[] activeSignature = material.sign(payload);
 
             assertThat(material.activeKeyId()).isEqualTo("server-signing-v2");
@@ -68,14 +68,14 @@ class ServerIdentityMaterialTest {
     void doesNotGenerateMissingIdentityIntoAnExistingStore() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor existing = rsa("other-signing", 1);
-        try (KeyMaterialService service = KeyMaterialService.open(store, options(true))) {
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
             service.generateKeyIfMissing(existing, 2048);
             service.save();
         }
         String before = store.read().orElseThrow().version();
         SigningMaterialSet missing = new SigningMaterialSet(rsa("server-signing-v1", 1), List.of());
 
-        assertThatThrownBy(() -> ServerIdentityMaterial.open(store, options(true), missing, 2048))
+        assertThatThrownBy(() -> ServerIdentityMaterial.open(store, options(), missing, 2048))
                 .isInstanceOf(Exception.class)
                 .hasMessageContaining("server-signing-v1");
         assertThat(store.read().orElseThrow().version()).isEqualTo(before);
@@ -92,7 +92,7 @@ class ServerIdentityMaterialTest {
 
         assertThatThrownBy(() -> ServerIdentityMaterial.open(
                 store,
-                options(true),
+                options(),
                 new SigningMaterialSet(ed25519, List.of()),
                 0))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -116,7 +116,7 @@ class ServerIdentityMaterialTest {
                 CLUSTER);
     }
 
-    private static KeyMaterialOptions options(boolean createIfMissing) {
-        return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password(), createIfMissing);
+    private static KeyMaterialOptions options() {
+        return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
     }
 }

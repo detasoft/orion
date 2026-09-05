@@ -41,8 +41,8 @@ mvn -pl core/bootstrap -am -Prun-server process-classes
 By default the server uses `orion_root` as its base directory and
 `orion_root/repos` as repository storage. This directory is outside Maven's
 `target` tree, so `mvn clean` does not remove generated keys or the local ACL.
-The protected key-material store is created at
-`orion_root/key-material/orion.p12`; its password is read only from
+The protected `material.p12` key-material store is created in the local
+`orion` repository alongside `orion.xml`; its password is read only from
 `ORION_KEY_MATERIAL_PASSWORD`. The Make helper also creates a separate local
 admin SSH identity at `orion_root/admin-identity.pem` when it is missing.
 
@@ -256,9 +256,10 @@ bootstrap:
       - orion.xml
     createDefaultIfMissing: true
   keyMaterial:
-    location: key-material/orion.p12
+    location: local:orion
+    ref: refs/heads/main
+    path: material.p12
     password: env:ORION_KEY_MATERIAL_PASSWORD
-    createIfMissing: true
     clusterId: orion
     serverSigning:
       algorithm: RSA

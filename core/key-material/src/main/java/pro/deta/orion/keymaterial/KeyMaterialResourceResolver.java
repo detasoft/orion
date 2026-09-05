@@ -75,12 +75,10 @@ public final class KeyMaterialResourceResolver {
         throw new IllegalArgumentException("Unsupported key material location reference scheme");
     }
 
-    public KeyMaterialOptions pkcs12Options(
-            String passwordReference,
-            boolean createIfMissing) throws IOException {
+    public KeyMaterialOptions pkcs12Options(String passwordReference) throws IOException {
         char[] password = resolvePassword(passwordReference);
         try {
-            return KeyMaterialOptions.pkcs12(password, createIfMissing);
+            return KeyMaterialOptions.pkcs12(password);
         } finally {
             Arrays.fill(password, '\0');
         }

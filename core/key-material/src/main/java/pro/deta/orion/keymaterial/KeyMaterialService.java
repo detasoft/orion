@@ -114,9 +114,6 @@ public class KeyMaterialService implements AutoCloseable {
                             snapshot.get().version(),
                             signingKeysCopy);
                 }
-                if (!ownedOptions.createIfMissing()) {
-                    throw new KeyMaterialStoreNotFoundException("Key material store does not exist");
-                }
                 keyStore.load(null, password);
                 return new KeyMaterialService(
                         store,

@@ -22,11 +22,10 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals("local:orion", configuration.getBootstrap().getKeyMaterial().getLocation());
         assertEquals("refs/heads/main", configuration.getBootstrap().getKeyMaterial().selectedRef());
         assertEquals("material.p12", configuration.getBootstrap().getKeyMaterial().getPath());
-        assertFalse(configuration.getBootstrap().getKeyMaterial().isCreateIfMissing());
     }
 
     @Test
-    void partialKeyMaterialSectionRetainsFailClosedSourceDefaults() throws Exception {
+    void partialKeyMaterialSectionRetainsSourceDefaults() throws Exception {
         Path configFile = tempDir.resolve("partial-material.yml");
         Files.writeString(configFile, """
                 bootstrap:
@@ -40,7 +39,6 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals("local:orion", configuration.getBootstrap().getKeyMaterial().getLocation());
         assertEquals("refs/heads/main", configuration.getBootstrap().getKeyMaterial().selectedRef());
         assertEquals("material.p12", configuration.getBootstrap().getKeyMaterial().getPath());
-        assertFalse(configuration.getBootstrap().getKeyMaterial().isCreateIfMissing());
     }
 
     @Test
@@ -64,7 +62,6 @@ class OrionConfigurationBootstrapShapeTest {
                     ref: refs/heads/keys
                     path: stores/material.p12
                     password: env:ORION_KEY_MATERIAL_PASSWORD
-                    createIfMissing: false
                     auth:
                       credentialKind: ssh-private-key
                       credential: file:/run/secrets/orion-material-key
@@ -140,7 +137,6 @@ class OrionConfigurationBootstrapShapeTest {
         assertEquals(
                 "env:ORION_KEY_MATERIAL_PASSWORD",
                 configuration.getBootstrap().getKeyMaterial().getPassword());
-        assertFalse(configuration.getBootstrap().getKeyMaterial().isCreateIfMissing());
         assertEquals(
                 "file:/run/secrets/orion-material-key",
                 configuration.getBootstrap().getKeyMaterial().getAuth().get("credential"));

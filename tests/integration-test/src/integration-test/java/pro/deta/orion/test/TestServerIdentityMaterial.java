@@ -30,7 +30,6 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         configuration.getBootstrap().getKeyMaterial().setLocation(
                 baseDirectory.toRealPath().resolve("material.p12").toString());
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
-        configuration.getBootstrap().getKeyMaterial().setCreateIfMissing(true);
         ServerIdentityMaterial material = ServerIdentityMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, PASSWORD));
         try {
@@ -63,7 +62,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
                 .getServerSigning()
                 .getActive()
                 .getAlias();
-        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(PASSWORD.toCharArray(), false);
+        try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12(PASSWORD.toCharArray());
              KeyMaterialService service = KeyMaterialService.open(
                      new LocalKeyMaterialContentStore(location), options)) {
             return service.getKeyPair(alias);

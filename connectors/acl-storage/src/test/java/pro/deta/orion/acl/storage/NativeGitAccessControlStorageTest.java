@@ -111,7 +111,7 @@ class NativeGitAccessControlStorageTest {
     }
 
     @Test
-    void existingRefWithoutConfiguredAclIsInvalidRatherThanEmpty(@TempDir Path rootDirectory) throws Exception {
+    void existingRefWithoutPrimaryAclIsReportedAsMissing(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository repository = provider.create("internal/configuration")
                 .valueOrFailure("repository");
@@ -121,6 +121,26 @@ class NativeGitAccessControlStorageTest {
                 "add readme",
                 GitCommitAuthor.EMPTY);
         NativeGitAccessControlStorage storage = preparedStorage(provider);
+
+        Result<AccessControlSnapshot> result = storage.load();
+
+        assertThat(result).isInstanceOf(Result.Failure.class);
+        assertThat(((Result.Failure<?>) result).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
+    }
+
+    @Test
+    void existingRefWithoutSecondaryAclIsInvalid(@TempDir Path rootDirectory) throws Exception {
+        FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
+        NativeGitRepository repository = provider.create("internal/configuration")
+                .valueOrFailure("repository");
+        repository.saveFiles(
+                "refs/heads/configuration",
+                Map.of(ACL_PATH, bytes("primary ACL")),
+                "add primary ACL",
+                GitCommitAuthor.EMPTY);
+        BootstrapConfigurationSourceConfig configuration = config();
+        configuration.setPaths(List.of(ACL_PATH, "config/roles.xml"));
+        NativeGitAccessControlStorage storage = new NativeGitAccessControlStorage(configuration, provider);
 
         Result<AccessControlSnapshot> result = storage.load();
 

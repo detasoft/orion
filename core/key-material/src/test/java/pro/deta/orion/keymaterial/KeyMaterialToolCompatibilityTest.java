@@ -62,7 +62,7 @@ class KeyMaterialToolCompatibilityTest {
         LocalKeyMaterialContentStore store = new LocalKeyMaterialContentStore(keyStorePath);
         KeyMaterialService service = KeyMaterialService.open(
                 store,
-                KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password(), true));
+                KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password()));
         service.generateKeyIfMissing(alias, KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.TOOL_COMPATIBILITY_PURPOSE));
         service.save();
         return keyStorePath;

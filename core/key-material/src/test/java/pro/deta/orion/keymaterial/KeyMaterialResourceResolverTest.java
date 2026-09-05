@@ -73,8 +73,7 @@ class KeyMaterialResourceResolverTest {
         assertThat(resolver.resolvePassword(KeyMaterialTestConstants.fileReference(passwordFile)))
                 .isEqualTo(KeyMaterialTestConstants.password());
         try (KeyMaterialOptions options = resolver.pkcs12Options(
-                KeyMaterialTestConstants.envReference(KeyMaterialTestConstants.ORION_KEYSTORE_PASSWORD_ENV),
-                true)) {
+                KeyMaterialTestConstants.envReference(KeyMaterialTestConstants.ORION_KEYSTORE_PASSWORD_ENV))) {
             assertThat(options.password()).isEqualTo(KeyMaterialTestConstants.password());
         }
     }

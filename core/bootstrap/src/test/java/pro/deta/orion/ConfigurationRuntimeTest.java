@@ -5,7 +5,6 @@ import pro.deta.orion.config.LocationConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ConfigurationRuntimeTest {
@@ -27,7 +26,6 @@ public class ConfigurationRuntimeTest {
         assertEquals("refs/heads/main", oc.getBootstrap().getKeyMaterial().selectedRef());
         assertEquals("material.p12", oc.getBootstrap().getKeyMaterial().getPath());
         assertEquals("env:ORION_KEY_MATERIAL_PASSWORD", oc.getBootstrap().getKeyMaterial().getPassword());
-        assertFalse(oc.getBootstrap().getKeyMaterial().isCreateIfMissing());
         assertEquals("orion", oc.getBootstrap().getKeyMaterial().getClusterId());
         assertEquals("repos", oc.getStorage().getLocation());
         assertTrue(oc.getTransport().getGit().isEnabled());

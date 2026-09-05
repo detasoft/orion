@@ -4,29 +4,23 @@ import java.util.Arrays;
 
 public final class KeyMaterialOptions implements AutoCloseable {
     private final String type;
-    private final boolean createIfMissing;
     private final char[] password;
     private boolean closed;
 
-    public KeyMaterialOptions(String type, char[] password, boolean createIfMissing) {
+    public KeyMaterialOptions(String type, char[] password) {
         this.type = type == null || type.isBlank() ? KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE : type;
         if (password == null || password.length == 0) {
             throw new IllegalArgumentException("Key material password must not be empty");
         }
         this.password = Arrays.copyOf(password, password.length);
-        this.createIfMissing = createIfMissing;
     }
 
-    public static KeyMaterialOptions pkcs12(char[] password, boolean createIfMissing) {
-        return new KeyMaterialOptions(KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE, password, createIfMissing);
+    public static KeyMaterialOptions pkcs12(char[] password) {
+        return new KeyMaterialOptions(KeyMaterialConstants.DEFAULT_KEY_STORE_TYPE, password);
     }
 
     public String type() {
         return type;
-    }
-
-    public boolean createIfMissing() {
-        return createIfMissing;
     }
 
     public synchronized char[] password() {
@@ -36,7 +30,7 @@ public final class KeyMaterialOptions implements AutoCloseable {
 
     synchronized KeyMaterialOptions copy() {
         requireOpen();
-        return new KeyMaterialOptions(type, password, createIfMissing);
+        return new KeyMaterialOptions(type, password);
     }
 
     @Override

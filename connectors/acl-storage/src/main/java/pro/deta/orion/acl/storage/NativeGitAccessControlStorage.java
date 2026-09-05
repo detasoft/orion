@@ -2,6 +2,7 @@ package pro.deta.orion.acl.storage;
 
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitOperationException;
+import pro.deta.orion.git.nativestorage.GitRepositoryFileNotFoundException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
@@ -41,14 +42,24 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
 
     @Override
     public Result<AccessControlSnapshot> load() {
+        NativeGitRepository repository;
         try {
-            NativeGitRepository repository = repositoryProvider.openForRead(repositoryName)
+            repository = repositoryProvider.openForRead(repositoryName)
                     .valueOrFailure("Cannot open native repository " + repositoryName);
+        } catch (RuntimeException error) {
+            return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
+        }
+        try {
             if (!repository.refs().containsKey(configurationRef)) {
                 return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
             }
             GitRepositoryFileSnapshot snapshot = repository.loadFiles(configurationRef, paths);
             return new Result.Success<>(new AccessControlSnapshot(snapshot.files(), snapshot.version()));
+        } catch (GitRepositoryFileNotFoundException error) {
+            if (primaryPathIsMissing(repository)) {
+                return new Result.Failure<>(Result.FailureCode.NOT_FOUND);
+            }
+            return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
         } catch (GitOperationException | RuntimeException error) {
             return new Result.Failure<>(Result.FailureCode.GENERAL, error.getMessage(), error);
         }
@@ -95,6 +106,20 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
 
     private static GitCommitAuthor author(AccessControlSaveRequest request) {
         return new GitCommitAuthor(request.author().getUsername(), request.author().getEmail());
+    }
+
+    private boolean primaryPathIsMissing(NativeGitRepository repository) {
+        if (paths.size() == 1) {
+            return true;
+        }
+        try {
+            repository.loadFiles(configurationRef, List.of(paths.getFirst()));
+            return false;
+        } catch (GitRepositoryFileNotFoundException missing) {
+            return true;
+        } catch (GitOperationException failure) {
+            return false;
+        }
     }
 
     @Override
