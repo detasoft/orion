@@ -6,10 +6,11 @@
 authoritative process-exit record survive a machine crash before normal host completion.
 
 **Architecture:** A writer always uses buffered appends for ordinary traffic and explicit file synchronization for
-authority records. Segment creation publishes the directory entry durably, and every rotation synchronizes the
-closed prefix before publishing the next active segment. `finish_durably` is the only production path that emits
-`PROCESS_EXITED`; it returns only after the final record is synchronized. No global durability enum, public flush
-choice, or alternate finalization path remains.
+authority records. Session-path creation durably publishes every missing directory below an existing ancestor;
+segment creation publishes its entry durably; and every rotation synchronizes the closed prefix before publishing
+the next active segment. `finish_durably` is the only production path that emits `PROCESS_EXITED`; it synchronizes
+the final record and makes the writer terminal. No global durability enum, public flush choice, or alternate
+finalization path remains.
 
 **Tech Stack:** Rust, CBOR Sequence journal segments, Unix file and directory synchronization, Cargo tests, Maven
 reactor.
@@ -26,6 +27,10 @@ reactor.
 - A successful durable append guarantees that the appended authority record and its complete journal prefix are
   recoverable after machine crash. A successful final operation provides the same guarantee for the sole
   authoritative `PROCESS_EXITED` record, including when that append rotates to a new segment.
+- Define the filesystem root of that guarantee precisely: the nearest pre-existing ancestor of a requested session
+  path is assumed durable, and every missing descendant plus the segment entry must be published by synchronizing
+  its parent before a durable operation can succeed. The Unix host must use this path instead of an unsynchronized
+  `create_dir_all` path.
 - Buffered writes may remain only in the active segment and may leave an incomplete crash tail. They must not call
   `sync_data` per record.
 - Keep maintenance completion separate from `finish_durably`; termination coordination and control-connection
@@ -55,7 +60,9 @@ reactor.
    boundary.
 6. Add a deterministic failure test for the required sync step. Verify rollback removes an unaccepted final record
    and either permits a correct retry or poisons the writer when rollback itself cannot be made durable.
-7. Run `make session-host-test` outside the sandbox and record the expected red result before implementation.
+7. Add tests proving a successful finish is terminal: a second finish and both generic append operations must fail
+   without writing or advancing an event ID.
+8. Run `make session-host-test` outside the sandbox and record the expected red result before implementation.
 
 ## Task 2: Delete the global durability model
 
@@ -71,8 +78,8 @@ reactor.
    `append_durable(event_type, payload)` as the authority-record operation. Both must use one private append core;
    any internal traversal policy is not a public durability choice.
 3. Add `finish_durably(exit_code)` and make it encode `PROCESS_EXITED` through the existing canonical encoder before
-   applying the final durable barrier. Production must not construct the exit event through generic append plus
-   flush.
+   applying the final durable barrier. After success, reject repeated finish and all later append operations.
+   Production must not construct the exit event through generic append plus flush.
 4. Remove the public `flush` method. Make explicit rotation test-only if no production caller remains; automatic
    rotation is the sole runtime path.
 5. Remove the durability parameter from `write_metadata`. Preserve the current production buffered write/rename
@@ -87,19 +94,31 @@ reactor.
 - Modify: `session-host/src/journal.rs`
 - Test: inline tests in `session-host/src/journal.rs`
 
-1. Publish each newly created segment's directory entry durably once. This removes the need to remember whether a
+1. Replace direct Unix `create_dir_all` with one journal-owned helper that creates each missing session-path
+   component from the nearest existing ancestor and synchronizes its parent before proceeding. Reuse the same
+   helper from writer construction so direct in-crate construction cannot bypass the guarantee.
+2. Publish each newly created segment's directory entry durably once. This removes the need to remember whether a
    later authority record is still inside an unpublished file.
-2. Make every rotation synchronize the complete closed segment before creating and publishing its successor. The
+3. Make every rotation synchronize the complete closed segment before creating and publishing its successor. The
    cost is per segment boundary, never per buffered PTY record, and it guarantees that a later durable record cannot
    survive without its ordered prefix.
-3. For `append_durable` and `finish_durably`, write the record and call `sync_data` on the active file before
+4. If successor creation succeeds but publication fails, remove the successor and synchronize that removal before
+   returning the original error. If removal or its directory synchronization fails, poison the writer so neither a
+   retry nor a smaller append can continue on an ambiguous segment set.
+5. Keep writer publication synchronization observable through a writer-owned internal test seam. Do not share an
+   untagged ordered-operation recorder with the asynchronous compression worker; tests must not depend on scheduler
+   timing or maintenance progress.
+6. For `append_durable` and `finish_durably`, write the record and call `sync_data` on the active file before
    advancing the accepted in-memory event ID. Reuse the existing truncation/seek/sync rollback behavior on failure.
-4. Preserve automatic rotation between whole CBOR records. For a final append that rotates, enforce this order:
+7. Preserve automatic rotation between whole CBOR records. For a final append that rotates, enforce this order:
    synchronize the closed prefix, durably publish the new segment, write the exit record, synchronize the exit
    record, then return success.
-5. Preserve maintenance compression ordering and crash-tail rules. Do not wait for compression or physical
+8. Add deterministic coverage for publication failure with successful cleanup and retry, publication rollback
+   failure with writer poisoning, final-record rollback over an existing buffered prefix, and record rollback-sync
+   failure with writer poisoning.
+9. Preserve maintenance compression ordering and crash-tail rules. Do not wait for compression or physical
    retention as part of a record durability barrier.
-6. Run `make session-host-test` outside the sandbox.
+10. Run `make session-host-test` outside the sandbox.
 
 ## Task 4: Map every Unix call site to one semantic operation
 
@@ -125,22 +144,26 @@ reactor.
 **Files:**
 
 - Modify: `docs/plans/2026-09-02-session-journal-cbor-sequence.md`
+- Modify: `session-host/protocol/README.md`
 - Verify: `session-host/protocol/fixtures/`
 - Verify: `session-host/src/journal.rs`
 - Verify: `session-host/src/platform/unix.rs`
 
-1. Document the stable-storage ordering for buffered records, rotation, durable authority records, and the final
-   exit barrier. State that durability applies to the complete prefix through the synchronized record.
-2. Hash every checked-in `session-host/protocol/fixtures/*` file before implementation and compare after it; do not
+1. Document the stable-storage ordering for session-path publication, buffered records, rotation, durable authority
+   records, and the final exit barrier. State the existing-ancestor assumption and that durability applies to the
+   complete prefix through the synchronized record.
+2. Remove the protocol README's obsolete statement that metadata follows a configured durability policy. Describe
+   its single current atomic write/rename behavior without claiming a removed mode.
+3. Hash every checked-in `session-host/protocol/fixtures/*` file before implementation and compare after it; do not
    regenerate fixtures.
-3. Search production code and confirm `Durability`, `JournalConfig.durability`, old generic `append`, public
+4. Search production code and confirm `Durability`, `JournalConfig.durability`, old generic `append`, public
    `flush`, and append-plus-flush `PROCESS_EXITED` are absent. Confirm each production append site names buffered,
    durable, or final semantics directly.
-4. Confirm `Durability::EveryRecord` has not been replaced with a differently named global mode or boolean
+5. Confirm `Durability::EveryRecord` has not been replaced with a differently named global mode or boolean
    configuration.
-5. Run `git diff --check`.
-6. Run `make session-host-test` outside the sandbox.
-7. Create the logical implementation commit, then run `make test` outside the sandbox as required by `AGENTS.md`.
+6. Run `git diff --check`.
+7. Run `make session-host-test` outside the sandbox.
+8. Create the logical implementation commit, then run `make test` outside the sandbox as required by `AGENTS.md`.
    If a task-caused fix is needed after the commit, use the same commit subject for the follow-up so orchestration
    can squash the branch cleanly.
 
