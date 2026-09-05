@@ -228,6 +228,98 @@ class GitBlockingClientsTest {
     }
 
     @Test
+    void rejectsBlankUnpackStatus() {
+        for (String status : new String[] {"", "   "}) {
+            RecordingTransport transport = new RecordingTransport(concat(
+                    advertisement("report-status"),
+                    packet("unpack " + status + "\n"),
+                    packet("ok refs/heads/main\n"), flush()));
+            GitReceivePackRequest request = new GitReceivePackRequest(
+                    List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, "refs/heads/main")),
+                    output -> { });
+
+            var result = new GitReceivePackClient(transport).push(REMOTE, GitClientOptions.defaults(), request);
+
+            assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
+            assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.REPORT_STATUS);
+            assertThat(transport.session.closed).isTrue();
+        }
+    }
+
+    @Test
+    void preservesUnpackFailureReasonAsDomainResult() {
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement("report-status"),
+                packet("unpack insufficient disk space\n"),
+                packet("ng refs/heads/main unpacker error\n"), flush()));
+        GitReceivePackRequest request = new GitReceivePackRequest(
+                List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, "refs/heads/main")),
+                output -> { });
+
+        var result = new GitReceivePackClient(transport).push(REMOTE, GitClientOptions.defaults(), request);
+
+        assertThat(success(result).accepted()).isFalse();
+        assertThat(success(result).unpackStatus()).isEqualTo("insufficient disk space");
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
+    void acceptsPushStatusWithInterleavedSideBandProgress() {
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement("report-status side-band-64k"),
+                sideBandPacket(1, packet("unpack ok\n")),
+                sideBandPacket(2, "counting objects\n".getBytes(StandardCharsets.UTF_8)),
+                sideBandPacket(1, concat(packet("ok refs/heads/main\n"), flush())),
+                flush()));
+        GitReceivePackRequest request = new GitReceivePackRequest(
+                List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, "refs/heads/main")),
+                output -> { });
+
+        var result = new GitReceivePackClient(transport).push(REMOTE, GitClientOptions.defaults(), request);
+
+        assertThat(success(result).accepted()).isTrue();
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
+    void rejectsUnknownPushStatusSideBandChannels() {
+        for (int channel : new int[] {0, 4, 255}) {
+            RecordingTransport transport = new RecordingTransport(concat(
+                    advertisement("report-status side-band-64k"),
+                    sideBandPacket(channel, new byte[] {42}),
+                    sideBandPacket(1, concat(
+                            packet("unpack ok\n"), packet("ok refs/heads/main\n"), flush())),
+                    flush()));
+            GitReceivePackRequest request = new GitReceivePackRequest(
+                    List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, "refs/heads/main")),
+                    output -> { });
+
+            var result = new GitReceivePackClient(transport).push(REMOTE, GitClientOptions.defaults(), request);
+
+            assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.MALFORMED_RESPONSE);
+            assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.REPORT_STATUS);
+            assertThat(transport.session.closed).isTrue();
+        }
+    }
+
+    @Test
+    void reportsFatalPushStatusSideBandError() {
+        RecordingTransport transport = new RecordingTransport(concat(
+                advertisement("report-status side-band-64k"),
+                sideBandPacket(3, "remote failure\n".getBytes(StandardCharsets.UTF_8)),
+                flush()));
+        GitReceivePackRequest request = new GitReceivePackRequest(
+                List.of(new GitReceivePackRequest.Command(OLD_ID, NEW_ID, "refs/heads/main")),
+                output -> { });
+
+        var result = new GitReceivePackClient(transport).push(REMOTE, GitClientOptions.defaults(), request);
+
+        assertThat(failure(result).kind()).isEqualTo(GitClientFailure.Kind.SIDE_BAND_ERROR);
+        assertThat(failure(result).phase()).isEqualTo(GitClientFailure.Phase.REPORT_STATUS);
+        assertThat(transport.session.closed).isTrue();
+    }
+
+    @Test
     void rejectsPushStatusWithoutAStatusForEverySentCommand() {
         assertMalformedPushStatus(packet("unpack ok\n"));
         assertMalformedPushStatus(concat(

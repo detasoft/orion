@@ -225,6 +225,12 @@ final class GitBlockingClientWire {
                     "Receive-pack response is missing unpack status");
         }
         String unpackStatus = lines.getFirst().substring("unpack ".length());
+        if (unpackStatus.isBlank()) {
+            throw protocolFailure(
+                    GitClientFailure.Kind.MALFORMED_RESPONSE,
+                    GitClientFailure.Phase.REPORT_STATUS,
+                    "Receive-pack response is missing unpack status");
+        }
         List<GitReceivePackResult.RefStatus> refs = new ArrayList<>();
         for (int index = 1; index < lines.size(); index++) {
             String line = lines.get(index);
@@ -384,6 +390,11 @@ final class GitBlockingClientWire {
                             GitClientFailure.Kind.SIDE_BAND_ERROR,
                             GitClientFailure.Phase.REPORT_STATUS,
                             sanitized(data));
+                } else if (channel != 2) {
+                    throw protocolFailure(
+                            GitClientFailure.Kind.MALFORMED_RESPONSE,
+                            GitClientFailure.Phase.REPORT_STATUS,
+                            "Unknown Git side-band channel");
                 }
             } finally {
                 packet.payload().release();
