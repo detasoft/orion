@@ -1,6 +1,7 @@
 # Model Organization-Local Users
 
 Status: todo
+Owner: codex, session organization-users-4c81, started 2026-09-05 18:26 Europe/Amsterdam.
 
 Move ordinary user ownership into organizations while retaining a separate
 system administration and recovery scope.
