@@ -154,6 +154,23 @@ After deletion, `firstAvailableEventId` is obtained from the first record of
 the oldest remaining segment. Readers whose cursor predates that value receive
 a gap result.
 
+Acknowledgement grants durable deletion permission but does not make physical
+deletion part of ACK completion. The single journal-maintenance worker
+coalesces non-waiting wakes to the greatest acknowledged watermark and
+active-segment boundary, then retries failed cleanup on a later wake or host
+finish. Journal appends and unrelated controls do not wait for discovery,
+compression, retention scanning, or deletion.
+
+Retention first totals physical segment sizes with checked arithmetic. It
+decodes no records when the journal is already within its target or no durable
+acknowledgement exists. When oversized, it bounded-stream-decodes only the
+oldest closed deletion candidates, preserves their segment and event order,
+and stops at the size target, acknowledgement boundary, or active-segment
+boundary. A greatest-observed active-segment boundary may conservatively retain
+an extra closed segment but cannot expose the writer's current segment to
+deletion. Validation of later noncandidate segments is deferred until a reader
+or later retention attempt needs them.
+
 ## Compression
 
 Compression applies only to closed segments:

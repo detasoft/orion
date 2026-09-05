@@ -98,6 +98,14 @@ or lower watermarks do not lower state and return the current durable
 watermark. A repeated request also wakes maintenance so a prior deletion
 failure can be retried.
 
+ACK completion includes durable watermark publication, operation-ledger
+acknowledgement, and a non-waiting maintenance wake. The handler releases
+shared host state before constructing its response. It does not wait for
+segment discovery, compression, scanning, deletion, or directory
+synchronization. Physical retention is eventual cleanup: wakes coalesce to the
+greatest watermark and active-segment boundary, and later wakes or host finish
+retry an unresolved maintenance failure.
+
 A crash before checkpoint publication leaves the previous watermark and
 therefore cannot authorize new deletion. A crash after publication may leave
 eligible files present; later maintenance may finish deleting them. No crash
@@ -115,6 +123,16 @@ below the durable acknowledged watermark. The active segment is never deleted.
 If the size target requires deleting unacknowledged data, maintenance retains
 that data and the physical journal is allowed to exceed `journal_max_bytes`.
 Absence of a checkpoint means that no segment is eligible for deletion.
+
+Retention collects physical segment sizes with checked arithmetic before
+decoding records. A journal already within its size target needs no record
+scan. When oversized, maintenance streams only the oldest closed candidates
+in order and stops as soon as the target is met or a candidate extends beyond
+the acknowledged watermark. Noncandidate segments are not eagerly decoded;
+their corruption is reported only when a reader or later retention attempt
+needs them. The worker conservatively retains any segment that could still be
+the writer's active segment by coalescing the greatest observed active-segment
+number.
 
 The existing single maintenance worker remains the sole segment mutator. It
 receives the acknowledged watermark, discovers closed segment event ranges,
