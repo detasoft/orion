@@ -22,7 +22,6 @@ commands, and survives independently of `agentd`.
 
 ## Child Tasks
 
-- [ ] [Reduce the journal writer API](journal-writer-api/TASK.md)
 - [ ] [Make journal durability operations explicit](journal-durability/TASK.md)
 - [ ] [Move acknowledged retention off the writer path](asynchronous-journal-retention/TASK.md)
 - [ ] [Harden Linux process-tree control](linux-process-tree-control/TASK.md)

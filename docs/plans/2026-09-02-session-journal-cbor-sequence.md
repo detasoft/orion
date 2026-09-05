@@ -11,7 +11,7 @@ complete exactly when its CBOR item is complete; writers and readers must not
 reintroduce a separate persisted completion state under another name.
 
 This document supersedes the journal framing, timestamp, cursor, segmentation,
-compression, retention, and recovery requirements in
+compression, retention, and crash-tail requirements in
 `2026-09-01-native-session-host.md`. The remaining session-host architecture
 and process-host requirements continue to apply.
 
@@ -24,7 +24,7 @@ The base record is a CBOR array:
 ```
 
 - `eventId` is an unsigned 64-bit integer that is unique and strictly
-  increasing within one session.
+  increasing within one host incarnation.
 - `eventType` is an integer event-type identifier.
 - `payload` is a CBOR value whose schema is selected by `eventType`.
 
@@ -54,9 +54,9 @@ raw = monotonicTimeSinceSessionStart()
 eventId = max(raw, previousEventId + 1)
 ```
 
-The value is not a Unix timestamp and must not be compared between sessions.
-Recovery must read the last complete event and ensure that the next generated
-ID remains greater even if the recovered clock reading is equal or lower.
+The value is not a Unix timestamp and must not be compared between host
+incarnations. A host incarnation creates one writer, and a failed writer is
+never reopened for append.
 
 ## Segment Layout and Rotation
 
@@ -83,7 +83,7 @@ segment begins with one complete record.
 The journal is self-indexing. A reader determines a segment's start by decoding
 its first complete item and extracting `firstEventId`.
 
-`readAfter(requestedEventId)` must:
+A cursor reader must:
 
 1. List journal segments in segment-number order.
 2. Decode the first record of every segment.
@@ -138,20 +138,19 @@ discover `firstEventId`, a reader only needs to decompress enough data for the
 first complete CBOR item.
 
 The active segment remains uncompressed. Replacement of a closed `.cbor` file
-with its `.cbor.zst` form must be recoverable without losing the only valid
+with its `.cbor.zst` form must be reconciled without losing the only valid
 copy.
 
-## Crash Recovery
+## Crash Tails
 
 Abnormal termination may leave the active `.cbor` segment ending in a partial
-CBOR item. A reader must return every preceding complete item, ignore the
-incomplete trailing item, and must not classify the whole segment as corrupt.
-No flag written before or after an item participates in this decision.
+CBOR item. Readers and validation must accept every preceding complete item,
+ignore the incomplete trailing item, and must not classify the whole segment
+as corrupt. No flag written before or after an item participates in this
+decision. The abandoned active segment is never reopened for append.
 
-Recovery may truncate the active file to the last valid CBOR boundary before
-appending. Corruption inside an already completed item or before the trailing
-item remains a journal error and must not be silently treated as an incomplete
-tail.
+Corruption inside an already completed item or before the trailing item remains
+a journal error and must not be silently treated as an incomplete tail.
 
 ## Forward Compatibility
 
@@ -187,13 +186,13 @@ contents after reassembly.
 The format change is complete when tests cover:
 
 - golden bytes and round trips for the required event payloads;
-- monotonic event IDs when clock readings repeat and after recovery;
+- monotonic event IDs when clock readings repeat within one host incarnation;
 - multiple items without external framing and rotation only between items;
-- `readAfter` before, within, and between segments;
+- cursor reading before, within, and between segments;
 - gap reporting after retention deletes old segments;
 - rebuilding an optional index from uncompressed and compressed segments;
 - discovery of the first event without decompressing an entire large segment;
-- a partial active tail and truncation to the last complete boundary;
+- a partial active tail accepted through the last complete boundary;
 - absence of `FINAL` or any equivalent persisted completion marker in encoded
   fixtures and writer output;
 - additional trailing fields and unknown event types;

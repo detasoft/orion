@@ -84,10 +84,8 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     let _endpoint_guard = EndpointGuard(endpoint_path);
     listener.set_nonblocking(true)?;
 
-    let journal_id = random_journal_id()?;
     let journal = JournalWriter::create(
         &options.session_dir,
-        journal_id,
         JournalConfig {
             durability: Durability::Buffered,
             segment_max_bytes: options.journal_segment_bytes,
@@ -193,7 +191,7 @@ impl PendingStartOutcome {
                 .map_err(|error| HostError::Protocol(error.to_string()))
                 .and_then(|payload| {
                     self.journal
-                        .append_durable(event_type::SESSION_START_FAILED, 1, 0, &payload)
+                        .append_durable(event_type::SESSION_START_FAILED, &payload)
                         .map(|_| ())
                         .map_err(HostError::from)
                 });
@@ -208,7 +206,7 @@ impl PendingStartOutcome {
 
     fn started(mut self, child_pid: u64) -> Result<JournalWriter, HostError> {
         self.journal
-            .append_durable(event_type::PROCESS_STARTED, 1, 0, &child_pid.to_le_bytes())?;
+            .append_durable(event_type::PROCESS_STARTED, &child_pid.to_le_bytes())?;
         Ok(self.journal)
     }
 }
@@ -646,13 +644,13 @@ struct SharedState {
 
 impl SharedState {
     fn append(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
-        let event_id = self.journal.append(event, 1, 0, payload)?;
+        let event_id = self.journal.append(event, payload)?;
         self.journal.flush()?;
         Ok(event_id)
     }
 
     fn append_durable(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
-        Ok(self.journal.append_durable(event, 1, 0, payload)?)
+        Ok(self.journal.append_durable(event, payload)?)
     }
 
     fn persist_metadata(&self) -> Result<(), HostError> {
@@ -1580,14 +1578,6 @@ fn lock_descendants(
     descendants
         .lock()
         .map_err(|_| HostError::Thread("descendant tracker mutex is poisoned".to_owned()))
-}
-
-fn random_journal_id() -> Result<[u8; 16], HostError> {
-    let mut value = [0_u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut value)?;
-    value[6] = (value[6] & 0x0f) | 0x40;
-    value[8] = (value[8] & 0x3f) | 0x80;
-    Ok(value)
 }
 
 fn epoch_millis() -> Result<u64, HostError> {

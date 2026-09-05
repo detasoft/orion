@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+mod support;
+
 use std::fs;
 use std::io::{self, Write};
 #[cfg(target_os = "linux")]
@@ -17,6 +19,7 @@ use orion_session_host::journal_acknowledgement::STATE_FILE_NAME;
 use orion_session_host::protocol::{
     self, ControlFrame, control_message, event_type,
 };
+use support::journal::{self as journal_reader, JournalEvent};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -39,7 +42,7 @@ fn failed_exec_records_the_authoritative_start_failure() {
     assert_eq!(output.status.code(), Some(70));
     let metadata = journal::read_metadata(directory.path()).unwrap();
     assert_eq!(metadata.child_pid, None);
-    let events = journal::read(directory.path(), 0).unwrap().events;
+    let events = journal_reader::read(directory.path(), 0).unwrap().events;
     assert_start_failure(&events, "child command exec failed");
 }
 
@@ -61,7 +64,7 @@ fn missing_working_directory_records_the_authoritative_start_failure() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(70));
-    let events = journal::read(directory.path(), 0).unwrap().events;
+    let events = journal_reader::read(directory.path(), 0).unwrap().events;
     assert_start_failure(&events, "child failed to change working directory");
 }
 
@@ -83,7 +86,7 @@ fn post_journal_initialization_failure_records_the_authoritative_outcome() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(70));
-    let events = journal::read(directory.path(), 0).unwrap().events;
+    let events = journal_reader::read(directory.path(), 0).unwrap().events;
     assert_start_failure(&events, "cannot decode state");
 }
 
@@ -312,7 +315,7 @@ fn hosts_a_real_tty_and_preserves_raw_output() {
 
     let status = host.wait();
     assert!(status.success(), "session-host exited with {status}");
-    let result = journal::read(host.directory(), 0).unwrap();
+    let result = journal_reader::read(host.directory(), 0).unwrap();
     let output = terminal_output(&result.events);
     assert!(contains(&output, b"\x1b[31mraw\xff\x1b[0m"));
     assert_eq!(
@@ -371,7 +374,7 @@ fn bounds_compresses_and_replays_the_session_journal() {
     assert!(!compressed_segments.is_empty());
     assert_eq!(active_segments.len(), 1);
 
-    let result = journal::read_after(host.directory(), 0).unwrap();
+    let result = journal_reader::read_after(host.directory(), 0).unwrap();
     assert_eq!(terminal_output(&result.events), b"bounded-journal-output");
     assert_eq!(
         result.events.first().unwrap().event_type,
@@ -404,7 +407,7 @@ fn orders_idempotent_controls_and_reuses_results_after_reconnect() {
     let mut first = connect(host.directory());
     let status = request(&mut first, control_message::STATUS, 1, &[]);
     assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
-    let journal_at_status = journal::read(host.directory(), 0).unwrap();
+    let journal_at_status = journal_reader::read(host.directory(), 0).unwrap();
     assert_eq!(u16_at(&status.payload[0..2]), 2);
     assert_eq!(u16_at(&status.payload[2..4]) & 3, 3);
     assert_eq!(u32_at(&status.payload[4..8]), 80);
@@ -509,7 +512,7 @@ fn orders_idempotent_controls_and_reuses_results_after_reconnect() {
 
     let status = host.wait();
     assert!(status.success(), "session-host exited with {status}");
-    let result = journal::read(host.directory(), 0).unwrap();
+    let result = journal_reader::read(host.directory(), 0).unwrap();
     let inputs: Vec<_> = result
         .events
         .iter()
@@ -615,7 +618,7 @@ fn leaves_metadata_unchanged_across_output_input_and_signal_events() {
     let metadata_after = fs::read(host.directory().join("metadata")).unwrap();
     assert_eq!(metadata_after, metadata_before);
 
-    let result = journal::read(host.directory(), 0).unwrap();
+    let result = journal_reader::read(host.directory(), 0).unwrap();
     assert!(result.events.iter().any(|event| event.event_type == event_type::PTY_INPUT));
     assert!(result.events.iter().any(|event| event.event_type == event_type::PTY_OUTPUT));
     assert!(result.events.iter().any(|event| event.event_type == event_type::SIGNAL));
@@ -782,7 +785,7 @@ fn durable_acknowledgement_controls_retention_and_ledger_capacity() {
     );
     assert_eq!(admitted.message_type, control_message::ACCEPTED);
 
-    let result = journal::read_after(host.directory(), first_result_id).unwrap();
+    let result = journal_reader::read_after(host.directory(), first_result_id).unwrap();
     assert!(
         result
             .events
@@ -878,7 +881,7 @@ fn sends_interactive_signals_to_the_foreground_process_group() {
 
     let status = host.wait_with_timeout(Duration::from_secs(2));
     assert!(status.success(), "session-host exited with {status}");
-    let result = journal::read(host.directory(), 0).unwrap();
+    let result = journal_reader::read(host.directory(), 0).unwrap();
     assert_command_triplet(&result.events, event_type::SIGNAL, result_event_id);
 }
 
@@ -948,7 +951,7 @@ fn blocked_pty_input_does_not_block_status_ack_or_matching_retry() {
     assert_eq!(completed.message_type, control_message::ACCEPTED);
     let result_event_id = u64_at(&completed.payload);
     assert!(host.wait().success());
-    let result = journal::read_after(host.directory(), latest_event_id).unwrap();
+    let result = journal_reader::read_after(host.directory(), latest_event_id).unwrap();
     let command_result = result
         .events
         .iter()
@@ -971,7 +974,7 @@ fn restores_default_sigpipe_disposition_in_child() {
     );
 
     assert!(host.wait().success());
-    let result = journal::read(host.directory(), 0).unwrap();
+    let result = journal_reader::read(host.directory(), 0).unwrap();
     let exited = result
         .events
         .iter()
@@ -1030,7 +1033,7 @@ fn remains_available_after_the_launching_process_exits() {
     drop(stream);
 
     wait_for_event(directory.path(), event_type::PROCESS_EXITED);
-    let result = journal::read(directory.path(), 0).unwrap();
+    let result = journal_reader::read(directory.path(), 0).unwrap();
     assert!(contains(&terminal_output(&result.events), b"SURVIVED:yes"));
     wait_for_process_exit(host_pid);
     process_guard.0 = None;
@@ -1264,7 +1267,7 @@ fn base_arguments_with_cwd(
     ]
 }
 
-fn assert_start_failure(events: &[journal::JournalEvent], diagnostic_fragment: &str) {
+fn assert_start_failure(events: &[JournalEvent], diagnostic_fragment: &str) {
     assert_eq!(events.len(), 1);
     let event = &events[0];
     assert_eq!(event.event_type, event_type::SESSION_START_FAILED);
@@ -1403,7 +1406,7 @@ fn assert_error(frame: &OwnedControlFrame, code: u32) {
 }
 
 fn assert_command_triplet(
-    events: &[journal::JournalEvent],
+    events: &[JournalEvent],
     effect_type: u16,
     result_event_id: u64,
 ) {
@@ -1420,7 +1423,7 @@ fn assert_command_triplet(
 fn wait_for_output(directory: &Path, expected: &[u8]) {
     let deadline = Instant::now() + TIMEOUT;
     loop {
-        if let Ok(result) = journal::read(directory, 0)
+        if let Ok(result) = journal_reader::read(directory, 0)
             && contains(&terminal_output(&result.events), expected)
         {
             return;
@@ -1436,7 +1439,7 @@ fn wait_for_output(directory: &Path, expected: &[u8]) {
 fn wait_for_event(directory: &Path, expected: u16) {
     let deadline = Instant::now() + TIMEOUT;
     loop {
-        if let Ok(result) = journal::read(directory, 0)
+        if let Ok(result) = journal_reader::read(directory, 0)
             && result.events.iter().any(|event| event.event_type == expected)
         {
             return;
@@ -1477,7 +1480,7 @@ fn wait_for_process_exit(pid: i32) {
     }
 }
 
-fn terminal_output(events: &[journal::JournalEvent]) -> Vec<u8> {
+fn terminal_output(events: &[JournalEvent]) -> Vec<u8> {
     let mut output = Vec::new();
     for event in events {
         if event.event_type == event_type::PTY_OUTPUT {
