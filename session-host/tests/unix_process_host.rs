@@ -761,7 +761,7 @@ fn durable_acknowledgement_controls_retention_and_ledger_capacity() {
         fs::read_to_string(host.directory().join(STATE_FILE_NAME)).unwrap(),
         format!(r#"{{"stateVersion":1,"acknowledgedEventId":{first_result_id}}}"#),
     );
-    assert!(journal_file_count(host.directory()) < segment_count_before);
+    wait_for_journal_file_count_below(host.directory(), segment_count_before);
 
     let lower = request(
         &mut stream,
@@ -1527,6 +1527,20 @@ fn journal_segment_numbers(directory: &Path) -> (Vec<u64>, Vec<u64>) {
 fn journal_file_count(directory: &Path) -> usize {
     let (compressed, active) = journal_segment_numbers(directory);
     compressed.len() + active.len()
+}
+
+fn wait_for_journal_file_count_below(directory: &Path, expected_upper_bound: usize) {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        if journal_file_count(directory) < expected_upper_bound {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for acknowledged journal retention"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

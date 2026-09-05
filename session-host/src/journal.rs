@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -65,19 +65,19 @@ impl std::fmt::Display for JournalError {
     }
 }
 
-// Active segment numbers make stale reconciliation commands harmless: FIFO delivery eventually
-// supplies the newest boundary, and Finish always carries the final boundary before shutdown.
 enum MaintenanceCommand {
-    Reconcile(u64),
-    ApplyRetention {
+    Wake {
         active_segment: u64,
-        acknowledged_event_id: u64,
-        result: Sender<Result<(), JournalError>>,
+        acknowledged_event_id: Option<u64>,
     },
     Finish(u64),
 }
 
 trait MaintenanceFileSystem: Send + Sync {
+    fn reconciliation_started(&self) {}
+
+    fn retention_scan_started(&self, _path: &Path) {}
+
     fn rename(&self, source: &Path, target: &Path) -> io::Result<()>;
 
     fn remove_file(&self, path: &Path) -> io::Result<()>;
@@ -106,6 +106,66 @@ trait RecordFileSync: Send + Sync {
 struct RealMaintenanceFileSystem;
 
 struct RealRecordFileSync;
+
+#[cfg(test)]
+pub(crate) struct StalledMaintenance {
+    started_sender: Sender<()>,
+    started_receiver: std::sync::Mutex<Receiver<()>>,
+    paused: std::sync::atomic::AtomicBool,
+    released: std::sync::Mutex<bool>,
+    wake: std::sync::Condvar,
+}
+
+#[cfg(test)]
+impl StalledMaintenance {
+    fn new() -> Self {
+        let (started_sender, started_receiver) = mpsc::channel();
+        Self {
+            started_sender,
+            started_receiver: std::sync::Mutex::new(started_receiver),
+            paused: std::sync::atomic::AtomicBool::new(false),
+            released: std::sync::Mutex::new(false),
+            wake: std::sync::Condvar::new(),
+        }
+    }
+
+    pub(crate) fn wait_until_started(&self) {
+        self.started_receiver
+            .lock()
+            .unwrap()
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+    }
+
+    pub(crate) fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.wake.notify_all();
+    }
+}
+
+#[cfg(test)]
+impl MaintenanceFileSystem for StalledMaintenance {
+    fn reconciliation_started(&self) {
+        if !self
+            .paused
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let _ = self.started_sender.send(());
+            let mut released = self.released.lock().unwrap();
+            while !*released {
+                released = self.wake.wait(released).unwrap();
+            }
+        }
+    }
+
+    fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
+        fs::rename(source, target)
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
+    }
+}
 
 impl MaintenanceFileSystem for RealMaintenanceFileSystem {
     fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
@@ -136,14 +196,12 @@ impl JournalMaintenance {
         file_system: Arc<dyn MaintenanceFileSystem>,
     ) -> Result<Self, JournalError> {
         let (sender, receiver) = mpsc::channel();
-        sender
-            .send(MaintenanceCommand::Reconcile(active_segment))
-            .map_err(|_| JournalError::Maintenance("cannot schedule initial reconciliation".to_owned()))?;
         let thread = thread::Builder::new()
             .name("session-journal-maintenance".to_owned())
             .spawn(move || {
                 run_maintenance(
                     &directory,
+                    active_segment,
                     journal_max_bytes,
                     file_system,
                     receiver,
@@ -156,7 +214,7 @@ impl JournalMaintenance {
     }
 
     fn reconcile(&self, active_segment: u64) {
-        let _ = self.sender.send(MaintenanceCommand::Reconcile(active_segment));
+        let _ = self.schedule(active_segment, None);
     }
 
     fn ensure_running(&self) -> Result<(), JournalError> {
@@ -168,25 +226,18 @@ impl JournalMaintenance {
         Ok(())
     }
 
-    fn apply_retention_through(
+    fn schedule(
         &self,
         active_segment: u64,
-        acknowledged_event_id: u64,
+        acknowledged_event_id: Option<u64>,
     ) -> Result<(), JournalError> {
         self.ensure_running()?;
-        let (sender, receiver) = mpsc::channel();
         self.sender
-            .send(MaintenanceCommand::ApplyRetention {
+            .send(MaintenanceCommand::Wake {
                 active_segment,
                 acknowledged_event_id,
-                result: sender,
             })
-            .map_err(|_| {
-                JournalError::Maintenance("cannot schedule acknowledged retention".to_owned())
-            })?;
-        receiver.recv().map_err(|_| {
-            JournalError::Maintenance("acknowledged retention worker stopped".to_owned())
-        })?
+            .map_err(|_| JournalError::Maintenance("cannot schedule journal maintenance".to_owned()))
     }
 
     fn finish(&mut self, active_segment: u64) -> Result<(), JournalError> {
@@ -242,6 +293,20 @@ impl JournalWriter {
             config,
             Arc::new(RealMaintenanceFileSystem),
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn create_with_stalled_maintenance_for_test(
+        directory: impl AsRef<Path>,
+        config: JournalConfig,
+    ) -> Result<(Self, Arc<StalledMaintenance>), JournalError> {
+        let maintenance = Arc::new(StalledMaintenance::new());
+        let writer = Self::create_with_maintenance_file_system(
+            directory,
+            config,
+            maintenance.clone(),
+        )?;
+        Ok((writer, maintenance))
     }
 
     fn create_with_maintenance_file_system(
@@ -513,12 +578,9 @@ impl JournalWriter {
         (self.previous_event_id != 0).then_some(self.previous_event_id)
     }
 
-    pub fn apply_retention_through(
-        &mut self,
-        acknowledged_event_id: u64,
-    ) -> Result<(), JournalError> {
+    pub fn schedule_retention(&self, acknowledged_event_id: u64) -> Result<(), JournalError> {
         self.maintenance
-            .apply_retention_through(self.segment_number, acknowledged_event_id)
+            .schedule(self.segment_number, Some(acknowledged_event_id))
     }
 
     pub fn finish_maintenance(&mut self) -> Result<(), JournalError> {
@@ -534,62 +596,80 @@ impl Drop for JournalWriter {
 
 fn run_maintenance(
     directory: &Path,
+    initial_active_segment: u64,
     journal_max_bytes: u64,
     file_system: Arc<dyn MaintenanceFileSystem>,
     receiver: Receiver<MaintenanceCommand>,
 ) -> Result<(), JournalError> {
-    let mut pending_error = None;
+    let mut active_segment = initial_active_segment;
     let mut acknowledged_event_id = None;
-    while let Ok(command) = receiver.recv() {
-        match command {
-            MaintenanceCommand::Reconcile(active_segment) => {
-                let result = reconcile_journal(
-                    directory,
-                    active_segment,
-                    journal_max_bytes,
-                    acknowledged_event_id,
-                    file_system.as_ref(),
-                );
-                match result {
-                    Ok(()) => pending_error = None,
-                    Err(error) => pending_error = Some(error),
+    let mut pending_error = reconcile_journal(
+        directory,
+        active_segment,
+        journal_max_bytes,
+        acknowledged_event_id,
+        file_system.as_ref(),
+    )
+    .err();
+    loop {
+        let command = match receiver.recv() {
+            Ok(command) => command,
+            Err(_) => return pending_error.map_or(Ok(()), Err),
+        };
+        let mut finishing = fold_maintenance_command(
+            command,
+            &mut active_segment,
+            &mut acknowledged_event_id,
+        );
+        loop {
+            match receiver.try_recv() {
+                Ok(command) => {
+                    finishing |= fold_maintenance_command(
+                        command,
+                        &mut active_segment,
+                        &mut acknowledged_event_id,
+                    );
                 }
-            }
-            MaintenanceCommand::ApplyRetention {
-                active_segment,
-                acknowledged_event_id: requested,
-                result,
-            } => {
-                acknowledged_event_id = Some(
-                    acknowledged_event_id
-                        .map_or(requested, |current: u64| current.max(requested)),
-                );
-                let applied = reconcile_journal(
-                    directory,
-                    active_segment,
-                    journal_max_bytes,
-                    acknowledged_event_id,
-                    file_system.as_ref(),
-                );
-                if applied.is_ok() {
-                    pending_error = None;
-                }
-                let _ = result.send(applied);
-            }
-            MaintenanceCommand::Finish(active_segment) => {
-                return reconcile_journal(
-                    directory,
-                    active_segment,
-                    journal_max_bytes,
-                    acknowledged_event_id,
-                    file_system.as_ref(),
-                );
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => finishing = true,
             }
         }
+        pending_error = reconcile_journal(
+            directory,
+            active_segment,
+            journal_max_bytes,
+            acknowledged_event_id,
+            file_system.as_ref(),
+        )
+        .err();
+        if finishing {
+            return pending_error.map_or(Ok(()), Err);
+        }
     }
-    match pending_error {
-        Some(error) => Err(error),
-        None => Ok(()),
+}
+
+fn fold_maintenance_command(
+    command: MaintenanceCommand,
+    active_segment: &mut u64,
+    acknowledged_event_id: &mut Option<u64>,
+) -> bool {
+    match command {
+        MaintenanceCommand::Wake {
+            active_segment: observed_active,
+            acknowledged_event_id: observed_acknowledgement,
+        } => {
+            *active_segment = (*active_segment).max(observed_active);
+            if let Some(observed) = observed_acknowledgement {
+                *acknowledged_event_id = Some(
+                    acknowledged_event_id.map_or(observed, |current| current.max(observed)),
+                );
+            }
+            false
+        }
+        MaintenanceCommand::Finish(observed_active) => {
+            *active_segment = (*active_segment).max(observed_active);
+            true
+        }
     }
 }
 
@@ -600,6 +680,7 @@ fn reconcile_journal(
     acknowledged_event_id: Option<u64>,
     file_system: &dyn MaintenanceFileSystem,
 ) -> Result<(), JournalError> {
+    file_system.reconciliation_started();
     compress_closed_segments(directory, active_segment, file_system)?;
     enforce_retention(
         directory,
@@ -976,60 +1057,16 @@ struct SegmentFile {
     compressed: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SegmentSize {
-    number: u64,
-    last_event_id: u64,
-    physical_bytes: u64,
-    active: bool,
-}
-
-impl SegmentSize {
-    fn closed(number: u64, last_event_id: u64, physical_bytes: u64) -> Self {
-        Self {
-            number,
-            last_event_id,
-            physical_bytes,
-            active: false,
-        }
-    }
-
-    fn active(number: u64, last_event_id: u64, physical_bytes: u64) -> Self {
-        Self {
-            number,
-            last_event_id,
-            physical_bytes,
-            active: true,
-        }
-    }
-}
-
-fn retention_deletions(
-    segments: &[SegmentSize],
-    journal_max_bytes: u64,
-    acknowledged_event_id: Option<u64>,
-) -> Result<Vec<u64>, JournalError> {
+fn checked_physical_total(
+    sizes: impl IntoIterator<Item = u64>,
+) -> Result<u64, JournalError> {
     let mut total = 0_u64;
-    for segment in segments {
-        total = total.checked_add(segment.physical_bytes).ok_or_else(|| {
+    for size in sizes {
+        total = total.checked_add(size).ok_or_else(|| {
             JournalError::Maintenance("physical journal size overflow".to_owned())
         })?;
     }
-    let mut deletions = Vec::new();
-    let Some(acknowledged_event_id) = acknowledged_event_id else {
-        return Ok(deletions);
-    };
-    for segment in segments {
-        if total <= journal_max_bytes
-            || segment.active
-            || segment.last_event_id > acknowledged_event_id
-        {
-            break;
-        }
-        total -= segment.physical_bytes;
-        deletions.push(segment.number);
-    }
-    Ok(deletions)
+    Ok(total)
 }
 
 fn enforce_retention(
@@ -1039,39 +1076,62 @@ fn enforce_retention(
     acknowledged_event_id: Option<u64>,
     file_system: &dyn MaintenanceFileSystem,
 ) -> Result<(), JournalError> {
-    let segments = discover_segments(directory)?;
+    let segments = list_segment_files(directory)?;
     let relevant = segments
-        .iter()
+        .into_iter()
         .take_while(|segment| segment.number <= active_segment)
-        .cloned()
         .collect::<Vec<_>>();
-    let scans = scan_segments(&relevant)?;
-    let mut sizes = Vec::new();
-    for (segment, scan) in relevant.iter().zip(scans) {
-        let physical_bytes = fs::metadata(&segment.path)?.len();
-        if segment.number == active_segment {
-            sizes.push(SegmentSize::active(segment.number, 0, physical_bytes));
-        } else {
-            sizes.push(SegmentSize::closed(
-                segment.number,
-                scan.last_event_id,
-                physical_bytes,
-            ));
-        }
+    let sizes = relevant
+        .iter()
+        .map(|segment| fs::metadata(&segment.path).map(|metadata| metadata.len()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut total = checked_physical_total(sizes.iter().copied())?;
+    let Some(acknowledged_event_id) = acknowledged_event_id else {
+        return Ok(());
+    };
+    if total <= journal_max_bytes {
+        return Ok(());
     }
-    let deletions = retention_deletions(&sizes, journal_max_bytes, acknowledged_event_id)?;
-    for number in deletions {
-        let segment = segments
-            .iter()
-            .find(|segment| segment.number == number)
-            .ok_or_else(|| JournalError::Maintenance("retention segment disappeared".to_owned()))?;
-        file_system.remove_file(&segment.path)?;
-        sync_directory(directory)?;
+
+    let mut previous_event_id = 0;
+    let mut deletions = Vec::new();
+    for (index, (segment, physical_bytes)) in relevant.iter().zip(sizes).enumerate() {
+        if total <= journal_max_bytes || segment.number >= active_segment {
+            break;
+        }
+        if let Some(next) = relevant.get(index + 1)
+            && segment.number.checked_add(1) != Some(next.number)
+        {
+            return Err(JournalError::Format("segment sequence has a gap".to_owned()));
+        }
+        if physical_bytes == 0 {
+            return Err(JournalError::Format("empty closed segment".to_owned()));
+        }
+        file_system.retention_scan_started(&segment.path);
+        let scan = scan_path(
+            segment,
+            ScanExtent::AllRecords,
+            false,
+            previous_event_id,
+        )?;
+        if scan.first_event_id.is_none() {
+            return Err(JournalError::Format("empty closed segment".to_owned()));
+        }
+        previous_event_id = scan.last_event_id;
+        if scan.last_event_id > acknowledged_event_id {
+            break;
+        }
+        deletions.push(&segment.path);
+        total -= physical_bytes;
+    }
+    for path in deletions {
+        file_system.remove_file(path)?;
+        file_system.sync_directory(directory)?;
     }
     Ok(())
 }
 
-fn discover_segments(directory: &Path) -> Result<Vec<SegmentFile>, JournalError> {
+fn list_segment_files(directory: &Path) -> Result<Vec<SegmentFile>, JournalError> {
     let mut candidates = BTreeMap::<u64, (Option<PathBuf>, Option<PathBuf>)>::new();
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
@@ -1101,6 +1161,11 @@ fn discover_segments(directory: &Path) -> Result<Vec<SegmentFile>, JournalError>
             });
         }
     }
+    Ok(segments)
+}
+
+fn discover_segments(directory: &Path) -> Result<Vec<SegmentFile>, JournalError> {
+    let segments = list_segment_files(directory)?;
     for pair in segments.windows(2) {
         if pair[0].number.checked_add(1) != Some(pair[1].number) {
             return Err(JournalError::Format("segment sequence has a gap".to_owned()));
@@ -1128,6 +1193,7 @@ fn first_available_event_id(segments: &[SegmentFile]) -> Result<Option<u64>, Jou
     Ok(None)
 }
 
+#[cfg(test)]
 fn scan_segments(segments: &[SegmentFile]) -> Result<Vec<SegmentScan>, JournalError> {
     let mut scans = Vec::with_capacity(segments.len());
     let mut previous_event_id = 0;
@@ -1669,7 +1735,7 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Condvar, Mutex};
     use std::time::Duration;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1687,6 +1753,21 @@ mod tests {
     struct RecordingCompressionFileSystem {
         file_syncs: AtomicUsize,
         directory_syncs: AtomicUsize,
+    }
+
+    struct ScanRecordingFileSystem {
+        scanned: Mutex<Vec<PathBuf>>,
+    }
+
+    struct PausingMaintenanceFileSystem {
+        started: Sender<()>,
+        reconciliation_calls: AtomicUsize,
+        gate: (Mutex<bool>, Condvar),
+    }
+
+    #[cfg(unix)]
+    struct ReaderRaceFileSystem {
+        read_after_delete: Mutex<Vec<u8>>,
     }
 
     struct CountingRecordFileSync {
@@ -1884,6 +1965,75 @@ mod tests {
         }
     }
 
+    impl MaintenanceFileSystem for ScanRecordingFileSystem {
+        fn retention_scan_started(&self, path: &Path) {
+            self.scanned.lock().unwrap().push(path.to_path_buf());
+        }
+
+        fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
+            fs::rename(source, target)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            fs::remove_file(path)
+        }
+    }
+
+    impl PausingMaintenanceFileSystem {
+        fn new(started: Sender<()>) -> Self {
+            Self {
+                started,
+                reconciliation_calls: AtomicUsize::new(0),
+                gate: (Mutex::new(false), Condvar::new()),
+            }
+        }
+
+        fn release(&self) {
+            let (released, wake) = &self.gate;
+            *released.lock().unwrap() = true;
+            wake.notify_all();
+        }
+    }
+
+    impl MaintenanceFileSystem for PausingMaintenanceFileSystem {
+        fn reconciliation_started(&self) {
+            if self.reconciliation_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                let _ = self.started.send(());
+                let (released, wake) = &self.gate;
+                let mut released = released.lock().unwrap();
+                while !*released {
+                    released = wake.wait(released).unwrap();
+                }
+            }
+        }
+
+        fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
+            fs::rename(source, target)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            fs::remove_file(path)
+        }
+
+        fn sync_file(&self, path: &Path) -> io::Result<()> {
+            File::open(path)?.sync_all()
+        }
+    }
+
+    #[cfg(unix)]
+    impl MaintenanceFileSystem for ReaderRaceFileSystem {
+        fn rename(&self, source: &Path, target: &Path) -> io::Result<()> {
+            fs::rename(source, target)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            let mut reader = File::open(path)?;
+            fs::remove_file(path)?;
+            reader.read_to_end(&mut self.read_after_delete.lock().unwrap())?;
+            Ok(())
+        }
+    }
+
     fn temporary_directory(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!(
             "orion-session-host-{name}-{}-{}",
@@ -1962,53 +2112,207 @@ mod tests {
     }
 
     #[test]
-    fn retention_requires_an_acknowledged_event_watermark() {
-        let segments = [
-            SegmentSize::closed(1, 10, 40),
-            SegmentSize::closed(2, 20, 40),
-            SegmentSize::active(3, 30, 40),
-        ];
-
-        assert!(retention_deletions(&segments, 80, None).unwrap().is_empty());
-        assert!(retention_deletions(&segments, 80, Some(9)).unwrap().is_empty());
-    }
-
-    #[test]
-    fn retention_deletes_only_the_acknowledged_prefix_needed_for_the_limit() {
-        let segments = [
-            SegmentSize::closed(1, 10, 40),
-            SegmentSize::closed(2, 20, 40),
-            SegmentSize::active(3, 30, 40),
-        ];
-
-        assert_eq!(retention_deletions(&segments, 80, Some(10)).unwrap(), [1]);
-        assert_eq!(retention_deletions(&segments, 20, Some(10)).unwrap(), [1]);
-        assert_eq!(retention_deletions(&segments, 20, Some(20)).unwrap(), [1, 2]);
-    }
-
-    #[test]
-    fn retention_keeps_every_segment_when_the_journal_is_within_the_limit() {
-        let segments = [
-            SegmentSize::closed(1, 10, 40),
-            SegmentSize::closed(2, 20, 40),
-            SegmentSize::active(3, 30, 40),
-        ];
-
-        assert!(retention_deletions(&segments, 120, Some(20)).unwrap().is_empty());
-    }
-
-    #[test]
-    fn retention_reports_physical_size_overflow() {
-        let segments = [
-            SegmentSize::closed(1, 10, u64::MAX),
-            SegmentSize::active(2, 20, 1),
-        ];
-
+    fn retention_size_total_reports_overflow() {
         assert!(matches!(
-            retention_deletions(&segments, u64::MAX, None),
+            checked_physical_total([u64::MAX, 1]),
             Err(JournalError::Maintenance(message))
                 if message == "physical journal size overflow"
         ));
+    }
+
+    #[test]
+    fn in_limit_retention_does_not_decode_closed_segments() {
+        let directory = temporary_directory("in-limit-no-scan");
+        fs::write(segment_path(&directory, 1), b"not-cbor").unwrap();
+        write_raw_event(&directory, 2, 2, b"active");
+        let total = fs::metadata(segment_path(&directory, 1)).unwrap().len()
+            + fs::metadata(segment_path(&directory, 2)).unwrap().len();
+        let file_system = ScanRecordingFileSystem {
+            scanned: Mutex::new(Vec::new()),
+        };
+
+        enforce_retention(
+            &directory,
+            2,
+            total,
+            Some(u64::MAX),
+            &file_system,
+        )
+        .unwrap();
+
+        assert!(file_system.scanned.lock().unwrap().is_empty());
+        assert!(segment_path(&directory, 1).is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retention_without_acknowledgement_does_not_decode_closed_segments() {
+        let directory = temporary_directory("no-ack-no-scan");
+        fs::write(segment_path(&directory, 1), b"not-cbor").unwrap();
+        write_raw_event(&directory, 2, 2, b"active");
+
+        enforce_retention(
+            &directory,
+            2,
+            1,
+            None,
+            &RealMaintenanceFileSystem,
+        )
+        .unwrap();
+
+        assert!(segment_path(&directory, 1).is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retention_stops_at_an_unacknowledged_candidate() {
+        let directory = temporary_directory("unacknowledged-retention-boundary");
+        write_raw_event(&directory, 1, 2, b"protected");
+        write_raw_event(&directory, 2, 3, b"active");
+
+        enforce_retention(
+            &directory,
+            2,
+            1,
+            Some(1),
+            &RealMaintenanceFileSystem,
+        )
+        .unwrap();
+
+        assert!(segment_path(&directory, 1).is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retention_stops_before_decoding_a_compressed_non_candidate() {
+        let directory = temporary_directory("retention-prefix-only");
+        write_raw_event(&directory, 1, 1, b"oldest-deletion-candidate");
+        fs::write(compressed_segment_path(&directory, 2), b"not-zstd").unwrap();
+        write_raw_event(&directory, 3, 3, b"active");
+        let first_size = fs::metadata(segment_path(&directory, 1)).unwrap().len();
+        let total = [1_u64, 2, 3]
+            .into_iter()
+            .map(|number| {
+                let raw = segment_path(&directory, number);
+                let path = if raw.exists() {
+                    raw
+                } else {
+                    compressed_segment_path(&directory, number)
+                };
+                fs::metadata(path).unwrap().len()
+            })
+            .sum::<u64>();
+        let file_system = ScanRecordingFileSystem {
+            scanned: Mutex::new(Vec::new()),
+        };
+
+        enforce_retention(
+            &directory,
+            3,
+            total - first_size,
+            Some(1),
+            &file_system,
+        )
+        .unwrap();
+
+        assert_eq!(
+            *file_system.scanned.lock().unwrap(),
+            [segment_path(&directory, 1)]
+        );
+        assert!(!segment_path(&directory, 1).exists());
+        assert!(compressed_segment_path(&directory, 2).is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retention_rejects_corruption_in_a_deletion_candidate() {
+        let directory = temporary_directory("corrupt-retention-candidate");
+        fs::write(segment_path(&directory, 1), b"not-cbor").unwrap();
+        write_raw_event(&directory, 2, 2, b"active");
+
+        assert!(matches!(
+            enforce_retention(
+                &directory,
+                2,
+                1,
+                Some(u64::MAX),
+                &RealMaintenanceFileSystem,
+            ),
+            Err(JournalError::Format(_))
+        ));
+        assert!(segment_path(&directory, 1).is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retention_rejects_a_gap_at_the_candidate_boundary() {
+        let directory = temporary_directory("retention-candidate-gap");
+        write_raw_event(&directory, 1, 1, b"candidate");
+        write_raw_event(&directory, 3, 3, b"active");
+
+        assert!(matches!(
+            enforce_retention(
+                &directory,
+                3,
+                1,
+                Some(u64::MAX),
+                &RealMaintenanceFileSystem,
+            ),
+            Err(JournalError::Format(message)) if message == "segment sequence has a gap"
+        ));
+        assert!(segment_path(&directory, 1).is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retention_rejects_event_order_regression_in_the_candidate_prefix() {
+        let directory = temporary_directory("retention-event-regression");
+        write_raw_event(&directory, 1, 2, b"oldest");
+        write_raw_event(&directory, 2, 1, b"regressed");
+        write_raw_event(&directory, 3, 3, b"active");
+
+        assert!(matches!(
+            enforce_retention(
+                &directory,
+                3,
+                1,
+                Some(u64::MAX),
+                &RealMaintenanceFileSystem,
+            ),
+            Err(JournalError::Format(_))
+        ));
+        assert!(segment_path(&directory, 1).is_file());
+        assert!(segment_path(&directory, 2).is_file());
+        assert!(matches!(
+            enforce_retention(
+                &directory,
+                3,
+                1,
+                Some(u64::MAX),
+                &RealMaintenanceFileSystem,
+            ),
+            Err(JournalError::Format(_))
+        ));
+        assert!(segment_path(&directory, 1).is_file());
+        assert!(segment_path(&directory, 2).is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retention_keeps_an_already_open_reader_valid_while_deleting() {
+        let directory = temporary_directory("retention-reader-race");
+        let encoded = write_raw_event(&directory, 1, 1, b"candidate");
+        write_raw_event(&directory, 2, 2, b"active");
+        let file_system = ReaderRaceFileSystem {
+            read_after_delete: Mutex::new(Vec::new()),
+        };
+
+        enforce_retention(&directory, 2, 1, Some(1), &file_system).unwrap();
+
+        assert_eq!(*file_system.read_after_delete.lock().unwrap(), encoded);
+        assert!(!segment_path(&directory, 1).exists());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -2273,7 +2577,7 @@ mod tests {
                 .append_at_for_test(event_id, protocol::event_type::PTY_OUTPUT, &payload)
                 .unwrap();
         }
-        writer.apply_retention_through(3).unwrap();
+        writer.schedule_retention(3).unwrap();
         writer.finish_maintenance().unwrap();
 
         for number in 1..=3 {
@@ -2324,6 +2628,99 @@ mod tests {
     }
 
     #[test]
+    fn stalled_acknowledged_retention_does_not_block_appends_or_shared_controls() {
+        let directory = temporary_directory("nonblocking-retention");
+        let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, b"same-size").unwrap();
+        let limit = u64::try_from(encoded.len()).unwrap();
+        let (started_sender, started_receiver) = mpsc::channel();
+        let file_system = Arc::new(PausingMaintenanceFileSystem::new(started_sender));
+        let mut writer = JournalWriter::create_with_maintenance_file_system(
+            &directory,
+            journal_config(limit, limit),
+            file_system.clone(),
+        )
+        .unwrap();
+        writer
+            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, b"same-size")
+            .unwrap();
+        writer
+            .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"same-size")
+            .unwrap();
+        started_receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        let shared = Arc::new(Mutex::new(writer));
+        shared.lock().unwrap().schedule_retention(1).unwrap();
+        let (completed_sender, completed_receiver) = mpsc::channel();
+        let append_state = Arc::clone(&shared);
+        let append_completed = completed_sender.clone();
+        let append = thread::spawn(move || {
+            append_state
+                .lock()
+                .unwrap()
+                .append_at_for_test(3, protocol::event_type::PTY_OUTPUT, b"same-size")
+                .unwrap();
+            append_completed.send("append").unwrap();
+        });
+        assert_eq!(
+            completed_receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "append"
+        );
+        let status_state = Arc::clone(&shared);
+        let status = thread::spawn(move || {
+            assert_eq!(status_state.lock().unwrap().latest_event_id(), Some(3));
+            completed_sender.send("status").unwrap();
+        });
+
+        assert_eq!(
+            completed_receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "status"
+        );
+        append.join().unwrap();
+        status.join().unwrap();
+
+        file_system.release();
+        shared.lock().unwrap().finish_maintenance().unwrap();
+        drop(shared);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn maintenance_coalesces_the_greatest_watermark_and_active_segment() {
+        let directory = temporary_directory("coalesced-retention");
+        for number in 1..=4 {
+            write_raw_event(&directory, number, number, b"event");
+        }
+        let (started_sender, started_receiver) = mpsc::channel();
+        let file_system = Arc::new(PausingMaintenanceFileSystem::new(started_sender));
+        let mut maintenance = JournalMaintenance::start_with_file_system(
+            directory.clone(),
+            2,
+            1,
+            file_system.clone(),
+        )
+        .unwrap();
+        started_receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        maintenance.schedule(2, Some(1)).unwrap();
+        maintenance.schedule(4, Some(3)).unwrap();
+        maintenance.schedule(3, Some(2)).unwrap();
+        maintenance.sender.send(MaintenanceCommand::Finish(4)).unwrap();
+        file_system.release();
+        maintenance.finish(4).unwrap();
+
+        assert_eq!(file_system.reconciliation_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            discover_segments(&directory)
+                .unwrap()
+                .iter()
+                .map(|segment| segment.number)
+                .collect::<Vec<_>>(),
+            [4]
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn repeated_watermark_retries_a_transient_retention_deletion() {
         let directory = temporary_directory("retention-deletion-retry");
         write_raw_event(&directory, 1, 1, b"closed");
@@ -2342,20 +2739,16 @@ mod tests {
         )
         .unwrap();
 
-        let error = maintenance.apply_retention_through(2, 1).unwrap_err();
+        maintenance.schedule(2, Some(1)).unwrap();
 
         assert_eq!(
             receive_retention_signal(&signal_receiver),
             RetentionFailureSignal::AttemptStarted
         );
-        assert!(matches!(
-            error,
-            JournalError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied
-        ));
         assert!(compressed_segment_path(&directory, 1).is_file());
         assert!(!segment_path(&directory, 1).exists());
 
-        maintenance.apply_retention_through(2, 1).unwrap();
+        maintenance.schedule(2, Some(1)).unwrap();
         assert_eq!(
             receive_retention_signal(&signal_receiver),
             RetentionFailureSignal::RetryStarted
@@ -2385,15 +2778,11 @@ mod tests {
         )
         .unwrap();
 
-        let first_error = maintenance.apply_retention_through(2, 1).unwrap_err();
+        maintenance.schedule(2, Some(1)).unwrap();
         assert_eq!(
             receive_retention_signal(&signal_receiver),
             RetentionFailureSignal::AttemptStarted
         );
-        assert!(matches!(
-            first_error,
-            JournalError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied
-        ));
         let error = maintenance.finish(2).unwrap_err();
 
         assert!(matches!(

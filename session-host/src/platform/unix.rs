@@ -1027,9 +1027,10 @@ fn handle_journal_acknowledgement(
         Err(error) => return response_error(ERROR_IO, &error.to_string()),
     };
     state.operations.acknowledge(durable);
-    if let Err(error) = state.journal.apply_retention_through(durable) {
+    if let Err(error) = state.journal.schedule_retention(durable) {
         eprintln!("session-host: journal retention will be retried: {error}");
     }
+    drop(state);
     (
         control_message::ACCEPTED,
         host::event_id_payload(durable).to_vec(),
@@ -1584,6 +1585,182 @@ fn epoch_millis() -> Result<u64, HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+
+    struct MaintenanceReleaseGuard(Arc<journal::StalledMaintenance>);
+
+    impl Drop for MaintenanceReleaseGuard {
+        fn drop(&mut self) {
+            self.0.release();
+        }
+    }
+
+    fn temporary_test_directory(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "orion-session-host-unix-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        directory
+    }
+
+    fn test_metadata() -> Metadata {
+        Metadata {
+            metadata_version: 1,
+            journal_format_version: protocol::JOURNAL_VERSION,
+            control_protocol_version: protocol::CONTROL_VERSION,
+            session_id: "asynchronous-retention-test".to_owned(),
+            created_at_epoch_millis: 1,
+            session_start_epoch_millis: 1,
+            command: vec!["test".to_owned()],
+            cwd: "/".to_owned(),
+            host_pid: u64::from(std::process::id()),
+            child_pid: None,
+            initial_cols: 80,
+            initial_rows: 24,
+            current_cols: 80,
+            current_rows: 24,
+            term: "xterm-256color".to_owned(),
+            sandbox: SandboxMetadata {
+                requested: false,
+                enforcement: SandboxEnforcement::None,
+                unavailable_policy: SandboxUnavailablePolicy::RunUnsandboxed,
+                read_write_paths: Vec::new(),
+                read_only_paths: Vec::new(),
+                policy_version: None,
+                handled_rights: None,
+                rules: Vec::new(),
+            },
+            control: ControlMetadata {
+                transport: ControlTransport::UnixDomainSocket,
+                endpoint: CONTROL_ENDPOINT.to_owned(),
+            },
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn test_descendants() -> DescendantTracker {
+        DescendantTracker {
+            root: 1,
+            pty: PtySlaveIdentity {
+                device: 0,
+                inode: 0,
+            },
+            live: HashMap::new(),
+            termination_signal: None,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn test_descendants() -> DescendantTracker {
+        DescendantTracker {
+            root: 1,
+            root_reaped: true,
+            pty: PtySlaveIdentity {
+                device: 0,
+                inode: 0,
+            },
+            live: HashMap::new(),
+            termination_signal: None,
+        }
+    }
+
+    #[test]
+    fn stalled_maintenance_does_not_delay_ack_append_or_status() {
+        let directory = temporary_test_directory("stalled-maintenance");
+        let (mut journal, maintenance) = JournalWriter::create_with_stalled_maintenance_for_test(
+            &directory,
+            JournalConfig {
+                segment_max_bytes: 1024,
+                journal_max_bytes: 1024,
+            },
+        )
+        .unwrap();
+        maintenance.wait_until_started();
+        let event_id = journal
+            .append_durable(event_type::PTY_OUTPUT, b"before-ack")
+            .unwrap();
+        let mut operations = LiveOperationLedger::new(1).unwrap();
+        let identity = OperationIdentity {
+            operation_sequence: 1,
+            command_id: b"acknowledged-operation".to_vec(),
+            command_envelope: vec![0x81, 0x01],
+            message_type: control_message::RESIZE,
+            effect: protocol::pty_resize_payload(90, 30).to_vec(),
+        };
+        assert_eq!(operations.admit(identity), Admission::New);
+        assert!(operations.mark_pending(1));
+        assert!(operations.complete(1, event_id));
+        let state = Arc::new(Mutex::new(SharedState {
+            journal,
+            metadata: test_metadata(),
+            master: File::open("/dev/null").unwrap(),
+            operations,
+            operation_order: Arc::new(Mutex::new(())),
+            acknowledgement: JournalAcknowledgement::open(&directory).unwrap(),
+            descendants: Arc::new(Mutex::new(test_descendants())),
+            child_live: true,
+            exit_code: i32::MIN,
+            exit_signal: -1,
+        }));
+        let release_guard = MaintenanceReleaseGuard(maintenance.clone());
+        let (mut client, server) = UnixStream::pair().unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let server_state = Arc::clone(&state);
+        let server_thread = thread::spawn(move || serve_connection(server, server_state));
+
+        host::write_control_frame(
+            &mut client,
+            control_message::ACK_JOURNAL,
+            1,
+            &event_id.to_le_bytes(),
+        )
+        .unwrap();
+        let acknowledgement = host::read_control_frame(&mut client).unwrap().unwrap();
+        assert_eq!(acknowledgement.message_type, control_message::ACCEPTED);
+        assert_eq!(acknowledgement.payload, event_id.to_le_bytes());
+        assert_eq!(state.lock().unwrap().operations.len(), 0);
+
+        let (append_sender, append_receiver) = mpsc::channel();
+        let append_state = Arc::clone(&state);
+        let append_thread = thread::spawn(move || {
+            let result = append_state
+                .lock()
+                .unwrap()
+                .append_buffered(event_type::PTY_OUTPUT, b"after-ack");
+            append_sender.send(result).unwrap();
+        });
+        let appended = append_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        append_thread.join().unwrap();
+
+        host::write_control_frame(&mut client, control_message::STATUS, 2, &[]).unwrap();
+        let status = host::read_control_frame(&mut client).unwrap().unwrap();
+        assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
+        assert_eq!(
+            u64::from_le_bytes(status.payload[36..44].try_into().unwrap()),
+            appended
+        );
+        assert_eq!(
+            fs::read_to_string(directory.join(crate::journal_acknowledgement::STATE_FILE_NAME))
+                .unwrap(),
+            format!(r#"{{"stateVersion":1,"acknowledgedEventId":{event_id}}}"#),
+        );
+
+        maintenance.release();
+        drop(release_guard);
+        drop(client);
+        server_thread.join().unwrap().unwrap();
+        state.lock().unwrap().journal.finish_maintenance().unwrap();
+        drop(state);
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn requires_three_consecutive_empty_descendant_observations() {
