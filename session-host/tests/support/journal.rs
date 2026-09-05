@@ -213,7 +213,9 @@ fn scan_sequence(
             Err(error) => return Err(parse_error(error)),
         };
         if end - position > MAX_ENCODED_RECORD_LENGTH {
-            return Err(ReadError::Format("CBOR journal record is too large".to_owned()));
+            return Err(ReadError::Format(
+                "CBOR journal record is too large".to_owned(),
+            ));
         }
         let event = parse_record(&bytes[position..end])?;
         if event.event_id == 0 || event.event_id <= previous_event_id {
@@ -254,27 +256,21 @@ fn parse_record(encoded: &[u8]) -> Result<JournalEvent, ReadError> {
 
 fn decode_payload(event_type: u16, encoded: &[u8]) -> Result<Vec<u8>, ReadError> {
     match event_type {
-        protocol::event_type::COMMAND_ACCEPTED => {
-            let fields = array_fields(encoded)?;
-            require_fields(&fields, 2, "COMMAND_ACCEPTED")?;
-            let sequence = decode_unsigned(field(encoded, fields[0]), "operationSequence")?;
-            let envelope = decode_bytes(field(encoded, fields[1]))?;
-            Ok([sequence.to_le_bytes().as_slice(), envelope.as_slice()].concat())
-        }
         protocol::event_type::COMMAND_RESULT => {
             let fields = array_fields(encoded)?;
             require_fields(&fields, 4, "COMMAND_RESULT")?;
             let sequence = decode_unsigned(field(encoded, fields[0]), "operationSequence")?;
-            let command_id = decode_bytes(field(encoded, fields[1]))?;
+            let envelope = decode_bytes(field(encoded, fields[1]))?;
             let outcome = u8::try_from(decode_unsigned(field(encoded, fields[2]), "outcome")?)
                 .map_err(|_| ReadError::Format("COMMAND_RESULT outcome exceeds u8".to_owned()))?;
             let detail = decode_text(field(encoded, fields[3]))?;
-            let command_id_length = u16::try_from(command_id.len())
-                .map_err(|_| ReadError::Format("COMMAND_RESULT command ID is too long".to_owned()))?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&sequence.to_le_bytes());
-            payload.extend_from_slice(&command_id_length.to_le_bytes());
-            payload.extend_from_slice(&command_id);
+            let envelope_length = u32::try_from(envelope.len()).map_err(|_| {
+                ReadError::Format("COMMAND_RESULT command envelope is too long".to_owned())
+            })?;
+            payload.extend_from_slice(&envelope_length.to_le_bytes());
+            payload.extend_from_slice(&envelope);
             payload.push(outcome);
             payload.extend_from_slice(detail.as_bytes());
             Ok(payload)
@@ -338,13 +334,11 @@ fn decode_payload(event_type: u16, encoded: &[u8]) -> Result<Vec<u8>, ReadError>
     }
 }
 
-fn require_fields(
-    fields: &[(usize, usize)],
-    minimum: usize,
-    event: &str,
-) -> Result<(), ReadError> {
+fn require_fields(fields: &[(usize, usize)], minimum: usize, event: &str) -> Result<(), ReadError> {
     if fields.len() < minimum {
-        return Err(ReadError::Format(format!("{event} payload has missing fields")));
+        return Err(ReadError::Format(format!(
+            "{event} payload has missing fields"
+        )));
     }
     Ok(())
 }
@@ -432,7 +426,9 @@ fn indefinite_end(
             return Ok(position + 1);
         }
         if matches!(major, 2 | 3) && (next >> 5 != major || next & 0x1f == 31) {
-            return Err(ParseFailure::Invalid("invalid CBOR indefinite string chunk"));
+            return Err(ParseFailure::Invalid(
+                "invalid CBOR indefinite string chunk",
+            ));
         }
         position = item_end(bytes, position, depth + 1)?;
         map_items += 1;
@@ -449,12 +445,18 @@ fn argument(bytes: &[u8], start: usize, additional: u8) -> Result<(u64, usize), 
         25 => {
             let end = start + 3;
             let value = bytes.get(start + 1..end).ok_or(ParseFailure::Incomplete)?;
-            Ok((u64::from(u16::from_be_bytes(value.try_into().unwrap())), end))
+            Ok((
+                u64::from(u16::from_be_bytes(value.try_into().unwrap())),
+                end,
+            ))
         }
         26 => {
             let end = start + 5;
             let value = bytes.get(start + 1..end).ok_or(ParseFailure::Incomplete)?;
-            Ok((u64::from(u32::from_be_bytes(value.try_into().unwrap())), end))
+            Ok((
+                u64::from(u32::from_be_bytes(value.try_into().unwrap())),
+                end,
+            ))
         }
         27 => {
             let end = start + 9;
@@ -481,7 +483,9 @@ fn array_fields(encoded: &[u8]) -> Result<Vec<(usize, usize)>, ReadError> {
         position = 1;
         while encoded.get(position) != Some(&0xff) {
             if fields.len() == MAX_RECORD_FIELDS {
-                return Err(ReadError::Format("CBOR array has too many fields".to_owned()));
+                return Err(ReadError::Format(
+                    "CBOR array has too many fields".to_owned(),
+                ));
             }
             let end = item_end(encoded, position, 1).map_err(parse_error)?;
             fields.push((position, end));
@@ -493,7 +497,9 @@ fn array_fields(encoded: &[u8]) -> Result<Vec<(usize, usize)>, ReadError> {
         let length = usize::try_from(length)
             .map_err(|_| ReadError::Format("CBOR array length exceeds platform".to_owned()))?;
         if length > MAX_RECORD_FIELDS {
-            return Err(ReadError::Format("CBOR array has too many fields".to_owned()));
+            return Err(ReadError::Format(
+                "CBOR array has too many fields".to_owned(),
+            ));
         }
         position = content;
         for _ in 0..length {
@@ -503,7 +509,9 @@ fn array_fields(encoded: &[u8]) -> Result<Vec<(usize, usize)>, ReadError> {
         }
     }
     if position != encoded.len() {
-        return Err(ReadError::Format("CBOR array has trailing bytes".to_owned()));
+        return Err(ReadError::Format(
+            "CBOR array has trailing bytes".to_owned(),
+        ));
     }
     Ok(fields)
 }

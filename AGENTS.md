@@ -82,3 +82,59 @@
 - Whenever you create a task, commit its task-tree changes immediately without
   waiting for a separate commit request. Treat this as a documentation-only
   commit and do not run tests afterward.
+
+
+# Repository Agent Policy
+
+## Core implementation policy
+
+- Make the smallest change that satisfies the requirement.
+- Preserve all externally observable behavior not explicitly changed by the task.
+- Preserve existing architectural invariants and module boundaries.
+- Reuse existing concepts, abstractions, protocols, lifecycle, state, and configuration before introducing new ones.
+- New abstractions, public APIs, persistent state, protocols, dependencies, configuration options, modules, and services have a cost and require concrete justification from the current requirement.
+- Do not perform unrelated refactoring.
+- Extensibility is not a goal unless explicitly required.
+- Prefer local changes over cross-module changes when both are correct.
+- Prefer fewer changed files, fewer changed types, and fewer new concepts over broader cleanup.
+- Prefer simplification or deletion over addition when behavior remains equivalent.
+- Do not introduce a general-purpose abstraction for a single use case unless the existing code cannot express the requirement cleanly.
+
+## Decision order
+
+When several implementations satisfy the requirement, choose in this order:
+
+1. Preserve behavior not mentioned by the task.
+2. Preserve architectural invariants.
+3. Minimize public contract changes.
+4. Minimize affected modules.
+5. Minimize changed files.
+6. Minimize new types/interfaces/classes.
+7. Minimize new configuration and persistent state.
+8. Minimize dependencies.
+9. Minimize code added.
+
+## Architectural-change trigger
+
+Before making a change that introduces or materially modifies any of the following, apply the `minimal-delta` skill:
+
+- public API or protocol
+- persistent state or schema
+- cross-module behavior
+- lifecycle or ownership
+- concurrency model
+- new dependency
+- new service/module/subsystem
+- new reusable abstraction
+
+A new `Manager`, `Provider`, `Registry`, `Factory`, `Coordinator`, `Service`, or similar concept should be treated as an architectural change unless it is clearly an implementation detail local to one existing concept.
+
+## Review expectation
+
+After any non-trivial implementation, verify that the same requirement could not be met with fewer concepts or a smaller architectural delta. Use the `architecture-review` skill when a change is cross-module, concept-heavy, or difficult to explain locally.
+
+## Philosophy
+
+The central rule is:
+
+> Implement the smallest change that makes the requested behavior true while preserving existing invariants. Introduce no new concepts unless the requirement cannot be satisfied with concepts already present in the codebase.

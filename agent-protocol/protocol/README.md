@@ -51,7 +51,7 @@ decoding and is distinct from semantic recovery within the sequence decoder.
 | `0x8101` | server to agent | `INPUT` | CommandId, SessionId, input UUID, bytes |
 | `0x8102` | server to agent | `RESIZE` | CommandId, SessionId, columns, rows |
 | `0x8103` | server to agent | `SIGNAL` | CommandId, SessionId, signal kind, signed platform code |
-| `0x8104` | server to agent | `TERMINATE` | CommandId, SessionId, mode, grace milliseconds |
+| `0x8104` | server to agent | `TERMINATE` | CommandId, SessionId, mode |
 | `0x8110` | server to agent | `SESSION_SYNC` | SessionId, optional committed EventId |
 
 Machine is `[hostname, operatingSystem, architecture]`. A session descriptor is

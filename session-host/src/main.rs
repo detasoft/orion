@@ -22,8 +22,6 @@ Options:
   --sandbox-policy PATH        Filesystem sandbox policy
   --journal-segment-bytes N    Journal segment size (default: 67108864)
   --journal-max-bytes N        Total journal size limit (default: 1073741824)
-  --max-unacknowledged-operations N
-                               Live operation ledger capacity (default: 4096)
   -h, --help                   Print help
   -V, --version                Print version
 ";

@@ -14,6 +14,7 @@ import pro.deta.orion.command.CommandPresentation;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.render.RenderedCommand;
+import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -44,6 +45,7 @@ public final class InteractiveTerminal implements AutoCloseable {
     private final AtomicReference<ActiveCommand> active = new AtomicReference<>();
     private final AtomicReference<InputStream> input = new AtomicReference<>();
     private final AtomicReference<Thread> reader = new AtomicReference<>();
+    private final AtomicReference<Runnable> inputConsumedHook = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicInteger exitCode = new AtomicInteger();
 
@@ -99,6 +101,11 @@ public final class InteractiveTerminal implements AutoCloseable {
         }
     }
 
+    @TestOnly
+    void onInputChunkConsumed(Runnable hook) {
+        inputConsumedHook.set(Objects.requireNonNull(hook, "hook"));
+    }
+
     @Override
     public void close() {
         shutdown(exitCode.get());
@@ -128,6 +135,10 @@ public final class InteractiveTerminal implements AutoCloseable {
             for (TerminalInputEvent event : events) {
                 handle(event);
             }
+        }
+        Runnable hook = inputConsumedHook.get();
+        if (hook != null) {
+            hook.run();
         }
         if (bellWritten) {
             write("\u0007");

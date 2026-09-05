@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::{CString, OsStr};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
+use std::net::Shutdown;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
@@ -9,7 +10,7 @@ use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -17,28 +18,121 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::PlatformKind;
 use super::sandbox::PreparedSandbox;
 use crate::cli::SessionOptions;
-use crate::control_journal::{Admission, LiveOperationLedger, OperationIdentity};
 use crate::host::{
-    self, ERROR_INVALID_REQUEST, ERROR_INVALID_STATE, ERROR_IO, ERROR_POLICY,
-    ERROR_UNSUPPORTED_MESSAGE, ERROR_UNSUPPORTED_SCHEMA, HostError, OwnedControlFrame,
+    self, ERROR_INVALID_REQUEST, ERROR_INVALID_STATE, ERROR_IO, ERROR_UNSUPPORTED_MESSAGE,
+    ERROR_UNSUPPORTED_SCHEMA, HostError, OwnedControlFrame,
 };
 use crate::journal::{
-    self, ControlMetadata, ControlTransport, JournalConfig, JournalWriter, Metadata,
+    self, ControlMetadata, ControlTransport, JournalConfig, JournalEvent, JournalWriter, Metadata,
     SandboxEnforcement, SandboxMetadata, SandboxRuleMetadata, SandboxUnavailablePolicy,
 };
 use crate::journal_acknowledgement::{JournalAcknowledgement, validate_received_watermark};
-use crate::protocol::{self, control_message, event_type};
+use crate::protocol::{self, control_message};
 
 const CONTROL_ENDPOINT: &str = "control.sock";
-const CONTROL_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const DESCENDANT_ABSENCE_CONFIRMATIONS: usize = 3;
 const DESCENDANT_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const READ_BUFFER_LENGTH: usize = 64 * 1024;
+const CONTROL_RESPONSE_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 const CHILD_SETUP_SANDBOX: u8 = 1;
 const CHILD_SETUP_CWD: u8 = 2;
 const CHILD_SETUP_TERM: u8 = 3;
 const CHILD_SETUP_COLORTERM: u8 = 4;
 const CHILD_SETUP_EXEC: u8 = 5;
+
+static SIGNAL_PIPE_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
+
+extern "C" fn forward_signal(signal: libc::c_int) {
+    let fd = SIGNAL_PIPE_WRITE_FD.load(Ordering::Relaxed);
+    if fd >= 0 {
+        let byte = [signal as u8];
+        unsafe {
+            libc::write(fd, byte.as_ptr().cast(), byte.len());
+        }
+    }
+}
+
+struct SignalIngress {
+    read_fd: libc::c_int,
+    write_fd: libc::c_int,
+}
+
+impl SignalIngress {
+    fn install() -> Result<Self, HostError> {
+        let mut pipe = [0; 2];
+        if unsafe { libc::pipe(pipe.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        if let Err(error) = set_nonblocking(pipe[0])
+            .and_then(|()| set_nonblocking(pipe[1]))
+            .and_then(|()| set_close_on_exec(pipe[0]))
+            .and_then(|()| set_close_on_exec(pipe[1]))
+        {
+            unsafe {
+                libc::close(pipe[0]);
+                libc::close(pipe[1]);
+            }
+            return Err(error.into());
+        }
+        let handler = forward_signal as *const () as libc::sighandler_t;
+        for signal in forwarded_signals() {
+            if unsafe { libc::signal(signal, handler) } == libc::SIG_ERR {
+                let error = io::Error::last_os_error();
+                unsafe {
+                    libc::close(pipe[0]);
+                    libc::close(pipe[1]);
+                }
+                return Err(error.into());
+            }
+        }
+        SIGNAL_PIPE_WRITE_FD.store(pipe[1], Ordering::Release);
+        Ok(Self {
+            read_fd: pipe[0],
+            write_fd: pipe[1],
+        })
+    }
+
+    fn take_signal(&self) -> Option<libc::c_int> {
+        let mut byte = [0_u8; 1];
+        let result = unsafe { libc::read(self.read_fd, byte.as_mut_ptr().cast(), byte.len()) };
+        (result == 1).then_some(libc::c_int::from(byte[0]))
+    }
+}
+
+fn set_nonblocking(fd: libc::c_int) -> io::Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn set_close_on_exec(fd: libc::c_int) -> io::Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+impl Drop for SignalIngress {
+    fn drop(&mut self) {
+        SIGNAL_PIPE_WRITE_FD.store(-1, Ordering::Release);
+        unsafe {
+            for signal in forwarded_signals() {
+                libc::signal(signal, libc::SIG_DFL);
+            }
+            libc::close(self.read_fd);
+            libc::close(self.write_fd);
+        }
+    }
+}
+
+fn forwarded_signals() -> impl Iterator<Item = libc::c_int> {
+    (1..=31).filter(|&signal| {
+        signal != libc::SIGKILL && signal != libc::SIGSTOP && signal != libc::SIGCHLD
+    })
+}
 
 struct DescendantAbsenceConfirmation {
     consecutive_empty: usize,
@@ -68,15 +162,10 @@ pub(super) fn current_platform() -> PlatformKind {
 pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     let prepared = PreparedCommand::validate(&options)?;
     let sandbox = PreparedSandbox::prepare(&options)?;
-    let operations = LiveOperationLedger::new(options.max_unacknowledged_operations)
-        .map_err(|error| HostError::InvalidOptions(error.to_owned()))?;
-
-    // A launching shell may send SIGHUP as it exits. The PTY child restores the default before
-    // exec, while the host deliberately stays independent of the launcher.
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
     }
-
     journal::create_session_directory_durably(&options.session_dir)?;
     let endpoint_path = options.session_dir.join(CONTROL_ENDPOINT);
     remove_stale_endpoint(&endpoint_path)?;
@@ -92,18 +181,24 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         },
     )?;
     let pending = PendingStartOutcome::new(journal, options.start_command_id.clone());
-    let initialized = match initialize_after_journal(&options, &prepared, sandbox, operations) {
+    let signal_ingress = match SignalIngress::install() {
+        Ok(signal_ingress) => signal_ingress,
+        Err(error) => return Err(pending.failed(error)),
+    };
+    let initialized = match initialize_after_journal(&options, &prepared, sandbox) {
         Ok(initialized) => initialized,
         Err(error) => return Err(pending.failed(error)),
     };
-    let journal = pending.started(initialized.child_pid_u64)?;
+    let child_pid = initialized.child_pid;
+    let journal = pending.started(initialized.child_pid_u64);
 
     let state = Arc::new(Mutex::new(SharedState {
         journal,
         metadata: initialized.metadata,
         master: initialized.master,
-        operations: initialized.operations,
+        accepted_sequence_high_watermark: None,
         operation_order: Arc::new(Mutex::new(())),
+        operations: Arc::new(OperationCoordinator::new()),
         acknowledgement: initialized.acknowledgement,
         descendants: Arc::new(Mutex::new(initialized.descendants)),
         child_live: true,
@@ -112,17 +207,13 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     }));
     {
         let state = lock_state(&state)?;
-        state.persist_metadata()?;
+        if let Err(error) = state.persist_metadata() {
+            eprintln!("session-host: metadata persistence failed: {error}");
+        }
     }
 
     let stop = Arc::new(AtomicBool::new(false));
-    let active_connections = Arc::new(AtomicUsize::new(0));
-    let accept_thread = spawn_accept_loop(
-        listener,
-        Arc::clone(&state),
-        Arc::clone(&stop),
-        Arc::clone(&active_connections),
-    );
+    let accept_thread = spawn_accept_loop(listener, Arc::clone(&state), Arc::clone(&stop));
     let reader_master = {
         let state = lock_state(&state)?;
         state.master.try_clone()?
@@ -130,13 +221,7 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
     let reader_state = Arc::clone(&state);
     let reader_thread = thread::spawn(move || copy_pty_output(reader_master, reader_state));
 
-    let wait_status = wait_for_child(initialized.child_pid)?;
-    let descendants = {
-        let state = lock_state(&state)?;
-        Arc::clone(&state.descendants)
-    };
-    lock_descendants(&descendants)?.mark_root_reaped();
-    wait_for_descendants(&descendants)?;
+    let wait_status = wait_for_process_tree(child_pid, &state, &signal_ingress)?;
     {
         let mut state = lock_state(&state)?;
         state.child_live = false;
@@ -146,26 +231,54 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         .map_err(|_| HostError::Thread("PTY reader panicked".to_owned()))?;
     reader_result?;
 
+    let operations = {
+        let state = lock_state(&state)?;
+        Arc::clone(&state.operations)
+    };
+    operations.close_admission()?;
+    operations.wait_for_operations()?;
+
     let (exit_code, exit_signal) = decode_wait_status(wait_status);
-    {
+    let finalization = {
         let mut state = lock_state(&state)?;
         state.exit_code = exit_code;
         state.exit_signal = exit_signal;
-        state.journal.finish_durably(exit_code)?;
-    }
+        state
+            .journal
+            .finish_durably(exit_code)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
 
     stop.store(true, Ordering::Release);
-    accept_thread
+    let accept_result = accept_thread
         .join()
-        .map_err(|_| HostError::Thread("control accept loop panicked".to_owned()))??;
-    let drain_deadline = std::time::Instant::now() + CONTROL_DRAIN_TIMEOUT;
-    while active_connections.load(Ordering::Acquire) != 0
-        && std::time::Instant::now() < drain_deadline
-    {
-        thread::sleep(Duration::from_millis(1));
+        .map_err(|_| HostError::Thread("control accept loop panicked".to_owned()))
+        .and_then(|result| result)
+        .map_err(|error| error.to_string());
+    let maintenance = lock_state(&state)?
+        .journal
+        .finish_maintenance()
+        .map_err(|error| error.to_string());
+    finish_session(finalization, accept_result, maintenance)
+}
+
+fn finish_session(
+    finalization: Result<(), String>,
+    accept_result: Result<(), String>,
+    maintenance: Result<(), String>,
+) -> Result<(), HostError> {
+    let mut failures = Vec::new();
+    failures.extend(
+        [finalization, accept_result, maintenance]
+            .into_iter()
+            .filter_map(Result::err),
+    );
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(HostError::Protocol(failures.join("; ")))
     }
-    lock_state(&state)?.journal.finish_maintenance()?;
-    Ok(())
 }
 
 struct PendingStartOutcome {
@@ -183,15 +296,15 @@ impl PendingStartOutcome {
 
     fn failed(mut self, launch: HostError) -> HostError {
         let (diagnostic, omitted) = protocol::bound_start_diagnostic(&launch.to_string());
-        let persistence =
-            protocol::session_start_failed_payload(&self.command_id, &diagnostic, omitted)
-                .map_err(|error| HostError::Protocol(error.to_string()))
-                .and_then(|payload| {
-                    self.journal
-                        .append_durable(event_type::SESSION_START_FAILED, &payload)
-                        .map(|_| ())
-                        .map_err(HostError::from)
-                });
+        let persistence = self
+            .journal
+            .append_durable(JournalEvent::SessionStartFailed {
+                command_id: self.command_id.clone(),
+                diagnostic,
+                omitted_byte_count: omitted,
+            })
+            .map(|_| ())
+            .map_err(|error| HostError::Protocol(format!("journal append failed: {error}")));
         match persistence {
             Ok(()) => launch,
             Err(persistence) => HostError::StartOutcome {
@@ -201,10 +314,14 @@ impl PendingStartOutcome {
         }
     }
 
-    fn started(mut self, child_pid: u64) -> Result<JournalWriter, HostError> {
+    fn started(mut self, child_pid: u64) -> JournalWriter {
+        if let Err(error) = self
+            .journal
+            .append_durable(JournalEvent::ProcessStarted(child_pid))
+        {
+            eprintln!("session-host: failed to record PROCESS_STARTED: {error}");
+        }
         self.journal
-            .append_durable(event_type::PROCESS_STARTED, &child_pid.to_le_bytes())?;
-        Ok(self.journal)
     }
 }
 
@@ -214,7 +331,6 @@ struct InitializedSession {
     child_pid: libc::pid_t,
     child_pid_u64: u64,
     master: File,
-    operations: LiveOperationLedger,
     descendants: DescendantTracker,
 }
 
@@ -222,7 +338,6 @@ fn initialize_after_journal(
     options: &SessionOptions,
     prepared: &PreparedCommand,
     sandbox: PreparedSandbox,
-    operations: LiveOperationLedger,
 ) -> Result<InitializedSession, HostError> {
     let acknowledgement = JournalAcknowledgement::open(&options.session_dir)
         .map_err(|error| HostError::Protocol(error.to_string()))?;
@@ -240,7 +355,6 @@ fn initialize_after_journal(
         child_pid,
         child_pid_u64,
         master,
-        operations,
         descendants,
     })
 }
@@ -374,20 +488,42 @@ fn initial_metadata(
 fn policy_paths(policy: Option<&crate::sandbox::CompiledPolicy>, rights: u64) -> Vec<String> {
     policy
         .map(|policy| {
-            policy.rules.iter().filter(|rule| rule.rights == rights)
-                .map(|rule| rule.path.to_string_lossy().into_owned()).collect()
+            policy
+                .rules
+                .iter()
+                .filter(|rule| rule.rights == rights)
+                .map(|rule| rule.path.to_string_lossy().into_owned())
+                .collect()
         })
         .unwrap_or_default()
 }
 
 fn right_names(mask: u64) -> Vec<String> {
     const NAMES: [&str; 17] = [
-        "execute", "write-file", "read-file", "read-dir", "remove-dir", "remove-file",
-        "make-char", "make-dir", "make-reg", "make-sock", "make-fifo", "make-block",
-        "make-sym", "refer", "truncate", "ioctl-dev", "resolve-unix",
+        "execute",
+        "write-file",
+        "read-file",
+        "read-dir",
+        "remove-dir",
+        "remove-file",
+        "make-char",
+        "make-dir",
+        "make-reg",
+        "make-sock",
+        "make-fifo",
+        "make-block",
+        "make-sym",
+        "refer",
+        "truncate",
+        "ioctl-dev",
+        "resolve-unix",
     ];
-    NAMES.iter().enumerate().filter(|(bit, _)| mask & (1 << bit) != 0)
-        .map(|(_, name)| (*name).to_owned()).collect()
+    NAMES
+        .iter()
+        .enumerate()
+        .filter(|(bit, _)| mask & (1 << bit) != 0)
+        .map(|(_, name)| (*name).to_owned())
+        .collect()
 }
 
 fn spawn_pty(
@@ -525,7 +661,9 @@ fn spawn_pty(
             break result;
         }
     };
-    unsafe { libc::close(setup_pipe[0]); }
+    unsafe {
+        libc::close(setup_pipe[0]);
+    }
     if setup_result < 0 {
         let error = io::Error::last_os_error();
         unsafe {
@@ -576,6 +714,7 @@ fn exec_child(
     unsafe {
         libc::signal(libc::SIGHUP, libc::SIG_DFL);
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        libc::signal(libc::SIGTERM, libc::SIG_DFL);
         if libc::chdir(command.cwd.as_ptr()) != 0 {
             child_exec_failed(
                 setup_fd,
@@ -584,7 +723,11 @@ fn exec_child(
             );
         }
         if libc::setenv(c"TERM".as_ptr(), command.term.as_ptr(), 1) != 0 {
-            child_exec_failed(setup_fd, CHILD_SETUP_TERM, b"session-host: cannot set TERM\r\n");
+            child_exec_failed(
+                setup_fd,
+                CHILD_SETUP_TERM,
+                b"session-host: cannot set TERM\r\n",
+            );
         }
         if let Some(colorterm) = &command.colorterm
             && libc::setenv(c"COLORTERM".as_ptr(), colorterm.as_ptr(), 1) != 0
@@ -616,7 +759,9 @@ unsafe fn child_exec_failed(setup_fd: libc::c_int, code: u8, message: &[u8]) -> 
 
 fn child_setup_error(code: u8) -> HostError {
     let detail = match code {
-        CHILD_SETUP_SANDBOX => return HostError::Policy("child failed to apply Landlock policy".to_owned()),
+        CHILD_SETUP_SANDBOX => {
+            return HostError::Policy("child failed to apply Landlock policy".to_owned());
+        }
         CHILD_SETUP_CWD => "child failed to change working directory",
         CHILD_SETUP_TERM => "child failed to set TERM",
         CHILD_SETUP_COLORTERM => "child failed to set COLORTERM",
@@ -630,8 +775,9 @@ struct SharedState {
     journal: JournalWriter,
     metadata: Metadata,
     master: File,
-    operations: LiveOperationLedger,
+    accepted_sequence_high_watermark: Option<u64>,
     operation_order: Arc<Mutex<()>>,
+    operations: Arc<OperationCoordinator>,
     acknowledgement: JournalAcknowledgement,
     descendants: Arc<Mutex<DescendantTracker>>,
     child_live: bool,
@@ -639,13 +785,86 @@ struct SharedState {
     exit_signal: i32,
 }
 
-impl SharedState {
-    fn append_buffered(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
-        Ok(self.journal.append_buffered(event, payload)?)
+struct OperationCoordinator {
+    state: Mutex<OperationState>,
+    changed: std::sync::Condvar,
+}
+
+struct OperationState {
+    admission_open: bool,
+    active_operations: usize,
+}
+
+impl OperationCoordinator {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(OperationState {
+                admission_open: true,
+                active_operations: 0,
+            }),
+            changed: std::sync::Condvar::new(),
+        }
     }
 
-    fn append_durable(&mut self, event: u16, payload: &[u8]) -> Result<u64, HostError> {
-        Ok(self.journal.append_durable(event, payload)?)
+    fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, OperationState>, HostError> {
+        self.state
+            .lock()
+            .map_err(|_| HostError::Thread("operation coordinator mutex is poisoned".to_owned()))
+    }
+
+    fn register_operation(self: &Arc<Self>) -> Result<Option<ActiveOperation>, HostError> {
+        let mut state = self.lock_state()?;
+        if !state.admission_open {
+            return Ok(None);
+        }
+        state.active_operations += 1;
+        Ok(Some(ActiveOperation {
+            operations: Arc::clone(self),
+        }))
+    }
+
+    fn close_admission(&self) -> Result<(), HostError> {
+        let mut state = self.lock_state()?;
+        state.admission_open = false;
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    fn operation_done(&self) -> Result<(), HostError> {
+        let mut state = self.lock_state()?;
+        state.active_operations = state.active_operations.saturating_sub(1);
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    fn wait_for_operations(&self) -> Result<(), HostError> {
+        let mut state = self.lock_state()?;
+        while state.active_operations != 0 {
+            state = self.changed.wait(state).map_err(|_| {
+                HostError::Thread("operation coordinator mutex is poisoned".to_owned())
+            })?;
+        }
+        Ok(())
+    }
+}
+
+struct ActiveOperation {
+    operations: Arc<OperationCoordinator>,
+}
+
+impl Drop for ActiveOperation {
+    fn drop(&mut self) {
+        let _ = self.operations.operation_done();
+    }
+}
+
+impl SharedState {
+    fn append_buffered(&mut self, event: JournalEvent) -> Result<u64, HostError> {
+        Ok(self.journal.append_buffered(event)?)
+    }
+
+    fn append_durable(&mut self, event: JournalEvent) -> Result<u64, HostError> {
+        Ok(self.journal.append_durable(event)?)
     }
 
     fn persist_metadata(&self) -> Result<(), HostError> {
@@ -656,12 +875,36 @@ impl SharedState {
 
 fn copy_pty_output(mut master: File, state: Arc<Mutex<SharedState>>) -> Result<(), HostError> {
     let mut buffer = vec![0_u8; READ_BUFFER_LENGTH];
+    let mut journal_available = true;
     loop {
         match master.read(&mut buffer) {
             Ok(0) => return Ok(()),
             Ok(length) => {
-                let mut state = lock_state(&state)?;
-                state.append_buffered(event_type::PTY_OUTPUT, &buffer[..length])?;
+                let mut state = match lock_state(&state) {
+                    Ok(state) => state,
+                    Err(error) => {
+                        if journal_available {
+                            eprintln!(
+                                "session-host: PTY output journaling failed; \
+                                 continuing to drain PTY: {error}"
+                            );
+                            journal_available = false;
+                        }
+                        continue;
+                    }
+                };
+                match state.append_buffered(JournalEvent::PtyOutput(buffer[..length].to_vec())) {
+                    Ok(_) => journal_available = true,
+                    Err(error) => {
+                        if journal_available {
+                            eprintln!(
+                                "session-host: PTY output journaling failed; \
+                                 continuing to drain PTY: {error}"
+                            );
+                            journal_available = false;
+                        }
+                    }
+                }
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) if error.raw_os_error() == Some(libc::EIO) => return Ok(()),
@@ -674,7 +917,6 @@ fn spawn_accept_loop(
     listener: UnixListener,
     state: Arc<Mutex<SharedState>>,
     stop: Arc<AtomicBool>,
-    active_connections: Arc<AtomicUsize>,
 ) -> thread::JoinHandle<Result<(), HostError>> {
     thread::spawn(move || {
         while !stop.load(Ordering::Acquire) {
@@ -682,10 +924,7 @@ fn spawn_accept_loop(
                 Ok((stream, _address)) => {
                     stream.set_nonblocking(false)?;
                     let state = Arc::clone(&state);
-                    let active_connections = Arc::clone(&active_connections);
-                    active_connections.fetch_add(1, Ordering::AcqRel);
                     thread::spawn(move || {
-                        let _active_connection = ActiveConnection(active_connections);
                         if let Err(error) = serve_connection(stream, state) {
                             eprintln!("session-host: control connection failed: {error}");
                         }
@@ -702,230 +941,224 @@ fn spawn_accept_loop(
     })
 }
 
-struct ActiveConnection(Arc<AtomicUsize>);
-
-impl Drop for ActiveConnection {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
 fn serve_connection(
     mut stream: UnixStream,
     state: Arc<Mutex<SharedState>>,
 ) -> Result<(), HostError> {
     while let Some(frame) = host::read_control_frame(&mut stream)? {
-        let (message_type, payload) = handle_request(&frame, &state);
-        host::write_control_frame(&mut stream, message_type, frame.request_id, &payload)?;
+        stream.set_write_timeout(Some(CONTROL_RESPONSE_WRITE_TIMEOUT))?;
+        if is_operation_control(frame.message_type) && frame.payload_schema_version == 2 {
+            handle_operation(&mut stream, &frame, &state)?;
+        } else if let Some((message_type, sequence, payload)) = handle_request(&frame, &state) {
+            host::write_control_frame(&mut stream, message_type, sequence, &payload)?;
+        }
     }
     Ok(())
 }
 
-fn handle_request(frame: &OwnedControlFrame, state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
+fn is_operation_control(message_type: u16) -> bool {
+    matches!(
+        message_type,
+        control_message::INPUT
+            | control_message::RESIZE
+            | control_message::SIGNAL
+            | control_message::TERMINATE
+            | control_message::ACK_JOURNAL
+    )
+}
+
+fn handle_request(
+    frame: &OwnedControlFrame,
+    state: &Arc<Mutex<SharedState>>,
+) -> Option<(u16, u64, Vec<u8>)> {
     match frame.message_type {
         control_message::INPUT
         | control_message::RESIZE
         | control_message::SIGNAL
-        | control_message::TERMINATE => {
+        | control_message::TERMINATE
+        | control_message::ACK_JOURNAL => {
             if frame.payload_schema_version != 2 {
-                response_error(ERROR_UNSUPPORTED_SCHEMA, "operation controls require schema 2")
+                Some(response_error(
+                    frame.sequence,
+                    ERROR_UNSUPPORTED_SCHEMA,
+                    "operation controls require schema 2",
+                ))
             } else {
-                handle_operation(frame, state)
+                unreachable!("operation controls are handled by serve_connection")
             }
         }
         control_message::STATUS => {
             if frame.payload_schema_version != 1 {
-                response_error(ERROR_UNSUPPORTED_SCHEMA, "STATUS requires schema 1")
+                Some(response_error(
+                    frame.sequence,
+                    ERROR_UNSUPPORTED_SCHEMA,
+                    "STATUS requires schema 1",
+                ))
             } else {
-                handle_status(&frame.payload, state)
-            }
-        }
-        control_message::ACK_JOURNAL => {
-            if frame.payload_schema_version != 1 {
-                response_error(ERROR_UNSUPPORTED_SCHEMA, "ACK_JOURNAL requires schema 1")
-            } else {
-                handle_journal_acknowledgement(&frame.payload, state)
+                match handle_status(&frame.payload, state) {
+                    Ok(payload) => {
+                        Some((control_message::STATUS_RESPONSE, frame.sequence, payload))
+                    }
+                    Err((code, detail)) => Some(response_error(frame.sequence, code, &detail)),
+                }
             }
         }
         control_message::APPEND_EVENT => {
             if frame.payload_schema_version != 1 {
-                response_error(ERROR_UNSUPPORTED_SCHEMA, "APPEND_EVENT requires schema 1")
+                Some(response_error(
+                    frame.sequence,
+                    ERROR_UNSUPPORTED_SCHEMA,
+                    "APPEND_EVENT requires schema 1",
+                ))
             } else {
-                response_error(
+                Some(response_error(
+                    u64::MAX,
                     ERROR_UNSUPPORTED_MESSAGE,
                     "ordered harness event ingress is not enabled yet",
-                )
+                ))
             }
         }
-        _ => response_error(ERROR_UNSUPPORTED_MESSAGE, "unsupported control message"),
+        _ => Some(response_error(
+            u64::MAX,
+            ERROR_UNSUPPORTED_MESSAGE,
+            "unsupported control message",
+        )),
     }
 }
 
 fn handle_operation(
+    stream: &mut UnixStream,
     frame: &OwnedControlFrame,
     shared: &Arc<Mutex<SharedState>>,
-) -> (u16, Vec<u8>) {
+) -> Result<(), HostError> {
+    let operation_sequence = frame.sequence;
+    if operation_sequence == 0 || operation_sequence == u64::MAX {
+        return send_operation_rejection(stream, frame, "operation sequence must be positive");
+    }
     let operation = match protocol::decode_operation_control_payload(
         frame.message_type,
+        operation_sequence,
         &frame.payload,
     ) {
         Ok(operation) => operation,
-        Err(error) => return response_error(ERROR_INVALID_REQUEST, &error.to_string()),
+        Err(error) => {
+            let detail = error.to_string();
+            return send_operation_rejection(stream, frame, &detail);
+        }
     };
     if frame.message_type == control_message::SIGNAL
         && let Err(detail) = parse_signal(&operation.effect)
     {
-        return response_error(ERROR_INVALID_REQUEST, detail);
+        return send_received(stream, frame, Some((ERROR_INVALID_REQUEST, detail)));
     }
-    let identity = OperationIdentity {
-        operation_sequence: operation.operation_sequence,
-        command_id: operation.command_id.clone(),
-        command_envelope: operation.command_envelope.clone(),
-        message_type: frame.message_type,
-        effect: operation.effect.clone(),
-    };
-    let operation_order = {
-        let mut state = match lock_state(shared) {
-            Ok(state) => state,
-            Err(error) => return response_error(ERROR_IO, &error.to_string()),
-        };
-        match state.operations.admit(identity) {
-            Admission::New => {
-                if !state.child_live {
-                    state
-                        .operations
-                        .cancel_reservation(operation.operation_sequence);
-                    return response_error(ERROR_INVALID_STATE, "child process has exited");
-                }
-                Arc::clone(&state.operation_order)
-            }
-            Admission::Pending => {
-                return response_error(ERROR_INVALID_STATE, "operation is still in progress");
-            }
-            Admission::Completed { result_event_id } => {
-                return (
-                    control_message::ACCEPTED,
-                    host::event_id_payload(result_event_id).to_vec(),
-                );
-            }
-            Admission::Conflict => {
-                return response_error(
+    let admission = match lock_state(shared) {
+        Ok(mut state) => {
+            if state
+                .accepted_sequence_high_watermark
+                .is_some_and(|watermark| operation_sequence <= watermark)
+            {
+                Err((
                     ERROR_INVALID_REQUEST,
-                    "operation sequence was reused with a different identity",
+                    "operation sequence is stale".to_owned(),
+                ))
+            } else {
+                match state.operations.register_operation() {
+                    Ok(Some(active_operation)) => {
+                        state.accepted_sequence_high_watermark = Some(operation_sequence);
+                        Ok((Arc::clone(&state.operation_order), active_operation))
+                    }
+                    Ok(None) => Err((
+                        ERROR_INVALID_STATE,
+                        "session finalization has started".to_owned(),
+                    )),
+                    Err(error) => Err((ERROR_IO, error.to_string())),
+                }
+            }
+        }
+        Err(error) => Err((ERROR_IO, error.to_string())),
+    };
+    let (operation_order, _active_operation) = match admission {
+        Ok(admission) => admission,
+        Err((code, detail)) => {
+            send_received(stream, frame, Some((code, &detail)))?;
+            return Ok(());
+        }
+    };
+    send_received(stream, frame, None)?;
+    let _operation_guard = if frame.message_type == control_message::TERMINATE {
+        None
+    } else {
+        match operation_order.lock() {
+            Ok(guard) => Some(guard),
+            Err(_) => {
+                eprintln!(
+                    "session-host: operation {} was received but operation order mutex is poisoned",
+                    operation_sequence
                 );
-            }
-            Admission::Stale => {
-                return response_error(ERROR_INVALID_REQUEST, "operation sequence is stale");
-            }
-            Admission::Full => {
-                return response_error(ERROR_POLICY, "unacknowledged operation capacity is full");
+                return Ok(());
             }
         }
     };
-    let _operation_guard = match operation_order.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            cancel_operation_reservation(shared, operation.operation_sequence);
-            return response_error(ERROR_IO, "operation order mutex is poisoned");
-        }
+
+    let effect_result = execute_operation_effect(frame.message_type, &operation.effect, shared);
+    let (outcome, detail) = match effect_result {
+        Ok(()) => (protocol::CommandOutcome::Succeeded, String::new()),
+        Err(detail) => (
+            protocol::CommandOutcome::Failed,
+            bounded_result_detail(&detail),
+        ),
     };
-    let pre_effect_failure = {
+    {
         let mut state = match lock_state(shared) {
             Ok(state) => state,
             Err(error) => {
-                cancel_operation_reservation(shared, operation.operation_sequence);
-                return response_error(ERROR_IO, &error.to_string());
+                eprintln!(
+                    "session-host: operation {operation_sequence} could not be journaled: {error}"
+                );
+                return Ok(());
             }
         };
-        if !state.child_live {
-            state
-                .operations
-                .cancel_reservation(operation.operation_sequence);
-            return response_error(ERROR_INVALID_STATE, "child process has exited");
-        }
-        if state
-            .operations
-            .accepted_sequence_high_watermark()
-            .is_some_and(|watermark| operation.operation_sequence <= watermark)
-        {
-            state
-                .operations
-                .cancel_reservation(operation.operation_sequence);
-            return response_error(ERROR_INVALID_REQUEST, "operation sequence is stale");
-        }
-        let payload = command_accepted_payload(
-            operation.operation_sequence,
-            &operation.command_envelope,
-        );
-        if let Err(error) = state.append_durable(event_type::COMMAND_ACCEPTED, &payload) {
-            state
-                .operations
-                .cancel_reservation(operation.operation_sequence);
-            return response_error(ERROR_IO, &error.to_string());
-        }
-        if !state.operations.mark_pending(operation.operation_sequence) {
-            return response_error(ERROR_IO, "operation ledger transition failed");
-        }
-        None
-    };
-
-    let effect_result = match pre_effect_failure {
-        Some(error) => Err(error),
-        None => execute_operation_effect(frame.message_type, &operation.effect, shared),
-    };
-    let (outcome, detail) = match effect_result {
-        Ok(()) => (protocol::CommandOutcome::Succeeded, String::new()),
-        Err(detail) => (protocol::CommandOutcome::Failed, bounded_result_detail(&detail)),
-    };
-    let result_event_id = {
-        let mut state = match lock_state(shared) {
-            Ok(state) => state,
-            Err(error) => return response_error(ERROR_IO, &error.to_string()),
-        };
-        let payload = command_result_payload(
-            operation.operation_sequence,
-            &operation.command_id,
+        if let Err(error) = state.append_durable(JournalEvent::CommandResult {
+            operation_sequence,
+            command_envelope: operation.command_envelope,
             outcome,
-            &detail,
-        );
-        let event_id = match state.append_durable(event_type::COMMAND_RESULT, &payload) {
-            Ok(event_id) => event_id,
-            Err(error) => return response_error(ERROR_IO, &error.to_string()),
-        };
-        if !state.operations.complete(operation.operation_sequence, event_id) {
-            return response_error(ERROR_IO, "operation ledger completion failed");
+            detail,
+        }) {
+            eprintln!(
+                "session-host: COMMAND_RESULT for operation {} was not persisted: {error}",
+                operation_sequence
+            );
         }
-        event_id
-    };
-    (
-        control_message::ACCEPTED,
-        host::event_id_payload(result_event_id).to_vec(),
-    )
-}
-
-fn cancel_operation_reservation(state: &Arc<Mutex<SharedState>>, operation_sequence: u64) {
-    if let Ok(mut state) = lock_state(state) {
-        state.operations.cancel_reservation(operation_sequence);
     }
+    Ok(())
 }
 
-fn command_accepted_payload(operation_sequence: u64, command_envelope: &[u8]) -> Vec<u8> {
-    [operation_sequence.to_le_bytes().as_slice(), command_envelope].concat()
-}
-
-fn command_result_payload(
-    operation_sequence: u64,
-    command_id: &[u8],
-    outcome: protocol::CommandOutcome,
+fn send_operation_rejection(
+    stream: &mut UnixStream,
+    frame: &OwnedControlFrame,
     detail: &str,
-) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(11 + command_id.len() + detail.len());
-    payload.extend_from_slice(&operation_sequence.to_le_bytes());
-    payload.extend_from_slice(&(command_id.len() as u16).to_le_bytes());
-    payload.extend_from_slice(command_id);
-    payload.push(outcome.wire_code() as u8);
-    payload.extend_from_slice(detail.as_bytes());
-    payload
+) -> Result<(), HostError> {
+    send_received(stream, frame, Some((ERROR_INVALID_REQUEST, detail)))
+}
+
+fn send_received(
+    stream: &mut UnixStream,
+    frame: &OwnedControlFrame,
+    error: Option<(u32, &str)>,
+) -> Result<(), HostError> {
+    let payload = error
+        .map(|(code, detail)| host::error_payload(code, detail))
+        .unwrap_or_default();
+    if let Err(error) =
+        host::write_control_frame(stream, control_message::RECEIVED, frame.sequence, &payload)
+    {
+        eprintln!(
+            "session-host: RECEIVED for sequence {} was not delivered: {error}",
+            frame.sequence
+        );
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+    Ok(())
 }
 
 fn bounded_result_detail(detail: &str) -> String {
@@ -949,34 +1182,70 @@ fn execute_operation_effect(
             apply_foreground_signal(kind, signal, state)
         }
         control_message::TERMINATE => apply_terminate(effect, state),
+        control_message::ACK_JOURNAL => apply_journal_acknowledgement(effect, state),
         _ => Err("unsupported operation control".to_owned()),
     }
 }
 
 fn apply_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), String> {
     let mut state = lock_state(state).map_err(|error| error.to_string())?;
-    if !state.child_live {
-        return Err("child process has exited".to_owned());
-    }
+    let command_id = payload
+        .get(0..16)
+        .and_then(|raw| <&[u8; 16]>::try_from(raw).ok())
+        .ok_or_else(|| "PTY_INPUT payload is shorter than its UUID".to_owned())?;
     state
-        .append_buffered(event_type::PTY_INPUT, payload)
+        .append_buffered(JournalEvent::PtyInput {
+            command_id: *command_id,
+            payload: payload[16..].to_vec(),
+        })
         .map_err(|error| error.to_string())?;
-    let mut master = state.master.try_clone().map_err(|error| error.to_string())?;
+    let master = state
+        .master
+        .try_clone()
+        .map_err(|error| error.to_string())?;
     drop(state);
-    master
-        .write_all(&payload[16..])
-        .map_err(|error| error.to_string())
+    let mut written = 0;
+    while written < payload.len() - 16 {
+        let mut pollfd = libc::pollfd {
+            fd: master.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut pollfd, 1, 100) };
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error.to_string());
+        }
+        if ready == 0 {
+            continue;
+        }
+        let chunk_end = (written + 4096).min(payload.len() - 16);
+        let chunk = &payload[16 + written..16 + chunk_end];
+        let result = unsafe { libc::write(master.as_raw_fd(), chunk.as_ptr().cast(), chunk.len()) };
+        if result < 0 {
+            let error = io::Error::last_os_error();
+            if matches!(
+                error.kind(),
+                io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+            ) {
+                continue;
+            }
+            return Err(error.to_string());
+        }
+        written += result as usize;
+    }
+    Ok(())
 }
 
 fn apply_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), String> {
     let cols = host::u32_at(&payload[0..4]);
     let rows = host::u32_at(&payload[4..8]);
     let mut state = lock_state(state).map_err(|error| error.to_string())?;
-    if !state.child_live {
-        return Err("child process has exited".to_owned());
-    }
     state
-        .append_buffered(event_type::PTY_RESIZE, payload)
+        .append_buffered(JournalEvent::PtyResize { cols, rows })
         .map_err(|error| error.to_string())?;
     let dimensions = libc::winsize {
         ws_row: rows as u16,
@@ -994,74 +1263,85 @@ fn apply_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), S
 
 fn apply_terminate(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), String> {
     let mode = u16::from_le_bytes(payload[0..2].try_into().unwrap());
-    if mode == 1 {
-        return apply_descendant_signal(3, libc::SIGKILL, state);
-    }
-    let grace_millis = host::u32_at(&payload[4..8]);
-    apply_descendant_signal(2, libc::SIGTERM, state)?;
-    let state = Arc::clone(state);
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(u64::from(grace_millis)));
-        let _ = apply_descendant_signal(3, libc::SIGKILL, &state);
-    });
+    let (kind, signal) = match mode {
+        0 => (2, libc::SIGTERM),
+        1 => (3, libc::SIGKILL),
+        _ => return Err("unsupported termination mode".to_owned()),
+    };
+    signal_descendants(kind, signal, state).map_err(|error| error.detail())?;
     Ok(())
 }
 
-fn handle_journal_acknowledgement(
+fn apply_journal_acknowledgement(
     payload: &[u8],
     shared: &Arc<Mutex<SharedState>>,
-) -> (u16, Vec<u8>) {
-    let requested = match protocol::decode_journal_ack_payload(payload) {
-        Ok(event_id) => event_id,
-        Err(error) => return response_error(ERROR_INVALID_REQUEST, &error.to_string()),
-    };
-    let mut state = match lock_state(shared) {
-        Ok(state) => state,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
-    if let Err(error) = validate_received_watermark(requested, state.journal.latest_event_id()) {
-        return response_error(ERROR_INVALID_REQUEST, &error.to_string());
-    }
-    let durable = match state.acknowledgement.advance(requested) {
-        Ok(event_id) => event_id,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
-    };
-    state.operations.acknowledge(durable);
+) -> Result<(), String> {
+    let requested = u64::from_le_bytes(
+        payload
+            .try_into()
+            .map_err(|_| "journal acknowledgement effect must be 8 bytes".to_owned())?,
+    );
+    let mut state = lock_state(shared).map_err(|error| error.to_string())?;
+    validate_received_watermark(requested, state.journal.latest_event_id())
+        .map_err(|error| error.to_string())?;
+    let durable = state
+        .acknowledgement
+        .advance(requested)
+        .map_err(|error| error.to_string())?;
     if let Err(error) = state.journal.apply_retention_through(durable) {
-        eprintln!("session-host: journal retention will be retried: {error}");
+        eprintln!("session-host: journal retention was not applied: {error}");
     }
-    (
-        control_message::ACCEPTED,
-        host::event_id_payload(durable).to_vec(),
-    )
+    Ok(())
 }
 
-fn handle_status(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> (u16, Vec<u8>) {
+fn handle_status(
+    payload: &[u8],
+    state: &Arc<Mutex<SharedState>>,
+) -> Result<Vec<u8>, (u32, String)> {
     if !payload.is_empty() {
-        return response_error(ERROR_INVALID_REQUEST, "STATUS payload must be empty");
+        return Err((
+            ERROR_INVALID_REQUEST,
+            "STATUS payload must be empty".to_owned(),
+        ));
     }
     let state = match lock_state(state) {
         Ok(state) => state,
-        Err(error) => return response_error(ERROR_IO, &error.to_string()),
+        Err(error) => return Err((ERROR_IO, error.to_string())),
     };
     let mut payload = vec![0_u8; 64];
     let state_code: u16 = if state.child_live { 2 } else { 3 };
     payload[0..2].copy_from_slice(&state_code.to_le_bytes());
-    let flags = 1_u16 | if state.child_live { 2 } else { 0 };
+    let flags = 1_u16
+        | if state.child_live { 2 } else { 0 }
+        | if state.metadata.sandbox.enforcement == SandboxEnforcement::Landlock {
+            4
+        } else {
+            0
+        };
     payload[2..4].copy_from_slice(&flags.to_le_bytes());
     payload[4..8].copy_from_slice(&u32::from(state.metadata.current_cols).to_le_bytes());
     payload[8..12].copy_from_slice(&u32::from(state.metadata.current_rows).to_le_bytes());
     payload[12..20].copy_from_slice(&state.metadata.host_pid.to_le_bytes());
     payload[20..28].copy_from_slice(&state.metadata.child_pid.unwrap_or(u64::MAX).to_le_bytes());
-    payload[28..36]
-        .copy_from_slice(&state.journal.first_event_id().unwrap_or(u64::MAX).to_le_bytes());
-    payload[36..44]
-        .copy_from_slice(&state.journal.latest_event_id().unwrap_or(u64::MAX).to_le_bytes());
+    payload[28..36].copy_from_slice(
+        &state
+            .journal
+            .first_event_id()
+            .unwrap_or(u64::MAX)
+            .to_le_bytes(),
+    );
+    payload[36..44].copy_from_slice(
+        &state
+            .journal
+            .latest_event_id()
+            .unwrap_or(u64::MAX)
+            .to_le_bytes(),
+    );
     payload[44..48].copy_from_slice(&state.exit_code.to_le_bytes());
     payload[48..52].copy_from_slice(&state.exit_signal.to_le_bytes());
     payload[52..54].copy_from_slice(&protocol::JOURNAL_VERSION.to_le_bytes());
     payload[54..56].copy_from_slice(&protocol::CONTROL_VERSION.to_le_bytes());
-    (control_message::STATUS_RESPONSE, payload)
+    Ok(payload)
 }
 
 fn apply_foreground_signal(
@@ -1070,12 +1350,11 @@ fn apply_foreground_signal(
     state: &Arc<Mutex<SharedState>>,
 ) -> Result<(), String> {
     let mut state = lock_state(state).map_err(|error| error.to_string())?;
-    if !state.child_live {
-        return Err("child process has exited".to_owned());
-    }
-    let payload = host::signal_payload(kind, signal);
     state
-        .append_buffered(event_type::SIGNAL, &payload)
+        .append_buffered(JournalEvent::Signal {
+            kind,
+            platform_code: signal,
+        })
         .map_err(|error| error.to_string())?;
     let foreground_group = unsafe { libc::tcgetpgrp(state.master.as_raw_fd()) };
     if foreground_group < 0 {
@@ -1088,24 +1367,104 @@ fn apply_foreground_signal(
     Ok(())
 }
 
-fn apply_descendant_signal(
+struct DescendantSignalFailure {
+    journal: Option<String>,
+    discovery: Option<String>,
+    delivery: DescendantDelivery,
+}
+
+#[derive(Default)]
+struct DescendantDelivery {
+    attempted: usize,
+    succeeded: usize,
+    failures: Vec<String>,
+}
+
+impl DescendantSignalFailure {
+    fn journal(detail: String) -> Self {
+        Self {
+            journal: Some(detail),
+            discovery: None,
+            delivery: DescendantDelivery::default(),
+        }
+    }
+
+    fn discovery(detail: String) -> Self {
+        Self {
+            journal: None,
+            discovery: Some(detail),
+            delivery: DescendantDelivery::default(),
+        }
+    }
+
+    fn detail(&self) -> String {
+        let mut details = Vec::new();
+        if let Some(journal) = &self.journal {
+            details.push(format!("failed to record descendant signal: {journal}"));
+        }
+        if let Some(discovery) = &self.discovery {
+            details.push(format!("process discovery failed: {discovery}"));
+        }
+        if !self.delivery.failures.is_empty() {
+            details.push(format!(
+                "descendant signal delivery failed ({} attempted, {} succeeded): {}",
+                self.delivery.attempted,
+                self.delivery.succeeded,
+                self.delivery.failures.join("; ")
+            ));
+        }
+        details.join("; ")
+    }
+}
+
+fn signal_descendants(
     kind: u16,
     signal: libc::c_int,
     state: &Arc<Mutex<SharedState>>,
-) -> Result<(), String> {
-    let mut state = lock_state(state).map_err(|error| error.to_string())?;
-    if !state.child_live {
-        return Err("child process has exited".to_owned());
+) -> Result<DescendantDelivery, DescendantSignalFailure> {
+    let descendants = {
+        let state = lock_state(state)
+            .map_err(|error| DescendantSignalFailure::journal(error.to_string()))?;
+        Arc::clone(&state.descendants)
+    };
+    let mut tracker = lock_descendants(&descendants)
+        .map_err(|error| DescendantSignalFailure::journal(error.to_string()))?;
+    tracker
+        .refresh()
+        .map_err(|error| DescendantSignalFailure::discovery(error.to_string()))?;
+    let mut delivery = DescendantDelivery::default();
+    for (pid, _) in tracker.snapshot() {
+        delivery.attempted += 1;
+        if unsafe { libc::kill(pid, signal) } == 0 {
+            delivery.succeeded += 1;
+        } else {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                delivery.succeeded += 1;
+            } else {
+                delivery.failures.push(format!("pid {pid}: {error}"));
+            }
+        }
     }
-    let payload = host::signal_payload(kind, signal);
-    state
-        .append_buffered(event_type::SIGNAL, &payload)
-        .map_err(|error| error.to_string())?;
-    let descendants = Arc::clone(&state.descendants);
-    drop(state);
-    lock_descendants(&descendants)
-        .and_then(|mut tracker| tracker.signal(signal))
-        .map_err(|error| error.to_string())
+    let journal_error = lock_state(state)
+        .and_then(|mut state| {
+            state
+                .append_buffered(JournalEvent::Signal {
+                    kind,
+                    platform_code: signal,
+                })
+                .map(|_| ())
+        })
+        .err()
+        .map(|error| error.to_string());
+    if journal_error.is_none() && delivery.failures.is_empty() {
+        return Ok(delivery);
+    }
+    Err(DescendantSignalFailure {
+        journal: journal_error,
+        discovery: None,
+        delivery,
+    })
 }
 
 fn parse_signal(payload: &[u8]) -> Result<(u16, libc::c_int), &'static str> {
@@ -1133,8 +1492,12 @@ fn parse_signal(payload: &[u8]) -> Result<(u16, libc::c_int), &'static str> {
     Ok((kind, signal))
 }
 
-fn response_error(code: u32, detail: &str) -> (u16, Vec<u8>) {
-    (control_message::ERROR, host::error_payload(code, detail))
+fn response_error(sequence: u64, code: u32, detail: &str) -> (u16, u64, Vec<u8>) {
+    (
+        control_message::ERROR,
+        sequence,
+        host::error_payload(code, detail),
+    )
 }
 
 fn wait_for_child(pid: libc::pid_t) -> Result<libc::c_int, HostError> {
@@ -1151,14 +1514,61 @@ fn wait_for_child(pid: libc::pid_t) -> Result<libc::c_int, HostError> {
     }
 }
 
-fn wait_for_descendants(descendants: &Arc<Mutex<DescendantTracker>>) -> Result<(), HostError> {
+fn wait_for_process_tree(
+    pid: libc::pid_t,
+    state: &Arc<Mutex<SharedState>>,
+    signal_ingress: &SignalIngress,
+) -> Result<libc::c_int, HostError> {
+    let descendants = {
+        let state = lock_state(state)?;
+        Arc::clone(&state.descendants)
+    };
+    let mut child_status = None;
     let mut absence = DescendantAbsenceConfirmation::new();
+
     loop {
-        let live = lock_descendants(descendants)?.is_live()?;
-        if absence.observe(live) {
-            return Ok(());
+        let mut status = 0;
+        if child_status.is_none() {
+            let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+            if result == pid {
+                lock_descendants(&descendants)?.mark_root_reaped();
+                child_status = Some(status);
+            } else if result < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() != io::ErrorKind::Interrupted {
+                    return Err(error.into());
+                }
+            }
+        }
+
+        while let Some(signal) = signal_ingress.take_signal() {
+            let kind = portable_signal_kind(signal);
+            if let Err(failure) = signal_descendants(kind, signal, state) {
+                eprintln!(
+                    "session-host: external signal {signal} forwarding failed: {}",
+                    failure.detail()
+                );
+            }
+        }
+
+        let live = lock_descendants(&descendants)?.is_live()?;
+        if let Some(status) = child_status {
+            if absence.observe(live) {
+                return Ok(status);
+            }
         }
         thread::sleep(DESCENDANT_POLL_INTERVAL);
+    }
+}
+
+fn portable_signal_kind(signal: libc::c_int) -> u16 {
+    match signal {
+        libc::SIGINT => 1,
+        libc::SIGTERM => 2,
+        libc::SIGKILL => 3,
+        libc::SIGHUP => 4,
+        libc::SIGQUIT => 5,
+        _ => 0xffff,
     }
 }
 
@@ -1180,7 +1590,6 @@ struct DescendantTracker {
     root: libc::pid_t,
     pty: PtySlaveIdentity,
     live: HashMap<libc::pid_t, u128>,
-    termination_signal: Option<libc::c_int>,
 }
 
 #[cfg(target_os = "macos")]
@@ -1195,7 +1604,6 @@ impl DescendantTracker {
             root,
             pty,
             live: HashMap::from([(root, root_start)]),
-            termination_signal: None,
         })
     }
 
@@ -1205,8 +1613,11 @@ impl DescendantTracker {
 
     fn refresh(&mut self) -> io::Result<()> {
         let processes = macos_processes(self.pty)?;
-        self.live
-            .retain(|pid, start| processes.get(pid).is_some_and(|process| process.start == *start));
+        self.live.retain(|pid, start| {
+            processes
+                .get(pid)
+                .is_some_and(|process| process.start == *start)
+        });
         loop {
             let mut changed = false;
             for (pid, process) in &processes {
@@ -1223,25 +1634,14 @@ impl DescendantTracker {
                 break;
             }
         }
-        self.apply_termination_signal();
         Ok(())
     }
 
-    fn apply_termination_signal(&self) {
-        let Some(signal) = self.termination_signal else {
-            return;
-        };
-        for pid in self.live.keys() {
-            unsafe {
-                libc::kill(*pid, signal);
-            }
-        }
-    }
-
-    fn signal(&mut self, signal: libc::c_int) -> Result<(), HostError> {
-        self.termination_signal = Some(signal);
-        self.refresh()?;
-        Ok(())
+    fn snapshot(&self) -> Vec<(libc::pid_t, u128)> {
+        self.live
+            .iter()
+            .map(|(pid, start)| (*pid, *start))
+            .collect()
     }
 
     fn is_live(&mut self) -> io::Result<bool> {
@@ -1322,8 +1722,7 @@ fn macos_processes(pty: PtySlaveIdentity) -> io::Result<HashMap<libc::pid_t, Mac
             MacProcess {
                 parent: info.pbi_ppid as libc::pid_t,
                 session,
-                start: (u128::from(info.pbi_start_tvsec) << 64)
-                    | u128::from(info.pbi_start_tvusec),
+                start: (u128::from(info.pbi_start_tvsec) << 64) | u128::from(info.pbi_start_tvusec),
                 holds_pty: macos_process_holds_pty(pid, info.pbi_nfiles, pty),
             },
         );
@@ -1332,11 +1731,7 @@ fn macos_processes(pty: PtySlaveIdentity) -> io::Result<HashMap<libc::pid_t, Mac
 }
 
 #[cfg(target_os = "macos")]
-fn macos_process_holds_pty(
-    pid: libc::pid_t,
-    file_count: u32,
-    pty: PtySlaveIdentity,
-) -> bool {
+fn macos_process_holds_pty(pid: libc::pid_t, file_count: u32, pty: PtySlaveIdentity) -> bool {
     let capacity = file_count.saturating_add(16) as usize;
     let mut files: Vec<std::mem::MaybeUninit<libc::proc_fdinfo>> = Vec::with_capacity(capacity);
     let bytes = unsafe {
@@ -1388,7 +1783,6 @@ struct DescendantTracker {
     root_reaped: bool,
     pty: PtySlaveIdentity,
     live: HashMap<libc::pid_t, u128>,
-    termination_signal: Option<libc::c_int>,
 }
 
 #[cfg(target_os = "linux")]
@@ -1404,7 +1798,6 @@ impl DescendantTracker {
             root_reaped: false,
             pty,
             live: HashMap::from([(root, root_start)]),
-            termination_signal: None,
         })
     }
 
@@ -1423,8 +1816,11 @@ impl DescendantTracker {
             }
         }
         let processes = linux_processes(self.pty)?;
-        self.live
-            .retain(|pid, start| processes.get(pid).is_some_and(|process| process.start == *start));
+        self.live.retain(|pid, start| {
+            processes
+                .get(pid)
+                .is_some_and(|process| process.start == *start)
+        });
         let host_pid = std::process::id() as libc::pid_t;
         loop {
             let mut changed = false;
@@ -1443,20 +1839,14 @@ impl DescendantTracker {
                 break;
             }
         }
-        if let Some(signal) = self.termination_signal {
-            for pid in self.live.keys() {
-                unsafe {
-                    libc::kill(*pid, signal);
-                }
-            }
-        }
         Ok(())
     }
 
-    fn signal(&mut self, signal: libc::c_int) -> Result<(), HostError> {
-        self.termination_signal = Some(signal);
-        self.refresh()?;
-        Ok(())
+    fn snapshot(&self) -> Vec<(libc::pid_t, u128)> {
+        self.live
+            .iter()
+            .map(|(pid, start)| (*pid, *start))
+            .collect()
     }
 
     fn is_live(&mut self) -> io::Result<bool> {
@@ -1477,7 +1867,11 @@ struct LinuxProcess {
 fn linux_processes(pty: PtySlaveIdentity) -> io::Result<HashMap<libc::pid_t, LinuxProcess>> {
     let mut processes = HashMap::new();
     for entry in fs::read_dir("/proc")? {
-        let entry = entry?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
         let Some(pid) = entry
             .file_name()
             .to_str()
@@ -1485,8 +1879,10 @@ fn linux_processes(pty: PtySlaveIdentity) -> io::Result<HashMap<libc::pid_t, Lin
         else {
             continue;
         };
-        let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
-            continue;
+        let stat = match fs::read_to_string(entry.path().join("stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
         };
         let Some(fields) = stat.rsplit_once(") ").map(|(_, fields)| fields) else {
             continue;
@@ -1502,15 +1898,7 @@ fn linux_processes(pty: PtySlaveIdentity) -> io::Result<HashMap<libc::pid_t, Lin
         ) else {
             continue;
         };
-        let holds_pty = fs::read_dir(entry.path().join("fd"))
-            .into_iter()
-            .flatten()
-            .filter_map(Result::ok)
-            .filter_map(|fd| fs::metadata(fd.path()).ok())
-            .any(|metadata| {
-                metadata.rdev() as libc::dev_t == pty.device
-                    && metadata.ino() as libc::ino_t == pty.inode
-            });
+        let holds_pty = linux_process_holds_pty(entry.path().join("fd"), pty)?;
         processes.insert(
             pid,
             LinuxProcess {
@@ -1522,6 +1910,34 @@ fn linux_processes(pty: PtySlaveIdentity) -> io::Result<HashMap<libc::pid_t, Lin
         );
     }
     Ok(processes)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_holds_pty(path: PathBuf, pty: PtySlaveIdentity) -> io::Result<bool> {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        match fs::metadata(entry.path()) {
+            Ok(metadata)
+                if metadata.rdev() as libc::dev_t == pty.device
+                    && metadata.ino() as libc::ino_t == pty.inode =>
+            {
+                return Ok(true);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
 }
 
 fn decode_wait_status(status: libc::c_int) -> (i32, i32) {
@@ -1584,6 +2000,8 @@ fn epoch_millis() -> Result<u64, HostError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::io::Write;
 
     #[test]
     fn requires_three_consecutive_empty_descendant_observations() {
@@ -1598,6 +2016,57 @@ mod tests {
     }
 
     #[test]
+    fn pty_reader_continues_after_journal_append_failure() {
+        let directory = std::env::temp_dir().join(format!(
+            "session-host-reader-{}-{}",
+            std::process::id(),
+            epoch_millis().unwrap()
+        ));
+        let options = SessionOptions {
+            session_id: "reader-journal-failure".to_owned(),
+            start_command_id: "command.start".to_owned(),
+            session_dir: directory.clone(),
+            cwd: PathBuf::from("/tmp"),
+            cols: 80,
+            rows: 24,
+            term: "xterm-256color".to_owned(),
+            colorterm: None,
+            sandbox_policy: None,
+            journal_segment_bytes: 1024,
+            journal_max_bytes: 1024 * 1024,
+            command: ["/bin/sh", "-c", "printf output; sleep 0.05"]
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+        };
+        let prepared = PreparedCommand::validate(&options).unwrap();
+        let sandbox = PreparedSandbox::prepare(&options).unwrap();
+        let mut journal = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
+        journal.finish_durably(0).unwrap();
+        let acknowledgement = JournalAcknowledgement::open(&directory).unwrap();
+        let metadata = initial_metadata(&options, &sandbox, epoch_millis().unwrap()).unwrap();
+        let (child_pid, master, descendants) = spawn_pty(&prepared, 80, 24, sandbox).unwrap();
+        let state = Arc::new(Mutex::new(SharedState {
+            journal,
+            metadata,
+            master: File::open("/dev/null").unwrap(),
+            accepted_sequence_high_watermark: None,
+            operation_order: Arc::new(Mutex::new(())),
+            operations: Arc::new(OperationCoordinator::new()),
+            acknowledgement,
+            descendants: Arc::new(Mutex::new(descendants)),
+            child_live: true,
+            exit_code: i32::MIN,
+            exit_signal: -1,
+        }));
+
+        assert!(copy_pty_output(master, Arc::clone(&state)).is_ok());
+        assert!(libc::WIFEXITED(wait_for_child(child_pid).unwrap()));
+        drop(state);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn validates_portable_and_platform_signals() {
         assert_eq!(
             parse_signal(&host::signal_payload(1, -1)),
@@ -1608,5 +2077,58 @@ mod tests {
             Ok((0xffff, libc::SIGUSR1))
         );
         assert!(parse_signal(&host::signal_payload(1, libc::SIGTERM)).is_err());
+    }
+
+    #[test]
+    fn operation_admission_stays_open_until_finalization() {
+        let coordinator = Arc::new(OperationCoordinator::new());
+        let first = coordinator.register_operation().unwrap().unwrap();
+        let second = coordinator.register_operation().unwrap().unwrap();
+        coordinator.close_admission().unwrap();
+        assert!(coordinator.register_operation().unwrap().is_none());
+        drop(first);
+        drop(second);
+        coordinator.wait_for_operations().unwrap();
+    }
+
+    #[test]
+    fn operation_guard_releases_coordinator_wait_after_registration() {
+        let coordinator = Arc::new(OperationCoordinator::new());
+        let active = coordinator.register_operation().unwrap().unwrap();
+        let waiting = Arc::clone(&coordinator);
+        let thread = thread::spawn(move || waiting.wait_for_operations().unwrap());
+        thread::sleep(Duration::from_millis(10));
+        drop(active);
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn received_delivery_timeout_closes_a_stalled_connection() {
+        let (mut writer, _reader) = UnixStream::pair().unwrap();
+        writer.set_nonblocking(true).unwrap();
+        let filler = [0_u8; 4096];
+        loop {
+            match writer.write(&filler) {
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("failed to fill Unix socket: {error}"),
+            }
+        }
+        writer.set_nonblocking(false).unwrap();
+        writer
+            .set_write_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
+        let frame = OwnedControlFrame {
+            message_type: control_message::INPUT,
+            payload_schema_version: 2,
+            sequence: 1,
+            payload: Vec::new(),
+        };
+
+        let started = std::time::Instant::now();
+        send_received(&mut writer, &frame, None).unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(writer.write(&[1]).is_err());
     }
 }

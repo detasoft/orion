@@ -56,7 +56,9 @@ fn decode(bytes: &[u8]) -> Result<CompiledPolicy, HostError> {
     decoder.array(3, "top-level policy")?;
     let version = decoder.unsigned("version")?;
     if version != 1 {
-        return Err(policy(format!("unsupported compiled policy version {version}")));
+        return Err(policy(format!(
+            "unsupported compiled policy version {version}"
+        )));
     }
     let handled_rights = decoder.unsigned("handledRights")?;
     if handled_rights != HANDLED_FS_RIGHTS {
@@ -83,7 +85,9 @@ fn decode(bytes: &[u8]) -> Result<CompiledPolicy, HostError> {
             .map_err(|_| policy(format!("rule {index} path is not valid UTF-8")))?;
         let path = PathBuf::from(text);
         if !normalized_absolute(text) {
-            return Err(policy(format!("rule {index} path is not normalized and absolute")));
+            return Err(policy(format!(
+                "rule {index} path is not normalized and absolute"
+            )));
         }
         let rights = decoder.unsigned("rule rights")?;
         if rights == 0 || rights & !HANDLED_FS_RIGHTS != 0 {
@@ -169,7 +173,9 @@ impl<'a> Decoder<'a> {
             _ => 0,
         };
         if additional >= 24 && value < minimum {
-            return Err(policy(format!("{field} integer or length is not shortest-form")));
+            return Err(policy(format!(
+                "{field} integer or length is not shortest-form"
+            )));
         }
         Ok(value)
     }
@@ -269,7 +275,13 @@ mod tests {
         if rights < 24 {
             bytes.push(u8::try_from(rights).unwrap());
         } else {
-            bytes.extend([0x1a, (rights >> 24) as u8, (rights >> 16) as u8, (rights >> 8) as u8, rights as u8]);
+            bytes.extend([
+                0x1a,
+                (rights >> 24) as u8,
+                (rights >> 16) as u8,
+                (rights >> 8) as u8,
+                rights as u8,
+            ]);
         }
         bytes
     }

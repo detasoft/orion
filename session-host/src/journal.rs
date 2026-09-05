@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -55,7 +55,9 @@ impl std::fmt::Display for JournalError {
                 write!(formatter, "invalid journal configuration: {message}")
             }
             Self::Format(message) => write!(formatter, "invalid journal format: {message}"),
-            Self::Maintenance(message) => write!(formatter, "journal maintenance failed: {message}"),
+            Self::Maintenance(message) => {
+                write!(formatter, "journal maintenance failed: {message}")
+            }
             Self::Finished => formatter.write_str("journal has already finished"),
             Self::EventIdExhausted => formatter.write_str("journal event ID is exhausted"),
             Self::PayloadTooLarge(length) => {
@@ -72,7 +74,6 @@ enum MaintenanceCommand {
     ApplyRetention {
         active_segment: u64,
         acknowledged_event_id: u64,
-        result: Sender<Result<(), JournalError>>,
     },
     Finish(u64),
 }
@@ -138,17 +139,12 @@ impl JournalMaintenance {
         let (sender, receiver) = mpsc::channel();
         sender
             .send(MaintenanceCommand::Reconcile(active_segment))
-            .map_err(|_| JournalError::Maintenance("cannot schedule initial reconciliation".to_owned()))?;
+            .map_err(|_| {
+                JournalError::Maintenance("cannot schedule initial reconciliation".to_owned())
+            })?;
         let thread = thread::Builder::new()
             .name("session-journal-maintenance".to_owned())
-            .spawn(move || {
-                run_maintenance(
-                    &directory,
-                    journal_max_bytes,
-                    file_system,
-                    receiver,
-                )
-            })?;
+            .spawn(move || run_maintenance(&directory, journal_max_bytes, file_system, receiver))?;
         Ok(Self {
             sender,
             thread: Some(thread),
@@ -156,7 +152,9 @@ impl JournalMaintenance {
     }
 
     fn reconcile(&self, active_segment: u64) {
-        let _ = self.sender.send(MaintenanceCommand::Reconcile(active_segment));
+        let _ = self
+            .sender
+            .send(MaintenanceCommand::Reconcile(active_segment));
     }
 
     fn ensure_running(&self) -> Result<(), JournalError> {
@@ -174,19 +172,14 @@ impl JournalMaintenance {
         acknowledged_event_id: u64,
     ) -> Result<(), JournalError> {
         self.ensure_running()?;
-        let (sender, receiver) = mpsc::channel();
         self.sender
             .send(MaintenanceCommand::ApplyRetention {
                 active_segment,
                 acknowledged_event_id,
-                result: sender,
             })
             .map_err(|_| {
                 JournalError::Maintenance("cannot schedule acknowledged retention".to_owned())
-            })?;
-        receiver.recv().map_err(|_| {
-            JournalError::Maintenance("acknowledged retention worker stopped".to_owned())
-        })?
+            })
     }
 
     fn finish(&mut self, active_segment: u64) -> Result<(), JournalError> {
@@ -216,6 +209,36 @@ impl From<io::Error> for JournalError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
     }
+}
+
+#[derive(Debug)]
+pub(crate) enum JournalEvent {
+    CommandResult {
+        operation_sequence: u64,
+        command_envelope: Vec<u8>,
+        outcome: protocol::CommandOutcome,
+        detail: String,
+    },
+    PtyOutput(Vec<u8>),
+    PtyInput {
+        command_id: [u8; 16],
+        payload: Vec<u8>,
+    },
+    PtyResize {
+        cols: u32,
+        rows: u32,
+    },
+    ProcessStarted(u64),
+    ProcessExited(i32),
+    SessionStartFailed {
+        command_id: String,
+        diagnostic: String,
+        omitted_byte_count: u64,
+    },
+    Signal {
+        kind: u16,
+        platform_code: i32,
+    },
 }
 
 pub struct JournalWriter {
@@ -249,12 +272,7 @@ impl JournalWriter {
         config: JournalConfig,
         file_system: Arc<dyn MaintenanceFileSystem>,
     ) -> Result<Self, JournalError> {
-        Self::create_with_file_systems(
-            directory,
-            config,
-            file_system,
-            Arc::new(RealRecordFileSync),
-        )
+        Self::create_with_file_systems(directory, config, file_system, Arc::new(RealRecordFileSync))
     }
 
     #[cfg(test)]
@@ -304,33 +322,24 @@ impl JournalWriter {
         })
     }
 
-    pub fn append_buffered(
-        &mut self,
-        event_type: u16,
-        payload: &[u8],
-    ) -> Result<u64, JournalError> {
-        self.reject_generic_process_exit(event_type)?;
-        self.append_record(event_type, payload, false)
+    pub(crate) fn append_buffered(&mut self, event: JournalEvent) -> Result<u64, JournalError> {
+        self.reject_generic_process_exit(&event)?;
+        self.append_record(event, false)
     }
 
-    pub fn append_durable(
-        &mut self,
-        event_type: u16,
-        payload: &[u8],
-    ) -> Result<u64, JournalError> {
-        self.reject_generic_process_exit(event_type)?;
-        self.append_record(event_type, payload, true)
+    pub(crate) fn append_durable(&mut self, event: JournalEvent) -> Result<u64, JournalError> {
+        self.reject_generic_process_exit(&event)?;
+        self.append_record(event, true)
     }
 
     pub fn finish_durably(&mut self, exit_code: i32) -> Result<u64, JournalError> {
-        let payload = protocol::process_exited_payload(exit_code, -1);
-        let event_id = self.append_record(protocol::event_type::PROCESS_EXITED, &payload, true)?;
+        let event_id = self.append_record(JournalEvent::ProcessExited(exit_code), true)?;
         self.finished = true;
         Ok(event_id)
     }
 
-    fn reject_generic_process_exit(&self, event_type: u16) -> Result<(), JournalError> {
-        if event_type == protocol::event_type::PROCESS_EXITED {
+    fn reject_generic_process_exit(&self, event: &JournalEvent) -> Result<(), JournalError> {
+        if matches!(event, JournalEvent::ProcessExited(_)) {
             return Err(JournalError::Format(
                 "PROCESS_EXITED must be written with finish_durably".to_owned(),
             ));
@@ -340,48 +349,37 @@ impl JournalWriter {
 
     fn append_record(
         &mut self,
-        event_type: u16,
-        payload: &[u8],
+        event: JournalEvent,
         force_sync: bool,
     ) -> Result<u64, JournalError> {
         let elapsed = self.session_start.elapsed().as_nanos();
         let raw_event_id = u64::try_from(elapsed).unwrap_or(u64::MAX);
-        self.append_at(
-            raw_event_id,
-            event_type,
-            payload,
-            force_sync,
-        )
+        self.append_at(raw_event_id, event, force_sync)
     }
 
     #[cfg(test)]
     fn append_at_for_test(
         &mut self,
         raw_event_id: u64,
-        event_type: u16,
-        payload: &[u8],
+        event: JournalEvent,
     ) -> Result<u64, JournalError> {
-        self.append_at(raw_event_id, event_type, payload, false)
+        self.append_at(raw_event_id, event, false)
     }
 
     fn append_at(
         &mut self,
         raw_event_id: u64,
-        event_type: u16,
-        payload: &[u8],
+        event: JournalEvent,
         force_sync: bool,
     ) -> Result<u64, JournalError> {
         self.ensure_accepting_records()?;
         self.maintenance.ensure_running()?;
-        if payload.len() > MAX_PAYLOAD_LENGTH {
-            return Err(JournalError::PayloadTooLarge(payload.len()));
-        }
         let next = self
             .previous_event_id
             .checked_add(1)
             .ok_or(JournalError::EventIdExhausted)?;
         let event_id = max(raw_event_id, next);
-        let record = encode_event(event_id, event_type, payload)?;
+        let record = encode_event(event_id, event)?;
         let record_length = u64::try_from(record.len())
             .map_err(|_| JournalError::Format("journal record length exceeds u64".to_owned()))?;
         let next_length = self
@@ -395,8 +393,7 @@ impl JournalWriter {
         if let Err(error) = self.file.write_all(&record) {
             return Err(self.rollback_failed_append(initial_length, error, force_sync));
         }
-        if force_sync && let Err(error) = self.record_file_sync.sync_data(&self.file)
-        {
+        if force_sync && let Err(error) = self.record_file_sync.sync_data(&self.file) {
             return Err(self.rollback_failed_append(initial_length, error, true));
         }
         self.active_length = if self.active_length == 0 {
@@ -442,7 +439,10 @@ impl JournalWriter {
                 )));
             }
             Err(SegmentCreateError::Create(error)) => return Err(JournalError::Io(error)),
-            Err(SegmentCreateError::Publication { error, cleanup: None }) => {
+            Err(SegmentCreateError::Publication {
+                error,
+                cleanup: None,
+            }) => {
                 return Err(JournalError::Io(error));
             }
             Err(SegmentCreateError::Publication {
@@ -540,50 +540,60 @@ fn run_maintenance(
 ) -> Result<(), JournalError> {
     let mut pending_error = None;
     let mut acknowledged_event_id = None;
-    while let Ok(command) = receiver.recv() {
-        match command {
-            MaintenanceCommand::Reconcile(active_segment) => {
-                let result = reconcile_journal(
-                    directory,
-                    active_segment,
-                    journal_max_bytes,
-                    acknowledged_event_id,
-                    file_system.as_ref(),
-                );
-                match result {
-                    Ok(()) => pending_error = None,
-                    Err(error) => pending_error = Some(error),
+    loop {
+        let first = match receiver.recv() {
+            Ok(command) => command,
+            Err(_) => break,
+        };
+        let mut active_segment = None;
+        let mut should_reconcile = false;
+        let mut finish = false;
+        let mut command = Some(first);
+        while let Some(command_value) = command.take() {
+            match command_value {
+                MaintenanceCommand::Reconcile(segment) => {
+                    active_segment = Some(segment);
+                    should_reconcile = true;
+                }
+                MaintenanceCommand::ApplyRetention {
+                    active_segment: segment,
+                    acknowledged_event_id: requested,
+                } => {
+                    active_segment = Some(segment);
+                    acknowledged_event_id = Some(
+                        acknowledged_event_id
+                            .map_or(requested, |current: u64| current.max(requested)),
+                    );
+                    should_reconcile = true;
+                }
+                MaintenanceCommand::Finish(segment) => {
+                    active_segment = Some(segment);
+                    should_reconcile = true;
+                    finish = true;
                 }
             }
-            MaintenanceCommand::ApplyRetention {
-                active_segment,
-                acknowledged_event_id: requested,
-                result,
-            } => {
-                acknowledged_event_id = Some(
-                    acknowledged_event_id
-                        .map_or(requested, |current: u64| current.max(requested)),
-                );
-                let applied = reconcile_journal(
-                    directory,
-                    active_segment,
-                    journal_max_bytes,
-                    acknowledged_event_id,
-                    file_system.as_ref(),
-                );
-                if applied.is_ok() {
-                    pending_error = None;
-                }
-                let _ = result.send(applied);
-            }
-            MaintenanceCommand::Finish(active_segment) => {
-                return reconcile_journal(
-                    directory,
-                    active_segment,
-                    journal_max_bytes,
-                    acknowledged_event_id,
-                    file_system.as_ref(),
-                );
+            command = receiver.try_recv().ok();
+        }
+        if finish {
+            return reconcile_journal(
+                directory,
+                active_segment.expect("finish always provides an active segment"),
+                journal_max_bytes,
+                acknowledged_event_id,
+                file_system.as_ref(),
+            );
+        }
+        if should_reconcile {
+            let result = reconcile_journal(
+                directory,
+                active_segment.expect("reconciliation always provides an active segment"),
+                journal_max_bytes,
+                acknowledged_event_id,
+                file_system.as_ref(),
+            );
+            match result {
+                Ok(()) => pending_error = None,
+                Err(error) => pending_error = Some(error),
             }
         }
     }
@@ -837,136 +847,56 @@ fn create_segment(
     Ok(file)
 }
 
-fn encode_event(event_id: u64, event_type: u16, payload: &[u8]) -> Result<Vec<u8>, JournalError> {
-    let encoded = match event_type {
-        protocol::event_type::COMMAND_ACCEPTED => encode_command_accepted_event(event_id, payload),
-        protocol::event_type::COMMAND_RESULT => encode_command_result_event(event_id, payload),
-        protocol::event_type::PTY_OUTPUT => protocol::encode_pty_output(event_id, payload),
-        protocol::event_type::PTY_INPUT => {
-            if payload.len() < 16 {
-                return Err(JournalError::Format("PTY_INPUT payload is shorter than its UUID".to_owned()));
-            }
-            let command_id = format_uuid(payload[..16].try_into().unwrap());
-            protocol::encode_pty_input(event_id, &command_id, &payload[16..])
+fn encode_event(event_id: u64, event: JournalEvent) -> Result<Vec<u8>, JournalError> {
+    let encoded = match event {
+        JournalEvent::CommandResult {
+            operation_sequence,
+            command_envelope,
+            outcome,
+            detail,
+        } => protocol::encode_command_result(
+            event_id,
+            operation_sequence,
+            &command_envelope,
+            outcome,
+            &detail,
+        ),
+        JournalEvent::PtyOutput(payload) => protocol::encode_pty_output(event_id, &payload),
+        JournalEvent::PtyInput {
+            command_id,
+            payload,
+        } => {
+            let command_id = format_uuid(command_id);
+            protocol::encode_pty_input(event_id, &command_id, &payload)
         }
-        protocol::event_type::PTY_RESIZE => {
-            if payload.len() != 8 {
-                return Err(JournalError::Format("PTY_RESIZE payload must be 8 bytes".to_owned()));
-            }
-            protocol::encode_pty_resize(
-                event_id,
-                u32::from_le_bytes(payload[0..4].try_into().unwrap()),
-                u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-            )
+        JournalEvent::PtyResize { cols, rows } => protocol::encode_pty_resize(event_id, cols, rows),
+        JournalEvent::ProcessStarted(process_id) => {
+            protocol::encode_process_started(event_id, process_id)
         }
-        protocol::event_type::PROCESS_STARTED => {
-            if payload.len() != 8 {
-                return Err(JournalError::Format("PROCESS_STARTED payload must be 8 bytes".to_owned()));
-            }
-            protocol::encode_process_started(
-                event_id,
-                u64::from_le_bytes(payload.try_into().unwrap()),
-            )
+        JournalEvent::ProcessExited(exit_code) => {
+            Ok(protocol::encode_process_exited(event_id, exit_code))
         }
-        protocol::event_type::SESSION_START_FAILED => {
-            let (command_id, diagnostic, omitted_byte_count) = start_failure_fields(payload)?;
-            protocol::encode_session_start_failed(
-                event_id,
-                command_id,
-                diagnostic,
-                omitted_byte_count,
-            )
-        }
-        protocol::event_type::PROCESS_EXITED => {
-            if payload.len() != 8 {
-                return Err(JournalError::Format("PROCESS_EXITED payload must be 8 bytes".to_owned()));
-            }
-            Ok(protocol::encode_process_exited(
-                event_id,
-                i32::from_le_bytes(payload[0..4].try_into().unwrap()),
-            ))
-        }
-        protocol::event_type::SIGNAL => {
-            if payload.len() != 8 {
-                return Err(JournalError::Format("SIGNAL payload must be 8 bytes".to_owned()));
-            }
-            let flags = u16::from_le_bytes(payload[2..4].try_into().unwrap());
-            if flags != 0 {
-                return Err(JournalError::Format("SIGNAL flags must be zero".to_owned()));
-            }
-            protocol::encode_signal(
-                event_id,
-                u16::from_le_bytes(payload[0..2].try_into().unwrap()),
-                i32::from_le_bytes(payload[4..8].try_into().unwrap()),
-            )
-        }
-        _ => protocol::encode_binary_event(event_id, event_type, payload),
+        JournalEvent::SessionStartFailed {
+            command_id,
+            diagnostic,
+            omitted_byte_count,
+        } => protocol::encode_session_start_failed(
+            event_id,
+            &command_id,
+            &diagnostic,
+            omitted_byte_count,
+        ),
+        JournalEvent::Signal {
+            kind,
+            platform_code,
+        } => protocol::encode_signal(event_id, kind, platform_code),
     };
     encoded.map_err(|error| match error {
-        protocol::EncodeError::PayloadTooLarge { .. } => JournalError::PayloadTooLarge(payload.len()),
+        protocol::EncodeError::PayloadTooLarge { actual, .. } => {
+            JournalError::PayloadTooLarge(actual)
+        }
         protocol::EncodeError::InvalidPayload(message) => JournalError::Format(message.to_owned()),
     })
-}
-
-fn encode_command_accepted_event(
-    event_id: u64,
-    payload: &[u8],
-) -> Result<Vec<u8>, protocol::EncodeError> {
-    if payload.len() <= 8 {
-        return Err(protocol::EncodeError::InvalidPayload(
-            "COMMAND_ACCEPTED payload must contain a sequence and envelope",
-        ));
-    }
-    let operation_sequence = u64::from_le_bytes(payload[0..8].try_into().unwrap());
-    protocol::encode_command_accepted(event_id, operation_sequence, &payload[8..])
-}
-
-fn encode_command_result_event(
-    event_id: u64,
-    payload: &[u8],
-) -> Result<Vec<u8>, protocol::EncodeError> {
-    if payload.len() < 12 {
-        return Err(protocol::EncodeError::InvalidPayload(
-            "COMMAND_RESULT payload is truncated",
-        ));
-    }
-    let operation_sequence = u64::from_le_bytes(payload[0..8].try_into().unwrap());
-    let command_id_length = usize::from(u16::from_le_bytes(payload[8..10].try_into().unwrap()));
-    let command_id_end = 10_usize.checked_add(command_id_length).ok_or(
-        protocol::EncodeError::InvalidPayload("COMMAND_RESULT command ID length overflows"),
-    )?;
-    let outcome_index = command_id_end;
-    let detail_start = outcome_index.checked_add(1).ok_or(
-        protocol::EncodeError::InvalidPayload("COMMAND_RESULT payload length overflows"),
-    )?;
-    if payload.len() < detail_start {
-        return Err(protocol::EncodeError::InvalidPayload(
-            "COMMAND_RESULT payload is truncated",
-        ));
-    }
-    let outcome = command_outcome(u64::from(payload[outcome_index]))?;
-    let detail = std::str::from_utf8(&payload[detail_start..]).map_err(|_| {
-        protocol::EncodeError::InvalidPayload("COMMAND_RESULT detail is not valid UTF-8")
-    })?;
-    protocol::encode_command_result(
-        event_id,
-        operation_sequence,
-        &payload[10..command_id_end],
-        outcome,
-        detail,
-    )
-}
-
-fn command_outcome(value: u64) -> Result<protocol::CommandOutcome, protocol::EncodeError> {
-    match value {
-        1 => Ok(protocol::CommandOutcome::Succeeded),
-        2 => Ok(protocol::CommandOutcome::Failed),
-        3 => Ok(protocol::CommandOutcome::Rejected),
-        4 => Ok(protocol::CommandOutcome::Ambiguous),
-        _ => Err(protocol::EncodeError::InvalidPayload(
-            "COMMAND_RESULT outcome is invalid",
-        )),
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -1004,34 +934,6 @@ impl SegmentSize {
     }
 }
 
-fn retention_deletions(
-    segments: &[SegmentSize],
-    journal_max_bytes: u64,
-    acknowledged_event_id: Option<u64>,
-) -> Result<Vec<u64>, JournalError> {
-    let mut total = 0_u64;
-    for segment in segments {
-        total = total.checked_add(segment.physical_bytes).ok_or_else(|| {
-            JournalError::Maintenance("physical journal size overflow".to_owned())
-        })?;
-    }
-    let mut deletions = Vec::new();
-    let Some(acknowledged_event_id) = acknowledged_event_id else {
-        return Ok(deletions);
-    };
-    for segment in segments {
-        if total <= journal_max_bytes
-            || segment.active
-            || segment.last_event_id > acknowledged_event_id
-        {
-            break;
-        }
-        total -= segment.physical_bytes;
-        deletions.push(segment.number);
-    }
-    Ok(deletions)
-}
-
 fn enforce_retention(
     directory: &Path,
     active_segment: u64,
@@ -1045,21 +947,40 @@ fn enforce_retention(
         .take_while(|segment| segment.number <= active_segment)
         .cloned()
         .collect::<Vec<_>>();
-    let scans = scan_segments(&relevant)?;
     let mut sizes = Vec::new();
-    for (segment, scan) in relevant.iter().zip(scans) {
+    for segment in &relevant {
         let physical_bytes = fs::metadata(&segment.path)?.len();
         if segment.number == active_segment {
             sizes.push(SegmentSize::active(segment.number, 0, physical_bytes));
         } else {
-            sizes.push(SegmentSize::closed(
-                segment.number,
-                scan.last_event_id,
-                physical_bytes,
-            ));
+            sizes.push(SegmentSize::closed(segment.number, 0, physical_bytes));
         }
     }
-    let deletions = retention_deletions(&sizes, journal_max_bytes, acknowledged_event_id)?;
+    let mut total = 0_u64;
+    for segment in &sizes {
+        total = total.checked_add(segment.physical_bytes).ok_or_else(|| {
+            JournalError::Maintenance("physical journal size overflow".to_owned())
+        })?;
+    }
+    let mut deletions = Vec::new();
+    if total > journal_max_bytes {
+        if let Some(acknowledged_event_id) = acknowledged_event_id {
+            let mut previous_event_id = 0;
+            for (segment, size) in relevant.iter().zip(&mut sizes) {
+                if total <= journal_max_bytes || size.active {
+                    break;
+                }
+                let scan = scan_path(segment, ScanExtent::AllRecords, false, previous_event_id)?;
+                previous_event_id = scan.last_event_id;
+                size.last_event_id = scan.last_event_id;
+                if size.last_event_id > acknowledged_event_id {
+                    break;
+                }
+                total -= size.physical_bytes;
+                deletions.push(size.number);
+            }
+        }
+    }
     for number in deletions {
         let segment = segments
             .iter()
@@ -1103,14 +1024,19 @@ fn discover_segments(directory: &Path) -> Result<Vec<SegmentFile>, JournalError>
     }
     for pair in segments.windows(2) {
         if pair[0].number.checked_add(1) != Some(pair[1].number) {
-            return Err(JournalError::Format("segment sequence has a gap".to_owned()));
+            return Err(JournalError::Format(
+                "segment sequence has a gap".to_owned(),
+            ));
         }
     }
     for (index, segment) in segments.iter().enumerate() {
         if segment.compressed && index + 1 == segments.len() {
             continue;
         }
-        if !segment.compressed && index + 1 != segments.len() && fs::metadata(&segment.path)?.len() == 0 {
+        if !segment.compressed
+            && index + 1 != segments.len()
+            && fs::metadata(&segment.path)?.len() == 0
+        {
             return Err(JournalError::Format("empty closed segment".to_owned()));
         }
     }
@@ -1128,12 +1054,18 @@ fn first_available_event_id(segments: &[SegmentFile]) -> Result<Option<u64>, Jou
     Ok(None)
 }
 
+#[cfg(test)]
 fn scan_segments(segments: &[SegmentFile]) -> Result<Vec<SegmentScan>, JournalError> {
     let mut scans = Vec::with_capacity(segments.len());
     let mut previous_event_id = 0;
     for (index, segment) in segments.iter().enumerate() {
         let allow_tail = index + 1 == segments.len() && !segment.compressed;
-        let scan = scan_path(segment, ScanExtent::AllRecords, allow_tail, previous_event_id)?;
+        let scan = scan_path(
+            segment,
+            ScanExtent::AllRecords,
+            allow_tail,
+            previous_event_id,
+        )?;
         previous_event_id = scan.last_event_id;
         scans.push(scan);
     }
@@ -1162,7 +1094,8 @@ fn scan_path(
     let file = File::open(&segment.path)?;
     if segment.compressed {
         let mut decoder = zstd::stream::read::Decoder::new(file)?;
-        let decoded_limit = (extent == ScanExtent::AllRecords).then_some(MAX_DECOMPRESSED_SEGMENT_LENGTH);
+        let decoded_limit =
+            (extent == ScanExtent::AllRecords).then_some(MAX_DECOMPRESSED_SEGMENT_LENGTH);
         return scan_reader(
             &mut decoder,
             extent,
@@ -1197,7 +1130,9 @@ fn scan_reader(
         match item_end(&pending, 0, 0) {
             Ok(end) => {
                 if end > MAX_ENCODED_RECORD_LENGTH {
-                    return Err(JournalError::Format("CBOR journal record is too large".to_owned()));
+                    return Err(JournalError::Format(
+                        "CBOR journal record is too large".to_owned(),
+                    ));
                 }
                 let event_id = parse_record_structure(&pending[..end])?;
                 if event_id == 0 || event_id <= previous_event_id {
@@ -1217,7 +1152,9 @@ fn scan_reader(
             }
             Err(ParseFailure::Incomplete) => {
                 if pending.len() > MAX_ENCODED_RECORD_LENGTH {
-                    return Err(JournalError::Format("CBOR journal record is too large".to_owned()));
+                    return Err(JournalError::Format(
+                        "CBOR journal record is too large".to_owned(),
+                    ));
                 }
                 if decoded_limit.is_some_and(|limit| decoded_bytes > limit) {
                     return Err(JournalError::Format(
@@ -1270,32 +1207,6 @@ fn parse_record_structure(encoded: &[u8]) -> Result<u64, JournalError> {
     u16::try_from(event_type_value)
         .map_err(|_| JournalError::Format("eventType exceeds u16".to_owned()))?;
     Ok(event_id)
-}
-
-fn start_failure_fields(payload: &[u8]) -> Result<(&str, &str, u64), JournalError> {
-    if payload.len() < 10 {
-        return Err(JournalError::Format(
-            "SESSION_START_FAILED payload is truncated".to_owned(),
-        ));
-    }
-    let command_id_length = usize::from(u16::from_le_bytes(payload[0..2].try_into().unwrap()));
-    let command_id_end = 2_usize
-        .checked_add(command_id_length)
-        .ok_or_else(|| JournalError::Format("SESSION_START_FAILED command ID length overflows".to_owned()))?;
-    let omitted_end = command_id_end
-        .checked_add(8)
-        .ok_or_else(|| JournalError::Format("SESSION_START_FAILED payload length overflows".to_owned()))?;
-    if payload.len() < omitted_end {
-        return Err(JournalError::Format(
-            "SESSION_START_FAILED payload is truncated".to_owned(),
-        ));
-    }
-    let command_id = std::str::from_utf8(&payload[2..command_id_end])
-        .map_err(|_| JournalError::Format("SESSION_START_FAILED command ID is not UTF-8".to_owned()))?;
-    let omitted_byte_count = u64::from_le_bytes(payload[command_id_end..omitted_end].try_into().unwrap());
-    let diagnostic = std::str::from_utf8(&payload[omitted_end..])
-        .map_err(|_| JournalError::Format("SESSION_START_FAILED diagnostic is not UTF-8".to_owned()))?;
-    Ok((command_id, diagnostic, omitted_byte_count))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1370,13 +1281,17 @@ fn indefinite_end(
         let next = *bytes.get(position).ok_or(ParseFailure::Incomplete)?;
         if next == 0xff {
             if major == 5 && map_items % 2 != 0 {
-                return Err(ParseFailure::Invalid("indefinite CBOR map has an unmatched key"));
+                return Err(ParseFailure::Invalid(
+                    "indefinite CBOR map has an unmatched key",
+                ));
             }
             return Ok(position + 1);
         }
         if matches!(major, 2 | 3) {
             if next >> 5 != major || next & 0x1f == 31 {
-                return Err(ParseFailure::Invalid("invalid CBOR indefinite string chunk"));
+                return Err(ParseFailure::Invalid(
+                    "invalid CBOR indefinite string chunk",
+                ));
             }
         }
         position = item_end(bytes, position, depth + 1)?;
@@ -1387,16 +1302,25 @@ fn indefinite_end(
 fn argument(bytes: &[u8], start: usize, additional: u8) -> Result<(u64, usize), ParseFailure> {
     match additional {
         value @ 0..=23 => Ok((u64::from(value), start + 1)),
-        24 => Ok((u64::from(*bytes.get(start + 1).ok_or(ParseFailure::Incomplete)?), start + 2)),
+        24 => Ok((
+            u64::from(*bytes.get(start + 1).ok_or(ParseFailure::Incomplete)?),
+            start + 2,
+        )),
         25 => {
             let end = start + 3;
             let value = bytes.get(start + 1..end).ok_or(ParseFailure::Incomplete)?;
-            Ok((u64::from(u16::from_be_bytes(value.try_into().unwrap())), end))
+            Ok((
+                u64::from(u16::from_be_bytes(value.try_into().unwrap())),
+                end,
+            ))
         }
         26 => {
             let end = start + 5;
             let value = bytes.get(start + 1..end).ok_or(ParseFailure::Incomplete)?;
-            Ok((u64::from(u32::from_be_bytes(value.try_into().unwrap())), end))
+            Ok((
+                u64::from(u32::from_be_bytes(value.try_into().unwrap())),
+                end,
+            ))
         }
         27 => {
             let end = start + 9;
@@ -1412,7 +1336,9 @@ fn array_fields(encoded: &[u8]) -> Result<Vec<(usize, usize)>, JournalError> {
         .first()
         .ok_or_else(|| JournalError::Format("empty CBOR item".to_owned()))?;
     if initial >> 5 != 4 {
-        return Err(JournalError::Format("session event field must be a CBOR array".to_owned()));
+        return Err(JournalError::Format(
+            "session event field must be a CBOR array".to_owned(),
+        ));
     }
     let additional = initial & 0x1f;
     let mut fields = Vec::new();
@@ -1421,7 +1347,9 @@ fn array_fields(encoded: &[u8]) -> Result<Vec<(usize, usize)>, JournalError> {
         position = 1;
         while encoded.get(position) != Some(&0xff) {
             if fields.len() == MAX_RECORD_FIELDS {
-                return Err(JournalError::Format("CBOR array has too many fields".to_owned()));
+                return Err(JournalError::Format(
+                    "CBOR array has too many fields".to_owned(),
+                ));
             }
             let end = item_end(encoded, position, 1).map_err(parse_error)?;
             fields.push((position, end));
@@ -1433,7 +1361,9 @@ fn array_fields(encoded: &[u8]) -> Result<Vec<(usize, usize)>, JournalError> {
         let length = usize::try_from(length)
             .map_err(|_| JournalError::Format("CBOR array length exceeds platform".to_owned()))?;
         if length > MAX_RECORD_FIELDS {
-            return Err(JournalError::Format("CBOR array has too many fields".to_owned()));
+            return Err(JournalError::Format(
+                "CBOR array has too many fields".to_owned(),
+            ));
         }
         position = content;
         for _ in 0..length {
@@ -1443,7 +1373,9 @@ fn array_fields(encoded: &[u8]) -> Result<Vec<(usize, usize)>, JournalError> {
         }
     }
     if position != encoded.len() {
-        return Err(JournalError::Format("CBOR array has trailing bytes".to_owned()));
+        return Err(JournalError::Format(
+            "CBOR array has trailing bytes".to_owned(),
+        ));
     }
     Ok(fields)
 }
@@ -1453,11 +1385,15 @@ fn decode_unsigned(encoded: &[u8], name: &str) -> Result<u64, JournalError> {
         .first()
         .ok_or_else(|| JournalError::Format(format!("{name} is empty")))?;
     if initial >> 5 != 0 || initial & 0x1f == 31 {
-        return Err(JournalError::Format(format!("{name} must be an unsigned integer")));
+        return Err(JournalError::Format(format!(
+            "{name} must be an unsigned integer"
+        )));
     }
     let (value, end) = argument(encoded, 0, initial & 0x1f).map_err(parse_error)?;
     if end != encoded.len() {
-        return Err(JournalError::Format(format!("{name} contains trailing bytes")));
+        return Err(JournalError::Format(format!(
+            "{name} contains trailing bytes"
+        )));
     }
     Ok(value)
 }
@@ -1491,8 +1427,22 @@ fn segment_number(name: &std::ffi::OsStr) -> Option<(u64, bool)> {
 fn format_uuid(bytes: [u8; 16]) -> String {
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
     )
 }
 
@@ -1600,7 +1550,10 @@ pub fn write_metadata(
     let contents = serde_json::to_vec_pretty(metadata)
         .map_err(|error| JournalError::Format(format!("cannot encode metadata JSON: {error}")))?;
     let write_result = (|| -> Result<(), JournalError> {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
         file.write_all(&contents)?;
         file.write_all(b"\n")?;
         drop(file);
@@ -1646,7 +1599,9 @@ fn validate_metadata(metadata: &Metadata) -> Result<(), JournalError> {
         || metadata.term.len() > 128
         || metadata.control.endpoint.is_empty()
     {
-        return Err(JournalError::Format("metadata has invalid required fields".to_owned()));
+        return Err(JournalError::Format(
+            "metadata has invalid required fields".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -1759,7 +1714,10 @@ mod tests {
 
     impl RecordFileSync for RecordingWriterFileSync {
         fn sync_data(&self, file: &File) -> io::Result<()> {
-            self.operations.lock().unwrap().push(WriterSyncOperation::Data);
+            self.operations
+                .lock()
+                .unwrap()
+                .push(WriterSyncOperation::Data);
             file.sync_data()
         }
 
@@ -1854,9 +1812,7 @@ mod tests {
                 }
                 return fs::remove_file(path);
             }
-            let _ = self
-                .signal
-                .send(RetentionFailureSignal::AttemptStarted);
+            let _ = self.signal.send(RetentionFailureSignal::AttemptStarted);
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "injected retention deletion failure",
@@ -1931,7 +1887,7 @@ mod tests {
     }
 
     fn write_raw_event(directory: &Path, number: u64, event_id: u64, payload: &[u8]) -> Vec<u8> {
-        let encoded = encode_event(event_id, protocol::event_type::PTY_OUTPUT, payload).unwrap();
+        let encoded = encode_event(event_id, JournalEvent::PtyOutput(payload.to_vec())).unwrap();
         fs::write(segment_path(directory, number), &encoded).unwrap();
         encoded
     }
@@ -1942,73 +1898,16 @@ mod tests {
         compressed
     }
 
-    fn command_accepted_payload(operation_sequence: u64, envelope: &[u8]) -> Vec<u8> {
-        [operation_sequence.to_le_bytes().as_slice(), envelope].concat()
-    }
-
-    fn command_result_payload(
-        operation_sequence: u64,
-        command_id: &[u8],
-        outcome: protocol::CommandOutcome,
-        detail: &[u8],
-    ) -> Vec<u8> {
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&operation_sequence.to_le_bytes());
-        payload.extend_from_slice(&(command_id.len() as u16).to_le_bytes());
-        payload.extend_from_slice(command_id);
-        payload.push(outcome.wire_code() as u8);
-        payload.extend_from_slice(detail);
-        payload
-    }
-
     #[test]
-    fn retention_requires_an_acknowledged_event_watermark() {
-        let segments = [
-            SegmentSize::closed(1, 10, 40),
-            SegmentSize::closed(2, 20, 40),
-            SegmentSize::active(3, 30, 40),
-        ];
+    fn retention_does_not_decode_segments_when_the_journal_is_within_target() {
+        let directory = temporary_directory("retention-skips-in-range-corruption");
+        fs::write(compressed_segment_path(&directory, 1), b"not a zstd stream").unwrap();
+        write_raw_event(&directory, 2, 2, b"active");
 
-        assert!(retention_deletions(&segments, 80, None).unwrap().is_empty());
-        assert!(retention_deletions(&segments, 80, Some(9)).unwrap().is_empty());
-    }
+        enforce_retention(&directory, 2, u64::MAX, Some(1), &RealMaintenanceFileSystem).unwrap();
 
-    #[test]
-    fn retention_deletes_only_the_acknowledged_prefix_needed_for_the_limit() {
-        let segments = [
-            SegmentSize::closed(1, 10, 40),
-            SegmentSize::closed(2, 20, 40),
-            SegmentSize::active(3, 30, 40),
-        ];
-
-        assert_eq!(retention_deletions(&segments, 80, Some(10)).unwrap(), [1]);
-        assert_eq!(retention_deletions(&segments, 20, Some(10)).unwrap(), [1]);
-        assert_eq!(retention_deletions(&segments, 20, Some(20)).unwrap(), [1, 2]);
-    }
-
-    #[test]
-    fn retention_keeps_every_segment_when_the_journal_is_within_the_limit() {
-        let segments = [
-            SegmentSize::closed(1, 10, 40),
-            SegmentSize::closed(2, 20, 40),
-            SegmentSize::active(3, 30, 40),
-        ];
-
-        assert!(retention_deletions(&segments, 120, Some(20)).unwrap().is_empty());
-    }
-
-    #[test]
-    fn retention_reports_physical_size_overflow() {
-        let segments = [
-            SegmentSize::closed(1, 10, u64::MAX),
-            SegmentSize::active(2, 20, 1),
-        ];
-
-        assert!(matches!(
-            retention_deletions(&segments, u64::MAX, None),
-            Err(JournalError::Maintenance(message))
-                if message == "physical journal size overflow"
-        ));
+        assert!(compressed_segment_path(&directory, 1).is_file());
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -2022,17 +1921,16 @@ mod tests {
     #[test]
     fn rotates_before_an_item_would_cross_the_segment_limit() {
         let directory = temporary_directory("automatic-rotation");
-        let first = encode_event(1, protocol::event_type::PTY_OUTPUT, b"one").unwrap();
-        let second = encode_event(2, protocol::event_type::PTY_OUTPUT, b"two").unwrap();
+        let first = encode_event(1, JournalEvent::PtyOutput(b"one".to_vec())).unwrap();
+        let second = encode_event(2, JournalEvent::PtyOutput(b"two".to_vec())).unwrap();
         let limit = u64::try_from(first.len() + second.len() - 1).unwrap();
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
 
         writer
-            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, b"one")
+            .append_at_for_test(1, JournalEvent::PtyOutput(b"one".to_vec()))
             .unwrap();
         writer
-            .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"two")
+            .append_at_for_test(2, JournalEvent::PtyOutput(b"two".to_vec()))
             .unwrap();
         writer.finish_maintenance().unwrap();
 
@@ -2049,14 +1947,13 @@ mod tests {
     #[test]
     fn compresses_every_closed_segment_and_leaves_the_active_segment_raw() {
         let directory = temporary_directory("background-compression");
-        let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, b"same-size").unwrap();
+        let encoded = encode_event(1, JournalEvent::PtyOutput(b"same-size".to_vec())).unwrap();
         let limit = u64::try_from(encoded.len()).unwrap();
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
 
         for event_id in 1..=3 {
             writer
-                .append_at_for_test(event_id, protocol::event_type::PTY_OUTPUT, b"same-size")
+                .append_at_for_test(event_id, JournalEvent::PtyOutput(b"same-size".to_vec()))
                 .unwrap();
         }
         writer.finish_maintenance().unwrap();
@@ -2081,14 +1978,7 @@ mod tests {
             file_syncs: AtomicUsize::new(0),
             directory_syncs: AtomicUsize::new(0),
         });
-        reconcile_journal(
-            &directory,
-            2,
-            u64::MAX,
-            None,
-            file_system.as_ref(),
-        )
-        .unwrap();
+        reconcile_journal(&directory, 2, u64::MAX, None, file_system.as_ref()).unwrap();
 
         assert!(compressed_segment_path(&directory, 1).is_file());
         assert!(!segment_path(&directory, 1).exists());
@@ -2100,14 +1990,13 @@ mod tests {
     #[test]
     fn compression_does_not_delete_closed_segments_without_acknowledgement() {
         let directory = temporary_directory("compression-without-acknowledgement");
-        let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, b"same-size").unwrap();
+        let encoded = encode_event(1, JournalEvent::PtyOutput(b"same-size".to_vec())).unwrap();
         let limit = u64::try_from(encoded.len()).unwrap();
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(limit, limit)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(limit, limit)).unwrap();
 
         for event_id in 1..=3 {
             writer
-                .append_at_for_test(event_id, protocol::event_type::PTY_OUTPUT, b"same-size")
+                .append_at_for_test(event_id, JournalEvent::PtyOutput(b"same-size".to_vec()))
                 .unwrap();
         }
         writer.finish_maintenance().unwrap();
@@ -2123,17 +2012,16 @@ mod tests {
     #[test]
     fn rejects_append_after_maintenance_has_finished_without_mutating_the_writer() {
         let directory = temporary_directory("append-after-maintenance");
-        let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, b"same-size").unwrap();
+        let encoded = encode_event(1, JournalEvent::PtyOutput(b"same-size".to_vec())).unwrap();
         let limit = u64::try_from(encoded.len()).unwrap();
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
         writer
-            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, b"same-size")
+            .append_at_for_test(1, JournalEvent::PtyOutput(b"same-size".to_vec()))
             .unwrap();
         writer.finish_maintenance().unwrap();
 
         let error = writer
-            .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"same-size")
+            .append_at_for_test(2, JournalEvent::PtyOutput(b"same-size".to_vec()))
             .unwrap_err();
 
         assert!(matches!(
@@ -2150,8 +2038,7 @@ mod tests {
     #[test]
     fn rejects_direct_rotation_after_maintenance_has_finished() {
         let directory = temporary_directory("rotate-after-maintenance");
-        let mut writer =
-            JournalWriter::create(&directory, JournalConfig::default()).unwrap();
+        let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
         writer.finish_maintenance().unwrap();
 
         let error = writer.rotate().unwrap_err();
@@ -2169,29 +2056,30 @@ mod tests {
     #[test]
     fn compressed_segments_decode_to_the_exact_original_cbor_bytes() {
         let directory = temporary_directory("exact-compressed-bytes");
-        let payloads = [b"aaaaaaaa".as_slice(), b"bbbbbbbb".as_slice(), b"cccccccc".as_slice()];
+        let payloads = [
+            b"aaaaaaaa".as_slice(),
+            b"bbbbbbbb".as_slice(),
+            b"cccccccc".as_slice(),
+        ];
         let expected = payloads
             .iter()
             .enumerate()
             .map(|(index, payload)| {
                 encode_event(
                     u64::try_from(index + 1).unwrap(),
-                    protocol::event_type::PTY_OUTPUT,
-                    payload,
+                    JournalEvent::PtyOutput((*payload).to_vec()),
                 )
                 .unwrap()
             })
             .collect::<Vec<_>>();
         let limit = u64::try_from(expected[0].len()).unwrap();
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
 
         for (index, payload) in payloads.iter().enumerate() {
             writer
                 .append_at_for_test(
                     u64::try_from(index + 1).unwrap(),
-                    protocol::event_type::PTY_OUTPUT,
-                    payload,
+                    JournalEvent::PtyOutput((*payload).to_vec()),
                 )
                 .unwrap();
         }
@@ -2220,14 +2108,14 @@ mod tests {
 
         for (name, payload) in payload_sets {
             let directory = temporary_directory(name);
-            let encoded = encode_event(1, protocol::event_type::PTY_OUTPUT, &payload).unwrap();
+            let encoded = encode_event(1, JournalEvent::PtyOutput(payload.to_vec())).unwrap();
             let limit = u64::try_from(encoded.len()).unwrap();
             let mut writer =
                 JournalWriter::create(&directory, journal_config(limit, 64 * 1024)).unwrap();
 
             for event_id in 1..=4 {
                 writer
-                    .append_at_for_test(event_id, protocol::event_type::PTY_OUTPUT, &payload)
+                    .append_at_for_test(event_id, JournalEvent::PtyOutput(payload.to_vec()))
                     .unwrap();
             }
             writer.finish_maintenance().unwrap();
@@ -2253,12 +2141,16 @@ mod tests {
         }
         let records = (1..=5)
             .map(|event_id| {
-                encode_event(event_id, protocol::event_type::PTY_OUTPUT, &payload).unwrap()
+                encode_event(event_id, JournalEvent::PtyOutput(payload.to_vec())).unwrap()
             })
             .collect::<Vec<_>>();
         let compressed_sizes = records
             .iter()
-            .map(|record| zstd::stream::encode_all(record.as_slice(), 3).unwrap().len() as u64)
+            .map(|record| {
+                zstd::stream::encode_all(record.as_slice(), 3)
+                    .unwrap()
+                    .len() as u64
+            })
             .collect::<Vec<_>>();
         let segment_max_bytes = records[0].len() as u64;
         let journal_max_bytes = compressed_sizes[3] + records[4].len() as u64;
@@ -2270,7 +2162,7 @@ mod tests {
 
         for event_id in 1..=5 {
             writer
-                .append_at_for_test(event_id, protocol::event_type::PTY_OUTPUT, &payload)
+                .append_at_for_test(event_id, JournalEvent::PtyOutput(payload.to_vec()))
                 .unwrap();
         }
         writer.apply_retention_through(3).unwrap();
@@ -2282,7 +2174,10 @@ mod tests {
         }
         let segments = discover_segments(&directory).unwrap();
         assert_eq!(
-            segments.iter().map(|segment| segment.number).collect::<Vec<_>>(),
+            segments
+                .iter()
+                .map(|segment| segment.number)
+                .collect::<Vec<_>>(),
             [4, 5]
         );
         assert!(segments[0].compressed);
@@ -2305,11 +2200,10 @@ mod tests {
     fn retention_never_deletes_an_oversized_active_segment() {
         let directory = temporary_directory("oversized-active-retention");
         let payload = vec![0x5a; 4096];
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(1, 1)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(1, 1)).unwrap();
 
         writer
-            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, &payload)
+            .append_at_for_test(1, JournalEvent::PtyOutput(payload.to_vec()))
             .unwrap();
         writer.finish_maintenance().unwrap();
 
@@ -2334,24 +2228,16 @@ mod tests {
             remaining_failures: Mutex::new(Some(1)),
             signal: signal_sender,
         });
-        let mut maintenance = JournalMaintenance::start_with_file_system(
-            directory.clone(),
-            2,
-            1,
-            file_system,
-        )
-        .unwrap();
+        let mut maintenance =
+            JournalMaintenance::start_with_file_system(directory.clone(), 2, 1, file_system)
+                .unwrap();
 
-        let error = maintenance.apply_retention_through(2, 1).unwrap_err();
+        maintenance.apply_retention_through(2, 1).unwrap();
 
         assert_eq!(
             receive_retention_signal(&signal_receiver),
             RetentionFailureSignal::AttemptStarted
         );
-        assert!(matches!(
-            error,
-            JournalError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied
-        ));
         assert!(compressed_segment_path(&directory, 1).is_file());
         assert!(!segment_path(&directory, 1).exists());
 
@@ -2377,23 +2263,15 @@ mod tests {
             remaining_failures: Mutex::new(None),
             signal: signal_sender,
         });
-        let mut maintenance = JournalMaintenance::start_with_file_system(
-            directory.clone(),
-            2,
-            1,
-            file_system,
-        )
-        .unwrap();
+        let mut maintenance =
+            JournalMaintenance::start_with_file_system(directory.clone(), 2, 1, file_system)
+                .unwrap();
 
-        let first_error = maintenance.apply_retention_through(2, 1).unwrap_err();
+        maintenance.apply_retention_through(2, 1).unwrap();
         assert_eq!(
             receive_retention_signal(&signal_receiver),
             RetentionFailureSignal::AttemptStarted
         );
-        assert!(matches!(
-            first_error,
-            JournalError::Io(error) if error.kind() == io::ErrorKind::PermissionDenied
-        ));
         let error = maintenance.finish(2).unwrap_err();
 
         assert!(matches!(
@@ -2408,7 +2286,8 @@ mod tests {
     fn reconciliation_compresses_existing_closed_raw_segments() {
         let directory = temporary_directory("recovery-compression");
         for event_id in 1..=3 {
-            let encoded = encode_event(event_id, protocol::event_type::PTY_OUTPUT, b"payload").unwrap();
+            let encoded =
+                encode_event(event_id, JournalEvent::PtyOutput(b"payload".to_vec())).unwrap();
             fs::write(directory.join(format!("{event_id:08}.cbor")), encoded).unwrap();
         }
 
@@ -2425,11 +2304,25 @@ mod tests {
         let directory = temporary_directory("recovery-abandoned-compression");
         let closed = write_raw_event(&directory, 1, 1, b"closed");
         let active = write_raw_event(&directory, 2, 2, b"active");
-        fs::write(compressed_temporary_segment_path(&directory, 1), b"abandoned").unwrap();
-        fs::write(compressed_temporary_segment_path(&directory, 99), b"temporary-only").unwrap();
+        fs::write(
+            compressed_temporary_segment_path(&directory, 1),
+            b"abandoned",
+        )
+        .unwrap();
+        fs::write(
+            compressed_temporary_segment_path(&directory, 99),
+            b"temporary-only",
+        )
+        .unwrap();
 
         let discovered = discover_segments(&directory).unwrap();
-        assert_eq!(discovered.iter().map(|segment| segment.number).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(
+            discovered
+                .iter()
+                .map(|segment| segment.number)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
         let before = scan_segments(&discovered).unwrap();
         assert_eq!(before.first().unwrap().first_event_id, Some(1));
         assert_eq!(before.last().unwrap().last_event_id, 2);
@@ -2461,7 +2354,10 @@ mod tests {
 
         reconcile_journal(&directory, 2, 4096, None, &RealMaintenanceFileSystem).unwrap();
 
-        assert_eq!(fs::read(compressed_segment_path(&directory, 1)).unwrap(), published);
+        assert_eq!(
+            fs::read(compressed_segment_path(&directory, 1)).unwrap(),
+            published
+        );
         assert!(!segment_path(&directory, 1).exists());
         assert!(segment_path(&directory, 2).is_file());
         fs::remove_dir_all(directory).unwrap();
@@ -2490,7 +2386,7 @@ mod tests {
     fn reconciliation_rebuilds_a_different_published_compression_from_the_raw_copy() {
         let directory = temporary_directory("recovery-different-compression");
         let closed = write_raw_event(&directory, 1, 1, b"authoritative");
-        let different = encode_event(1, protocol::event_type::PTY_OUTPUT, b"different").unwrap();
+        let different = encode_event(1, JournalEvent::PtyOutput(b"different".to_vec())).unwrap();
         assert_ne!(different, closed);
         write_compressed_bytes(&directory, 1, &different);
         write_raw_event(&directory, 2, 2, b"active");
@@ -2511,10 +2407,14 @@ mod tests {
     fn reconciliation_preserves_one_ordered_event_per_logical_segment() {
         let directory = temporary_directory("recovery-logical-segments");
         let first = write_raw_event(&directory, 1, 1, b"first");
-        let stale = encode_event(1, protocol::event_type::PTY_OUTPUT, b"stale").unwrap();
+        let stale = encode_event(1, JournalEvent::PtyOutput(b"stale".to_vec())).unwrap();
         write_compressed_bytes(&directory, 1, &stale);
         let second = write_raw_event(&directory, 2, 2, b"second");
-        fs::write(compressed_temporary_segment_path(&directory, 2), b"abandoned").unwrap();
+        fs::write(
+            compressed_temporary_segment_path(&directory, 2),
+            b"abandoned",
+        )
+        .unwrap();
         let third = write_raw_event(&directory, 3, 3, b"third");
 
         reconcile_journal(&directory, 3, 4096, None, &RealMaintenanceFileSystem).unwrap();
@@ -2531,17 +2431,16 @@ mod tests {
     #[test]
     fn does_not_rotate_when_an_item_exactly_reaches_the_segment_limit() {
         let directory = temporary_directory("exact-segment-limit");
-        let first = encode_event(1, protocol::event_type::PTY_OUTPUT, b"one").unwrap();
-        let second = encode_event(2, protocol::event_type::PTY_OUTPUT, b"two").unwrap();
+        let first = encode_event(1, JournalEvent::PtyOutput(b"one".to_vec())).unwrap();
+        let second = encode_event(2, JournalEvent::PtyOutput(b"two".to_vec())).unwrap();
         let limit = u64::try_from(first.len() + second.len()).unwrap();
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
 
         writer
-            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, b"one")
+            .append_at_for_test(1, JournalEvent::PtyOutput(b"one".to_vec()))
             .unwrap();
         writer
-            .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"two")
+            .append_at_for_test(2, JournalEvent::PtyOutput(b"two".to_vec()))
             .unwrap();
         assert_eq!(
             fs::read(directory.join("00000001.cbor")).unwrap(),
@@ -2556,17 +2455,16 @@ mod tests {
     #[test]
     fn keeps_an_oversized_first_item_whole_then_rotates_before_the_next_item() {
         let directory = temporary_directory("oversized-item");
-        let first = encode_event(1, protocol::event_type::PTY_OUTPUT, b"whole").unwrap();
-        let second = encode_event(2, protocol::event_type::PTY_OUTPUT, b"next").unwrap();
+        let first = encode_event(1, JournalEvent::PtyOutput(b"whole".to_vec())).unwrap();
+        let second = encode_event(2, JournalEvent::PtyOutput(b"next".to_vec())).unwrap();
         let limit = u64::try_from(first.len() - 1).unwrap();
-        let mut writer =
-            JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(limit, 1024)).unwrap();
 
         writer
-            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, b"whole")
+            .append_at_for_test(1, JournalEvent::PtyOutput(b"whole".to_vec()))
             .unwrap();
         writer
-            .append_at_for_test(2, protocol::event_type::PTY_OUTPUT, b"next")
+            .append_at_for_test(2, JournalEvent::PtyOutput(b"next".to_vec()))
             .unwrap();
         writer.finish_maintenance().unwrap();
 
@@ -2599,16 +2497,25 @@ mod tests {
         let directory = temporary_directory("cbor-sequence");
         let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
         let first = writer
-            .append_at_for_test(0, protocol::event_type::PTY_OUTPUT, &[0, 0x1b, 0xff])
+            .append_at_for_test(0, JournalEvent::PtyOutput(vec![0, 0x1b, 0xff].to_vec()))
             .unwrap();
         writer.rotate().unwrap();
         let second = writer
-            .append_at_for_test(0, protocol::event_type::PTY_RESIZE, &protocol::pty_resize_payload(180, 50))
+            .append_at_for_test(
+                0,
+                JournalEvent::PtyResize {
+                    cols: 180,
+                    rows: 50,
+                },
+            )
             .unwrap();
         writer.finish_maintenance().unwrap();
 
         assert_eq!((first, second), (1, 2));
-        assert_eq!(decode_compressed_segment(&directory, 1), hex_bytes("830119010043001bff"));
+        assert_eq!(
+            decode_compressed_segment(&directory, 1),
+            hex_bytes("830119010043001bff")
+        );
         assert_eq!(
             fs::read(directory.join("00000002.cbor")).unwrap(),
             hex_bytes("83021901028218b41832"),
@@ -2626,24 +2533,28 @@ mod tests {
         ];
         let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
         writer
-            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, &[0, 0x1b, 0xff])
+            .append_at_for_test(1, JournalEvent::PtyOutput(vec![0, 0x1b, 0xff].to_vec()))
             .unwrap();
         writer
-            .append_at_for_test(2, protocol::event_type::PTY_RESIZE, &protocol::pty_resize_payload(180, 50))
+            .append_at_for_test(
+                2,
+                JournalEvent::PtyResize {
+                    cols: 180,
+                    rows: 50,
+                },
+            )
             .unwrap();
         writer
             .append_at_for_test(
                 3,
-                protocol::event_type::PTY_INPUT,
-                &protocol::pty_input_payload(input_id, &[0, 0xff]).unwrap(),
+                JournalEvent::PtyInput {
+                    command_id: input_id,
+                    payload: vec![0, 0xff],
+                },
             )
             .unwrap();
         writer
-            .append_at_for_test(
-                4,
-                protocol::event_type::PROCESS_EXITED,
-                &protocol::process_exited_payload(0, -1),
-            )
+            .append_at_for_test(4, JournalEvent::ProcessExited(0))
             .unwrap();
         let expected = hex_bytes(include_str!("../protocol/fixtures/session-events-v1.hex"));
         assert_eq!(fs::read(directory.join("00000001.cbor")).unwrap(), expected);
@@ -2660,39 +2571,29 @@ mod tests {
             "8619810167636f6d6d616e646773657373696f6e",
             "50707172737475767778797a7b7c7d7e7f410066667574757265",
         ));
-        let accepted = command_accepted_payload(sequence, &envelope);
-        writer
-            .append_at_for_test(1, protocol::event_type::COMMAND_ACCEPTED, &accepted)
-            .unwrap();
         let cases = [
             (protocol::CommandOutcome::Succeeded, ""),
             (protocol::CommandOutcome::Failed, "effect failed"),
             (protocol::CommandOutcome::Rejected, "rejected"),
             (protocol::CommandOutcome::Ambiguous, "ambiguous"),
         ];
-        let mut expected_records = vec![
-            protocol::encode_command_accepted(1, sequence, &envelope).unwrap(),
-        ];
+        let mut expected_records = Vec::new();
         for (index, (outcome, detail)) in cases.into_iter().enumerate() {
-            let command_id = format!("command.{index}");
-            let payload = command_result_payload(sequence, command_id.as_bytes(), outcome, detail.as_bytes());
             let event_id = 2 + index as u64;
             writer
                 .append_at_for_test(
                     event_id,
-                    protocol::event_type::COMMAND_RESULT,
-                    &payload,
+                    JournalEvent::CommandResult {
+                        operation_sequence: sequence,
+                        command_envelope: envelope.clone(),
+                        outcome,
+                        detail: detail.to_owned(),
+                    },
                 )
                 .unwrap();
             expected_records.push(
-                protocol::encode_command_result(
-                    event_id,
-                    sequence,
-                    command_id.as_bytes(),
-                    outcome,
-                    detail,
-                )
-                .unwrap(),
+                protocol::encode_command_result(event_id, sequence, &envelope, outcome, detail)
+                    .unwrap(),
             );
         }
         assert_eq!(
@@ -2706,12 +2607,14 @@ mod tests {
     fn session_start_failure_encodes_the_expected_record() {
         let directory = temporary_directory("session-start-failure");
         let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
-        let payload = protocol::session_start_failed_payload("command.start", "exec failed", 17).unwrap();
         writer
             .append_at_for_test(
                 1,
-                protocol::event_type::SESSION_START_FAILED,
-                &payload,
+                JournalEvent::SessionStartFailed {
+                    command_id: "command.start".to_owned(),
+                    diagnostic: "exec failed".to_owned(),
+                    omitted_byte_count: 17,
+                },
             )
             .unwrap();
         assert_eq!(
@@ -2726,49 +2629,39 @@ mod tests {
         let directory = temporary_directory("invalid-command-records");
         let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
         let invalid_writes = [
-            (protocol::event_type::COMMAND_ACCEPTED, vec![0_u8; 7]),
-            (
-                protocol::event_type::COMMAND_ACCEPTED,
-                command_accepted_payload(0, &[0x80]),
-            ),
-            (
-                protocol::event_type::COMMAND_ACCEPTED,
-                command_accepted_payload(1, &[]),
-            ),
-            (protocol::event_type::COMMAND_RESULT, vec![0_u8; 10]),
-            (
-                protocol::event_type::COMMAND_RESULT,
-                command_result_payload(1, b"bad/id", protocol::CommandOutcome::Failed, b"failed"),
-            ),
+            JournalEvent::CommandResult {
+                operation_sequence: 0,
+                command_envelope: vec![0x80],
+                outcome: protocol::CommandOutcome::Failed,
+                detail: "failed".to_owned(),
+            },
+            JournalEvent::CommandResult {
+                operation_sequence: 1,
+                command_envelope: vec![],
+                outcome: protocol::CommandOutcome::Failed,
+                detail: "failed".to_owned(),
+            },
+            JournalEvent::CommandResult {
+                operation_sequence: 1,
+                command_envelope: vec![0x80],
+                outcome: protocol::CommandOutcome::Succeeded,
+                detail: "detail".to_owned(),
+            },
+            JournalEvent::CommandResult {
+                operation_sequence: 1,
+                command_envelope: vec![0x80],
+                outcome: protocol::CommandOutcome::Failed,
+                detail: "x".repeat(4_097),
+            },
         ];
-        for (event_type, payload) in invalid_writes {
-            assert!(writer.append_at_for_test(1, event_type, &payload).is_err());
+        for event in invalid_writes {
+            assert!(writer.append_at_for_test(1, event).is_err());
         }
-        let unknown_outcome = command_result_payload(1, b"command", protocol::CommandOutcome::Failed, b"");
-        let mut unknown_outcome = unknown_outcome;
-        unknown_outcome[8 + 2 + b"command".len()] = 5;
-        assert!(writer
-            .append_at_for_test(1, protocol::event_type::COMMAND_RESULT, &unknown_outcome)
-            .is_err());
-        let invalid_utf8 = command_result_payload(
-            1,
-            b"command",
-            protocol::CommandOutcome::Failed,
-            &[0xff],
+        assert!(
+            fs::read(directory.join("00000001.cbor"))
+                .unwrap()
+                .is_empty()
         );
-        assert!(writer
-            .append_at_for_test(1, protocol::event_type::COMMAND_RESULT, &invalid_utf8)
-            .is_err());
-        let oversized_detail = command_result_payload(
-            1,
-            b"command",
-            protocol::CommandOutcome::Failed,
-            &vec![b'x'; 4097],
-        );
-        assert!(writer
-            .append_at_for_test(1, protocol::event_type::COMMAND_RESULT, &oversized_detail)
-            .is_err());
-        assert!(fs::read(directory.join("00000001.cbor")).unwrap().is_empty());
 
         fs::remove_dir_all(directory).unwrap();
     }
@@ -2786,15 +2679,17 @@ mod tests {
         )
         .unwrap();
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"buffered")
+            .append_buffered(JournalEvent::PtyOutput(b"buffered".to_vec()))
             .unwrap();
         assert_eq!(sync.calls.load(Ordering::SeqCst), 0);
 
         writer
-            .append_durable(
-                protocol::event_type::COMMAND_ACCEPTED,
-                &command_accepted_payload(1, &[0x80]),
-            )
+            .append_durable(JournalEvent::CommandResult {
+                operation_sequence: 1,
+                command_envelope: vec![0x80],
+                outcome: protocol::CommandOutcome::Succeeded,
+                detail: String::new(),
+            })
             .unwrap();
 
         assert_eq!(sync.calls.load(Ordering::SeqCst), 1);
@@ -2815,7 +2710,7 @@ mod tests {
         .unwrap();
 
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"buffered")
+            .append_buffered(JournalEvent::PtyOutput(b"buffered".to_vec()))
             .unwrap();
 
         assert_eq!(sync.calls.load(Ordering::SeqCst), 0);
@@ -2911,11 +2806,11 @@ mod tests {
         )
         .unwrap();
         let prefix_event_id = writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .append_buffered(JournalEvent::PtyOutput(b"prefix".to_vec()))
             .unwrap();
 
         assert!(matches!(
-            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"retry"),
+            writer.append_buffered(JournalEvent::PtyOutput(b"retry".to_vec())),
             Err(JournalError::Io(_))
         ));
         assert!(!segment_path(&directory, 2).exists());
@@ -2923,7 +2818,7 @@ mod tests {
         assert_eq!(writer.latest_event_id(), Some(prefix_event_id));
 
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"retry")
+            .append_buffered(JournalEvent::PtyOutput(b"retry".to_vec()))
             .unwrap();
         assert_eq!(writer.active_segment_number(), 2);
         drop(writer);
@@ -2942,19 +2837,22 @@ mod tests {
         )
         .unwrap();
         let prefix_event_id = writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .append_buffered(JournalEvent::PtyOutput(b"prefix".to_vec()))
             .unwrap();
 
         assert!(matches!(
-            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"rotation"),
+            writer.append_buffered(JournalEvent::PtyOutput(b"rotation".to_vec())),
             Err(JournalError::Maintenance(_))
         ));
         assert!(!segment_path(&directory, 2).exists());
         assert!(matches!(
-            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"x"),
+            writer.append_buffered(JournalEvent::PtyOutput(b"x".to_vec())),
             Err(JournalError::Maintenance(_))
         ));
-        assert!(matches!(writer.finish_durably(0), Err(JournalError::Maintenance(_))));
+        assert!(matches!(
+            writer.finish_durably(0),
+            Err(JournalError::Maintenance(_))
+        ));
         assert_eq!(writer.active_segment_number(), 1);
         assert_eq!(writer.latest_event_id(), Some(prefix_event_id));
         drop(writer);
@@ -2964,22 +2862,18 @@ mod tests {
     #[test]
     fn preexisting_successor_poisons_the_writer() {
         let directory = temporary_directory("preexisting-successor");
-        let mut writer = JournalWriter::create(
-            &directory,
-            journal_config(1, u64::MAX),
-        )
-        .unwrap();
+        let mut writer = JournalWriter::create(&directory, journal_config(1, u64::MAX)).unwrap();
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .append_buffered(JournalEvent::PtyOutput(b"prefix".to_vec()))
             .unwrap();
         File::create(segment_path(&directory, 2)).unwrap();
 
         assert!(matches!(
-            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"rotation"),
+            writer.append_buffered(JournalEvent::PtyOutput(b"rotation".to_vec())),
             Err(JournalError::Maintenance(_))
         ));
         assert!(matches!(
-            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"x"),
+            writer.append_buffered(JournalEvent::PtyOutput(b"x".to_vec())),
             Err(JournalError::Maintenance(_))
         ));
         drop(writer);
@@ -2999,12 +2893,12 @@ mod tests {
         )
         .unwrap();
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"first")
+            .append_buffered(JournalEvent::PtyOutput(b"first".to_vec()))
             .unwrap();
         assert_eq!(sync.calls.load(Ordering::SeqCst), 0);
 
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"second")
+            .append_buffered(JournalEvent::PtyOutput(b"second".to_vec()))
             .unwrap();
 
         assert_eq!(writer.active_segment_number(), 2);
@@ -3026,14 +2920,16 @@ mod tests {
         )
         .unwrap();
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .append_buffered(JournalEvent::PtyOutput(b"prefix".to_vec()))
             .unwrap();
 
         writer
-            .append_durable(
-                protocol::event_type::COMMAND_ACCEPTED,
-                &command_accepted_payload(1, &[0x80]),
-            )
+            .append_durable(JournalEvent::CommandResult {
+                operation_sequence: 1,
+                command_envelope: vec![0x80],
+                outcome: protocol::CommandOutcome::Succeeded,
+                detail: String::new(),
+            })
             .unwrap();
 
         assert_eq!(
@@ -3082,22 +2978,22 @@ mod tests {
         let accepted = fs::read(segment_path(&directory, 1)).unwrap();
 
         assert!(matches!(
-            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"late buffered"),
+            writer.append_buffered(JournalEvent::PtyOutput(b"late buffered".to_vec())),
             Err(JournalError::Finished)
         ));
         assert!(matches!(
-            writer.append_durable(
-                protocol::event_type::COMMAND_RESULT,
-                &command_result_payload(
-                    1,
-                    b"late-result",
-                    protocol::CommandOutcome::Succeeded,
-                    b"",
-                ),
-            ),
+            writer.append_durable(JournalEvent::CommandResult {
+                operation_sequence: 1,
+                command_envelope: vec![0x80],
+                outcome: protocol::CommandOutcome::Succeeded,
+                detail: String::new(),
+            }),
             Err(JournalError::Finished)
         ));
-        assert!(matches!(writer.finish_durably(38), Err(JournalError::Finished)));
+        assert!(matches!(
+            writer.finish_durably(38),
+            Err(JournalError::Finished)
+        ));
         assert_eq!(writer.latest_event_id(), Some(exit_event_id));
         assert_eq!(fs::read(segment_path(&directory, 1)).unwrap(), accepted);
         drop(writer);
@@ -3110,12 +3006,9 @@ mod tests {
         let sync = Arc::new(FailingOnceRecordFileSync {
             calls: AtomicUsize::new(0),
         });
-        let mut writer = JournalWriter::create_with_record_file_sync(
-            &directory,
-            JournalConfig::default(),
-            sync,
-        )
-        .unwrap();
+        let mut writer =
+            JournalWriter::create_with_record_file_sync(&directory, JournalConfig::default(), sync)
+                .unwrap();
 
         assert!(writer.finish_durably(17).is_err());
         assert!(fs::read(segment_path(&directory, 1)).unwrap().is_empty());
@@ -3135,25 +3028,28 @@ mod tests {
         let sync = Arc::new(FailingTwiceRecordFileSync {
             calls: AtomicUsize::new(0),
         });
-        let mut writer = JournalWriter::create_with_record_file_sync(
-            &directory,
-            JournalConfig::default(),
-            sync,
-        )
-        .unwrap();
+        let mut writer =
+            JournalWriter::create_with_record_file_sync(&directory, JournalConfig::default(), sync)
+                .unwrap();
         writer
-            .append_at_for_test(1, protocol::event_type::PTY_OUTPUT, b"preserved prefix")
+            .append_at_for_test(1, JournalEvent::PtyOutput(b"preserved prefix".to_vec()))
             .unwrap();
         let prefix = fs::read(segment_path(&directory, 1)).unwrap();
 
-        assert!(matches!(writer.finish_durably(17), Err(JournalError::Maintenance(_))));
+        assert!(matches!(
+            writer.finish_durably(17),
+            Err(JournalError::Maintenance(_))
+        ));
         assert_eq!(fs::read(segment_path(&directory, 1)).unwrap(), prefix);
         assert_eq!(writer.latest_event_id(), Some(1));
         assert!(matches!(
-            writer.append_buffered(protocol::event_type::PTY_OUTPUT, b"late"),
+            writer.append_buffered(JournalEvent::PtyOutput(b"late".to_vec())),
             Err(JournalError::Maintenance(_))
         ));
-        assert!(matches!(writer.finish_durably(17), Err(JournalError::Maintenance(_))));
+        assert!(matches!(
+            writer.finish_durably(17),
+            Err(JournalError::Maintenance(_))
+        ));
         assert_eq!(fs::read(segment_path(&directory, 1)).unwrap(), prefix);
         drop(writer);
         fs::remove_dir_all(directory).unwrap();
@@ -3187,7 +3083,7 @@ mod tests {
         )
         .unwrap();
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"prefix")
+            .append_buffered(JournalEvent::PtyOutput(b"prefix".to_vec()))
             .unwrap();
 
         let event_id = writer.finish_durably(-9).unwrap();
@@ -3224,14 +3120,16 @@ mod tests {
         )
         .unwrap();
         writer
-            .append_buffered(protocol::event_type::PTY_OUTPUT, b"buffered prefix")
+            .append_buffered(JournalEvent::PtyOutput(b"buffered prefix".to_vec()))
             .unwrap();
 
         writer
-            .append_durable(
-                protocol::event_type::COMMAND_ACCEPTED,
-                &command_accepted_payload(1, &[0x80]),
-            )
+            .append_durable(JournalEvent::CommandResult {
+                operation_sequence: 1,
+                command_envelope: vec![0x80],
+                outcome: protocol::CommandOutcome::Succeeded,
+                detail: String::new(),
+            })
             .unwrap();
 
         assert_eq!(writer.active_segment_number(), 2);
@@ -3245,70 +3143,27 @@ mod tests {
         let sync = Arc::new(FailingOnceRecordFileSync {
             calls: AtomicUsize::new(0),
         });
-        let mut writer = JournalWriter::create_with_record_file_sync(
-            &directory,
-            JournalConfig::default(),
-            sync,
-        )
-        .unwrap();
-        let payload = command_accepted_payload(1, &[0x80]);
+        let mut writer =
+            JournalWriter::create_with_record_file_sync(&directory, JournalConfig::default(), sync)
+                .unwrap();
+        let event = || JournalEvent::CommandResult {
+            operation_sequence: 1,
+            command_envelope: vec![0x80],
+            outcome: protocol::CommandOutcome::Succeeded,
+            detail: String::new(),
+        };
 
-        assert!(writer
-            .append_durable(protocol::event_type::COMMAND_ACCEPTED, &payload)
-            .is_err());
-        assert!(fs::read(directory.join("00000001.cbor")).unwrap().is_empty());
+        assert!(writer.append_durable(event()).is_err());
+        assert!(
+            fs::read(directory.join("00000001.cbor"))
+                .unwrap()
+                .is_empty()
+        );
 
-        let event_id = writer
-            .append_durable(protocol::event_type::COMMAND_ACCEPTED, &payload)
-            .unwrap();
+        let event_id = writer.append_durable(event()).unwrap();
         let scans = scan_segments(&discover_segments(&directory).unwrap()).unwrap();
         assert_eq!(scans[0].first_event_id, Some(event_id));
         assert_eq!(scans[0].last_event_id, event_id);
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn rejects_invalid_known_payloads_on_write() {
-        let directory = temporary_directory("invalid-known-payloads");
-        let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
-        assert!(writer
-            .append_at_for_test(1, protocol::event_type::PTY_RESIZE, &protocol::pty_resize_payload(0, 50))
-            .is_err());
-        assert!(writer
-            .append_at_for_test(
-                1,
-                protocol::event_type::PTY_RESIZE,
-                &protocol::pty_resize_payload(65536, 50),
-            )
-            .is_err());
-        assert!(writer
-            .append_at_for_test(1, protocol::event_type::PROCESS_STARTED, &0_u64.to_le_bytes())
-            .is_err());
-        let mut invalid_signal = Vec::new();
-        invalid_signal.extend_from_slice(&1_u16.to_le_bytes());
-        invalid_signal.extend_from_slice(&0_u16.to_le_bytes());
-        invalid_signal.extend_from_slice(&(-2_i32).to_le_bytes());
-        assert!(writer
-            .append_at_for_test(1, protocol::event_type::SIGNAL, &invalid_signal)
-            .is_err());
-        assert!(fs::read(directory.join("00000001.cbor")).unwrap().is_empty());
-        let delivered_signal = crate::host::signal_payload(1, 0);
-        assert_eq!(
-            writer
-                .append_at_for_test(1, protocol::event_type::SIGNAL, &delivered_signal)
-                .unwrap(),
-            1,
-        );
-        assert_eq!(
-            fs::read(directory.join("00000001.cbor")).unwrap(),
-            protocol::encode_signal(1, 1, 0).unwrap(),
-        );
-        assert!(protocol::encode_signal(1, 1, 2).is_ok());
-        assert!(protocol::encode_signal(1, 1, 0).is_ok());
-        assert!(protocol::encode_signal(1, 1, -2).is_err());
-        assert!(protocol::encode_signal(1, 6, -1).is_err());
-        assert!(protocol::encode_signal(1, 0xffff, -1).is_err());
-        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3378,7 +3233,11 @@ mod tests {
         .concat();
         let compressed = zstd::stream::encode_all(closed.as_slice(), 1).unwrap();
         fs::write(directory.join("00000007.cbor.zst"), compressed).unwrap();
-        fs::write(directory.join("00000008.cbor"), hex_bytes("8303190100457468697264")).unwrap();
+        fs::write(
+            directory.join("00000008.cbor"),
+            hex_bytes("8303190100457468697264"),
+        )
+        .unwrap();
 
         let scans = scan_segments(&discover_segments(&directory).unwrap()).unwrap();
         assert_eq!(scans.len(), 2);
@@ -3425,7 +3284,11 @@ mod tests {
         let bytes = [hex_bytes("8307190100456669727374"), vec![0xff]].concat();
         let compressed = zstd::stream::encode_all(bytes.as_slice(), 1).unwrap();
         fs::write(directory.join("00000001.cbor.zst"), compressed).unwrap();
-        fs::write(directory.join("00000002.cbor"), hex_bytes("8308190100467365636f6e64")).unwrap();
+        fs::write(
+            directory.join("00000002.cbor"),
+            hex_bytes("8308190100467365636f6e64"),
+        )
+        .unwrap();
         let segments = discover_segments(&directory).unwrap();
 
         assert!(scan_path(&segments[0], ScanExtent::AllRecords, false, 0).is_err());
@@ -3531,32 +3394,42 @@ mod tests {
     #[test]
     fn metadata_reader_ignores_a_future_field() {
         let directory = temporary_directory("future-metadata");
-        let mut value: serde_json::Value = serde_json::from_str(include_str!(
-            "../protocol/fixtures/metadata-v1.json"
-        ))
-        .unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(include_str!("../protocol/fixtures/metadata-v1.json")).unwrap();
         value
             .as_object_mut()
             .unwrap()
             .insert("futureField".to_owned(), serde_json::json!(true));
-        fs::write(directory.join(METADATA_NAME), serde_json::to_vec(&value).unwrap()).unwrap();
+        fs::write(
+            directory.join(METADATA_NAME),
+            serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
 
-        assert_eq!(read_metadata(&directory).unwrap().session_id, "019d-session-fixture");
+        assert_eq!(
+            read_metadata(&directory).unwrap().session_id,
+            "019d-session-fixture"
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn metadata_reader_accepts_legacy_fail_unavailable_policy() {
         let directory = temporary_directory("legacy-fail-metadata");
-        let mut value: serde_json::Value = serde_json::from_str(include_str!(
-            "../protocol/fixtures/metadata-v1.json"
-        ))
-        .unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(include_str!("../protocol/fixtures/metadata-v1.json")).unwrap();
         value["sandbox"]["unavailablePolicy"] = serde_json::json!("fail");
-        fs::write(directory.join(METADATA_NAME), serde_json::to_vec(&value).unwrap()).unwrap();
+        fs::write(
+            directory.join(METADATA_NAME),
+            serde_json::to_vec(&value).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(
-            read_metadata(&directory).unwrap().sandbox.unavailable_policy,
+            read_metadata(&directory)
+                .unwrap()
+                .sandbox
+                .unavailable_policy,
             SandboxUnavailablePolicy::Fail
         );
         fs::remove_dir_all(directory).unwrap();

@@ -59,9 +59,6 @@ public final class SessionControlClient {
                 return decoded;
             }
             ControlResult.Failed malformed = (ControlResult.Failed) decoded;
-            if (!(command instanceof ControlCommand.Input)) {
-                return failed(command, ControlResult.FailureKind.AMBIGUOUS_DELIVERY, malformed.detail());
-            }
             firstKind = malformed.kind();
             firstDetail = malformed.detail();
             firstMayHaveDelivered = true;
@@ -71,7 +68,7 @@ public final class SessionControlClient {
             firstDetail = failure.detail();
             firstMayHaveDelivered = failure.mayHaveDelivered();
         }
-        if (command instanceof ControlCommand.Input && !deadline.expired()) {
+        if (!(command instanceof ControlCommand.Status) && !deadline.expired()) {
             ControlTransport.Exchange retry = transport.exchange(endpoint, request, deadline);
             if (retry instanceof ControlTransport.Exchange.Response response) {
                 ControlResult decoded = new NativeControlCodec().decode(command, requestId, response.frame());

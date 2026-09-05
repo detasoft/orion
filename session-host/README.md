@@ -110,28 +110,53 @@ maximum indefinitely. The active raw segment is never deleted. Readers behind
 a deleted prefix receive a retention gap whose floor is the first event in the
 oldest remaining segment.
 
-## Idempotent Session Controls
+## Session Controls
 
-Established-session `INPUT`, `RESIZE`, `SIGNAL`, and `TERMINATE` requests use
-payload schema 2. AgentD assigns each operation a nonzero monotonic sequence
-and supplies its CommandId, the exact opaque server CBOR command item, and the
-typed effect bytes. The host compares all of those bytes for retry identity;
-it never decodes or re-encodes the server command item.
+Established-session `INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`, and `ACK_JOURNAL`
+requests use payload schema 2. AgentD assigns each operation a nonzero monotonic sequence
+and supplies the exact opaque server CBOR command item and the typed effect
+bytes. The host never decodes or re-encodes the server command item. A sequence
+at or below the accepted-sequence high-water mark is stale,
+so a reconnect cannot repeat an already accepted effect.
 
-Before applying an external effect, the live host durably writes
-`COMMAND_ACCEPTED`. It then writes a durable `COMMAND_RESULT` and returns that
-result event ID. A matching completed retry returns the original result ID
-without repeating the effect. A matching pending retry reports that the
-operation is still in progress. Conflicting or unexplained stale sequences are
-rejected. `--max-unacknowledged-operations` bounds the live retry ledger and
-defaults to 4096; server acknowledgement evicts covered completed entries but
-does not lower the host's accepted-sequence high-water mark.
+The host applies each new effect synchronously and writes one `COMMAND_RESULT`
+with an empty detail on success or diagnostic detail on an application failure.
+After a new operation passes the high-water mark, the host returns `RECEIVED`
+with the sequence in the response header and then applies the effect. This is
+an admission receipt, not a durable journal confirmation; AgentD observes
+durable acceptance and results in the journal. Validation and stale-sequence
+failures return `RECEIVED` with an error payload. If a journal append
+fails, the host reports it only on stderr and does not retry the effect or the
+append.
+
+The sequence identifies an operation and protects it from replay; it does not
+define FIFO order across control connections. Ordinary effects are mutually
+exclusive, but `TERMINATE` bypasses the effect mutex so it can signal descendants
+while a blocked ordinary effect is still running. The order in which different
+connections acquire the effect mutex is not preserved in the sequence.
+`RECEIVED` may precede an earlier effect or result, so journal readers match
+`COMMAND_RESULT` records by sequence rather than by their physical record order.
+
+PTY output remains continuously drained when a `PTY_OUTPUT` append fails. The
+host reports the failure on stderr and attempts later output chunks again, so a
+transient writer failure may recover. If the writer cannot recover, affected
+output is discarded and the journal is incomplete; the host still keeps the
+child and PTY service running.
+
+`COMMAND_RESULT` describes the host's execution attempt, not a rollback
+boundary. `Failed` does not imply that no side effect occurred: `INPUT` may
+have transferred only part of the requested bytes, and a signal may have been
+delivered to some or none of its targets. The journal's `PTY_INPUT` record
+contains the requested bytes, not a delivery acknowledgement. If no
+`COMMAND_RESULT` exists, the effect is unknown because the host may have
+executed it before the journal append failed. Retrying with a new sequence is
+a new attempt and may repeat an earlier partial effect.
 
 AgentD recovery uses the server's durably committed prefix plus the later
 suffix in the still-running host journal. The host does not reconstruct a
 failed incarnation, and AgentD keeps no private durable command cursor. After
 the server durably commits a complete journal prefix, AgentD may send its event
-ID through `ACK_JOURNAL`. The host atomically persists that monotonic watermark
-beside the journal before requesting deletion. The sidecar is local deletion
-permission only: it is not a journal record, an AgentD recovery cursor, or
+ID through the `ACK_JOURNAL` operation. The host atomically persists that
+monotonic watermark beside the journal before requesting deletion. The sidecar
+is local deletion permission only: it is not an AgentD recovery cursor or
 evidence that the server committed anything by itself.

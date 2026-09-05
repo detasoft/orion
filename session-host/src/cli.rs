@@ -9,7 +9,6 @@ pub use crate::journal::{DEFAULT_JOURNAL_MAX_BYTES, DEFAULT_JOURNAL_SEGMENT_BYTE
 pub const DEFAULT_COLS: u16 = 160;
 pub const DEFAULT_ROWS: u16 = 50;
 pub const DEFAULT_TERM: &str = "xterm-256color";
-pub const DEFAULT_MAX_UNACKNOWLEDGED_OPERATIONS: usize = 4096;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct SessionOptions {
@@ -24,7 +23,6 @@ pub struct SessionOptions {
     pub sandbox_policy: Option<PathBuf>,
     pub journal_segment_bytes: u64,
     pub journal_max_bytes: u64,
-    pub max_unacknowledged_operations: usize,
     pub command: Vec<OsString>,
 }
 
@@ -64,10 +62,13 @@ where
     let _program = arguments.next();
     let remaining: Vec<OsString> = arguments.collect();
 
-    if remaining.as_slice() == [OsStr::new("--help")] || remaining.as_slice() == [OsStr::new("-h")] {
+    if remaining.as_slice() == [OsStr::new("--help")] || remaining.as_slice() == [OsStr::new("-h")]
+    {
         return Ok(Command::Help);
     }
-    if remaining.as_slice() == [OsStr::new("--version")] || remaining.as_slice() == [OsStr::new("-V")] {
+    if remaining.as_slice() == [OsStr::new("--version")]
+        || remaining.as_slice() == [OsStr::new("-V")]
+    {
         return Ok(Command::Version);
     }
 
@@ -86,7 +87,6 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
     let mut sandbox_policy = None;
     let mut journal_segment_bytes = None;
     let mut journal_max_bytes = None;
-    let mut max_unacknowledged_operations = None;
     let mut index = 0;
 
     while index < arguments.len() {
@@ -103,8 +103,6 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             let journal_segment_bytes =
                 journal_segment_bytes.unwrap_or(DEFAULT_JOURNAL_SEGMENT_BYTES);
             let journal_max_bytes = journal_max_bytes.unwrap_or(DEFAULT_JOURNAL_MAX_BYTES);
-            let max_unacknowledged_operations = max_unacknowledged_operations
-                .unwrap_or(DEFAULT_MAX_UNACKNOWLEDGED_OPERATIONS);
             if journal_max_bytes < journal_segment_bytes {
                 return Err(ParseError::new(
                     "--journal-max-bytes must be greater than or equal to --journal-segment-bytes",
@@ -122,7 +120,6 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
                 sandbox_policy,
                 journal_segment_bytes,
                 journal_max_bytes,
-                max_unacknowledged_operations,
                 command,
             }));
         }
@@ -147,19 +144,20 @@ fn parse_session(arguments: Vec<OsString>) -> Result<Command, ParseError> {
             "--cols" => set_once(&mut cols, parse_dimension(value, option)?, option)?,
             "--rows" => set_once(&mut rows, parse_dimension(value, option)?, option)?,
             "--term" => set_once(&mut term, parse_environment_value(value, option)?, option)?,
-            "--colorterm" => {
-                set_once(&mut colorterm, parse_environment_value(value, option)?, option)?
-            }
+            "--colorterm" => set_once(
+                &mut colorterm,
+                parse_environment_value(value, option)?,
+                option,
+            )?,
             "--sandbox-policy" => set_once(&mut sandbox_policy, PathBuf::from(value), option)?,
-            "--journal-segment-bytes" => {
-                set_once(&mut journal_segment_bytes, parse_journal_bytes(value, option)?, option)?
-            }
-            "--journal-max-bytes" => {
-                set_once(&mut journal_max_bytes, parse_journal_bytes(value, option)?, option)?
-            }
-            "--max-unacknowledged-operations" => set_once(
-                &mut max_unacknowledged_operations,
-                parse_positive_usize(value, option)?,
+            "--journal-segment-bytes" => set_once(
+                &mut journal_segment_bytes,
+                parse_journal_bytes(value, option)?,
+                option,
+            )?,
+            "--journal-max-bytes" => set_once(
+                &mut journal_max_bytes,
+                parse_journal_bytes(value, option)?,
                 option,
             )?,
             _ => return Err(ParseError::new(format!("unknown option: {option}"))),
@@ -218,27 +216,17 @@ fn parse_dimension(value: &OsStr, option: &str) -> Result<u16, ParseError> {
         .parse::<u16>()
         .map_err(|_| ParseError::new(format!("{option} must be between 1 and 65535")))?;
     if parsed == 0 {
-        return Err(ParseError::new(format!("{option} must be between 1 and 65535")));
+        return Err(ParseError::new(format!(
+            "{option} must be between 1 and 65535"
+        )));
     }
     Ok(parsed)
 }
 
 fn parse_journal_bytes(value: &OsStr, option: &str) -> Result<u64, ParseError> {
     let error = || ParseError::new(format!("{option} must be a positive decimal integer"));
-    let value = value
-        .to_str()
-        .ok_or_else(&error)?;
-    let parsed = value.parse::<u64>().map_err(|_| error())?;
-    if parsed == 0 {
-        return Err(error());
-    }
-    Ok(parsed)
-}
-
-fn parse_positive_usize(value: &OsStr, option: &str) -> Result<usize, ParseError> {
-    let error = || ParseError::new(format!("{option} must be a positive decimal integer"));
     let value = value.to_str().ok_or_else(&error)?;
-    let parsed = value.parse::<usize>().map_err(|_| error())?;
+    let parsed = value.parse::<u64>().map_err(|_| error())?;
     if parsed == 0 {
         return Err(error());
     }
@@ -312,8 +300,6 @@ mod tests {
             "4096",
             "--journal-max-bytes",
             "16384",
-            "--max-unacknowledged-operations",
-            "8192",
             "--",
             "bash",
             "-l",
@@ -334,7 +320,6 @@ mod tests {
         assert_eq!(options.sandbox_policy, Some(PathBuf::from("/policy.json")));
         assert_eq!(options.journal_segment_bytes, 4096);
         assert_eq!(options.journal_max_bytes, 16384);
-        assert_eq!(options.max_unacknowledged_operations, 8192);
         assert_eq!(options.command, strings(&["bash", "-l"]));
     }
 
@@ -363,7 +348,6 @@ mod tests {
         assert_eq!(options.term, DEFAULT_TERM);
         assert_eq!(options.journal_segment_bytes, DEFAULT_JOURNAL_SEGMENT_BYTES);
         assert_eq!(options.journal_max_bytes, DEFAULT_JOURNAL_MAX_BYTES);
-        assert_eq!(options.max_unacknowledged_operations, 4096);
     }
 
     #[test]
@@ -410,7 +394,10 @@ mod tests {
             "--",
             "bash",
         ]));
-        assert_eq!(duplicate.unwrap_err().to_string(), "duplicate option: --session-id");
+        assert_eq!(
+            duplicate.unwrap_err().to_string(),
+            "duplicate option: --session-id"
+        );
 
         let duplicate = parse(session_arguments(&[
             "--start-command-id",
@@ -421,18 +408,11 @@ mod tests {
             "duplicate option: --start-command-id"
         );
 
-        let invalid_size = parse(strings(&[
-            "session-host",
-            "--cols",
-            "0",
-            "--",
-            "bash",
-        ]));
+        let invalid_size = parse(strings(&["session-host", "--cols", "0", "--", "bash"]));
         assert_eq!(
             invalid_size.unwrap_err().to_string(),
             "--cols must be between 1 and 65535"
         );
-
     }
 
     #[test]
@@ -467,7 +447,10 @@ mod tests {
         for option in ["--journal-segment-bytes", "--journal-max-bytes"] {
             let result = parse(session_arguments(&[option, "4096", option, "8192"]));
 
-            assert_eq!(result.unwrap_err().to_string(), format!("duplicate option: {option}"));
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                format!("duplicate option: {option}")
+            );
         }
     }
 
@@ -484,31 +467,5 @@ mod tests {
             result.unwrap_err().to_string(),
             "--journal-max-bytes must be greater than or equal to --journal-segment-bytes"
         );
-    }
-
-    #[test]
-    fn parses_and_validates_the_unacknowledged_operation_capacity() {
-        let Command::Run(options) = parse(session_arguments(&[
-            "--max-unacknowledged-operations",
-            "8192",
-        ]))
-        .unwrap()
-        else {
-            panic!("expected run command");
-        };
-        assert_eq!(options.max_unacknowledged_operations, 8192);
-
-        for values in [
-            vec!["--max-unacknowledged-operations", "0"],
-            vec!["--max-unacknowledged-operations", "not-a-number"],
-            vec![
-                "--max-unacknowledged-operations",
-                "1",
-                "--max-unacknowledged-operations",
-                "2",
-            ],
-        ] {
-            assert!(parse(session_arguments(&values)).is_err());
-        }
     }
 }

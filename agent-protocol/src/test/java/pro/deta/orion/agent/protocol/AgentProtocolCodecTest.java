@@ -337,7 +337,7 @@ class AgentProtocolCodecTest {
                 new AgentMessage.Signal(COMMAND_ID, SESSION_ID, AgentMessage.SignalKind.INTERRUPT, -1),
                 new AgentMessage.Signal(COMMAND_ID, SESSION_ID, AgentMessage.SignalKind.PLATFORM, 9),
                 new AgentMessage.Terminate(
-                        COMMAND_ID, SESSION_ID, AgentMessage.TerminationMode.GRACEFUL, 5_000),
+                        COMMAND_ID, SESSION_ID, AgentMessage.TerminationMode.GRACEFUL),
                 new AgentMessage.SessionOpen(
                         SESSION_ID,
                         Optional.of(new EventId(4)),

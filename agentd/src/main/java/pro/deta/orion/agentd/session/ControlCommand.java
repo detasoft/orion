@@ -13,9 +13,20 @@ public sealed interface ControlCommand {
         return Optional.empty();
     }
 
-    record Input(CommandId id, UUID inputId, ProtocolBytes bytes) implements ControlCommand {
+    record Input(
+            CommandId id,
+            long operationSequence,
+            ProtocolBytes commandEnvelope,
+            UUID inputId,
+            ProtocolBytes bytes
+    ) implements ControlCommand {
         public Input {
             Objects.requireNonNull(id, "id");
+            requireOperationSequence(operationSequence);
+            Objects.requireNonNull(commandEnvelope, "commandEnvelope");
+            if (commandEnvelope.toByteArray().length == 0) {
+                throw new IllegalArgumentException("command envelope must not be empty");
+            }
             Objects.requireNonNull(inputId, "inputId");
             Objects.requireNonNull(bytes, "bytes");
         }
@@ -26,9 +37,20 @@ public sealed interface ControlCommand {
         }
     }
 
-    record Resize(CommandId id, int columns, int rows) implements ControlCommand {
+    record Resize(
+            CommandId id,
+            long operationSequence,
+            ProtocolBytes commandEnvelope,
+            int columns,
+            int rows
+    ) implements ControlCommand {
         public Resize {
             Objects.requireNonNull(id, "id");
+            requireOperationSequence(operationSequence);
+            Objects.requireNonNull(commandEnvelope, "commandEnvelope");
+            if (commandEnvelope.toByteArray().length == 0) {
+                throw new IllegalArgumentException("command envelope must not be empty");
+            }
             requireDimension(columns, "columns");
             requireDimension(rows, "rows");
         }
@@ -39,9 +61,20 @@ public sealed interface ControlCommand {
         }
     }
 
-    record Signal(CommandId id, AgentMessage.SignalKind kind, int platformCode) implements ControlCommand {
+    record Signal(
+            CommandId id,
+            long operationSequence,
+            ProtocolBytes commandEnvelope,
+            AgentMessage.SignalKind kind,
+            int platformCode
+    ) implements ControlCommand {
         public Signal {
             Objects.requireNonNull(id, "id");
+            requireOperationSequence(operationSequence);
+            Objects.requireNonNull(commandEnvelope, "commandEnvelope");
+            if (commandEnvelope.toByteArray().length == 0) {
+                throw new IllegalArgumentException("command envelope must not be empty");
+            }
             Objects.requireNonNull(kind, "kind");
             if (kind == AgentMessage.SignalKind.PLATFORM && platformCode < 0) {
                 throw new IllegalArgumentException("platform signal requires a non-negative code");
@@ -57,10 +90,20 @@ public sealed interface ControlCommand {
         }
     }
 
-    record Terminate(CommandId id, AgentMessage.TerminationMode mode, long graceMillis)
-            implements ControlCommand {
+    record Terminate(
+            CommandId id,
+            long operationSequence,
+            ProtocolBytes commandEnvelope,
+            AgentMessage.TerminationMode mode,
+            long graceMillis
+    ) implements ControlCommand {
         public Terminate {
             Objects.requireNonNull(id, "id");
+            requireOperationSequence(operationSequence);
+            Objects.requireNonNull(commandEnvelope, "commandEnvelope");
+            if (commandEnvelope.toByteArray().length == 0) {
+                throw new IllegalArgumentException("command envelope must not be empty");
+            }
             Objects.requireNonNull(mode, "mode");
             if (graceMillis < 0 || graceMillis > 0xffff_ffffL) {
                 throw new IllegalArgumentException("graceMillis must fit an unsigned 32-bit integer");
@@ -74,6 +117,12 @@ public sealed interface ControlCommand {
     }
 
     record Status() implements ControlCommand {
+    }
+
+    private static void requireOperationSequence(long operationSequence) {
+        if (operationSequence == 0) {
+            throw new IllegalArgumentException("operationSequence must be non-zero");
+        }
     }
 
     private static void requireDimension(int value, String name) {

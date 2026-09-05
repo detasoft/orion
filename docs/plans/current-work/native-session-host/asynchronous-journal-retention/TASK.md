@@ -1,6 +1,6 @@
 # Move Acknowledged Retention Off the Writer Path
 
-Status: todo
+Status: complete
 Depends on:
 completed explicit journal durability,
 completed `ACK_JOURNAL` durability and retention gate
@@ -11,7 +11,7 @@ host state while physical retention scans and deletes journal segments.
 ## Scope
 
 - Under the existing serialized control boundary, durably advance the monotonic
-  acknowledgement watermark and update the operation ledger.
+  acknowledgement watermark.
 - Submit the greatest acknowledged watermark to a coalescing maintenance queue,
   release shared state, and return the ACK without waiting for physical
   deletion.

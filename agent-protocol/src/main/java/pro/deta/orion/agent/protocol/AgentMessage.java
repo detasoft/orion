@@ -257,15 +257,12 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         }
     }
 
-    record Terminate(CommandId commandId, SessionId sessionId, TerminationMode mode, long graceMillis)
+    record Terminate(CommandId commandId, SessionId sessionId, TerminationMode mode)
             implements AgentMessage {
         public Terminate {
             Objects.requireNonNull(commandId, "commandId");
             Objects.requireNonNull(sessionId, "sessionId");
             Objects.requireNonNull(mode, "mode");
-            if (graceMillis < 0 || graceMillis > 0xffff_ffffL) {
-                throw new IllegalArgumentException("graceMillis must fit an unsigned 32-bit integer");
-            }
         }
 
         @Override

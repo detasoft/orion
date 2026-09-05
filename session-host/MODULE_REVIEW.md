@@ -1,233 +1,157 @@
 # Module Review: `session-host`
 
-Date: 2026-09-02  
-Status: reviewed in isolation
+Date: 2026-09-07
+Status: reviewed in isolation; contract questions remain open
 
 ## Scope and coverage
 
-This review covers the module's Maven and Cargo build definitions, Rust sources, protocol specification,
-fixtures, module README, Unix integration tests, and module-specific history. It deliberately does not inspect
-callers or implementations in other modules.
+This review covers the module's Rust sources, protocol specification, module README, Unix tests, build files,
+and current task-tree requirements. It deliberately does not inspect callers or implementations in other
+modules.
 
 The review is static and read-only. Maven and Cargo verification were not run because review verification
 belongs to the implementation workflow.
 
-The module currently supports Linux as its production platform and macOS for local development. The Windows
-implementation is an explicit unsupported stub and is not treated as a defect.
+Linux is the production platform. macOS provides development support with documented process-tracking limits.
+Windows execution remains an unsupported stub and is not treated as a defect in the current module state.
 
 ## Current conceptual model
 
-`session-host` is a native process owner with five internal responsibilities:
+`session-host` owns an interactive child process tree, its PTY, one append-only session journal, a metadata
+manifest, and a local control endpoint.
 
-1. Parse and validate a session command.
-2. Start a child on a PTY and track its descendant process tree.
-3. Serialize terminal and lifecycle events into an append-only journal.
-4. publish a JSON metadata snapshot for discovery and status.
-5. Serve control requests over a Unix-domain socket.
+The journal is the durable source of terminal, command, and process history. Metadata is a discovery manifest,
+not a journal index or lifecycle replica. The main thread owns process-tree observation and finalization; a PTY
+reader drains output; an accept thread starts one worker per control connection. `SharedState` serializes journal
+writes and mutable session data. A separate operation mutex serializes ordinary effects, while `TERMINATE`
+bypasses it so a blocked `INPUT` cannot prevent process-tree signaling.
 
-The main thread owns session completion. A PTY reader thread records output, an accept thread creates one
-detached worker per control connection, and graceful termination creates detached timer threads. A single
-`SharedState` mutex serializes journal writes, metadata updates, and most control state. A second mutex preserves
-PTY input write order after the shared-state lock is released.
+Operation replay protection consists only of an in-memory sequence high-water mark. `RECEIVED` confirms
+admission, and one later `COMMAND_RESULT` records the observed effect outcome when the journal remains writable.
+The server owns grace periods and escalation; the host performs one requested signal delivery and does not
+schedule or retry termination.
 
-The observable metadata state is intended to be `starting`, `running`, `exited`, or `failed`. The implemented
-happy-path transitions are only `starting -> running -> exited`. The journal and metadata both persist journal
-identity and position information.
+## Remaining structural findings
 
-## Highest-value findings
+### 1. Control connection workers are detached and unbounded
 
-### 1. Metadata is a synchronously maintained replica of journal facts
+**Finding.** The accept loop creates one detached native thread per control connection without a configured
+bound or ownership mechanism.
 
-**Finding.** `metadata` is treated as a second durable source for journal identity and position. Keeping it
-current forces a JSON temporary-file write and rename after every event, including every PTY output chunk.
+**Evidence.** `spawn_accept_loop` calls `thread::spawn` for every accepted socket. Session finalization joins the
+accept thread and waits for admitted operations, but it does not join connection workers that are idle or blocked
+while reading their next frame.
 
-**Evidence.** `Metadata` stores `journal_id`, `active_segment`, `oldest_available_timestamp`, and
-`latest_timestamp` even though the segment headers and records contain the corresponding facts. `SharedState::append`
-updates the timestamp snapshot, and `copy_pty_output` immediately calls `persist_metadata` after every read.
-The journal record is written before the metadata replacement, so a crash or metadata I/O failure can leave the
-two durable representations disagreeing.
+**Requirement.** Blocking Unix sockets make one worker per connection straightforward. The module does not state
+how many concurrent control clients one session must support.
 
-**Why it likely exists.** The snapshot gives discovery and status readers quick access without scanning the
-journal. That is useful, but the current contract makes the cache authoritative and immediately consistent.
+**Smallest simplification.** First define a small maximum number of simultaneous control clients. Enforce that
+bound at admission and keep the current blocking implementation. A thread pool or async runtime is unnecessary
+without a larger verified concurrency requirement.
 
-**Simpler model.** Make the journal authoritative for its UUID, active segment, and timestamp bounds. Keep
-metadata for launch configuration and lifecycle facts only. If fast discovery still needs journal bounds, label
-them as a rebuildable snapshot and update them at coarse lifecycle checkpoints instead of after every event.
+**Contract and risk.** Excess connections would be rejected or closed. Existing accepted operations and their
+finalization guarantee remain unchanged.
 
-**Contract change.** Metadata would no longer guarantee immediately current journal bounds. A status reader
-would query the live host or derive them from the journal. Cross-module reliance was intentionally not inspected.
+**Confidence.** Medium; the missing client-count requirement determines whether this needs implementation.
 
-**Consequences.** This removes per-output metadata rewrites, reduces global-lock hold time, and eliminates a
-crash-consistency obligation. Cold status reads may require a journal header/index read.
+### 2. Journal maintenance has two commands for one reconciliation operation
 
-**Confidence.** High that the duplication and write amplification exist; medium that consumers can accept the
-weaker snapshot contract.
+**Finding.** `Reconcile` and `ApplyRetention` both update reconciliation inputs and invoke the same maintenance
+pass.
 
-### 2. Lifecycle concepts disagree and failure has no owner
+**Evidence.** `MaintenanceCommand` carries `Reconcile(activeSegment)` and
+`ApplyRetention { activeSegment, acknowledgedEventId }`. `run_maintenance` coalesces both into the same
+`reconcile_journal` call.
 
-**Finding.** Metadata state, `child_live`, the recorded child PID, and descendant liveness represent overlapping
-but different lifecycle concepts. The declared `failed` terminal state is never produced.
+**Requirement.** Segment rotation and acknowledgement update different inputs at different times, but they do
+not require different execution paths.
 
-**Evidence.** Production code assigns only `Starting`, `Running`, and `Exited`. After the root child is reaped,
-`child_live` remains true until every tracked descendant exits. The Unix integration test deliberately verifies
-that the protocol's `child live` flag remains set after the recorded child PID has exited. Errors propagated after
-the initial metadata write do not transition metadata to `Failed`; they simply make `main` exit with code 70.
+**Smallest simplification.** Use one reconciliation command carrying the latest active segment and optional
+acknowledgement watermark, plus the existing final command. Preserve FIFO coalescing and final synchronization.
 
-**Why it likely exists.** The original child lifecycle grew into ownership of a whole process tree, while names
-and protocol fields retained the earlier child-oriented vocabulary. Error paths were implemented independently
-from the happy-path state transitions.
-
-**Simpler model.** Use one observable session lifecycle: `starting -> active -> exited|failed`. Define activity
-as an owned process tree being live. Keep root-process exit as a journal fact, not as the meaning of session
-activity. Route every post-initialization exit through one finalization path that records either `exited` or
-`failed` and performs cleanup.
-
-**Contract change.** The status flag currently documented as `child live` becomes `owned process tree live`.
-Either make `failed` a real guaranteed terminal transition or remove it from v1 rather than retaining an
-unreachable state.
-
-**Consequences.** Clients receive one coherent liveness definition, and error paths cannot silently leave
-`starting` or `running` metadata behind. A finalization path must distinguish failures that occur before and
-after the child starts.
+**Contract and risk.** No wire or persistence contract changes. Care is required to retain the latest known
+acknowledgement when a later segment-only update arrives.
 
 **Confidence.** High.
-
-### 3. The journal block layer promises capabilities that the writer and reader do not provide
-
-**Finding.** The block abstraction currently adds duplicated framing and compatibility commitments without
-providing batching or compression. Its `FINAL` guarantee is not implementable by the current write order.
-
-**Evidence.** Every `JournalWriter::append_at` call writes one `NONE` block containing exactly one record, so
-block count and first/last timestamps duplicate record data. The header is encoded with `FINAL` and written
-before its payload, although the protocol says `FINAL` means the writer completed the block. The canonical
-truncated-record fixture itself contains a `FINAL` header followed by a truncated payload. The protocol also says
-v1 readers accept Zstandard, while a complete non-`NONE` block is rejected and the crate has no Zstandard
-dependency.
-
-**Why it likely exists.** Compression, block batching, segment rotation, and retention were reserved in the
-format before the module needed them.
-
-**Simpler model.** If v1 has not become a compatibility boundary, store validated records directly after the
-segment header and add a block layer only when batching or compression is implemented. If v1 is already fixed,
-keep the bytes but narrow the documented contract: codec `1` is reserved/unsupported and `FINAL` is not a
-completion proof. Avoid implementing compression solely to justify the existing abstraction.
-
-**Planned resolution.** The approved CBOR Sequence replacement removes block framing and `FINAL` entirely.
-Its task and format contract explicitly prohibit introducing an equivalent persisted completion marker; a
-complete CBOR item is the only record-completion boundary.
-
-**Contract change.** Removing blocks breaks the binary format. Narrowing the documentation withdraws promised
-Zstandard support and changes the meaning of `FINAL`. Persisted or external v1 consumers must be identified
-before either change.
-
-**Consequences.** A record-only format removes a header, a second checksum, duplicated counts/timestamps, and a
-second parsing pass. It gives up predesigned compression and batching compatibility.
-
-**Confidence.** High.
-
-### 4. Detached concurrency is counted but not owned
-
-**Finding.** Connection and termination threads have partial coordination that does not provide a clear shutdown
-or idempotency guarantee.
-
-**Evidence.** The accept loop creates an unbounded detached thread for each connection. `active_connections`
-counts those threads, but shutdown only polls the count for one second; it cannot close, cancel, or join them.
-Every accepted graceful `TERMINATE` creates another detached sleeping thread, so retries can create multiple
-kill timers. Core operations still serialize through `SharedState`, limiting the throughput benefit of the
-unbounded worker model.
-
-**Why it likely exists.** Blocking Unix sockets and PTY writes make thread-per-operation implementation direct,
-while the counter and grace wait were added later to reduce abrupt shutdown.
-
-**Simpler model.** Keep blocking I/O, but own a bounded set of connection workers and one session termination
-deadline. Make repeated termination requests update or reuse the one deadline. Either join workers during
-shutdown or delete the counter and stop claiming a drain period.
-
-**Contract change.** A worker bound can reject excessive simultaneous clients. Choosing to delete the drain
-logic explicitly permits active control responses to be cut off at process exit; choosing ownership guarantees
-their completion or cancellation.
-
-**Consequences.** The module loses unbounded client concurrency but gains deterministic resource use,
-idempotent termination, and a testable shutdown contract. No async framework is required.
-
-**Confidence.** Medium because the expected maximum number of simultaneous clients is not documented locally.
-
-### 5. The exact Rust toolchain version has multiple sources of truth
-
-**Finding.** An upgrade must keep several declarations aligned, and one of them is unused.
-
-**Evidence.** The exact version appears in `pom.xml` as `rust.version`, in `Makefile` as
-`SESSION_HOST_RUST_VERSION`, and in `rust-toolchain.toml` as `channel`. The Maven property is not referenced by
-the module's POM. `Cargo.toml` separately declares the compatible language/toolchain floor as `rust-version`.
-
-**Why it likely exists.** Maven, direct Cargo development, and bootstrap installation each acquired their own
-declaration.
-
-**Simpler model.** Select one exact bootstrap pin and derive the other build entry points from it. Keep Cargo's
-`rust-version` only as a compatibility floor if it intentionally has different semantics. At minimum, delete the
-unused Maven property.
-
-**Contract change.** None.
-
-**Consequences.** Toolchain upgrades become one intentional edit plus a checksum update. Deriving a Make value
-from TOML adds a small amount of build parsing, so simply making the Make variable authoritative may be smaller.
-
-**Confidence.** High.
-
-## Smaller contract inconsistencies
-
-- Resolved: the protocol and journal plans now consistently require readers to expose structurally valid unknown
-  event types as opaque records while allowing consumers to skip their semantic interpretation.
-- `APPEND_EVENT` is documented as a v1 control request, but the host always returns
-  `ERROR_UNSUPPORTED_MESSAGE`. If the number is only allocated for future use, document it as reserved rather
-  than supported.
 
 ## Things to try deleting
 
-- `journal_id`, `active_segment`, and timestamp bounds from authoritative metadata, once readers use journal
-  facts or treat these fields as a cache.
-- The block layer, codec enum, and truncated-Zstandard fixture if binary v1 compatibility is not yet required.
-- `SessionState::Failed` if no durable failure state is required; otherwise make it reachable instead.
-- `active_connections` and the one-second drain loop if the module does not promise connection draining.
-- The unused Maven `rust.version` property.
+- Delete the separate `ApplyRetention` maintenance variant after one reconciliation command can preserve both
+  latest inputs.
+- Avoid introducing a worker registry or async runtime until the required control-client bound is known; a fixed
+  admission bound is the smaller model.
+- Remove `journal_available` if journal failure becomes session-fatal. It currently suppresses repeated logging
+  but does not expose a recoverable or durable state.
 
 ## Proposed conceptual model
 
-- One exact Rust bootstrap version source.
-- Static session metadata plus one authoritative append-only journal.
-- One session lifecycle based on ownership of the process tree, with a single finalization path.
-- One bounded control-worker policy and one idempotent termination deadline.
-- A protocol that distinguishes implemented messages/codecs from merely reserved numeric allocations.
+- One metadata manifest for discovery and one journal as the durable source of session history.
+- One operation sequence high-water mark for host-lifetime replay protection, without a result ledger.
+- One ordinary-effect serialization path, with explicit `TERMINATE` bypass for blocked PTY input.
+- One maintenance reconciliation operation for compression and retention.
+- Three failure classes: connection-local delivery failure, non-fatal metadata refresh failure, and fatal loss of
+  the authoritative journal writer.
 
 ## Incremental migration path
 
-1. Decide whether the checked-in v1 format is already an immutable persisted or external contract.
-2. Reconcile documentation with implemented unknown-event, `APPEND_EVENT`, Zstandard, and `FINAL` semantics.
-3. Define session activity and terminal failure behavior, then cover root-exit-with-descendants and runtime-error
-   transitions in tests.
-4. Make journal position authoritative and stop rewriting metadata for every PTY output event. Add crash-point
-   tests around journal append and metadata replacement.
-5. If compatibility permits, simplify record framing before implementing retention or compression.
-6. Consolidate the Rust toolchain pin.
-7. Replace repeated termination timers and ambiguous connection draining with explicitly owned coordination.
-
-Each step is independently reversible except a published binary-format change.
+1. Resolve the journal-failure and post-exec start-outcome questions below and update the protocol text first.
+2. Add fault tests for the selected behavior before changing process cleanup or PTY-reader coordination.
+3. Apply one explicit fatal-journal path if the journal remains authoritative; keep metadata refresh failures
+   non-fatal.
+4. Merge the maintenance commands without changing reconciliation or retention behavior.
+5. Define and enforce a control-client bound only when the required concurrency is known.
 
 ## Do not change
 
-- Preserve raw PTY bytes and strictly increasing journal timestamps.
-- Preserve payload-length checks before allocation and CRC validation before accepting records.
-- Preserve input-UUID deduplication unless its delivery contract is deliberately replaced.
-- Preserve automatic warning fallback only when Landlock ABI 9 is unavailable; policy, grant-path, ruleset,
-  rule-application, incomplete-enforcement, and child-restriction failures remain fail-closed.
-- Preserve Linux descendant identity checks and the explicitly documented macOS limitations. These protect real
-  process-ownership invariants even though their implementation is substantial.
+- Keep metadata free of journal position and lifecycle replicas.
+- Keep `operationSequence` as the only host replay guard; do not restore a result ledger without a new concrete
+  requirement.
+- Keep `TERMINATE` independent of the ordinary effect mutex.
+- Keep grace periods, escalation, and termination retries outside the host.
+- Preserve raw PTY bytes, journal event ordering, durable acknowledgement before retention, and Linux descendant
+  identity checks.
+- Preserve the documented macOS process-tracking limitations and current Windows unsupported status.
 
 ## Open questions
 
-- Has protocol v1 already been persisted or consumed outside this module?
-- Must metadata journal bounds be immediately current, or may they be a rebuildable snapshot?
-- Does `failed` need to be a durable terminal state after every post-initialization error?
-- How many simultaneous control clients must one session support?
-- Is Zstandard required in v1, or was codec `1` intended only as a reserved allocation?
-- Is `APPEND_EVENT` intended to be supported by this module now or only by a future implementation?
+### 1. Should the host continue after losing journal output?
+
+The current behavior conflicts with the stated purpose of `session-host`. The task requires a durable ordered
+journal and preservation of terminal bytes for deterministic replay
+([native session-host task](../docs/plans/current-work/native-session-host/TASK.md)). The availability requirement
+only says that the host and child survive the process that launched them
+([module README](README.md)); it does not require the child to continue after loss of the host's own journal.
+
+`copy_pty_output` currently discards a PTY chunk when its append fails and may append later chunks after the
+writer recovers (`src/platform/unix.rs`). `JournalWriter::append_at` advances the event ID only after a successful
+append (`src/journal.rs`). A reader therefore sees an apparently continuous event sequence and cannot detect that
+terminal bytes were lost between records.
+
+The local `journal_available` flag only suppresses repeated stderr output. It is absent from `STATUS` and durable
+state, so it does not make the degraded session observable or recoverable.
+
+The preferred resolution is to treat loss of the authoritative journal writer as fatal to the session. The host
+should stop accepting controls, terminate and reap its owned process tree, and continue draining the PTY only as
+needed to avoid blocking cleanup. If process availability must instead win over deterministic replay, the
+contract needs an explicit observable gap/degraded-state model before this behavior can be considered safe.
+
+### 2. What happens when `PROCESS_STARTED` cannot be persisted after exec?
+
+The child has crossed the exec boundary, so writing `SESSION_START_FAILED` would record a false lifecycle fact.
+The current implementation instead logs the failed `PROCESS_STARTED` append and publishes a live session. That
+conflicts with the protocol promise of exactly one durable start outcome and with journal-based recovery, which
+then has no authoritative record that the process started.
+
+The preferred resolution is to publish the live session only after `PROCESS_STARTED` is durable. If that append
+fails, the host should perform immediate owned-process cleanup, return a distinct post-exec persistence failure,
+and must not write `SESSION_START_FAILED`. The protocol should state that exactly one start outcome is guaranteed
+when its durable append succeeds; storage failure can leave no durable outcome but must never create a live
+session without `PROCESS_STARTED`.
+
+This cleanup is failure containment for a host invariant, not server-owned graceful shutdown: it has no grace
+period, escalation policy, or effect retry.
+
+### 3. How many simultaneous control clients must one session support?
+
+The answer determines whether a fixed connection limit is sufficient or whether connection workers require
+explicit ownership beyond the current detached-thread model.

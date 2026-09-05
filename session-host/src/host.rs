@@ -79,7 +79,7 @@ impl From<JournalError> for HostError {
 pub struct OwnedControlFrame {
     pub message_type: u16,
     pub payload_schema_version: u16,
-    pub request_id: u64,
+    pub sequence: u64,
     pub payload: Vec<u8>,
 }
 
@@ -121,7 +121,7 @@ pub fn read_control_frame(reader: &mut impl Read) -> Result<Option<OwnedControlF
     Ok(Some(OwnedControlFrame {
         message_type: u16_at(&header[8..10]),
         payload_schema_version: u16_at(&header[10..12]),
-        request_id: u64_at(&header[16..24]),
+        sequence: u64_at(&header[16..24]),
         payload,
     }))
 }
@@ -129,14 +129,14 @@ pub fn read_control_frame(reader: &mut impl Read) -> Result<Option<OwnedControlF
 pub fn write_control_frame(
     writer: &mut impl Write,
     message_type: u16,
-    request_id: u64,
+    sequence: u64,
     payload: &[u8],
 ) -> Result<(), HostError> {
     let encoded = protocol::encode_control_frame(ControlFrame {
         message_type,
         payload_schema_version: 1,
         flags: 0,
-        request_id,
+        sequence,
         payload,
     })
     .map_err(|error| HostError::Protocol(error.to_string()))?;
@@ -199,7 +199,7 @@ mod tests {
             .unwrap();
         assert_eq!(decoded.message_type, control_message::INPUT);
         assert_eq!(decoded.payload_schema_version, 1);
-        assert_eq!(decoded.request_id, 41);
+        assert_eq!(decoded.sequence, 41);
         assert_eq!(decoded.payload, payload);
     }
 

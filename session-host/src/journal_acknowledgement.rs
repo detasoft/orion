@@ -22,10 +22,16 @@ impl Display for JournalAcknowledgementError {
         match self {
             Self::Io(error) => write!(formatter, "journal acknowledgement I/O error: {error}"),
             Self::Format(message) => {
-                write!(formatter, "invalid journal acknowledgement state: {message}")
+                write!(
+                    formatter,
+                    "invalid journal acknowledgement state: {message}"
+                )
             }
             Self::InvalidWatermark(message) => {
-                write!(formatter, "invalid journal acknowledgement watermark: {message}")
+                write!(
+                    formatter,
+                    "invalid journal acknowledgement watermark: {message}"
+                )
             }
         }
     }
@@ -298,7 +304,12 @@ mod tests {
         assert_eq!(state.advance(42).unwrap(), 42);
         assert_eq!(state.advance(7).unwrap(), 42);
         assert_eq!(state.acknowledged_event_id(), Some(42));
-        assert_eq!(JournalAcknowledgement::open(&directory).unwrap().acknowledged_event_id(), Some(42));
+        assert_eq!(
+            JournalAcknowledgement::open(&directory)
+                .unwrap()
+                .acknowledged_event_id(),
+            Some(42)
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -323,7 +334,12 @@ mod tests {
             r#"{"stateVersion":1,"acknowledgedEventId":42,"future":"ignored"}"#,
         )
         .unwrap();
-        assert_eq!(JournalAcknowledgement::open(&directory).unwrap().acknowledged_event_id(), Some(42));
+        assert_eq!(
+            JournalAcknowledgement::open(&directory)
+                .unwrap()
+                .acknowledged_event_id(),
+            Some(42)
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -342,12 +358,17 @@ mod tests {
         let mut initial = JournalAcknowledgement::open(&directory).unwrap();
         initial.advance(10).unwrap();
         let file_system = Arc::new(RecordingFileSystem::new(Some(Operation::SyncTemporary)));
-        let mut state = JournalAcknowledgement::open_with_file_system(&directory, file_system.clone())
-            .unwrap();
+        let mut state =
+            JournalAcknowledgement::open_with_file_system(&directory, file_system.clone()).unwrap();
 
         assert!(state.advance(20).is_err());
         assert_eq!(state.acknowledged_event_id(), Some(10));
-        assert_eq!(JournalAcknowledgement::open(&directory).unwrap().acknowledged_event_id(), Some(10));
+        assert_eq!(
+            JournalAcknowledgement::open(&directory)
+                .unwrap()
+                .acknowledged_event_id(),
+            Some(10)
+        );
         assert_eq!(
             *file_system.operations.lock().unwrap(),
             [Operation::WriteTemporary, Operation::SyncTemporary],
@@ -361,8 +382,8 @@ mod tests {
         let mut initial = JournalAcknowledgement::open(&directory).unwrap();
         initial.advance(10).unwrap();
         let file_system = Arc::new(RecordingFileSystem::new(Some(Operation::SyncDirectory)));
-        let mut state = JournalAcknowledgement::open_with_file_system(&directory, file_system.clone())
-            .unwrap();
+        let mut state =
+            JournalAcknowledgement::open_with_file_system(&directory, file_system.clone()).unwrap();
 
         assert!(state.advance(20).is_err());
         assert_eq!(state.acknowledged_event_id(), Some(10));
@@ -389,12 +410,14 @@ mod tests {
     fn successful_directory_sync_publishes_state_visible_after_reopen() {
         let directory = temporary_directory("success");
         let file_system = Arc::new(RecordingFileSystem::new(None));
-        let mut state = JournalAcknowledgement::open_with_file_system(&directory, file_system.clone())
-            .unwrap();
+        let mut state =
+            JournalAcknowledgement::open_with_file_system(&directory, file_system.clone()).unwrap();
 
         assert_eq!(state.advance(u64::MAX).unwrap(), u64::MAX);
         assert_eq!(
-            JournalAcknowledgement::open(&directory).unwrap().acknowledged_event_id(),
+            JournalAcknowledgement::open(&directory)
+                .unwrap()
+                .acknowledged_event_id(),
             Some(u64::MAX),
         );
         assert_eq!(
@@ -423,7 +446,12 @@ mod tests {
         let mut reopened = JournalAcknowledgement::open(&directory).unwrap();
         assert_eq!(reopened.acknowledged_event_id(), Some(10));
         assert_eq!(reopened.advance(20).unwrap(), 20);
-        assert_eq!(JournalAcknowledgement::open(&directory).unwrap().acknowledged_event_id(), Some(20));
+        assert_eq!(
+            JournalAcknowledgement::open(&directory)
+                .unwrap()
+                .acknowledged_event_id(),
+            Some(20)
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 }

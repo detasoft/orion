@@ -16,6 +16,10 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion.core</groupId>
+            <artifactId>common-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion.core</groupId>
             <artifactId>authorization</artifactId>
         </dependency>
         <dependency>

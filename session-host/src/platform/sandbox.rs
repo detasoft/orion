@@ -47,7 +47,9 @@ impl PreparedSandbox {
                 "session-host: warning: Landlock ABI 9 is unavailable; \
                  running without filesystem restrictions: Landlock is unavailable on this platform"
             );
-            Ok(Self { policy: Some(policy) })
+            Ok(Self {
+                policy: Some(policy),
+            })
         }
     }
 
@@ -107,7 +109,9 @@ enum Preparation<T> {
 fn classify_ruleset_result<T>(
     result: Result<T, landlock::RulesetError>,
 ) -> Result<Preparation<T>, landlock::RulesetError> {
-    use landlock::{AccessError, CompatError, HandleAccessError, HandleAccessesError, RulesetError};
+    use landlock::{
+        AccessError, CompatError, HandleAccessError, HandleAccessesError, RulesetError,
+    };
 
     match result {
         Ok(value) => Ok(Preparation::Enforced(value)),
@@ -177,8 +181,9 @@ fn open_rules(policy: &CompiledPolicy) -> Result<Vec<OpenedRule>, String> {
 #[cfg(not(target_os = "linux"))]
 fn validate_rules(policy: &CompiledPolicy) -> Result<(), HostError> {
     for rule in &policy.rules {
-        let metadata = std::fs::symlink_metadata(&rule.path)
-            .map_err(|error| HostError::Policy(invalid_rule_detail(&rule.path, &error.to_string())))?;
+        let metadata = std::fs::symlink_metadata(&rule.path).map_err(|error| {
+            HostError::Policy(invalid_rule_detail(&rule.path, &error.to_string()))
+        })?;
         validate_rule_type(rule.rights, &metadata)
             .map_err(|detail| HostError::Policy(invalid_rule_detail(&rule.path, &detail)))?;
     }
@@ -211,10 +216,22 @@ fn selected_access<T: Copy>(mask: u64, values: [T; 17]) -> impl Iterator<Item = 
 fn access(mask: u64) -> landlock::BitFlags<landlock::AccessFs> {
     use landlock::AccessFs;
     let values = [
-        AccessFs::Execute, AccessFs::WriteFile, AccessFs::ReadFile, AccessFs::ReadDir,
-        AccessFs::RemoveDir, AccessFs::RemoveFile, AccessFs::MakeChar, AccessFs::MakeDir,
-        AccessFs::MakeReg, AccessFs::MakeSock, AccessFs::MakeFifo, AccessFs::MakeBlock,
-        AccessFs::MakeSym, AccessFs::Refer, AccessFs::Truncate, AccessFs::IoctlDev,
+        AccessFs::Execute,
+        AccessFs::WriteFile,
+        AccessFs::ReadFile,
+        AccessFs::ReadDir,
+        AccessFs::RemoveDir,
+        AccessFs::RemoveFile,
+        AccessFs::MakeChar,
+        AccessFs::MakeDir,
+        AccessFs::MakeReg,
+        AccessFs::MakeSock,
+        AccessFs::MakeFifo,
+        AccessFs::MakeBlock,
+        AccessFs::MakeSym,
+        AccessFs::Refer,
+        AccessFs::Truncate,
+        AccessFs::IoctlDev,
         AccessFs::ResolveUnix,
     ];
     let mut result = landlock::BitFlags::EMPTY;
@@ -265,9 +282,7 @@ mod tests {
                 unknown: empty,
             },
         ] {
-            assert!(
-                classify_ruleset_result::<()>(Err(filesystem_handle_access(error))).is_err()
-            );
+            assert!(classify_ruleset_result::<()>(Err(filesystem_handle_access(error))).is_err());
         }
 
         for error in [

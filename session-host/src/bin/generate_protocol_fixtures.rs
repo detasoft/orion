@@ -8,12 +8,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("protocol")
         .join("fixtures");
     fs::create_dir_all(&directory)?;
-    fs::write(directory.join("session-events-v1.hex"), protocol_fixture::journal_hex())?;
+    fs::write(
+        directory.join("session-events-v1.hex"),
+        protocol_fixture::journal_hex(),
+    )?;
     fs::write(
         directory.join("session-event-unknown-tail-v1.hex"),
         protocol_fixture::unknown_event_hex(),
     )?;
-    fs::write(directory.join("control-v1.bin"), protocol_fixture::control())?;
+    fs::write(
+        directory.join("control-v1.bin"),
+        protocol_fixture::control(),
+    )?;
     fs::write(
         directory.join("control-idempotency-v2.bin"),
         protocol_fixture::control_idempotency_v2(),

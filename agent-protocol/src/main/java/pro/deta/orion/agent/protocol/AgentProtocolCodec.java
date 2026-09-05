@@ -131,8 +131,7 @@ public final class AgentProtocolCodec {
                         new SessionId(fields.text(2, "sessionId")),
                         requiredEnum(
                                 AgentMessage.TerminationMode.fromWireCode(fields.unsignedShort(3, "mode")),
-                                "termination mode"),
-                        fields.unsignedInt(4, "graceMillis"));
+                                "termination mode"));
                 case SESSION_OPEN -> decodeSessionOpen(fields);
                 case SESSION_SYNC -> new AgentMessage.SessionSync(
                         new SessionId(fields.text(1, "sessionId")),
@@ -195,7 +194,8 @@ public final class AgentProtocolCodec {
     private static int minimumFields(AgentMessageType type) {
         return switch (type) {
             case HELLO, AGENT_STATUS -> 8;
-            case WELCOME, COMMAND_RESULT, INPUT, RESIZE, SIGNAL, TERMINATE, SESSION_OPEN -> 5;
+            case WELCOME, COMMAND_RESULT, INPUT, RESIZE, SIGNAL, SESSION_OPEN -> 5;
+            case TERMINATE -> 4;
             case HEARTBEAT -> 4;
             case SESSION_SYNC -> 3;
             case SESSION_STATUS, SESSION_LIST -> 2;
@@ -336,12 +336,11 @@ public final class AgentProtocolCodec {
 
     private void encodeTerminate(CborWriter writer, AgentMessage.Terminate value)
             throws AgentProtocolException {
-        writer.array(5);
+        writer.array(4);
         writer.unsigned(value.typeCode());
         writer.text(value.commandId().value());
         writer.text(value.sessionId().value());
         writer.unsigned(value.mode().wireCode());
-        writer.signed(value.graceMillis());
     }
 
     private void encodeSessionOpen(CborWriter writer, AgentMessage.SessionOpen value)

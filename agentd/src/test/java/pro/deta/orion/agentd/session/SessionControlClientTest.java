@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatIOException;
 
 class SessionControlClientTest {
     private static final CommandId COMMAND_ID = new CommandId("command-1");
+    private static final ProtocolBytes COMMAND_ENVELOPE = ProtocolBytes.copyOf(new byte[]{0x11});
 
     @TempDir
     Path temporaryDirectory;
@@ -77,7 +78,8 @@ class SessionControlClientTest {
             SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
 
             ControlResult result = client.send(
-                    endpoint("error.sock"), new ControlCommand.Resize(COMMAND_ID, 80, 24));
+                    endpoint("error.sock"), new ControlCommand.Resize(
+                            COMMAND_ID, 3, COMMAND_ENVELOPE, 80, 24));
 
             assertThat(result).isEqualTo(new ControlResult.Rejected(Optional.of(COMMAND_ID), 4, "exited"));
             await(peer);
@@ -121,6 +123,8 @@ class SessionControlClientTest {
             SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
             ControlCommand.Input input = new ControlCommand.Input(
                     COMMAND_ID,
+                    1,
+                    COMMAND_ENVELOPE,
                     UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
                     ProtocolBytes.copyOf(new byte[]{1, 2, 3}));
 
@@ -151,6 +155,8 @@ class SessionControlClientTest {
             SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
             ControlCommand.Input input = new ControlCommand.Input(
                     COMMAND_ID,
+                    1,
+                    COMMAND_ENVELOPE,
                     UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
                     ProtocolBytes.copyOf(new byte[]{1, 2, 3}));
 
@@ -180,6 +186,8 @@ class SessionControlClientTest {
             SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
             ControlCommand.Input input = new ControlCommand.Input(
                     COMMAND_ID,
+                    1,
+                    COMMAND_ENVELOPE,
                     UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
                     ProtocolBytes.copyOf(new byte[]{1, 2, 3}));
 
@@ -192,7 +200,7 @@ class SessionControlClientTest {
     }
 
     @Test
-    void malformedResizeResponseIsAmbiguousAndDoesNotReplay() throws Exception {
+    void malformedResizeResponseIsAmbiguousAfterReplay() throws Exception {
         try (ServerSocketChannel server = listen("malformed-resize.sock")) {
             AtomicInteger connections = new AtomicInteger();
             Future<Void> peer = executor.submit(() -> {
@@ -217,11 +225,12 @@ class SessionControlClientTest {
             SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
 
             ControlResult result = client.send(
-                    endpoint("malformed-resize.sock"), new ControlCommand.Resize(COMMAND_ID, 81, 25));
+                    endpoint("malformed-resize.sock"), new ControlCommand.Resize(
+                            COMMAND_ID, 3, COMMAND_ENVELOPE, 81, 25));
 
             assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY);
             await(peer);
-            assertThat(connections).hasValue(1);
+            assertThat(connections).hasValue(2);
         }
     }
 
@@ -239,7 +248,7 @@ class SessionControlClientTest {
     }
 
     @Test
-    void doesNotReplayResizeAfterAmbiguousDelivery() throws Exception {
+    void replaysResizeAfterAmbiguousDelivery() throws Exception {
         try (ServerSocketChannel server = listen("no-retry.sock")) {
             AtomicInteger connections = new AtomicInteger();
             Future<Void> peer = executor.submit(() -> {
@@ -263,11 +272,12 @@ class SessionControlClientTest {
             SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
 
             ControlResult result = client.send(
-                    endpoint("no-retry.sock"), new ControlCommand.Resize(COMMAND_ID, 81, 25));
+                    endpoint("no-retry.sock"), new ControlCommand.Resize(
+                            COMMAND_ID, 3, COMMAND_ENVELOPE, 81, 25));
 
             assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY);
             await(peer);
-            assertThat(connections).hasValue(1);
+            assertThat(connections).hasValue(2);
         }
     }
 

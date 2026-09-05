@@ -1,5 +1,4 @@
 pub mod cli;
-pub mod control_journal;
 pub mod host;
 pub mod journal;
 pub mod journal_acknowledgement;

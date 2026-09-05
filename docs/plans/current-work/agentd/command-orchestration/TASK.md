@@ -4,8 +4,9 @@ Status: todo
 Design: ../../../2026-09-03-agentd-command-orchestration-design.md
 Plan: ../../../2026-09-03-agentd-command-orchestration.md
 Depends on: completed AgentD HTTP/2 transport, session discovery, and session
-runtime/control; ../journal-reader/TASK.md; ../journal-sync/TASK.md; and the
-[native control-journal idempotency design](../../../2026-09-03-native-control-journal-idempotency-design.md)
+runtime/control; ../journal-reader/TASK.md; ../journal-sync/TASK.md;
+../native-control-contract/TASK.md; and the [native control-journal idempotency
+design](../../../2026-09-03-native-control-journal-idempotency-design.md)
 
 - [ ] Route server session commands.
   - Owner: codex, session command-orchestration-d8e4, paused 2026-09-03 19:51 Europe/Amsterdam.

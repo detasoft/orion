@@ -1,6 +1,7 @@
 package pro.deta.orion.agentd.session;
 
 import pro.deta.orion.agent.protocol.CommandId;
+import pro.deta.orion.agent.protocol.ProtocolBytes;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -20,29 +21,60 @@ public final class NativeControlCodec {
 
     public byte[] encode(ControlCommand command, long requestId) {
         if (command instanceof ControlCommand.Input input) {
-            byte[] bytes = input.bytes().toByteArray();
-            ByteBuffer payload = payload(16 + bytes.length).order(ByteOrder.BIG_ENDIAN);
-            payload.putLong(input.inputId().getMostSignificantBits());
-            payload.putLong(input.inputId().getLeastSignificantBits());
-            payload.put(bytes);
-            return frame(1, requestId, payload.array());
+            ByteBuffer effect = payload(16 + input.bytes().toByteArray().length).order(ByteOrder.BIG_ENDIAN);
+            effect.putLong(input.inputId().getMostSignificantBits());
+            effect.putLong(input.inputId().getLeastSignificantBits());
+            effect.put(input.bytes().toByteArray());
+            return frame(
+                    1,
+                    2,
+                    requestId,
+                    operationPayload(
+                            input.commandId().orElseThrow(),
+                            input.operationSequence(),
+                            input.commandEnvelope(),
+                            effect.array()));
         }
         if (command instanceof ControlCommand.Resize resize) {
             ByteBuffer payload = payload(8);
             payload.putInt(resize.columns()).putInt(resize.rows());
-            return frame(2, requestId, payload.array());
+            return frame(
+                    2,
+                    2,
+                    requestId,
+                    operationPayload(
+                            resize.commandId().orElseThrow(),
+                            resize.operationSequence(),
+                            resize.commandEnvelope(),
+                            payload.array()));
         }
         if (command instanceof ControlCommand.Signal signal) {
             ByteBuffer payload = payload(8);
             payload.putShort((short) signal.kind().wireCode()).putShort((short) 0);
             payload.putInt(signal.platformCode());
-            return frame(3, requestId, payload.array());
+            return frame(
+                    3,
+                    2,
+                    requestId,
+                    operationPayload(
+                            signal.commandId().orElseThrow(),
+                            signal.operationSequence(),
+                            signal.commandEnvelope(),
+                            payload.array()));
         }
         if (command instanceof ControlCommand.Terminate terminate) {
             ByteBuffer payload = payload(8);
             payload.putShort((short) terminate.mode().wireCode()).putShort((short) 0);
             payload.putInt((int) terminate.graceMillis());
-            return frame(4, requestId, payload.array());
+            return frame(
+                    4,
+                    2,
+                    requestId,
+                    operationPayload(
+                            terminate.commandId().orElseThrow(),
+                            terminate.operationSequence(),
+                            terminate.commandEnvelope(),
+                            payload.array()));
         }
         return frame(5, requestId, new byte[0]);
     }
@@ -72,6 +104,10 @@ public final class NativeControlCodec {
     }
 
     static byte[] frame(int type, long requestId, byte[] payload) {
+        return frame(type, 1, requestId, payload);
+    }
+
+    static byte[] frame(int type, int payloadSchemaVersion, long requestId, byte[] payload) {
         if (payload.length > MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("control payload exceeds 16 MiB");
         }
@@ -80,7 +116,7 @@ public final class NativeControlCodec {
         encoded.putShort((short) VERSION);
         encoded.putShort((short) HEADER_LENGTH);
         encoded.putShort((short) type);
-        encoded.putShort((short) 1);
+        encoded.putShort((short) payloadSchemaVersion);
         encoded.putInt(0);
         encoded.putLong(requestId);
         encoded.putInt(payload.length);
@@ -135,14 +171,36 @@ public final class NativeControlCodec {
         if (payload.remaining() != Long.BYTES || command.commandId().isEmpty()) {
             throw new IllegalArgumentException("acknowledgement payload or command is invalid");
         }
-        if (duplicate && !(command instanceof ControlCommand.Input)) {
-            throw new IllegalArgumentException("duplicate response is valid only for INPUT");
-        }
         long timestamp = payload.getLong();
         if (timestamp < 0) {
             throw new IllegalArgumentException("journal timestamp exceeds the supported range");
         }
         return new ControlResult.Acknowledged(command.commandId().orElseThrow(), duplicate, timestamp);
+    }
+
+    private static byte[] operationPayload(
+            CommandId commandId,
+            long operationSequence,
+            ProtocolBytes commandEnvelope,
+            byte[] effect
+    ) {
+        byte[] commandIdBytes = commandId.value().getBytes(StandardCharsets.UTF_8);
+        byte[] envelope = commandEnvelope.toByteArray();
+        ByteBuffer payload = payload(
+                Long.BYTES
+                        + Short.BYTES
+                        + commandIdBytes.length
+                        + Integer.BYTES
+                        + envelope.length
+                        + effect.length)
+                .order(ByteOrder.LITTLE_ENDIAN);
+        payload.putLong(operationSequence);
+        payload.putShort((short) commandIdBytes.length);
+        payload.put(commandIdBytes);
+        payload.putInt(envelope.length);
+        payload.put(envelope);
+        payload.put(effect);
+        return payload.array();
     }
 
     private static ControlResult rejection(Optional<CommandId> commandId, ByteBuffer payload) {

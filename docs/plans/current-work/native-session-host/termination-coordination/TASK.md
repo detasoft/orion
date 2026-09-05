@@ -1,45 +1,47 @@
-# Coordinate Session Termination
+# Keep Session Termination Explicit
 
 Status: todo
 Depends on:
 [process control and PTY closure](../process-control-and-pty-closure/TASK.md),
 completed explicit journal durability
 
-Keep the framed `TERMINATE` request as the normal session shutdown path while
-providing process-level `SIGTERM` to `session-host` as a control-socket-independent
-manual fallback.
+Keep `TERMINATE` as an explicit operation submitted by the server or a manual
+control client. `session-host` executes the requested signal delivery once and
+does not own grace periods, escalation deadlines, or retry policy.
 
 ## Scope
 
-- Route both a valid `TERMINATE` request and host-directed `SIGTERM` through one
-  idempotent termination coordinator.
-- Preserve `TERMINATE` payload, response, journal, and control-protocol behavior;
-  use a host-configured grace period when termination starts from an OS signal.
-- Maintain one session-wide escalation deadline. Repeated or concurrent triggers
-  must not create timer threads, restart the sequence, or extend its deadline.
-- Deliver graceful termination to the complete owned process set, escalate to
-  forced termination after the deadline, reap every owned process, flush the
-  journal, and only then exit the host.
-- Receive host signals without executing locks, allocation, journal writes, or
-  process traversal in an asynchronous signal handler. Restore the intended
-  signal mask and dispositions in the PTY child before `exec`.
-- Keep control connections anonymous and multi-purpose: do not classify or
-  reserve a connection for termination before decoding each frame.
-- Remove the one-second `active_connections` pseudo-drain. Host exit may close
-  outstanding control responses after final journal flush; the journal remains
-  authoritative.
-- Let a recovered AgentD address the exact host incarnation before sending the
-  manual signal; never rely on an unverified, potentially recycled PID.
-- Cover normal protocol termination, host-directed `SIGTERM`, mixed and repeated
-  triggers, an unavailable or blocked control path, PID reuse protection, one
-  escalation deadline, complete process reaping, and use of the journal's final
-  durable barrier.
+- Route a valid `TERMINATE` request through the same sequence high-water mark
+  as other operation controls.
+- Make the termination effect available while another connection has a blocked
+  `INPUT`; it must not wait indefinitely for the ordinary operation-order
+  mutex.
+- Record one `COMMAND_RESULT` for the termination attempt. A missing result
+  leaves delivery unknown and is reported as a journal failure, not converted
+  into a host-side retry.
+- Forward an OS signal received by the host once to the current process tree
+  without doing locks, allocation, journal writes, or process traversal in the
+  signal handler.
+- Keep control connections anonymous and multi-purpose. Decode each frame
+  before applying its operation semantics.
+- Keep process discovery, PID identity checks, reaping, and final journal
+  synchronization in their existing owners.
+
+## Acceptance
+
+- A `TERMINATE` request on one connection completes while a large `INPUT` on
+  another connection is blocked by a stopped or non-reading PTY.
+- Repeated or stale sequences are rejected by the high-water mark and do not
+  execute another signal effect.
+- Graceful and force termination are distinct explicit operations; the host
+  does not schedule one from the other.
+- Signal attempts, command results, process exit, and final journal flush are
+  covered without requiring physical journal order to match operation order.
 
 ## Boundary
 
-This task owns termination entry points and coordination. Addressed `SIGNAL`
-requests and process-list semantics remain in
-`../process-control-and-pty-closure/TASK.md`; Linux cgroup, pidfd, and descendant
-delivery mechanics remain in `../linux-process-tree-control/TASK.md`; the
-journal durability API and final sync guarantee remain in
-[the retained journal durability plan](../../../2026-09-05-session-host-explicit-journal-durability.md).
+This task owns termination entry and its interaction with operation admission.
+Addressed `SIGNAL` requests and process-list semantics remain in
+`../process-control-and-pty-closure/TASK.md`; Linux cgroup, pidfd, and
+descendant delivery mechanics remain in
+`../linux-process-tree-control/TASK.md`.

@@ -306,6 +306,7 @@ class InteractiveTerminalTest {
         CountDownLatch releaseResult = new CountDownLatch(1);
         CountDownLatch promptAfterResult = new CountDownLatch(1);
         CountDownLatch ignoredBell = new CountDownLatch(1);
+        CountDownLatch inputChunksConsumed = new CountDownLatch(2);
         BlockingResultOutput output = new BlockingResultOutput(
                 resultWriting,
                 releaseResult,
@@ -318,11 +319,13 @@ class InteractiveTerminalTest {
                     executor,
                     output,
                     tree());
+            terminal.onInputChunkConsumed(inputChunksConsumed::countDown);
             Thread reader = Thread.ofVirtual().start(() -> terminal.run(input));
             input.send("command\r".getBytes(StandardCharsets.UTF_8));
             assertThat(resultWriting.await(5, TimeUnit.SECONDS)).isTrue();
 
             input.send(new byte[]{3, 'x'});
+            assertThat(inputChunksConsumed.await(5, TimeUnit.SECONDS)).isTrue();
             releaseResult.countDown();
             assertThat(promptAfterResult.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(ignoredBell.await(5, TimeUnit.SECONDS)).isTrue();
