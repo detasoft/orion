@@ -1,6 +1,7 @@
 # Add Querying and Automation Renderers
 
 Status: todo
+Owner: codex, session 8c5e48e6, started 2026-09-05 12:25 Europe/Amsterdam.
 Detailed plan: ../../../2026-09-02-interactive-ssh-shell.md
 Depends on: ../command-core-and-exec/TASK.md,
 ../read-only-domain-commands/TASK.md
