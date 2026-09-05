@@ -7,7 +7,7 @@ This task node tracks active high-level implementation work.
 
 ## Child Tasks
 
-- [x] [Review stale branches and worktree cleanup candidates](stale-branches-and-worktrees/TASK.md)
+- [ ] [Review stale branches and worktree cleanup candidates](stale-branches-and-worktrees/TASK.md)
 
 - [ ] [Build the AgentD orchestration service](agentd/TASK.md)
 - [ ] [Build the central agent session server](agent-session-server/TASK.md)
