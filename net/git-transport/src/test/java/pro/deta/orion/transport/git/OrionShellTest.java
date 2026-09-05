@@ -25,11 +25,16 @@ import org.junit.jupiter.api.Timeout;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.command.CommandDispatcher;
+import pro.deta.orion.command.CommandCompletion;
+import pro.deta.orion.command.CommandDefinition;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandLineParser;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandNode;
+import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.internal.OrionExecutor;
@@ -57,6 +62,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -136,7 +143,8 @@ class OrionShellTest {
                 new AggregateStateMachine(StateMachineDefinition.define().name("runtime").build()),
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         CommandNode tree = new ReadOnlyDomainCommandCatalog(source).commandTree();
-        DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(new CommandLineParser(), tree);
+        DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
+                new CommandLineParser(), tree, new pro.deta.orion.command.CommandRowQuery());
         OrionShell shell = shell(dispatcher, new CommandNavigator(tree));
         TestChannelSession channel = channel();
         AsyncInput input = new AsyncInput(new ArrayList<>());
@@ -160,10 +168,40 @@ class OrionShellTest {
     }
 
     @Test
+    void interactiveShellPreservesExplicitJsonAndTersePayloads() throws Exception {
+        CommandDispatcher dispatcher = queryDispatcher();
+        OrionShell shell = shell(dispatcher);
+        TestChannelSession channel = channel();
+        AsyncInput input = new AsyncInput(new ArrayList<>());
+        ControllableOutput output = new ControllableOutput(true);
+        ExitRecorder exit = new ExitRecorder();
+        Command command = configuredAsync(
+                shell.createShell(channel),
+                input,
+                output,
+                new ControllableOutput(true),
+                exit);
+
+        command.start(channel, new MutableEnvironment("xterm", "80"));
+        assertThat(input.reading.await(2, TimeUnit.SECONDS)).isTrue();
+        input.send("/repository ls columns=id,refCount format=json\r");
+        String json = "{\"columns\":[\"id\",\"refCount\"],"
+                + "\"rows\":[{\"id\":\"project\",\"refCount\":0}],"
+                + "\"page\":{\"number\":1,\"size\":100,\"matched\":1,\"next\":null}}\n";
+        awaitOutputContains(output, json);
+        input.send("/repository ls columns=id,refCount format=terse\r");
+        awaitOutputContains(output, "project\t0\n");
+        input.send("quit\r");
+
+        assertThat(exit.completed.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(output.value()).contains(json, "project\t0\n");
+    }
+
+    @Test
     void interactiveShellEscapesHostileStructuredFields() throws Exception {
-        CommandDispatcher dispatcher = ignored -> new CommandResult.Rows(
-                List.of("repositoryName"),
-                List.of(List.of("evil\r\n\t\u001b\\name")));
+        CommandDispatcher dispatcher = ignored -> CommandResult.Rows.unqueried(
+                List.of(CommandColumn.text("repositoryName")),
+                List.of(List.of(CommandValue.text("evil\r\n\t\u001b\\name"))));
         OrionShell shell = shell(dispatcher);
         TestChannelSession channel = channel();
         AsyncInput input = new AsyncInput(new ArrayList<>());
@@ -333,6 +371,27 @@ class OrionShellTest {
 
     private OrionShell shell(CommandDispatcher dispatcher) {
         return shell(dispatcher, new CommandNavigator(CommandNode.builder().build()));
+    }
+
+    private static DefaultCommandDispatcher queryDispatcher() {
+        CommandDefinition list = new CommandDefinition(
+                "ls",
+                0,
+                0,
+                Set.of(),
+                Set.of(),
+                ignored -> true,
+                ignored -> pro.deta.orion.auth.check.AccessDecision.allow("test"),
+                ignored -> CommandResult.Rows.unqueried(
+                        List.of(CommandColumn.text("id"), CommandColumn.number("refCount")),
+                        List.of(List.of(CommandValue.text("project"), CommandValue.number(0)))),
+                CommandCompletion.none(),
+                CommandQuery.enabled(List.of("id", "refCount"), Map.of()));
+        CommandNode tree = CommandNode.builder()
+                .child("repository", CommandNode.builder().action(list).build())
+                .build();
+        return new DefaultCommandDispatcher(
+                new CommandLineParser(), tree, new pro.deta.orion.command.CommandRowQuery());
     }
 
     private OrionShell shell(CommandDispatcher dispatcher, CommandNavigator navigator) {

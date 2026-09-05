@@ -12,10 +12,15 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
     private final CommandLineParser parser;
     private final CommandNode root;
     private final CommandNavigator navigator;
+    private final CommandRowQuery rowQuery;
 
-    public DefaultCommandDispatcher(CommandLineParser parser, CommandNode root) {
+    public DefaultCommandDispatcher(
+            CommandLineParser parser,
+            CommandNode root,
+            CommandRowQuery rowQuery) {
         this.parser = Objects.requireNonNull(parser, "parser");
         this.root = Objects.requireNonNull(root, "root");
+        this.rowQuery = Objects.requireNonNull(rowQuery, "rowQuery");
         navigator = new CommandNavigator(root);
     }
 
@@ -53,13 +58,13 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
         }
         for (Map.Entry<String, String> parameter : command.namedParameters().entrySet()) {
             boolean sensitive = definition == null
-                    || !definition.allowedNamedParameters().contains(parameter.getKey())
+                    || !allowedNamedParameter(definition, parameter.getKey())
                     || definition.sensitiveNamedParameters().contains(parameter.getKey());
             parameters.put(parameter.getKey(), sensitive ? REDACTED : parameter.getValue());
         }
         for (WherePredicate predicate : command.predicates()) {
             boolean classified = definition != null
-                    && definition.allowedWhereFields().contains(predicate.field());
+                    && definition.query().fields().contains(predicate.field());
             parameters.put("where." + predicate.field(), classified ? predicate.value() : REDACTED);
         }
         return new CommandAuditDescription(command.path().toString(), command.action(), parameters);
@@ -121,7 +126,13 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
         if (result == null) {
             return failure(CommandFailureCode.HANDLER_FAILED, "Command handler failed");
         }
-        return result;
+        if (!definition.query().enabled()
+                || result instanceof CommandResult.Failure
+                || !(result instanceof CommandResult.Rows)) {
+            return result;
+        }
+        CommandResult.Rows rows = (CommandResult.Rows) result;
+        return rowQuery.apply(rows, invocation.arguments(), definition.query(), context.presentation());
     }
 
     private static CommandResult validateArguments(CommandDefinition definition, ParsedCommand command) {
@@ -131,18 +142,23 @@ public final class DefaultCommandDispatcher implements CommandDispatcher, Comman
             return failure(CommandFailureCode.INVALID_ARGUMENTS, "Invalid positional arguments");
         }
         for (String name : command.namedParameters().keySet()) {
-            if (!definition.allowedNamedParameters().contains(name)) {
+            if (!allowedNamedParameter(definition, name)) {
                 return failure(CommandFailureCode.INVALID_ARGUMENTS, "Unknown named parameter: " + name);
             }
         }
         for (WherePredicate predicate : command.predicates()) {
-            if (!definition.allowedWhereFields().contains(predicate.field())) {
+            if (!definition.query().enabled()) {
                 return failure(
                         CommandFailureCode.INVALID_ARGUMENTS,
                         "Unknown where field: " + predicate.field());
             }
         }
         return null;
+    }
+
+    private static boolean allowedNamedParameter(CommandDefinition definition, String name) {
+        return definition.allowedNamedParameters().contains(name)
+                || definition.query().enabled() && CommandQuery.NAMED_PARAMETERS.contains(name);
     }
 
     private CommandDefinition findDefinitionShape(ParsedCommand command) {

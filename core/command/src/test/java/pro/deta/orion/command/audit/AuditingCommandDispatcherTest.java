@@ -6,6 +6,8 @@ import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.command.CommandCancellation;
 import pro.deta.orion.command.CommandContext;
+import pro.deta.orion.command.CommandCompletion;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandDefinition;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandFailureCode;
@@ -13,8 +15,11 @@ import pro.deta.orion.command.CommandLineParser;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandPath;
 import pro.deta.orion.command.CommandPresentation;
+import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandRowQuery;
+import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.schema.acl.AccessControl;
 
@@ -191,35 +196,41 @@ class AuditingCommandDispatcherTest {
                 0,
                 Set.of("public", "secret", "force"),
                 Set.of("secret"),
-                Set.of(),
                 context -> true,
                 invocation -> AccessDecision.allow("test"),
-                invocation -> new CommandResult.Message("configured"));
+                invocation -> new CommandResult.Message("configured"),
+                CommandCompletion.none(),
+                CommandQuery.none());
         CommandDefinition explode = new CommandDefinition(
                 "explode",
                 0,
                 0,
                 Set.of(),
                 Set.of(),
-                Set.of(),
                 context -> true,
                 invocation -> AccessDecision.allow("test"),
                 invocation -> {
                     throw new Exception("private exception");
-                });
+                },
+                CommandCompletion.none(),
+                CommandQuery.none());
         CommandDefinition inspect = new CommandDefinition(
                 "inspect",
                 0,
                 1,
                 Set.of(),
                 Set.of(),
-                Set.of("state"),
                 context -> true,
                 invocation -> AccessDecision.allow("test"),
-                invocation -> new CommandResult.Message("inspected"));
+                invocation -> CommandResult.Rows.unqueried(
+                        List.of(CommandColumn.text("state")),
+                        List.of(List.of(CommandValue.text("running")))),
+                CommandCompletion.none(),
+                CommandQuery.enabled(List.of("state"), Map.of()));
         return new DefaultCommandDispatcher(
                 new CommandLineParser(),
-                CommandNode.builder().action(configure).action(explode).action(inspect).build());
+                CommandNode.builder().action(configure).action(explode).action(inspect).build(),
+                new CommandRowQuery());
     }
 
     private static SecurityContext securityContext() {

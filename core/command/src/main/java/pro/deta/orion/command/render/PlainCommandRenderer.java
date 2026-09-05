@@ -1,19 +1,30 @@
 package pro.deta.orion.command.render;
 
 import pro.deta.orion.command.CommandFailureCode;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 public final class PlainCommandRenderer {
+    private final TerseCommandRenderer terse = new TerseCommandRenderer();
+    private final JsonCommandRenderer json = new JsonCommandRenderer();
+
     public RenderedCommand render(CommandResult result) {
         Objects.requireNonNull(result, "result");
         if (result instanceof CommandResult.Message message) {
             return success(withNewline(message.value()));
         }
         if (result instanceof CommandResult.Rows rows) {
+            if (rows.format() == pro.deta.orion.command.RowOutputFormat.TERSE) {
+                return terse.render(rows);
+            }
+            if (rows.format() == pro.deta.orion.command.RowOutputFormat.JSON) {
+                return json.render(rows);
+            }
             return success(renderRows(rows));
         }
         if (result instanceof CommandResult.ObjectValue objectValue) {
@@ -37,29 +48,40 @@ public final class PlainCommandRenderer {
 
     private static String renderRows(CommandResult.Rows rows) {
         StringBuilder output = new StringBuilder();
-        appendRow(output, rows.columns());
-        for (List<String> row : rows.values()) {
+        appendColumns(output, rows.columns());
+        for (List<CommandValue> row : rows.values()) {
             appendRow(output, row);
         }
+        RowPaginationRenderer.appendWhenRelevant(output, rows);
         return output.toString();
     }
 
-    private static void appendRow(StringBuilder output, List<String> row) {
+    private static void appendColumns(StringBuilder output, List<CommandColumn> columns) {
+        for (int index = 0; index < columns.size(); index++) {
+            if (index > 0) {
+                output.append('\t');
+            }
+            output.append(StructuredValueEscaper.escape(columns.get(index).name()));
+        }
+        output.append('\n');
+    }
+
+    private static void appendRow(StringBuilder output, List<CommandValue> row) {
         for (int index = 0; index < row.size(); index++) {
             if (index > 0) {
                 output.append('\t');
             }
-            output.append(StructuredValueEscaper.escape(row.get(index)));
+            output.append(StructuredValueEscaper.escape(row.get(index).asText()));
         }
         output.append('\n');
     }
 
     private static String renderObject(CommandResult.ObjectValue objectValue) {
         StringBuilder output = new StringBuilder();
-        for (Map.Entry<String, String> field : objectValue.fields().entrySet()) {
+        for (Map.Entry<String, CommandValue> field : objectValue.fields().entrySet()) {
             output.append(StructuredValueEscaper.escape(field.getKey()))
                     .append('=')
-                    .append(StructuredValueEscaper.escape(field.getValue()))
+                    .append(StructuredValueEscaper.escape(field.getValue().asText()))
                     .append('\n');
         }
         return output.toString();

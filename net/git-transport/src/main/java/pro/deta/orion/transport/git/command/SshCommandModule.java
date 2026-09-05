@@ -8,6 +8,7 @@ import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandLineParser;
 import pro.deta.orion.command.CommandNavigator;
 import pro.deta.orion.command.CommandNode;
+import pro.deta.orion.command.CommandRowQuery;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.audit.AuditingCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
@@ -58,10 +59,17 @@ public final class SshCommandModule {
 
     @Provides
     @Singleton
+    static CommandRowQuery commandRowQuery() {
+        return new CommandRowQuery();
+    }
+
+    @Provides
+    @Singleton
     static DefaultCommandDispatcher defaultCommandDispatcher(
             CommandLineParser parser,
-            CommandNode commandTree) {
-        return new DefaultCommandDispatcher(parser, commandTree);
+            CommandNode commandTree,
+            CommandRowQuery rowQuery) {
+        return new DefaultCommandDispatcher(parser, commandTree, rowQuery);
     }
 
     @Provides

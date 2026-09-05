@@ -11,12 +11,16 @@ import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.command.CommandAuthorization;
+import pro.deta.orion.command.CommandColumn;
+import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandDefinition;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandHandler;
 import pro.deta.orion.command.CommandInvocation;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandQuery;
+import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.resource.ScopedResourceCandidate;
 import pro.deta.orion.command.resource.ScopedResourceCatalogResult;
 import pro.deta.orion.command.resource.ScopedResourceResolver;
@@ -37,14 +41,38 @@ import java.util.function.Function;
 @Singleton
 public final class ReadOnlyDomainCommandCatalog {
     private static final Set<String> NO_PARAMETERS = Set.of();
-    private static final List<String> REPOSITORY_COLUMNS =
-            List.of("id", "name", "defaultHead", "refCount");
-    private static final List<String> SESSION_COLUMNS =
-            List.of("id", "name", "state", "ownerId", "repositoryName");
-    private static final List<String> PROXY_COLUMNS =
-            List.of("id", "name", "state", "repositoryName", "remote");
-    private static final List<String> SERVICE_COLUMNS =
-            List.of("id", "name", "state", "computedState", "terminal");
+    private static final List<CommandColumn> ORGANIZATION_COLUMNS = List.of(
+            CommandColumn.text("id"),
+            CommandColumn.text("name"));
+    private static final List<CommandColumn> ORGANIZATION_USER_COLUMNS = List.of(
+            CommandColumn.text("id"),
+            CommandColumn.text("name"),
+            CommandColumn.text("principalId"));
+    private static final List<CommandColumn> REPOSITORY_COLUMNS = List.of(
+            CommandColumn.text("id"),
+            CommandColumn.text("name"),
+            CommandColumn.text("defaultHead"),
+            CommandColumn.number("refCount"));
+    private static final List<CommandColumn> SESSION_COLUMNS = List.of(
+            CommandColumn.text("id"),
+            CommandColumn.text("name"),
+            CommandColumn.text("state"),
+            CommandColumn.text("ownerId"),
+            CommandColumn.text("repositoryName"));
+    private static final List<CommandColumn> PROXY_COLUMNS = List.of(
+            CommandColumn.text("id"),
+            CommandColumn.text("name"),
+            CommandColumn.text("state"),
+            CommandColumn.text("repositoryName"),
+            CommandColumn.text("remote"));
+    private static final List<CommandColumn> SERVICE_COLUMNS = List.of(
+            CommandColumn.text("id"),
+            CommandColumn.text("name"),
+            CommandColumn.text("state"),
+            CommandColumn.text("computedState"),
+            CommandColumn.bool("terminal"));
+    private static final List<String> SESSION_STATES = List.of("RUNNING", "COMPLETED");
+    private static final List<String> PROXY_STATES = List.of("READY", "FAILED");
 
     private final OperatorDomainSource source;
 
@@ -58,7 +86,8 @@ public final class ReadOnlyDomainCommandCatalog {
                 .action(definition("show", this::authenticatedNamedUser, this::showRepository))
                 .build();
         CommandNode repository = CommandNode.builder()
-                .action(definition("ls", this::authenticatedNamedUser, this::listRepositories))
+                .action(listDefinition(
+                        "ls", this::authenticatedNamedUser, this::listRepositories, REPOSITORY_COLUMNS))
                 .dynamicChild(
                         new ScopedResourceResolver<>(this::repositoryCandidates, true),
                         repositoryResource)
@@ -66,15 +95,23 @@ public final class ReadOnlyDomainCommandCatalog {
 
         CommandNode organizationResource = CommandNode.builder()
                 .child("user", CommandNode.builder()
-                        .action(definition("ls", this::authenticatedNamedUser, this::listOrganizationUsers))
+                        .action(listDefinition(
+                                "ls",
+                                this::authenticatedNamedUser,
+                                this::listOrganizationUsers,
+                                ORGANIZATION_USER_COLUMNS))
                         .build())
                 .child("repository", CommandNode.builder()
-                        .action(definition(
-                                "ls", this::authenticatedNamedUser, this::listOrganizationRepositories))
+                        .action(listDefinition(
+                                "ls",
+                                this::authenticatedNamedUser,
+                                this::listOrganizationRepositories,
+                                REPOSITORY_COLUMNS))
                         .build())
                 .build();
         CommandNode organization = CommandNode.builder()
-                .action(definition("ls", this::authenticatedNamedUser, this::listOrganizations))
+                .action(listDefinition(
+                        "ls", this::authenticatedNamedUser, this::listOrganizations, ORGANIZATION_COLUMNS))
                 .dynamicChild(
                         new ScopedResourceResolver<>(this::organizationCandidates, true),
                         organizationResource)
@@ -84,17 +121,28 @@ public final class ReadOnlyDomainCommandCatalog {
                 .action(definition("show", this::authenticatedNamedUser, this::showSession))
                 .build();
         CommandNode session = CommandNode.builder()
-                .action(definition("ls", this::authenticatedNamedUser, this::listSessions))
+                .action(listDefinition(
+                        "ls",
+                        this::authenticatedNamedUser,
+                        this::listSessions,
+                        SESSION_COLUMNS,
+                        Map.of("state", SESSION_STATES)))
                 .dynamicChild(new ScopedResourceResolver<>(this::sessionCandidates, true), sessionResource)
                 .build();
 
         CommandNode proxy = CommandNode.builder()
-                .action(definition("ls", this::authenticatedNamedUser, this::listProxies))
+                .action(listDefinition(
+                        "ls",
+                        this::authenticatedNamedUser,
+                        this::listProxies,
+                        PROXY_COLUMNS,
+                        Map.of("state", PROXY_STATES)))
                 .build();
         CommandNode system = CommandNode.builder()
                 .action(definition("resource", this::applicationAdmin, this::systemResources))
                 .child("service", CommandNode.builder()
-                        .action(definition("ls", this::applicationAdmin, this::listServices))
+                        .action(listDefinition(
+                                "ls", this::applicationAdmin, this::listServices, SERVICE_COLUMNS))
                         .build())
                 .build();
 
@@ -118,10 +166,42 @@ public final class ReadOnlyDomainCommandCatalog {
                 0,
                 NO_PARAMETERS,
                 NO_PARAMETERS,
+                context -> namedUser(context.securityContext()) != null,
+                authorization,
+                handler,
+                CommandCompletion.none(),
+                CommandQuery.none());
+    }
+
+    private CommandDefinition listDefinition(
+            String action,
+            CommandAuthorization authorization,
+            CommandHandler handler,
+            List<CommandColumn> columns) {
+        return listDefinition(action, authorization, handler, columns, Map.of());
+    }
+
+    private CommandDefinition listDefinition(
+            String action,
+            CommandAuthorization authorization,
+            CommandHandler handler,
+            List<CommandColumn> columns,
+            Map<String, List<String>> knownValues) {
+        List<String> fields = new ArrayList<>(columns.size());
+        for (CommandColumn column : columns) {
+            fields.add(column.name());
+        }
+        return new CommandDefinition(
+                action,
+                0,
+                0,
+                NO_PARAMETERS,
                 NO_PARAMETERS,
                 context -> namedUser(context.securityContext()) != null,
                 authorization,
-                handler);
+                handler,
+                CommandCompletion.none(),
+                CommandQuery.enabled(fields, knownValues));
     }
 
     private AccessDecision authenticatedNamedUser(CommandInvocation invocation) {
@@ -195,11 +275,16 @@ public final class ReadOnlyDomainCommandCatalog {
         users.removeIf(user -> !user.organizationId().equals(organization.id())
                 || !admin && !user.principalId().equals(userId));
         users.sort(Comparator.comparing(OperatorDomainViews.UserView::id));
-        List<List<String>> rows = new ArrayList<>();
+        List<List<CommandValue>> rows = new ArrayList<>();
         for (OperatorDomainViews.UserView user : users) {
-            rows.add(List.of(user.id(), value(user.name()), user.principalId()));
+            rows.add(List.of(
+                    CommandValue.text(user.id()),
+                    value(user.name()),
+                    CommandValue.text(user.principalId())));
         }
-        return new CommandResult.Rows(List.of("id", "name", "principalId"), rows);
+        return CommandResult.Rows.unqueried(
+                ORGANIZATION_USER_COLUMNS,
+                rows);
     }
 
     private CommandResult listOrganizationRepositories(CommandInvocation invocation) {
@@ -256,10 +341,10 @@ public final class ReadOnlyDomainCommandCatalog {
         return switch (source.systemResources()) {
             case OperatorQueryResult.AvailableValue<OperatorDomainViews.SystemResourceView>(var value) ->
                     new CommandResult.ObjectValue(fields(
-                            "availableProcessors", Integer.toString(value.availableProcessors()),
-                            "heapUsedBytes", Long.toString(value.heapUsedBytes()),
-                            "heapCommittedBytes", Long.toString(value.heapCommittedBytes()),
-                            "heapMaxBytes", Long.toString(value.heapMaxBytes())));
+                            "availableProcessors", value.availableProcessors(),
+                            "heapUsedBytes", value.heapUsedBytes(),
+                            "heapCommittedBytes", value.heapCommittedBytes(),
+                            "heapMaxBytes", value.heapMaxBytes()));
             case OperatorQueryResult.Unavailable<OperatorDomainViews.SystemResourceView> ignored ->
                     unavailable();
             case OperatorQueryResult.Failed<OperatorDomainViews.SystemResourceView> ignored -> failed();
@@ -271,16 +356,16 @@ public final class ReadOnlyDomainCommandCatalog {
             case OperatorQueryResult.AvailableSnapshot<OperatorDomainViews.ServiceView>(var services) -> {
                 List<OperatorDomainViews.ServiceView> ordered = new ArrayList<>(services);
                 ordered.sort(Comparator.comparing(OperatorDomainViews.ServiceView::id));
-                List<List<String>> rows = new ArrayList<>();
+                List<List<CommandValue>> rows = new ArrayList<>();
                 for (OperatorDomainViews.ServiceView service : ordered) {
                     rows.add(List.of(
-                            service.id(),
-                            service.name(),
-                            service.state(),
-                            service.computedState(),
-                            Boolean.toString(service.terminal())));
+                            CommandValue.text(service.id()),
+                            CommandValue.text(service.name()),
+                            CommandValue.text(service.state()),
+                            CommandValue.text(service.computedState()),
+                            CommandValue.bool(service.terminal())));
                 }
-                yield new CommandResult.Rows(SERVICE_COLUMNS, rows);
+                yield CommandResult.Rows.unqueried(SERVICE_COLUMNS, rows);
             }
             case OperatorQueryResult.Unavailable<List<OperatorDomainViews.ServiceView>> ignored ->
                     unavailable();
@@ -484,15 +569,15 @@ public final class ReadOnlyDomainCommandCatalog {
 
     private static CommandResult.Rows repositoryRows(List<OperatorDomainViews.RepositoryView> values) {
         values.sort(Comparator.comparing(OperatorDomainViews.RepositoryView::id));
-        List<List<String>> rows = new ArrayList<>();
+        List<List<CommandValue>> rows = new ArrayList<>();
         for (OperatorDomainViews.RepositoryView repository : values) {
             rows.add(List.of(
-                    repository.id(),
+                    CommandValue.text(repository.id()),
                     value(repository.name()),
-                    repository.defaultHead(),
-                    Integer.toString(repository.refCount())));
+                    CommandValue.text(repository.defaultHead()),
+                    CommandValue.number(repository.refCount())));
         }
-        return new CommandResult.Rows(REPOSITORY_COLUMNS, rows);
+        return CommandResult.Rows.unqueried(REPOSITORY_COLUMNS, rows);
     }
 
     private static CommandResult.ObjectValue repositoryObject(OperatorDomainViews.RepositoryView repository) {
@@ -501,30 +586,32 @@ public final class ReadOnlyDomainCommandCatalog {
                 "name", value(repository.name()),
                 "repositoryName", repository.repositoryName(),
                 "defaultHead", repository.defaultHead(),
-                "refCount", Integer.toString(repository.refCount())));
+                "refCount", repository.refCount()));
     }
 
     private static CommandResult.Rows organizationRows(List<OperatorDomainViews.OrganizationView> values) {
         values.sort(Comparator.comparing(OperatorDomainViews.OrganizationView::id));
-        List<List<String>> rows = new ArrayList<>();
+        List<List<CommandValue>> rows = new ArrayList<>();
         for (OperatorDomainViews.OrganizationView organization : values) {
-            rows.add(List.of(organization.id(), value(organization.name())));
+            rows.add(List.of(CommandValue.text(organization.id()), value(organization.name())));
         }
-        return new CommandResult.Rows(List.of("id", "name"), rows);
+        return CommandResult.Rows.unqueried(
+                ORGANIZATION_COLUMNS,
+                rows);
     }
 
     private static CommandResult.Rows sessionRows(List<OperatorDomainViews.SessionView> values) {
         values.sort(Comparator.comparing(OperatorDomainViews.SessionView::id));
-        List<List<String>> rows = new ArrayList<>();
+        List<List<CommandValue>> rows = new ArrayList<>();
         for (OperatorDomainViews.SessionView session : values) {
             rows.add(List.of(
-                    session.id(),
+                    CommandValue.text(session.id()),
                     value(session.name()),
-                    session.state(),
-                    session.ownerId(),
+                    CommandValue.text(session.state()),
+                    CommandValue.text(session.ownerId()),
                     value(session.repositoryName())));
         }
-        return new CommandResult.Rows(SESSION_COLUMNS, rows);
+        return CommandResult.Rows.unqueried(SESSION_COLUMNS, rows);
     }
 
     private static CommandResult.ObjectValue sessionObject(OperatorDomainViews.SessionView session) {
@@ -538,16 +625,16 @@ public final class ReadOnlyDomainCommandCatalog {
 
     private static CommandResult.Rows proxyRows(List<OperatorDomainViews.ProxyView> values) {
         values.sort(Comparator.comparing(OperatorDomainViews.ProxyView::id));
-        List<List<String>> rows = new ArrayList<>();
+        List<List<CommandValue>> rows = new ArrayList<>();
         for (OperatorDomainViews.ProxyView proxy : values) {
             rows.add(List.of(
-                    proxy.id(),
+                    CommandValue.text(proxy.id()),
                     value(proxy.name()),
-                    proxy.state(),
+                    CommandValue.text(proxy.state()),
                     value(proxy.repositoryName()),
-                    proxy.remote()));
+                    CommandValue.text(proxy.remote())));
         }
-        return new CommandResult.Rows(PROXY_COLUMNS, rows);
+        return CommandResult.Rows.unqueried(PROXY_COLUMNS, rows);
     }
 
     private static <T> T resource(CommandInvocation invocation, Class<T> type) {
@@ -571,16 +658,27 @@ public final class ReadOnlyDomainCommandCatalog {
         return userId == null || userId.isBlank() ? null : userId;
     }
 
-    private static String value(Optional<String> value) {
-        return value.orElse("");
+    private static CommandValue value(Optional<String> value) {
+        return value.<CommandValue>map(CommandValue::text).orElseGet(CommandValue::nullValue);
     }
 
-    private static Map<String, String> fields(String... values) {
-        LinkedHashMap<String, String> fields = new LinkedHashMap<>();
+    private static Map<String, CommandValue> fields(Object... values) {
+        LinkedHashMap<String, CommandValue> fields = new LinkedHashMap<>();
         for (int index = 0; index < values.length; index += 2) {
-            fields.put(values[index], values[index + 1]);
+            fields.put((String) values[index], commandValue(values[index + 1]));
         }
         return fields;
+    }
+
+    private static CommandValue commandValue(Object value) {
+        return switch (value) {
+            case CommandValue commandValue -> commandValue;
+            case Integer integer -> CommandValue.number(integer);
+            case Long longValue -> CommandValue.number(longValue);
+            case Boolean booleanValue -> CommandValue.bool(booleanValue);
+            case String string -> CommandValue.text(string);
+            default -> throw new IllegalArgumentException("unsupported command value");
+        };
     }
 
     private static CommandResult.Failure unavailable() {

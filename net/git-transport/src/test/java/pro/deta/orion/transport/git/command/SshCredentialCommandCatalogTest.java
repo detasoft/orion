@@ -16,6 +16,7 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandLineParser;
@@ -23,6 +24,7 @@ import pro.deta.orion.command.CommandPath;
 import pro.deta.orion.command.CommandPresentation;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 
 import java.security.KeyPairGenerator;
@@ -37,7 +39,8 @@ class SshCredentialCommandCatalogTest {
     private final RecordingService service = new RecordingService();
     private final DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
-            new SshCredentialCommandCatalog(service).commandTree());
+            new SshCredentialCommandCatalog(service).commandTree(),
+            new pro.deta.orion.command.CommandRowQuery());
 
     @Test
     void listsOnlyAuthenticatedUsersSafeCredentialDescriptors() {
@@ -49,11 +52,20 @@ class SshCredentialCommandCatalogTest {
                 "/auth/key ls",
                 context("alice", new SshConnectionCredentials("SHA256:current", List.of())));
 
-        assertThat(result).isEqualTo(new CommandResult.Rows(
-                List.of("algorithm", "fingerprint", "current"),
+        assertThat(result).isEqualTo(CommandResult.Rows.unqueried(
                 List.of(
-                        List.of("ssh-ed25519", "SHA256:other", "false"),
-                        List.of("ssh-rsa", "SHA256:current", "true"))));
+                        CommandColumn.text("algorithm"),
+                        CommandColumn.text("fingerprint"),
+                        CommandColumn.bool("current")),
+                List.of(
+                        List.of(
+                                CommandValue.text("ssh-ed25519"),
+                                CommandValue.text("SHA256:other"),
+                                CommandValue.bool(false)),
+                        List.of(
+                                CommandValue.text("ssh-rsa"),
+                                CommandValue.text("SHA256:current"),
+                                CommandValue.bool(true)))));
         assertThat(service.listUsers).containsExactly("alice");
 
         assertFailure(dispatch("/auth/key ls", anonymous()), CommandFailureCode.ACCESS_DENIED);

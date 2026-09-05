@@ -5,6 +5,7 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandFailureCode;
@@ -15,7 +16,10 @@ import pro.deta.orion.command.CommandPath;
 import pro.deta.orion.command.CommandPresentation;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
+import pro.deta.orion.command.RowOutputFormat;
+import pro.deta.orion.command.RowPage;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.terminal.TerminalCommandRenderer;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -28,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static pro.deta.orion.schema.acl.AccessControl.TRUE_STRING;
@@ -36,7 +41,10 @@ class ReadOnlyDomainCommandCatalogTest {
     private final FixtureSource source = new FixtureSource();
     private final CommandNode tree = new ReadOnlyDomainCommandCatalog(source).commandTree();
     private final DefaultCommandDispatcher dispatcher =
-            new DefaultCommandDispatcher(new CommandLineParser(), tree);
+            new DefaultCommandDispatcher(
+                    new CommandLineParser(),
+                    tree,
+                    new pro.deta.orion.command.CommandRowQuery());
 
     @Test
     void rejectsUnnamedIdentitiesBeforeConsultingStaticOrDynamicSources() {
@@ -51,7 +59,7 @@ class ReadOnlyDomainCommandCatalogTest {
         }
         assertThat(source.calls).isEmpty();
 
-        assertNoParameters(tree);
+        assertNoOrdinaryParameters(tree);
     }
 
     @Test
@@ -80,12 +88,16 @@ class ReadOnlyDomainCommandCatalogTest {
         UserIdentity reader = user("operator", repositoryGrant("team/visible"));
 
         CommandResult.ObjectValue whoami = (CommandResult.ObjectValue) dispatch("whoami", reader);
-        assertThat(whoami.fields()).containsExactly(Map.entry("userId", "operator"));
-        assertThat(dispatch("/repository ls", reader)).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name", "defaultHead", "refCount"),
+        assertThat(whoami.fields()).containsExactly(Map.entry("userId", CommandValue.text("operator")));
+        assertThat(dispatch("/repository ls", reader)).isEqualTo(rows(
                 List.of(
-                        List.of("visible-1", "primary", "refs/heads/main", "2"),
-                        List.of("visible-2", "shared", "refs/heads/main", "2"))));
+                        CommandColumn.text("id"),
+                        CommandColumn.text("name"),
+                        CommandColumn.text("defaultHead"),
+                        CommandColumn.number("refCount")),
+                List.of(
+                        row("visible-1", "primary", "refs/heads/main", 2),
+                        row("visible-2", "shared", "refs/heads/main", 2))));
         assertThat(dispatch("/repository/visible-1 show", reader))
                 .isEqualTo(repositoryObject("visible-1", "primary"));
         assertThat(dispatch("/repository/visible- show", reader)).isEqualTo(new CommandResult.Failure(
@@ -96,10 +108,34 @@ class ReadOnlyDomainCommandCatalogTest {
                 .isEqualTo(repositoryObject("visible-1", "primary"));
         assertFailure(dispatch("/repository/hidden-1 show", reader), CommandFailureCode.MISSING_RESOURCE);
         assertThat(((CommandResult.Rows) dispatch("/repository ls", admin())).values()).hasSize(3);
+        assertFailure(dispatch("whoami format=json", reader), CommandFailureCode.INVALID_ARGUMENTS);
+        assertFailure(
+                dispatch("/repository/visible-1 show format=json", reader),
+                CommandFailureCode.INVALID_ARGUMENTS);
+        assertFailure(dispatch("/system resource format=json", admin()), CommandFailureCode.INVALID_ARGUMENTS);
 
         CommandCompletion.Result completion = new CommandNavigator(tree).complete(
                 context(reader), CommandPath.root(), "/repository/h", 13);
         assertThat(completion.candidates()).isEmpty();
+    }
+
+    @Test
+    void queriesTypedRepositoryRowsAfterAclFilteringAndKeepsCanonicalOrder() {
+        source.repositories = available(List.of(
+                repository("visible-2", "shared", "team/visible"),
+                repository("hidden-1", "hidden", "team/hidden"),
+                repository("visible-1", "primary", "team/visible")));
+        UserIdentity reader = user("operator", repositoryGrant("team/visible"));
+
+        CommandResult result = dispatch(
+                "/repository ls columns=id,refCount page=2 page-size=1 where refCount=2",
+                reader);
+
+        assertThat(result).isEqualTo(new CommandResult.Rows(
+                List.of(CommandColumn.text("id"), CommandColumn.number("refCount")),
+                List.of(row("visible-2", 2)),
+                RowOutputFormat.AUTO,
+                Optional.of(new RowPage(2, 1, 2, OptionalInt.empty(), true))));
     }
 
     @Test
@@ -124,8 +160,13 @@ class ReadOnlyDomainCommandCatalogTest {
     void distinguishesEmptyUnavailableAndFailedRepositorySources() {
         source.repositories = available(List.of());
         assertThat(dispatch("/repository ls", user("operator")))
-                .isEqualTo(new CommandResult.Rows(
-                        List.of("id", "name", "defaultHead", "refCount"), List.of()));
+                .isEqualTo(rows(
+                        List.of(
+                                CommandColumn.text("id"),
+                                CommandColumn.text("name"),
+                                CommandColumn.text("defaultHead"),
+                                CommandColumn.number("refCount")),
+                        List.of()));
 
         source.repositories = new OperatorQueryResult.Unavailable<>("repository-secret");
         assertSanitized(dispatch("/repository ls", user("operator")), CommandFailureCode.SERVICE_UNAVAILABLE);
@@ -150,19 +191,23 @@ class ReadOnlyDomainCommandCatalogTest {
                 repository("repo-b", "shared", "team/hidden", "org-b"))));
         UserIdentity reader = user("operator", repositoryGrant("team/readable"));
 
-        assertThat(dispatch("/organization ls", reader)).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name"), List.of(List.of("org-a", "acme"))));
-        assertThat(dispatch("/organization/acme/user ls", reader)).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name", "principalId"),
-                List.of(List.of("member-a", "shared", "operator"))));
-        assertThat(dispatch("/organization/org-a/repository ls", reader)).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name", "defaultHead", "refCount"),
-                List.of(List.of("repo-a", "shared", "refs/heads/main", "2"))));
+        assertThat(dispatch("/organization ls", reader)).isEqualTo(rows(
+                textColumns("id", "name"), List.of(row("org-a", "acme"))));
+        assertThat(dispatch("/organization/acme/user ls", reader)).isEqualTo(rows(
+                textColumns("id", "name", "principalId"),
+                List.of(row("member-a", "shared", "operator"))));
+        assertThat(dispatch("/organization/org-a/repository ls", reader)).isEqualTo(rows(
+                List.of(
+                        CommandColumn.text("id"),
+                        CommandColumn.text("name"),
+                        CommandColumn.text("defaultHead"),
+                        CommandColumn.number("refCount")),
+                List.of(row("repo-a", "shared", "refs/heads/main", 2))));
         assertFailure(dispatch("/organization/org-b/user ls", reader), CommandFailureCode.MISSING_RESOURCE);
 
-        assertThat(dispatch("/organization/org-b/user ls", admin())).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name", "principalId"),
-                List.of(List.of("member-b", "shared", "someone"))));
+        assertThat(dispatch("/organization/org-b/user ls", admin())).isEqualTo(rows(
+                textColumns("id", "name", "principalId"),
+                List.of(row("member-b", "shared", "someone"))));
     }
 
     @Test
@@ -187,22 +232,54 @@ class ReadOnlyDomainCommandCatalogTest {
                 proxy("unassociated", Optional.empty())));
         UserIdentity reader = user("operator", repositoryGrant("team/readable"));
 
-        assertThat(dispatch("/session ls", reader)).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name", "state", "ownerId", "repositoryName"),
+        assertThat(dispatch("/session ls", reader)).isEqualTo(rows(
+                textColumns("id", "name", "state", "ownerId", "repositoryName"),
                 List.of(
-                        List.of("owned", "same", "RUNNING", "operator", ""),
-                        List.of("readable", "same", "RUNNING", "other", "team/readable"))));
-        assertThat(dispatch("/session/read show", reader)).isEqualTo(new CommandResult.ObjectValue(Map.of(
+                        row("owned", "same", "RUNNING", "operator", null),
+                        row("readable", "same", "RUNNING", "other", "team/readable"))));
+        assertThat(dispatch("/session/read show", reader)).isEqualTo(object(
                 "id", "readable",
                 "name", "same",
                 "state", "RUNNING",
                 "ownerId", "other",
-                "repositoryName", "team/readable")));
+                "repositoryName", "team/readable"));
         assertFailure(dispatch("/session/hidden show", reader), CommandFailureCode.MISSING_RESOURCE);
-        assertThat(dispatch("/proxy ls", reader)).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name", "state", "repositoryName", "remote"),
-                List.of(List.of("readable", "readable-name", "READY", "team/readable", "origin"))));
+        assertThat(dispatch("/proxy ls", reader)).isEqualTo(rows(
+                textColumns("id", "name", "state", "repositoryName", "remote"),
+                List.of(row("readable", "readable-name", "READY", "team/readable", "origin"))));
         assertThat(((CommandResult.Rows) dispatch("/proxy ls", admin())).values()).hasSize(3);
+    }
+
+    @Test
+    void queriesNullableSessionAndProxyFieldsAndCompletesKnownStates() {
+        source.sessions = available(List.of(
+                session("owned", "same", "operator", Optional.empty()),
+                session("readable", "same", "other", Optional.of("team/readable")),
+                session("hidden", "same", "other", Optional.of("team/hidden"))));
+        source.proxies = available(List.of(
+                proxy("readable", Optional.of("team/readable")),
+                proxy("hidden", Optional.of("team/hidden")),
+                proxy("unassociated", Optional.empty())));
+        UserIdentity reader = user("operator", repositoryGrant("team/readable"));
+
+        CommandResult.Rows sessions = (CommandResult.Rows) dispatch(
+                "/session ls columns=id,state where repositoryName=null state=RUNNING",
+                reader);
+        CommandResult.Rows proxies = (CommandResult.Rows) dispatch(
+                "/proxy ls columns=id,repositoryName where state=READY repositoryName!=null",
+                reader);
+
+        assertThat(sessions.values()).containsExactly(row("owned", "RUNNING"));
+        assertThat(sessions.page()).contains(new RowPage(1, 100, 1, OptionalInt.empty(), false));
+        assertThat(proxies.values()).containsExactly(row("readable", "team/readable"));
+        assertThat(new CommandNavigator(tree)
+                .complete(context(reader), CommandPath.root(), "/session ls where state=R", 25)
+                .candidates())
+                .containsExactly("RUNNING");
+        assertThat(new CommandNavigator(tree)
+                .complete(context(reader), CommandPath.root(), "/proxy ls where state!=R", 24)
+                .candidates())
+                .containsExactly("READY");
     }
 
     @Test
@@ -218,6 +295,20 @@ class ReadOnlyDomainCommandCatalogTest {
     }
 
     @Test
+    void leavesUnavailableAndFailedResultsUnchangedWhenAQueryWasRequested() {
+        source.sessions = new OperatorQueryResult.Unavailable<>("session-internal");
+        source.proxies = new OperatorQueryResult.Failed<>(
+                "proxy-internal", new RuntimeException("private proxy failure"));
+
+        assertSanitized(
+                dispatch("/session ls format=json where state=RUNNING", user("operator")),
+                CommandFailureCode.SERVICE_UNAVAILABLE);
+        assertSanitized(
+                dispatch("/proxy ls columns=id where state=READY", user("operator")),
+                CommandFailureCode.HANDLER_FAILED);
+    }
+
+    @Test
     void restrictsSystemResourcesAndServicesToAdministratorsWithStableOrder() {
         source.resources = new OperatorQueryResult.AvailableValue<>(
                 new OperatorDomainViews.SystemResourceView(4, 10, 20, 30));
@@ -230,15 +321,25 @@ class ReadOnlyDomainCommandCatalogTest {
         assertThat(source.calls).isEmpty();
         CommandResult.ObjectValue resources = (CommandResult.ObjectValue) dispatch("/system resource", admin());
         assertThat(resources.fields()).containsExactly(
-                Map.entry("availableProcessors", "4"),
-                Map.entry("heapUsedBytes", "10"),
-                Map.entry("heapCommittedBytes", "20"),
-                Map.entry("heapMaxBytes", "30"));
-        assertThat(dispatch("/system/service ls", admin())).isEqualTo(new CommandResult.Rows(
-                List.of("id", "name", "state", "computedState", "terminal"),
+                Map.entry("availableProcessors", CommandValue.number(4)),
+                Map.entry("heapUsedBytes", CommandValue.number(10)),
+                Map.entry("heapCommittedBytes", CommandValue.number(20)),
+                Map.entry("heapMaxBytes", CommandValue.number(30)));
+        assertThat(dispatch("/system/service ls", admin())).isEqualTo(rows(
                 List.of(
-                        List.of("alpha", "Alpha", "RUNNING", "RUNNING", "true"),
-                        List.of("zeta", "Zeta", "NEW", "NEW", "false"))));
+                        CommandColumn.text("id"),
+                        CommandColumn.text("name"),
+                        CommandColumn.text("state"),
+                        CommandColumn.text("computedState"),
+                        CommandColumn.bool("terminal")),
+                List.of(
+                        row("alpha", "Alpha", "RUNNING", "RUNNING", true),
+                        row("zeta", "Zeta", "NEW", "NEW", false))));
+
+        CommandResult.Rows terminal = (CommandResult.Rows) dispatch(
+                "/system/service ls columns=id,terminal where terminal=true",
+                admin());
+        assertThat(terminal.values()).containsExactly(row("alpha", true));
     }
 
     @Test
@@ -330,12 +431,59 @@ class ReadOnlyDomainCommandCatalogTest {
 
     private static CommandResult.ObjectValue repositoryObject(
             String id, String name, String repositoryName) {
-        return new CommandResult.ObjectValue(Map.of(
+        return object(
                 "id", id,
-                "name", name,
+                "name", name.isEmpty() ? null : name,
                 "repositoryName", repositoryName,
                 "defaultHead", "refs/heads/main",
-                "refCount", "2"));
+                "refCount", 2);
+    }
+
+    private static CommandResult.Rows rows(
+            List<CommandColumn> columns,
+            List<List<CommandValue>> values) {
+        return new CommandResult.Rows(
+                columns,
+                values,
+                RowOutputFormat.AUTO,
+                Optional.of(new RowPage(1, 100, values.size(), OptionalInt.empty(), false)));
+    }
+
+    private static List<CommandColumn> textColumns(String... names) {
+        List<CommandColumn> columns = new ArrayList<>(names.length);
+        for (String name : names) {
+            columns.add(CommandColumn.text(name));
+        }
+        return List.copyOf(columns);
+    }
+
+    private static List<CommandValue> row(Object... values) {
+        List<CommandValue> row = new ArrayList<>(values.length);
+        for (Object value : values) {
+            row.add(commandValue(value));
+        }
+        return List.copyOf(row);
+    }
+
+    private static CommandResult.ObjectValue object(Object... fields) {
+        Map<String, CommandValue> values = new java.util.LinkedHashMap<>();
+        for (int index = 0; index < fields.length; index += 2) {
+            values.put((String) fields[index], commandValue(fields[index + 1]));
+        }
+        return new CommandResult.ObjectValue(values);
+    }
+
+    private static CommandValue commandValue(Object value) {
+        if (value == null) {
+            return CommandValue.nullValue();
+        }
+        return switch (value) {
+            case String string -> CommandValue.text(string);
+            case Integer integer -> CommandValue.number(integer);
+            case Long longValue -> CommandValue.number(longValue);
+            case Boolean booleanValue -> CommandValue.bool(booleanValue);
+            default -> throw new IllegalArgumentException("unsupported test value");
+        };
     }
 
     private static <T> OperatorQueryResult<List<T>> available(List<T> values) {
@@ -360,16 +508,15 @@ class ReadOnlyDomainCommandCatalogTest {
         assertThat(result.toString()).doesNotContain("named user is required");
     }
 
-    private static void assertNoParameters(CommandNode node) {
+    private static void assertNoOrdinaryParameters(CommandNode node) {
         for (var definition : node.actions().values()) {
             assertThat(definition.allowedNamedParameters()).isEmpty();
-            assertThat(definition.allowedWhereFields()).isEmpty();
         }
         for (CommandNode child : node.children().values()) {
-            assertNoParameters(child);
+            assertNoOrdinaryParameters(child);
         }
         if (node.dynamicChild() != null) {
-            assertNoParameters(node.dynamicChild().node());
+            assertNoOrdinaryParameters(node.dynamicChild().node());
         }
     }
 

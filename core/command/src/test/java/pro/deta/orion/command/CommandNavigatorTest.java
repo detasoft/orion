@@ -107,6 +107,18 @@ class CommandNavigatorTest {
                 25,
                 "/session ls where state=running ",
                 List.of("running"));
+        assertCompletion(
+                CommandPath.root(),
+                "/session ls where state!=r",
+                26,
+                "/session ls where state!=running ",
+                List.of("running"));
+        assertCompletion(
+                CommandPath.root(),
+                "/session ls columns=id,st",
+                25,
+                "/session ls columns=id,state ",
+                List.of("state"));
     }
 
     @Test
@@ -117,14 +129,18 @@ class CommandNavigatorTest {
                 0,
                 Set.of("zeta", "alpha"),
                 Set.of(),
-                Set.of("zone", "account"),
                 ignored -> true,
                 ignored -> AccessDecision.allow("test"),
-                ignored -> new CommandResult.Message("ok"));
+                ignored -> CommandResult.Rows.unqueried(
+                        List.of(CommandColumn.text("account"), CommandColumn.text("zone")),
+                        List.of()),
+                CommandCompletion.none(),
+                CommandQuery.enabled(List.of("account", "zone"), Map.of()));
         CommandNavigator ordered = new CommandNavigator(CommandNode.builder().action(inspect).build());
 
         assertThat(ordered.complete(context, CommandPath.root(), "inspect ", 8).candidates())
-                .containsExactly("alpha=", "zeta=", "where");
+                .containsExactly(
+                        "alpha=", "columns=", "format=", "page=", "page-size=", "zeta=", "where");
         assertThat(ordered.complete(context, CommandPath.root(), "inspect where ", 14).candidates())
                 .containsExactly("account=", "zone=");
     }
@@ -135,7 +151,7 @@ class CommandNavigatorTest {
         values.put("zeta", List.of("last"));
         values.put("alpha", List.of("first"));
 
-        CommandCompletion completion = new CommandCompletion(values, Map.of());
+        CommandCompletion completion = new CommandCompletion(values);
 
         assertThat(completion.namedValues().keySet()).containsExactly("zeta", "alpha");
     }
@@ -202,14 +218,16 @@ class CommandNavigatorTest {
                 "ls",
                 0,
                 0,
-                Set.of("format"),
                 Set.of(),
-                Set.of("state"),
+                Set.of(),
                 ignored -> true,
                 ignored -> AccessDecision.allow("test"),
-                ignored -> new CommandResult.Message("ok"),
-                new CommandCompletion(
-                        Map.of("format", List.of("table", "wide")),
+                ignored -> CommandResult.Rows.unqueried(
+                        List.of(CommandColumn.text("state")),
+                        List.of()),
+                CommandCompletion.none(),
+                CommandQuery.enabled(
+                        List.of("state"),
                         Map.of("state", List.of("running", "completed"))));
         CommandDefinition hidden = definition("secret", false);
         CommandNode resource = CommandNode.builder().action(definition("show", true)).build();
@@ -251,10 +269,11 @@ class CommandNavigatorTest {
                 0,
                 Set.of(),
                 Set.of(),
-                Set.of(),
                 ignored -> visible,
                 ignored -> AccessDecision.allow("test"),
-                ignored -> new CommandResult.Message("ok"));
+                ignored -> new CommandResult.Message("ok"),
+                CommandCompletion.none(),
+                CommandQuery.none());
     }
 
     private static ScopedResourceCandidate<String> candidate(

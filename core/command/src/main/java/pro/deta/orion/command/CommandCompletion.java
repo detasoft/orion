@@ -6,16 +6,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-public record CommandCompletion(
-        Map<String, List<String>> namedValues,
-        Map<String, List<String>> whereValues) {
+public record CommandCompletion(Map<String, List<String>> namedValues) {
     public CommandCompletion {
         namedValues = immutableValues(namedValues, "namedValues");
-        whereValues = immutableValues(whereValues, "whereValues");
     }
 
     public static CommandCompletion none() {
-        return new CommandCompletion(Map.of(), Map.of());
+        return new CommandCompletion(Map.of());
     }
 
     private static Map<String, List<String>> immutableValues(

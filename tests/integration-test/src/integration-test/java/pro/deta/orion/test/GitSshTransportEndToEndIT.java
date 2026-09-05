@@ -594,17 +594,38 @@ class GitSshTransportEndToEndIT {
     }
 
     @Test
-    void namedUserCanRunReadOnlyDomainCommandsOverExecAndShell() throws Exception {
+    void namedUserCanQueryReadOnlyDomainCommandsOverExecAndShell() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         startedOrion = startFreshOrion(orionRoot);
         String rootToken = issueTokenOverSsh(startedOrion, startedOrion.serverIdentityKey(), 3_600);
         createManagedUser(startedOrion, rootToken, TRUSTED_USER_KEY, "project");
         startedOrion.gitRepositoryProvider().create("project").valueOrFailure("create project");
+        startedOrion.gitRepositoryProvider().create("hidden").valueOrFailure("create hidden");
 
         SshCommandResult whoami = executeCommandOverSsh(
                 startedOrion, USERNAME, TRUSTED_USER_KEY, "whoami");
         SshCommandResult repositories = executeCommandOverSsh(
                 startedOrion, USERNAME, TRUSTED_USER_KEY, "/repository ls");
+        SshCommandResult json = executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                TRUSTED_USER_KEY,
+                "/repository ls columns=id,refCount format=json where refCount=0");
+        SshCommandResult terse = executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                TRUSTED_USER_KEY,
+                "/repository ls columns=id,refCount format=terse where refCount=0");
+        SshCommandResult table = executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                TRUSTED_USER_KEY,
+                "/repository ls format=table");
+        SshCommandResult invalid = executeCommandOverSsh(
+                startedOrion,
+                USERNAME,
+                TRUSTED_USER_KEY,
+                "/repository ls where refCount=secret");
         SshCommandResult arbitrary = executeCommandOverSsh(
                 startedOrion, USERNAME, TRUSTED_USER_KEY, "definitely-not-an-orion-command");
 
@@ -615,6 +636,21 @@ class GitSshTransportEndToEndIT {
                 "id\tname\tdefaultHead\trefCount",
                 "project\tproject\trefs/heads/main\t0");
         assertThat(repositories.output()).doesNotContain("\u001b[", "@orion] >");
+        String jsonOutput = "{\"columns\":[\"id\",\"refCount\"],"
+                + "\"rows\":[{\"id\":\"project\",\"refCount\":0}],"
+                + "\"page\":{\"number\":1,\"size\":100,\"matched\":1,\"next\":null}}\n";
+        assertThat(json.exitStatus()).isZero();
+        assertThat(json.output()).isEqualTo(jsonOutput);
+        assertThat(json.output()).doesNotContain("hidden", "\u001b[");
+        assertThat(terse.exitStatus()).isZero();
+        assertThat(terse.output()).isEqualTo("project\t0\n");
+        assertThat(table.exitStatus()).isEqualTo(2);
+        assertThat(table.error())
+                .isEqualTo("INVALID_ARGUMENTS: Table format requires an interactive terminal\n");
+        assertThat(invalid.exitStatus()).isEqualTo(2);
+        assertThat(invalid.error())
+                .isEqualTo("INVALID_ARGUMENTS: Where value for refCount must be a number\n")
+                .doesNotContain("hidden");
         assertThat(arbitrary.exitStatus()).isEqualTo(127);
         assertThat(arbitrary.error()).isEqualTo("UNKNOWN_COMMAND: Unknown command\n");
 
@@ -641,6 +677,11 @@ class GitSshTransportEndToEndIT {
                 awaitContains(output, "[" + USERNAME + "@orion] > ");
                 send(clientInput, "whoami\r");
                 awaitContains(output, "userId=" + USERNAME);
+                send(clientInput, "/repository ls columns=id,refCount format=terse\r");
+                awaitContains(output, "project\t0\n");
+                send(clientInput, "/repository ls columns=id,refCount format=json where refCount=0\r");
+                awaitContains(output, jsonOutput);
+                assertThat(output.toString(StandardCharsets.UTF_8)).doesNotContain("hidden");
                 send(clientInput, "quit\r");
                 assertThat(channel.waitFor(
                                 EnumSet.of(ClientChannelEvent.CLOSED),

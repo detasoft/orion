@@ -253,6 +253,51 @@ rows contain `id`, `name`, `state`, `repositoryName`, and `remote`. System
 resources report processor and heap byte counts. Service rows contain `id`,
 `name`, `state`, `computedState`, and `terminal`.
 
+Every `ls` command above supports a bounded query over its declared columns:
+
+```text
+/session ls where state=RUNNING repositoryName!=null
+/repository ls columns=id,refCount page=2 page-size=50
+/system/service ls columns=id,terminal where terminal=true format=table
+```
+
+Predicates after `where` are combined with AND and use exact, type-aware `=`
+or `!=` comparisons. Numeric columns require numbers and boolean columns accept
+only `true` or `false`. The reserved value `null` selects an absent value;
+quote or escape other values using the ordinary command-line syntax. Unknown
+fields, duplicate or empty selected columns, invalid values, and non-positive
+pages are rejected with `INVALID_ARGUMENTS` and SSH exit status 2.
+
+Pages are one-based, default to 100 rows, and allow at most 500 rows. Filtering
+is applied before `columns`, then pagination preserves the command's canonical
+ID order. The query always runs after domain ACL filtering: hidden resources do
+not contribute rows, `matched`, `next`, completion values, or error details.
+
+`format=plain` emits escaped TSV with a header; `format=terse` emits the same
+records without a header; `format=json` preserves strings, numbers, booleans,
+and null; and `format=table` requests the width-aware interactive table. Table
+format requires a PTY. With no format, exec uses plain output and an interactive
+session uses a table when it fits, falling back to plain TSV otherwise.
+
+For automation, for example:
+
+```sh
+ssh operator@orion '/repository ls columns=id,refCount format=json where refCount!=0'
+ssh operator@orion '/session ls columns=id,state format=terse page-size=50'
+```
+
+JSON is one object followed by a newline, with columns and row keys in declared
+selection order:
+
+```json
+{"columns":["id","refCount"],"rows":[{"id":"demo","refCount":3}],"page":{"number":1,"size":100,"matched":1,"next":null}}
+```
+
+JSON always includes page metadata. Plain, terse, and table output append a
+line such as `# page=1 page-size=2 matched=3 next-page=2` only when a page
+parameter was explicit, the requested page was not the first, or more matching
+rows remain. `next-page=null` means there is no continuation.
+
 Dynamic selectors resolve in this order: exact canonical ID, unique authorized
 ID prefix, then exact authorized display name. Every collection and selector
 is filtered using the concrete resource's ACL before rows, ambiguity candidates,

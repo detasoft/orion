@@ -248,7 +248,8 @@ class GitSshTransportStateMachineTest {
         SshHostKeyService hostKeyService = new SshHostKeyService(configurationContext);
         CommandDispatcher dispatcher = new DefaultCommandDispatcher(
                 new CommandLineParser(),
-                new SshCredentialCommandCatalog(accessControlService).commandTree());
+                new SshCredentialCommandCatalog(accessControlService).commandTree(),
+                new pro.deta.orion.command.CommandRowQuery());
         executor = new OrionExecutor(2, new OrionThreadFactory());
         SshCommandFactory commandFactory = new SshCommandFactory(
                 executor,

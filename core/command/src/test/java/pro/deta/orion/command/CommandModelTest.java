@@ -5,10 +5,13 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.schema.acl.AccessControl;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,26 +78,72 @@ class CommandModelTest {
 
     @Test
     void defensivelyCopiesFiniteResultPayloadsAndPreservesObjectOrder() {
-        List<String> columns = new ArrayList<>(List.of("name"));
-        List<List<String>> values = new ArrayList<>();
-        values.add(new ArrayList<>(List.of("alpha")));
-        Map<String, String> fields = new LinkedHashMap<>();
-        fields.put("second", "2");
-        fields.put("first", "1");
+        List<CommandColumn> columns = new ArrayList<>(List.of(CommandColumn.text("name")));
+        List<List<CommandValue>> values = new ArrayList<>();
+        values.add(new ArrayList<>(List.of(CommandValue.text("alpha"))));
+        Map<String, CommandValue> fields = new LinkedHashMap<>();
+        fields.put("second", CommandValue.number(2));
+        fields.put("first", CommandValue.text("1"));
 
-        CommandResult.Rows rows = new CommandResult.Rows(columns, values);
+        CommandResult.Rows rows = CommandResult.Rows.unqueried(columns, values);
         CommandResult.ObjectValue object = new CommandResult.ObjectValue(fields);
-        columns.add("ignored");
-        values.getFirst().add("ignored");
-        fields.put("ignored", "ignored");
+        columns.add(CommandColumn.text("ignored"));
+        values.getFirst().add(CommandValue.text("ignored"));
+        fields.put("ignored", CommandValue.text("ignored"));
 
-        assertThat(rows.columns()).containsExactly("name");
-        assertThat(rows.values()).containsExactly(List.of("alpha"));
-        assertThatThrownBy(() -> rows.values().getFirst().add("no"))
+        assertThat(rows.columns()).containsExactly(CommandColumn.text("name"));
+        assertThat(rows.values()).containsExactly(List.of(CommandValue.text("alpha")));
+        assertThatThrownBy(() -> rows.values().getFirst().add(CommandValue.text("no")))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThat(object.fields()).containsExactly(
-                Map.entry("second", "2"),
-                Map.entry("first", "1"));
+                Map.entry("second", CommandValue.number(2)),
+                Map.entry("first", CommandValue.text("1")));
+    }
+
+    @Test
+    void preservesTypedValuesAndPaginationMetadata() {
+        CommandResult.Rows rows = new CommandResult.Rows(
+                List.of(
+                        CommandColumn.text("name"),
+                        CommandColumn.number("size"),
+                        CommandColumn.bool("active"),
+                        CommandColumn.text("note")),
+                List.of(List.of(
+                        CommandValue.text("alpha"),
+                        CommandValue.number(new BigDecimal("12.50")),
+                        CommandValue.bool(true),
+                        CommandValue.nullValue())),
+                RowOutputFormat.JSON,
+                Optional.of(new RowPage(2, 25, 31, OptionalInt.empty(), true)));
+
+        assertThat(rows.values().getFirst()).containsExactly(
+                new CommandValue.Text("alpha"),
+                new CommandValue.Numeric(new BigDecimal("12.50")),
+                new CommandValue.BooleanValue(true),
+                CommandValue.nullValue());
+        assertThat(rows.page()).contains(new RowPage(2, 25, 31, OptionalInt.empty(), true));
+    }
+
+    @Test
+    void rejectsInvalidTypedRowShapesAndPageBounds() {
+        assertThatThrownBy(() -> CommandResult.Rows.unqueried(
+                List.of(CommandColumn.number("count")),
+                List.of(List.of(CommandValue.text("wrong")))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("count");
+        assertThatThrownBy(() -> CommandResult.Rows.unqueried(
+                List.of(CommandColumn.text("name")),
+                List.of(List.of())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("column");
+        assertThatThrownBy(() -> CommandResult.Rows.unqueried(
+                List.of(CommandColumn.text("name"), CommandColumn.number("name")),
+                List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unique");
+        assertThatThrownBy(() -> new RowPage(0, 10, 0, OptionalInt.empty(), false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("page");
     }
 
     @Test
@@ -103,9 +152,11 @@ class CommandModelTest {
         CommandResult.AttachmentHandle attachmentHandle = new CommandResult.AttachmentHandle() {};
 
         assertThat(new CommandResult.Message("ok")).isInstanceOf(CommandResult.class);
-        assertThat(new CommandResult.Rows(List.of("name"), List.of(List.of("repo"))))
+        assertThat(CommandResult.Rows.unqueried(
+                List.of(CommandColumn.text("name")),
+                List.of(List.of(CommandValue.text("repo")))))
                 .isInstanceOf(CommandResult.class);
-        assertThat(new CommandResult.ObjectValue(Map.of("state", "running")))
+        assertThat(new CommandResult.ObjectValue(Map.of("state", CommandValue.text("running"))))
                 .isInstanceOf(CommandResult.class);
         assertThat(new CommandResult.Stream(streamHandle).handle()).isSameAs(streamHandle);
         assertThat(new CommandResult.Attachment(attachmentHandle).handle()).isSameAs(attachmentHandle);

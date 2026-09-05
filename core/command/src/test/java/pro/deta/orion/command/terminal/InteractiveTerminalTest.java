@@ -3,10 +3,12 @@ package pro.deta.orion.command.terminal;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.AccessDecision;
+import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandDefinition;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandPath;
+import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
 import pro.deta.orion.command.CommandNavigator;
@@ -423,10 +425,11 @@ class InteractiveTerminalTest {
                 0,
                 Set.of(),
                 Set.of(),
-                Set.of(),
                 ignored -> true,
                 ignored -> AccessDecision.allow("test"),
-                ignored -> new CommandResult.Message("shown"));
+                ignored -> new CommandResult.Message("shown"),
+                CommandCompletion.none(),
+                CommandQuery.none());
         return CommandNode.builder()
                 .child("session", CommandNode.builder().action(show).build())
                 .build();

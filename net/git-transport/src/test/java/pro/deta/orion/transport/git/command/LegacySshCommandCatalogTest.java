@@ -11,6 +11,7 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandContext;
 import pro.deta.orion.command.CommandDispatcher;
 import pro.deta.orion.command.CommandFailureCode;
@@ -20,7 +21,10 @@ import pro.deta.orion.command.CommandPath;
 import pro.deta.orion.command.CommandPresentation;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
+import pro.deta.orion.command.RowOutputFormat;
+import pro.deta.orion.command.RowPage;
 import pro.deta.orion.command.audit.CommandAuditRecord;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
@@ -35,6 +39,8 @@ import pro.deta.orion.util.Result;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,7 +58,8 @@ class LegacySshCommandCatalogTest {
             .commandTree();
     private final CommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
-            commandTree);
+            commandTree,
+            new pro.deta.orion.command.CommandRowQuery());
 
     @Test
     void tokenAliasesIssueTokensWithPositiveExpiry() {
@@ -99,9 +106,15 @@ class LegacySshCommandCatalogTest {
     @Test
     void composesAuthenticatedCredentialCommandsUnderAuthKey() {
         assertThat(dispatch("/auth/key ls", user(List.of())))
-                .isEqualTo(new CommandResult.Rows(
-                        List.of("algorithm", "fingerprint", "current"),
-                        List.of(List.of("ssh-rsa", "SHA256:key", "false"))));
+                .isEqualTo(CommandResult.Rows.unqueried(
+                        List.of(
+                                CommandColumn.text("algorithm"),
+                                CommandColumn.text("fingerprint"),
+                                CommandColumn.bool("current")),
+                        List.of(List.of(
+                                CommandValue.text("ssh-rsa"),
+                                CommandValue.text("SHA256:key"),
+                                CommandValue.bool(false)))));
         assertThat(accessControl.listUsers).containsExactly("operator");
     }
 
@@ -120,14 +133,39 @@ class LegacySshCommandCatalogTest {
                         "shutdown");
 
         assertThat(dispatch("whoami", user(List.of())))
-                .isEqualTo(new CommandResult.ObjectValue(Map.of("userId", "operator")));
+                .isEqualTo(new CommandResult.ObjectValue(Map.of(
+                        "userId", CommandValue.text("operator"))));
         assertThat(dispatch("/repository ls", user(List.of(grant(
                 AccessControl.GrantKey.REPOSITORY,
                 "project")))))
                 .isEqualTo(new CommandResult.Rows(
-                        List.of("id", "name", "defaultHead", "refCount"),
-                        List.of(List.of("project", "project", "refs/heads/main", "1"))));
+                        List.of(
+                                CommandColumn.text("id"),
+                                CommandColumn.text("name"),
+                                CommandColumn.text("defaultHead"),
+                                CommandColumn.number("refCount")),
+                        List.of(List.of(
+                                CommandValue.text("project"),
+                                CommandValue.text("project"),
+                                CommandValue.text("refs/heads/main"),
+                                CommandValue.number(1))),
+                        RowOutputFormat.AUTO,
+                        Optional.of(new RowPage(1, 100, 1, OptionalInt.empty(), false))));
         assertFailure(dispatch("/organization ls", user(List.of())), CommandFailureCode.SERVICE_UNAVAILABLE);
+    }
+
+    @Test
+    void enablesQueriesOnlyOnComposedReadOnlyListCommands() {
+        UserIdentity reader = user(List.of(grant(AccessControl.GrantKey.REPOSITORY, "project")));
+
+        CommandResult.Rows queried = (CommandResult.Rows) dispatch(
+                "/repository ls columns=id where refCount=1",
+                reader);
+
+        assertThat(queried.columns()).containsExactly(CommandColumn.text("id"));
+        assertThat(queried.values()).containsExactly(List.of(CommandValue.text("project")));
+        assertFailure(dispatch("repositories format=json", reader), CommandFailureCode.INVALID_ARGUMENTS);
+        assertFailure(dispatch("/auth/key ls format=json", reader), CommandFailureCode.INVALID_ARGUMENTS);
     }
 
     @Test

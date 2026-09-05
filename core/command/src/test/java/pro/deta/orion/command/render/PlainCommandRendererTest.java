@@ -2,11 +2,17 @@ package pro.deta.orion.command.render;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.command.CommandFailureCode;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
+import pro.deta.orion.command.RowOutputFormat;
+import pro.deta.orion.command.RowPage;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,7 +29,7 @@ class PlainCommandRendererTest {
 
     @Test
     void rendersRowsAsStableTabSeparatedPlainText() {
-        CommandResult.Rows rows = new CommandResult.Rows(
+        CommandResult.Rows rows = textRows(
                 List.of("name", "state"),
                 List.of(List.of("alpha", "ready"), List.of("beta", "stopped")));
 
@@ -37,19 +43,41 @@ class PlainCommandRendererTest {
     }
 
     @Test
+    void appendsPaginationOnlyWhenItIsRelevant() {
+        CommandResult.Rows complete = rows(
+                RowOutputFormat.PLAIN,
+                new RowPage(1, 100, 1, OptionalInt.empty(), false));
+        CommandResult.Rows truncated = rows(
+                RowOutputFormat.PLAIN,
+                new RowPage(1, 1, 2, OptionalInt.of(2), false));
+
+        assertThat(renderer.render(complete).stdout()).isEqualTo("id\none\n");
+        assertThat(renderer.render(truncated).stdout()).isEqualTo(
+                "id\none\n# page=1 page-size=1 matched=2 next-page=2\n");
+    }
+
+    private static CommandResult.Rows rows(RowOutputFormat format, RowPage page) {
+        return new CommandResult.Rows(
+                List.of(CommandColumn.text("id")),
+                List.of(List.of(CommandValue.text("one"))),
+                format,
+                Optional.of(page));
+    }
+
+    @Test
     void rendersObjectsInInsertionOrder() {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("second", "2");
         fields.put("first", "1");
 
-        assertThat(renderer.render(new CommandResult.ObjectValue(fields)))
+        assertThat(renderer.render(textObject(fields)))
                 .isEqualTo(new RenderedCommand("second=2\nfirst=1\n", "", 0));
     }
 
     @Test
     void escapesStructuredKeysAndValuesWithoutChangingMessageSemantics() {
         String hostile = "line\\break\r\n\t\u001b\u0000\u0085";
-        CommandResult.Rows rows = new CommandResult.Rows(
+        CommandResult.Rows rows = textRows(
                 List.of(hostile),
                 List.of(List.of(hostile)));
         Map<String, String> fields = new LinkedHashMap<>();
@@ -58,7 +86,7 @@ class PlainCommandRendererTest {
         assertThat(renderer.render(rows).stdout()).isEqualTo(
                 "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085\n"
                         + "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085\n");
-        assertThat(renderer.render(new CommandResult.ObjectValue(fields)).stdout()).isEqualTo(
+        assertThat(renderer.render(textObject(fields)).stdout()).isEqualTo(
                 "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085="
                         + "line\\\\break\\r\\n\\t\\u001B\\u0000\\u0085\n");
         assertThat(renderer.render(new CommandResult.Message("first\nsecond")).stdout())
@@ -122,5 +150,29 @@ class PlainCommandRendererTest {
                 126);
         assertThat(renderer.render(stream)).isEqualTo(unsupported);
         assertThat(renderer.render(attachment)).isEqualTo(unsupported);
+    }
+
+    private static CommandResult.Rows textRows(List<String> columns, List<List<String>> values) {
+        List<CommandColumn> typedColumns = new java.util.ArrayList<>();
+        for (String column : columns) {
+            typedColumns.add(CommandColumn.text(column));
+        }
+        List<List<CommandValue>> typedValues = new java.util.ArrayList<>();
+        for (List<String> row : values) {
+            List<CommandValue> typedRow = new java.util.ArrayList<>();
+            for (String value : row) {
+                typedRow.add(CommandValue.text(value));
+            }
+            typedValues.add(typedRow);
+        }
+        return CommandResult.Rows.unqueried(typedColumns, typedValues);
+    }
+
+    private static CommandResult.ObjectValue textObject(Map<String, String> fields) {
+        Map<String, CommandValue> typed = new LinkedHashMap<>();
+        for (Map.Entry<String, String> field : fields.entrySet()) {
+            typed.put(field.getKey(), CommandValue.text(field.getValue()));
+        }
+        return new CommandResult.ObjectValue(typed);
     }
 }

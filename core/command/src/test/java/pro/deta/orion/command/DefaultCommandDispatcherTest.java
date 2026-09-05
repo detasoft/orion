@@ -21,14 +21,15 @@ class DefaultCommandDispatcherTest {
     private final AtomicBoolean invoked = new AtomicBoolean();
     private final DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
             new CommandLineParser(),
-            commandTree());
+            commandTree(),
+            new CommandRowQuery());
 
     @Test
     void dispatchesStaticDynamicAndRelativeCommandsWithResolvedPayloads() {
         assertThat(dispatch("/repository ls", CommandPath.root()))
-                .isEqualTo(new CommandResult.Rows(List.of("name"), List.of(List.of("alpha"))));
+                .isEqualTo(textRows(List.of("name"), List.of(List.of("alpha"))));
         assertThat(dispatch("alpha1 show", CommandPath.absolute(List.of("repository"))))
-                .isEqualTo(new CommandResult.ObjectValue(Map.of("name", "alpha")));
+                .isEqualTo(textObject(Map.of("name", "alpha")));
         assertThat(invoked).isTrue();
     }
 
@@ -36,7 +37,7 @@ class DefaultCommandDispatcherTest {
     void returnsEveryFiniteHandlerResultWithoutTransportCoupling() {
         assertThat(dispatch("message", CommandPath.root())).isEqualTo(new CommandResult.Message("ok"));
         assertThat(dispatch("object", CommandPath.root()))
-                .isEqualTo(new CommandResult.ObjectValue(Map.of("state", "running")));
+                .isEqualTo(textObject(Map.of("state", "running")));
         assertThat(dispatch("exit", CommandPath.root())).isEqualTo(new CommandResult.Exit(5, "stopped"));
     }
 
@@ -62,9 +63,40 @@ class DefaultCommandDispatcherTest {
     }
 
     @Test
+    void appliesQueriesOnlyAfterTheAuthorizedHandlerReturnsRows() {
+        CommandResult result = dispatch(
+                "/session ls columns=id page-size=1 format=json where state=RUNNING owner!=bot",
+                CommandPath.root());
+
+        assertThat(result).isEqualTo(new CommandResult.Rows(
+                List.of(CommandColumn.text("id")),
+                List.of(List.of(CommandValue.text("one"))),
+                RowOutputFormat.JSON,
+                Optional.of(new RowPage(1, 1, 2, java.util.OptionalInt.of(2), true))));
+    }
+
+    @Test
+    void preservesHandlerFailuresBeforeValidatingQueryFields() {
+        CommandResult result = dispatch(
+                "/failed-query ls where undeclared=value",
+                CommandPath.root());
+
+        assertThat(result).isEqualTo(new CommandResult.Failure(
+                CommandFailureCode.SERVICE_UNAVAILABLE,
+                "source unavailable",
+                List.of()));
+    }
+
+    @Test
+    void preservesSuccessfulNonRowResultsFromQueryableHandlers() {
+        assertThat(dispatch("/message-query ls where undeclared=value", CommandPath.root()))
+                .isEqualTo(new CommandResult.Message("not rows"));
+    }
+
+    @Test
     void matchesActionsCaseInsensitivelyWithoutChangingPathCase() {
         assertThat(dispatch("/repository LS", CommandPath.root()))
-                .isEqualTo(new CommandResult.Rows(List.of("name"), List.of(List.of("alpha"))));
+                .isEqualTo(textRows(List.of("name"), List.of(List.of("alpha"))));
         assertFailure(dispatch("/Repository ls", CommandPath.root()), CommandFailureCode.UNKNOWN_PATH);
     }
 
@@ -159,7 +191,7 @@ class DefaultCommandDispatcherTest {
                 .action(definition("show", 0, 0, Set.of(), invocation -> {
                     invoked.set(true);
                     String name = (String) invocation.resolvedResources().getLast();
-                    return new CommandResult.ObjectValue(Map.of("name", name));
+                    return textObject(Map.of("name", name));
                 }))
                 .build();
         ScopedResourceCatalog<String> catalog = (context, parents) ->
@@ -169,27 +201,60 @@ class DefaultCommandDispatcherTest {
                         candidate("denied", "hidden", false)));
         CommandNode repositories = CommandNode.builder()
                 .action(definition("ls", 0, 0, Set.of(), invocation ->
-                        new CommandResult.Rows(List.of("name"), List.of(List.of("alpha")))))
+                        textRows(List.of("name"), List.of(List.of("alpha")))))
                 .action(new CommandDefinition(
                         "rm",
                         0,
                         0,
                         Set.of(),
                         Set.of(),
-                        Set.of(),
                         context -> true,
                         invocation -> AccessDecision.deny("test denial"),
-                        invocation -> new CommandResult.Message("removed")))
+                        invocation -> new CommandResult.Message("removed"),
+                        CommandCompletion.none(),
+                        CommandQuery.none()))
                 .dynamicChild(new ScopedResourceResolver<>(catalog, true), resourceNode)
+                .build();
+        CommandNode sessions = CommandNode.builder()
+                .action(queryDefinition("ls", invocation -> CommandResult.Rows.unqueried(
+                        List.of(
+                                CommandColumn.text("id"),
+                                CommandColumn.text("state"),
+                                CommandColumn.text("owner")),
+                        List.of(
+                                List.of(
+                                        CommandValue.text("one"),
+                                        CommandValue.text("RUNNING"),
+                                        CommandValue.text("ops")),
+                                List.of(
+                                        CommandValue.text("two"),
+                                        CommandValue.text("RUNNING"),
+                                        CommandValue.text("ops")),
+                                List.of(
+                                        CommandValue.text("hidden-before-handler"),
+                                        CommandValue.text("RUNNING"),
+                                        CommandValue.text("bot"))))))
+                .build();
+        CommandNode failedQuery = CommandNode.builder()
+                .action(queryDefinition("ls", invocation -> new CommandResult.Failure(
+                        CommandFailureCode.SERVICE_UNAVAILABLE,
+                        "source unavailable",
+                        List.of())))
+                .build();
+        CommandNode messageQuery = CommandNode.builder()
+                .action(queryDefinition("ls", invocation -> new CommandResult.Message("not rows")))
                 .build();
         return CommandNode.builder()
                 .child("repository", repositories)
+                .child("session", sessions)
+                .child("failed-query", failedQuery)
+                .child("message-query", messageQuery)
                 .action(definition("message", 0, 0, Set.of(), invocation -> {
                     invoked.set(true);
                     return new CommandResult.Message("ok");
                 }))
                 .action(definition("object", 0, 0, Set.of(), invocation ->
-                        new CommandResult.ObjectValue(Map.of("state", "running"))))
+                        textObject(Map.of("state", "running"))))
                 .action(definition("exit", 0, 0, Set.of(), invocation ->
                         new CommandResult.Exit(5, "stopped")))
                 .action(definition("flag", 0, 0, Set.of("force"), invocation ->
@@ -203,10 +268,11 @@ class DefaultCommandDispatcherTest {
                         0,
                         Set.of(),
                         Set.of(),
-                        Set.of(),
                         context -> false,
                         invocation -> AccessDecision.allow("allowed independently"),
-                        invocation -> new CommandResult.Message("visible")))
+                        invocation -> new CommandResult.Message("visible"),
+                        CommandCompletion.none(),
+                        CommandQuery.none()))
                 .build();
     }
 
@@ -220,7 +286,23 @@ class DefaultCommandDispatcherTest {
                                 CommandNode.builder().action(show).build())
                         .build())
                 .build();
-        return new DefaultCommandDispatcher(new CommandLineParser(), root);
+        return new DefaultCommandDispatcher(new CommandLineParser(), root, new CommandRowQuery());
+    }
+
+    private static CommandDefinition queryDefinition(String action, CommandHandler handler) {
+        return new CommandDefinition(
+                action,
+                0,
+                0,
+                Set.of(),
+                Set.of(),
+                context -> true,
+                invocation -> AccessDecision.allow("test"),
+                handler,
+                CommandCompletion.none(),
+                CommandQuery.enabled(
+                        List.of("id", "state", "owner"),
+                        Map.of("state", List.of("RUNNING", "COMPLETED"))));
     }
 
     private static CommandDefinition definition(
@@ -235,10 +317,11 @@ class DefaultCommandDispatcherTest {
                 maximumArguments,
                 namedParameters,
                 Set.of(),
-                Set.of(),
                 context -> true,
                 invocation -> AccessDecision.allow("test"),
-                handler);
+                handler,
+                CommandCompletion.none(),
+                CommandQuery.none());
     }
 
     private static ScopedResourceCandidate<String> candidate(String id, String name) {
@@ -248,6 +331,28 @@ class DefaultCommandDispatcherTest {
     private static ScopedResourceCandidate<String> candidate(String id, String name, boolean allowed) {
         AccessDecision decision = allowed ? AccessDecision.allow("test") : AccessDecision.deny("test");
         return new ScopedResourceCandidate<>(id, Optional.of(name), name, decision);
+    }
+
+    private static CommandResult.Rows textRows(List<String> columns, List<List<String>> values) {
+        List<CommandColumn> typedColumns = new java.util.ArrayList<>();
+        for (String column : columns) {
+            typedColumns.add(CommandColumn.text(column));
+        }
+        List<List<CommandValue>> typedValues = new java.util.ArrayList<>();
+        for (List<String> row : values) {
+            List<CommandValue> typedRow = new java.util.ArrayList<>();
+            for (String value : row) {
+                typedRow.add(CommandValue.text(value));
+            }
+            typedValues.add(typedRow);
+        }
+        return CommandResult.Rows.unqueried(typedColumns, typedValues);
+    }
+
+    private static CommandResult.ObjectValue textObject(Map<String, String> fields) {
+        Map<String, CommandValue> typed = new java.util.LinkedHashMap<>();
+        fields.forEach((name, value) -> typed.put(name, CommandValue.text(value)));
+        return new CommandResult.ObjectValue(typed);
     }
 
     private static void assertFailure(CommandResult result, CommandFailureCode code) {

@@ -1,8 +1,11 @@
 package pro.deta.orion.command.terminal;
 
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
+import pro.deta.orion.command.RowOutputFormat;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.command.render.RenderedCommand;
+import pro.deta.orion.command.render.RowPaginationRenderer;
 import pro.deta.orion.command.render.StructuredValueEscaper;
 
 import java.util.ArrayList;
@@ -12,7 +15,9 @@ public final class TerminalCommandRenderer {
     private final PlainCommandRenderer plain = new PlainCommandRenderer();
 
     public RenderedCommand render(CommandResult result, int width) {
-        if (!(result instanceof CommandResult.Rows rows) || !rectangular(rows) || !fits(rows, width)) {
+        if (!(result instanceof CommandResult.Rows rows)
+                || isAutomationFormat(rows.format())
+                || !fits(rows, width)) {
             return plain.render(result);
         }
         List<List<String>> allRows = escapedRows(rows);
@@ -28,17 +33,14 @@ public final class TerminalCommandRenderer {
             }
             output.append('\n');
         }
+        RowPaginationRenderer.appendWhenRelevant(output, rows);
         return new RenderedCommand(output.toString(), "", 0);
     }
 
-    private static boolean rectangular(CommandResult.Rows rows) {
-        int columns = rows.columns().size();
-        for (List<String> row : rows.values()) {
-            if (row.size() != columns) {
-                return false;
-            }
-        }
-        return true;
+    private static boolean isAutomationFormat(RowOutputFormat format) {
+        return format == RowOutputFormat.PLAIN
+                || format == RowOutputFormat.TERSE
+                || format == RowOutputFormat.JSON;
     }
 
     private static boolean fits(CommandResult.Rows rows, int terminalWidth) {
@@ -66,9 +68,17 @@ public final class TerminalCommandRenderer {
 
     private static List<List<String>> escapedRows(CommandResult.Rows rows) {
         List<List<String>> escaped = new ArrayList<>();
-        escaped.add(escapeRow(rows.columns()));
-        for (List<String> row : rows.values()) {
-            escaped.add(escapeRow(row));
+        List<String> columns = new ArrayList<>(rows.columns().size());
+        for (var column : rows.columns()) {
+            columns.add(column.name());
+        }
+        escaped.add(escapeRow(columns));
+        for (List<CommandValue> row : rows.values()) {
+            List<String> values = new ArrayList<>(row.size());
+            for (CommandValue value : row) {
+                values.add(value.asText());
+            }
+            escaped.add(escapeRow(values));
         }
         return escaped;
     }

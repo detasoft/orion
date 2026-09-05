@@ -169,15 +169,16 @@ public final class CommandNavigator {
             return null;
         }
         if (contains(tokens, argumentStart, "where")) {
-            int equals = token.indexOf('=');
-            if (equals >= 0) {
-                String field = token.substring(0, equals);
-                return definition.completion().whereValues().getOrDefault(field, List.of());
+            int operator = token.indexOf("!=");
+            if (operator < 0) {
+                operator = token.indexOf('=');
+            }
+            if (operator >= 0) {
+                String field = token.substring(0, operator);
+                return definition.query().knownValues().getOrDefault(field, List.of());
             }
             List<String> fields = new ArrayList<>();
-            List<String> orderedFields = new ArrayList<>(definition.allowedWhereFields());
-            orderedFields.sort(String::compareTo);
-            for (String field : orderedFields) {
+            for (String field : definition.query().fields()) {
                 fields.add(field + "=");
             }
             return fields;
@@ -185,15 +186,25 @@ public final class CommandNavigator {
         int equals = token.indexOf('=');
         if (equals >= 0) {
             String name = token.substring(0, equals);
+            if (definition.query().enabled() && name.equals("format")) {
+                return List.of("json", "plain", "table", "terse");
+            }
+            if (definition.query().enabled() && name.equals("columns")) {
+                return definition.query().fields();
+            }
             return definition.completion().namedValues().getOrDefault(name, List.of());
         }
         List<String> names = new ArrayList<>();
         List<String> orderedNames = new ArrayList<>(definition.allowedNamedParameters());
+        if (definition.query().enabled()) {
+            orderedNames.addAll(CommandQuery.NAMED_PARAMETERS);
+        }
         orderedNames.sort(String::compareTo);
         for (String name : orderedNames) {
             names.add(name + "=");
         }
-        if (token.equals("where") || "where".startsWith(token)) {
+        if (definition.query().enabled()
+                && (token.equals("where") || "where".startsWith(token))) {
             names.add("where");
         }
         return names;
@@ -274,6 +285,10 @@ public final class CommandNavigator {
     private static String tokenFragment(String token) {
         int equals = token.indexOf('=');
         if (equals >= 0) {
+            if (token.startsWith("columns=")) {
+                int comma = token.lastIndexOf(',');
+                return token.substring(Math.max(equals, comma) + 1);
+            }
             return token.substring(equals + 1);
         }
         int slash = token.lastIndexOf('/');
@@ -283,6 +298,12 @@ public final class CommandNavigator {
     private static String replacementToken(String token, String shared, boolean pathCandidate) {
         int equals = token.indexOf('=');
         if (equals >= 0) {
+            if (token.startsWith("columns=")) {
+                int comma = token.lastIndexOf(',');
+                if (comma > equals) {
+                    return token.substring(0, comma + 1) + shared;
+                }
+            }
             return token.substring(0, equals + 1) + shared;
         }
         if (pathCandidate) {

@@ -10,10 +10,12 @@ import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
 import pro.deta.orion.auth.check.resource.ApplicationShutdownResource;
 import pro.deta.orion.command.CommandDefinition;
+import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandInvocation;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.util.OrionProvider;
@@ -129,10 +131,11 @@ public final class LegacySshCommandCatalog {
                 positionalArguments,
                 NO_PARAMETERS,
                 NO_PARAMETERS,
-                NO_PARAMETERS,
                 context -> true,
                 authorization,
-                handler::handle);
+                handler::handle,
+                CommandCompletion.none(),
+                CommandQuery.none());
     }
 
     private AccessDecision authenticated(CommandInvocation invocation) {

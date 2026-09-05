@@ -13,10 +13,14 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.command.CommandDefinition;
+import pro.deta.orion.command.CommandColumn;
+import pro.deta.orion.command.CommandCompletion;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandInvocation;
 import pro.deta.orion.command.CommandNode;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandQuery;
+import pro.deta.orion.command.CommandValue;
 
 import java.security.PublicKey;
 import java.util.ArrayList;
@@ -65,10 +69,11 @@ public final class SshCredentialCommandCatalog {
                 maximumArguments,
                 namedParameters,
                 sensitiveParameters,
-                NO_PARAMETERS,
                 context -> true,
                 this::authenticatedNamedUser,
-                handler::handle);
+                handler::handle,
+                CommandCompletion.none(),
+                CommandQuery.none());
     }
 
     private AccessDecision authenticatedNamedUser(CommandInvocation invocation) {
@@ -95,14 +100,19 @@ public final class SshCredentialCommandCatalog {
             CommandInvocation invocation,
             List<SshCredential> credentials) {
         String current = connectionCredentials(invocation).authenticatedKeyFingerprint().orElse(null);
-        List<List<String>> values = new ArrayList<>(credentials.size());
+        List<List<CommandValue>> values = new ArrayList<>(credentials.size());
         for (SshCredential credential : credentials) {
             values.add(List.of(
-                    credential.algorithm(),
-                    credential.fingerprint(),
-                    Boolean.toString(credential.fingerprint().equals(current))));
+                    CommandValue.text(credential.algorithm()),
+                    CommandValue.text(credential.fingerprint()),
+                    CommandValue.bool(credential.fingerprint().equals(current))));
         }
-        return new CommandResult.Rows(List.of("algorithm", "fingerprint", "current"), values);
+        return CommandResult.Rows.unqueried(
+                List.of(
+                        CommandColumn.text("algorithm"),
+                        CommandColumn.text("fingerprint"),
+                        CommandColumn.bool("current")),
+                values);
     }
 
     private CommandResult add(CommandInvocation invocation) {

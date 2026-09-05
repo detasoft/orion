@@ -13,10 +13,16 @@ import pro.deta.orion.auth.SshConnectionCredentials;
 import pro.deta.orion.OrionAccessControlService;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.command.CommandDispatcher;
+import pro.deta.orion.command.CommandCompletion;
+import pro.deta.orion.command.CommandDefinition;
+import pro.deta.orion.command.CommandColumn;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandLineParser;
+import pro.deta.orion.command.CommandNode;
+import pro.deta.orion.command.CommandQuery;
 import pro.deta.orion.command.CommandRequest;
 import pro.deta.orion.command.CommandResult;
+import pro.deta.orion.command.CommandValue;
 import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
@@ -47,6 +53,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -108,7 +116,8 @@ class SshCommandFactoryTest {
                 () -> new OperatorDomainViews.SystemResourceView(1, 0, 0, 0));
         DefaultCommandDispatcher dispatcher = new DefaultCommandDispatcher(
                 new CommandLineParser(),
-                new ReadOnlyDomainCommandCatalog(source).commandTree());
+                new ReadOnlyDomainCommandCatalog(source).commandTree(),
+                new pro.deta.orion.command.CommandRowQuery());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ByteArrayOutputStream error = new ByteArrayOutputStream();
 
@@ -122,9 +131,62 @@ class SshCommandFactoryTest {
     }
 
     @Test
+    void execRendersExplicitJsonAndTerseAndRejectsNoPtyTable() throws Exception {
+        CommandDispatcher dispatcher = queryDispatcher();
+
+        ByteArrayOutputStream json = new ByteArrayOutputStream();
+        ExitOutcome jsonExit = run(
+                factory(dispatcher), channel(true),
+                "/repository ls columns=id,refCount format=json", json, new ByteArrayOutputStream());
+        ByteArrayOutputStream terse = new ByteArrayOutputStream();
+        ExitOutcome terseExit = run(
+                factory(dispatcher), channel(true),
+                "/repository ls columns=id,refCount format=terse", terse, new ByteArrayOutputStream());
+        ByteArrayOutputStream tableError = new ByteArrayOutputStream();
+        ExitOutcome tableExit = run(
+                factory(dispatcher), channel(true),
+                "/repository ls format=table", new ByteArrayOutputStream(), tableError);
+
+        assertEquals(0, jsonExit.code());
+        assertEquals(
+                "{\"columns\":[\"id\",\"refCount\"],\"rows\":[{\"id\":\"project\",\"refCount\":0}],"
+                        + "\"page\":{\"number\":1,\"size\":100,\"matched\":1,\"next\":null}}\n",
+                json.toString(StandardCharsets.UTF_8));
+        assertEquals(0, terseExit.code());
+        assertEquals("project\t0\n", terse.toString(StandardCharsets.UTF_8));
+        assertEquals(2, tableExit.code());
+        assertEquals(
+                "INVALID_ARGUMENTS: Table format requires an interactive terminal\n",
+                tableError.toString(StandardCharsets.UTF_8));
+        assertFalse(json.toString(StandardCharsets.UTF_8).contains("\u001b"));
+        assertFalse(terse.toString(StandardCharsets.UTF_8).contains("\u001b"));
+    }
+
+    private static DefaultCommandDispatcher queryDispatcher() {
+        CommandDefinition list = new CommandDefinition(
+                "ls",
+                0,
+                0,
+                Set.of(),
+                Set.of(),
+                ignored -> true,
+                ignored -> pro.deta.orion.auth.check.AccessDecision.allow("test"),
+                ignored -> CommandResult.Rows.unqueried(
+                        List.of(CommandColumn.text("id"), CommandColumn.number("refCount")),
+                        List.of(List.of(CommandValue.text("project"), CommandValue.number(0)))),
+                CommandCompletion.none(),
+                CommandQuery.enabled(List.of("id", "refCount"), Map.of()));
+        CommandNode tree = CommandNode.builder()
+                .child("repository", CommandNode.builder().action(list).build())
+                .build();
+        return new DefaultCommandDispatcher(
+                new CommandLineParser(), tree, new pro.deta.orion.command.CommandRowQuery());
+    }
+
+    @Test
     void execEscapesHostileStructuredFields() throws Exception {
         CommandDispatcher dispatcher = ignored -> new CommandResult.ObjectValue(Map.of(
-                "repositoryName", "evil\r\n\t\u001b\\name"));
+                "repositoryName", CommandValue.text("evil\r\n\t\u001b\\name")));
         ByteArrayOutputStream output = new ByteArrayOutputStream();
 
         ExitOutcome exit = run(
