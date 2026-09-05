@@ -99,7 +99,7 @@ rule to plan corrections discovered during review.
 
 Spawn a fresh worker for the selected leaf with:
 
-- model `gpt-5.6-sol`;
+- model `gpt-6-astra`;
 - reasoning effort `medium`;
 - `fork_turns="none"`, or the smallest supported bounded fork, so the explicit
   model and effort override is applied rather than inherited;
@@ -197,6 +197,10 @@ Report:
 - verification results;
 - that review has no remaining findings;
 - any unrelated state on `main` that must be cleared before integration.
+- in human short: 1-2 paragraphs, what was the reason for this task, explicitly list which modules/folders affected, 
+what exactly been done, what's the probability of failure, what's the outcome and how did it work before. 
+- The list of tasks with the short description to pick up in the logical/orion-task-runner order
+
 
 Ask the user either to authorize the workflow to integrate and continue, or to
 transfer the commit themselves and confirm it. Treat broad original requests
