@@ -1,6 +1,7 @@
 # Add Scoped Roles and Grants
 
 Status: todo
+Owner: codex, session organization-users-4c81, started 2026-09-05 18:44 Europe/Amsterdam.
 
 Allow organizations, teams, and repositories to define local roles and grants
 without relying on one global ACL namespace.
