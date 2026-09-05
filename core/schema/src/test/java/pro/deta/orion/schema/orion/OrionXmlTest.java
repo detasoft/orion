@@ -1,12 +1,19 @@
 package pro.deta.orion.schema.orion;
 
 import org.junit.jupiter.api.Test;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.xml.sax.InputSource;
 import pro.deta.orion.schema.acl.AccessControl;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringReader;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
@@ -32,6 +39,8 @@ class OrionXmlTest {
         assertThat(fromUnversioned.organizations()).isEmpty();
         assertThat(fromUnversioned.system().https()).isEmpty();
         assertThat(fromUnversioned.system().accessControl().getUsers().getFirst().getId()).isEqualTo("root");
+        assertThat(fromUnversioned.system().accessControl().getRoles()).isNotEmpty();
+        assertThat(fromUnversioned.system().accessControl().getGrants()).isNotEmpty();
     }
 
     @Test
@@ -47,13 +56,48 @@ class OrionXmlTest {
         assertThat(serialized).contains("<organization id=\"acme\">");
         assertThat(serialized).contains("<team id=\"platform\">");
         assertThat(serialized).contains("<repository id=\"api\">");
-        OrionDocument.Repository repository = document.organizations().getFirst()
-                .teams().getFirst().repositories().getFirst();
+        OrionDocument.Organization organization = document.organizations().getFirst();
+        assertThat(organization.users()).extracting(user -> user.id().value())
+                .containsExactly("alice", "blocked");
+        assertThat(organization.users()).extracting(OrganizationUser::enabled)
+                .containsExactly(true, false);
+        assertThat(organization.users().getFirst().teamMemberships())
+                .extracting(TeamId::value)
+                .containsExactly("platform");
+        assertThat(organization.users().getFirst().roleAssignments())
+                .extracting(RoleAddress::toString)
+                .containsExactly("acme/member");
+        assertThat(organization.grants()).extracting(grant -> grant.id().value())
+                .containsExactly("read");
+        assertThat(organization.roles()).extracting(role -> role.id().value())
+                .containsExactly("member");
+
+        OrionDocument.Team team = organization.teams().getFirst();
+        assertThat(team.grants()).extracting(grant -> grant.id().value())
+                .containsExactly("deploy");
+        assertThat(team.roles()).extracting(role -> role.id().value())
+                .containsExactly("operator");
+        assertThat(team.roles().getFirst().roleReferences())
+                .extracting(RoleAddress::toString)
+                .containsExactly("acme/member");
+
+        OrionDocument.Repository repository = team.repositories().getFirst();
+        assertThat(repository.grants()).extracting(grant -> grant.id().value())
+                .containsExactly("block-force-push");
+        assertThat(repository.grants().getFirst().effect()).isEqualTo(ScopedGrant.Effect.DENY);
+        assertThat(repository.roles()).extracting(role -> role.id().value())
+                .containsExactly("maintainer");
         assertThat(repository.defaultBranch()).isEqualTo("refs/heads/main");
         assertThat(repository.remotes()).extracting(remote -> remote.alias().value())
                 .containsExactly("upstream");
         assertThat(serialized).contains("<reference>github-token</reference>");
         assertThat(serialized).doesNotContain("github-token@");
+        assertThat(document.system().accessControl().getUsers()).extracting(AccessControl.User::getId)
+                .containsExactly("root");
+        assertThat(document.system().accessControl().getRoles()).extracting(AccessControl.Role::getId)
+                .containsExactly("ROOT");
+        assertThat(document.system().accessControl().getGrants()).extracting(AccessControl.Grant::getId)
+                .containsExactly("ALL_REPOSITORY");
         assertThat(OrionXml.currentSchemaVersion()).isEqualTo(OrionXmlSchemaVersion.V2);
     }
 
@@ -219,6 +263,7 @@ class OrionXmlTest {
     @Test
     void generatedSchemaDescribesAndValidatesVersionTwo() throws Exception {
         String schema = xmlSchema.document();
+        Document schemaDocument = parseXml(schema);
         String xml = testResource("pro/deta/orion/schema/orion/orion-v2.xml");
 
         OrionXmlSchema.ValidationResult result = validate(xml);
@@ -236,6 +281,40 @@ class OrionXmlTest {
         assertThat(schema).contains("name=\"remotes\"");
         assertThat(schema).contains("name=\"remote\"");
         assertThat(schema).contains("name=\"refMappings\"");
+        assertThat(schema).contains("name=\"users\"");
+        assertThat(schema).contains("name=\"memberships\"");
+        assertThat(schema).contains("name=\"team\" type=\"xs:string\"");
+        assertThat(schema).contains("name=\"roles\"");
+        assertThat(schema).contains("name=\"roleReferences\"");
+        assertThat(schema).contains("name=\"roleReference\" type=\"xs:string\"");
+        assertThat(schema).contains("name=\"grants\"");
+        assertThat(schema).contains("name=\"grantReferences\"");
+        assertThat(schema).contains("name=\"grantReference\" type=\"xs:string\"");
+        assertThat(schema).contains("name=\"expressions\"");
+        assertThat(schema).contains("name=\"effect\" type=\"scopedGrantEffect\" use=\"required\"");
+        assertThat(schema).contains("name=\"enabled\" type=\"xs:boolean\" use=\"required\"");
+        assertSchemaWrapper(schemaDocument, "organization", "users", "user");
+        assertSchemaWrapper(schemaDocument, "organization", "grants", "grant");
+        assertSchemaWrapper(schemaDocument, "organization", "roles", "role");
+        assertSchemaWrapper(schemaDocument, "team", "grants", "grant");
+        assertSchemaWrapper(schemaDocument, "team", "roles", "role");
+        assertSchemaWrapper(schemaDocument, "repository", "grants", "grant");
+        assertSchemaWrapper(schemaDocument, "repository", "roles", "role");
+        assertSchemaWrapper(schemaDocument, "organizationUser", "credentials", "credential");
+        assertSchemaWrapper(schemaDocument, "organizationUser", "memberships", "team");
+        assertSchemaWrapper(schemaDocument, "organizationUser", "roles", "role");
+        assertSchemaWrapper(schemaDocument, "scopedRole", "roleReferences", "roleReference");
+        assertSchemaWrapper(schemaDocument, "scopedRole", "grantReferences", "grantReference");
+        assertSchemaWrapper(schemaDocument, "scopedGrant", "expressions", "expression");
+        assertRequiredSchemaAttribute(schemaDocument, "organizationUser", "id");
+        assertRequiredSchemaAttribute(schemaDocument, "organizationUser", "enabled");
+        assertRequiredSchemaAttribute(schemaDocument, "scopedRole", "id");
+        assertRequiredSchemaAttribute(schemaDocument, "scopedGrant", "id");
+        assertRequiredSchemaAttribute(schemaDocument, "scopedGrant", "effect");
+        assertRequiredSchemaElement(schemaDocument, "organizationCredential", "type");
+        assertRequiredSchemaElement(schemaDocument, "organizationCredential", "value");
+        assertRequiredSchemaElement(schemaDocument, "scopedGrantExpression", "key");
+        assertRequiredSchemaElement(schemaDocument, "scopedGrantExpression", "value");
     }
 
     @Test
@@ -258,6 +337,31 @@ class OrionXmlTest {
         assertThat(repository.defaultBranch()).isEqualTo(OrionDocument.Repository.DEFAULT_BRANCH);
         assertThat(repository.policy()).isEqualTo(RepositoryPolicy.safeDefaults());
         assertThat(repository.remotes()).isEmpty();
+    }
+
+    @Test
+    void readsOlderMinimalVersionTwoDocumentsWithoutScopedIdentityWrappers() throws Exception {
+        String xml = minimalV2(
+                """
+                <organization id="acme">
+                  <teams>
+                    <team id="platform">
+                      <repositories><repository id="api"/></repositories>
+                    </team>
+                  </teams>
+                </organization>
+                """,
+                "");
+
+        OrionDocument.Organization organization = read(xml).organizations().getFirst();
+
+        assertThat(organization.users()).isEmpty();
+        assertThat(organization.grants()).isEmpty();
+        assertThat(organization.roles()).isEmpty();
+        assertThat(organization.teams().getFirst().grants()).isEmpty();
+        assertThat(organization.teams().getFirst().roles()).isEmpty();
+        assertThat(organization.teams().getFirst().repositories().getFirst().grants()).isEmpty();
+        assertThat(organization.teams().getFirst().repositories().getFirst().roles()).isEmpty();
     }
 
     @Test
@@ -295,6 +399,68 @@ class OrionXmlTest {
 
         assertInvalidAgainstSchemaAndReader(unknownElement);
         assertInvalidAgainstSchemaAndReader(unknownAttribute);
+
+        String unknownOrganizationUserField = minimalV2(
+                """
+                <organization id="acme">
+                  <users><user id="alice" enabled="true"><nickname>ally</nickname></user></users>
+                  <teams/>
+                </organization>
+                """,
+                "");
+        String unknownScopedGrantAttribute = minimalV2(
+                """
+                <organization id="acme">
+                  <grants><grant id="read" effect="ALLOW" inherited="true"/></grants>
+                  <teams/>
+                </organization>
+                """,
+                "");
+
+        assertInvalidAgainstSchemaAndReader(unknownOrganizationUserField);
+        assertInvalidAgainstSchemaAndReader(unknownScopedGrantAttribute);
+    }
+
+    @Test
+    void surfacesScopedRoleReferenceErrorsThroughTheReader() {
+        String crossScope = minimalV2(
+                """
+                <organization id="acme">
+                  <roles>
+                    <role id="member">
+                      <roleReferences><roleReference>other/member</roleReference></roleReferences>
+                    </role>
+                  </roles>
+                  <teams/>
+                </organization>
+                <organization id="other">
+                  <roles><role id="member"/></roles>
+                  <teams/>
+                </organization>
+                """,
+                "");
+        String cycle = minimalV2(
+                """
+                <organization id="acme">
+                  <roles>
+                    <role id="first">
+                      <roleReferences><roleReference>acme/second</roleReference></roleReferences>
+                    </role>
+                    <role id="second">
+                      <roleReferences><roleReference>acme/first</roleReference></roleReferences>
+                    </role>
+                  </roles>
+                  <teams/>
+                </organization>
+                """,
+                "");
+
+        assertThatThrownBy(() -> read(crossScope))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("role reference outside scope: other/member");
+        assertThatThrownBy(() -> read(cycle))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("role cycle closes at: acme/first");
     }
 
     @Test
@@ -361,6 +527,66 @@ class OrionXmlTest {
                 .hasMessageContaining("does not conform to Orion XML v2 schema");
     }
 
+    private static void assertSchemaWrapper(
+            Document schema,
+            String typeName,
+            String wrapperName,
+            String itemName) throws Exception {
+        Element wrapper = schemaElement(
+                schema,
+                "//*[local-name()='complexType' and @name='%s']"
+                        .formatted(typeName)
+                        + "/*[local-name()='sequence']/*[local-name()='element' and @name='%s']"
+                        .formatted(wrapperName));
+
+        assertThat(wrapper).as("%s.%s wrapper", typeName, wrapperName).isNotNull();
+        assertThat(schemaElement(wrapper, ".//*[local-name()='element' and @name='%s']".formatted(itemName)))
+                .as("%s.%s item", typeName, itemName)
+                .isNotNull();
+    }
+
+    private static void assertRequiredSchemaAttribute(
+            Document schema,
+            String typeName,
+            String attributeName) throws Exception {
+        Element attribute = schemaElement(
+                schema,
+                "//*[local-name()='complexType' and @name='%s']"
+                        .formatted(typeName)
+                        + "/*[local-name()='attribute' and @name='%s']"
+                        .formatted(attributeName));
+
+        assertThat(attribute).as("%s.%s attribute", typeName, attributeName).isNotNull();
+        assertThat(attribute.getAttribute("use")).isEqualTo("required");
+    }
+
+    private static void assertRequiredSchemaElement(
+            Document schema,
+            String typeName,
+            String elementName) throws Exception {
+        Element element = schemaElement(
+                schema,
+                "//*[local-name()='complexType' and @name='%s']"
+                        .formatted(typeName)
+                        + "/*[local-name()='sequence']/*[local-name()='element' and @name='%s']"
+                        .formatted(elementName));
+
+        assertThat(element).as("%s.%s element", typeName, elementName).isNotNull();
+        assertThat(element.getAttribute("minOccurs")).isNotEqualTo("0");
+    }
+
+    private static Document parseXml(String xml) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        return factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+    }
+
+    private static Element schemaElement(Object source, String expression) throws Exception {
+        return (Element) XPathFactory.newInstance()
+                .newXPath()
+                .evaluate(expression, source, XPathConstants.NODE);
+    }
+
     private OrionXmlSchema.ValidationResult validate(String xml) throws Exception {
         return xmlSchema.validate(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
     }
@@ -392,10 +618,13 @@ class OrionXmlTest {
                         null,
                         "refs/heads/main",
                         RepositoryPolicy.safeDefaults(),
+                        List.of(),
+                        List.of(),
                         List.of());
         OrionDocument.Team team =
-                new OrionDocument.Team(new TeamId("team"), null, List.of(repository));
-        return new OrionDocument.Organization(new OrganizationId(id), null, List.of(team));
+                new OrionDocument.Team(new TeamId("team"), null, List.of(), List.of(), List.of(repository));
+        return new OrionDocument.Organization(
+                new OrganizationId(id), null, List.of(), List.of(), List.of(), List.of(team));
     }
 
     private static OrionDocument documentWithRemotes(List<RepositoryRemote> remotes) {
@@ -404,14 +633,21 @@ class OrionXmlTest {
                 null,
                 OrionDocument.Repository.DEFAULT_BRANCH,
                 RepositoryPolicy.safeDefaults(),
-                remotes);
+                remotes,
+                List.of(),
+                List.of());
         OrionDocument.Team team = new OrionDocument.Team(
                 new TeamId("team"),
                 null,
+                List.of(),
+                List.of(),
                 List.of(repository));
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("organization"),
                 null,
+                List.of(),
+                List.of(),
+                List.of(),
                 List.of(team));
         return document(new AccessControl(), List.of(organization));
     }

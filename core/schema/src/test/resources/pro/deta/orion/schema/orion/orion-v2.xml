@@ -73,9 +73,71 @@
   <organizations>
     <organization id="acme">
       <displayName>Acme</displayName>
+      <users>
+        <user id="alice" enabled="true">
+          <first>Alice</first>
+          <last>Example</last>
+          <email>alice@acme.example</email>
+          <credentials>
+            <credential>
+              <type>ARGON2</type>
+              <value>alice-password-hash</value>
+            </credential>
+          </credentials>
+          <memberships>
+            <team>platform</team>
+          </memberships>
+          <roles>
+            <role>acme/member</role>
+          </roles>
+        </user>
+        <user id="blocked" enabled="false">
+          <credentials/>
+          <memberships/>
+          <roles/>
+        </user>
+      </users>
+      <grants>
+        <grant id="read" effect="ALLOW">
+          <expressions>
+            <expression>
+              <key>READ</key>
+              <value>true</value>
+            </expression>
+          </expressions>
+        </grant>
+      </grants>
+      <roles>
+        <role id="member">
+          <roleReferences/>
+          <grantReferences>
+            <grantReference>acme/read</grantReference>
+          </grantReferences>
+        </role>
+      </roles>
       <teams>
         <team id="platform">
           <displayName>Platform</displayName>
+          <grants>
+            <grant id="deploy" effect="ALLOW">
+              <expressions>
+                <expression>
+                  <key>WRITE</key>
+                  <value>true</value>
+                </expression>
+              </expressions>
+            </grant>
+          </grants>
+          <roles>
+            <role id="operator">
+              <roleReferences>
+                <roleReference>acme/member</roleReference>
+              </roleReferences>
+              <grantReferences>
+                <grantReference>acme/platform/deploy</grantReference>
+              </grantReferences>
+            </role>
+          </roles>
           <repositories>
             <repository id="api">
               <displayName>API</displayName>
@@ -112,6 +174,26 @@
                   </updatePolicy>
                 </remote>
               </remotes>
+              <grants>
+                <grant id="block-force-push" effect="DENY">
+                  <expressions>
+                    <expression>
+                      <key>FORCE</key>
+                      <value>true</value>
+                    </expression>
+                  </expressions>
+                </grant>
+              </grants>
+              <roles>
+                <role id="maintainer">
+                  <roleReferences>
+                    <roleReference>acme/platform/operator</roleReference>
+                  </roleReferences>
+                  <grantReferences>
+                    <grantReference>acme/platform/api/block-force-push</grantReference>
+                  </grantReferences>
+                </role>
+              </roles>
             </repository>
           </repositories>
         </team>

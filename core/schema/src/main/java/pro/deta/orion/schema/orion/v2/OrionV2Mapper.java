@@ -2,8 +2,11 @@ package pro.deta.orion.schema.orion.v2;
 
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
+import pro.deta.orion.schema.orion.GrantAddress;
+import pro.deta.orion.schema.orion.GrantId;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
+import pro.deta.orion.schema.orion.OrganizationUser;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.OrionMaterialReference;
@@ -16,7 +19,13 @@ import pro.deta.orion.schema.orion.RemoteUpdatePolicy;
 import pro.deta.orion.schema.orion.RepositoryId;
 import pro.deta.orion.schema.orion.RepositoryPolicy;
 import pro.deta.orion.schema.orion.RepositoryRemote;
+import pro.deta.orion.schema.orion.RoleAddress;
+import pro.deta.orion.schema.orion.RoleId;
+import pro.deta.orion.schema.orion.ScopedGrant;
+import pro.deta.orion.schema.orion.ScopedRole;
 import pro.deta.orion.schema.orion.TeamId;
+import pro.deta.orion.schema.orion.UserCredential;
+import pro.deta.orion.schema.orion.UserId;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -155,6 +164,9 @@ public final class OrionV2Mapper {
             organizations.add(new OrionDocument.Organization(
                     new OrganizationId(organization.getId()),
                     organization.getDisplayName(),
+                    toCurrentOrganizationUsers(organization.getUsers()),
+                    toCurrentScopedGrants(organization.getGrants()),
+                    toCurrentScopedRoles(organization.getRoles()),
                     toCurrentTeams(organization.getTeams())));
         }
         return organizations;
@@ -170,6 +182,8 @@ public final class OrionV2Mapper {
             teams.add(new OrionDocument.Team(
                     new TeamId(team.getId()),
                     team.getDisplayName(),
+                    toCurrentScopedGrants(team.getGrants()),
+                    toCurrentScopedRoles(team.getRoles()),
                     toCurrentRepositories(team.getRepositories())));
         }
         return teams;
@@ -190,9 +204,138 @@ public final class OrionV2Mapper {
                             ? OrionDocument.Repository.DEFAULT_BRANCH
                             : repository.getDefaultBranch(),
                     toCurrent(repository.getPolicy()),
-                    toCurrentRemotes(repository.getRemotes())));
+                    toCurrentRemotes(repository.getRemotes()),
+                    toCurrentScopedGrants(repository.getGrants()),
+                    toCurrentScopedRoles(repository.getRoles())));
         }
         return repositories;
+    }
+
+    private static List<OrganizationUser> toCurrentOrganizationUsers(
+            List<OrionV2.OrganizationUser> source) {
+        requireUniqueIds(source, OrionV2.OrganizationUser::getId, "user");
+        List<OrionV2.OrganizationUser> sortedUsers = sorted(
+                source,
+                Comparator.comparing(OrionV2.OrganizationUser::getId, NULL_SAFE_STRINGS));
+        List<OrganizationUser> users = new ArrayList<>();
+        for (OrionV2.OrganizationUser user : sortedUsers) {
+            Objects.requireNonNull(user, "organization user");
+            users.add(new OrganizationUser(
+                    new UserId(user.getId()),
+                    user.getFirst(),
+                    user.getLast(),
+                    user.getEmail(),
+                    user.isEnabled(),
+                    toCurrentOrganizationCredentials(user.getCredentials()),
+                    toCurrentTeamIds(user.getMemberships()),
+                    toCurrentRoleAddresses(user.getRoles())));
+        }
+        return users;
+    }
+
+    private static List<UserCredential> toCurrentOrganizationCredentials(
+            List<OrionV2.OrganizationCredential> source) {
+        List<OrionV2.OrganizationCredential> sortedCredentials = sorted(
+                source,
+                Comparator.comparing(
+                                (OrionV2.OrganizationCredential credential) -> enumName(credential.getType()),
+                                NULL_SAFE_STRINGS)
+                        .thenComparing(OrionV2.OrganizationCredential::getKeyId, NULL_SAFE_STRINGS)
+                        .thenComparing(OrionV2.OrganizationCredential::getValue, NULL_SAFE_STRINGS));
+        List<UserCredential> credentials = new ArrayList<>();
+        for (OrionV2.OrganizationCredential credential : sortedCredentials) {
+            Objects.requireNonNull(credential, "organization credential");
+            UserCredential.Type type = enumValue(UserCredential.Type.class, credential.getType());
+            credentials.add(switch (Objects.requireNonNull(type, "credential type")) {
+                case ARGON2, SHA1 -> toCurrentPasswordCredential(credential, type);
+                case OPENSSH_PUBLIC_KEY -> UserCredential.publicKey(
+                        credential.getKeyId(), credential.getValue());
+            });
+        }
+        return credentials;
+    }
+
+    private static UserCredential toCurrentPasswordCredential(
+            OrionV2.OrganizationCredential source,
+            UserCredential.Type type) {
+        if (source.getKeyId() != null) {
+            throw new IllegalArgumentException("password credential key id must be absent");
+        }
+        return UserCredential.passwordVerifier(type, source.getValue());
+    }
+
+    private static List<TeamId> toCurrentTeamIds(List<String> source) {
+        List<TeamId> ids = new ArrayList<>();
+        for (String value : sorted(source, NULL_SAFE_STRINGS)) {
+            ids.add(new TeamId(value));
+        }
+        return ids;
+    }
+
+    private static List<RoleAddress> toCurrentRoleAddresses(List<String> source) {
+        List<RoleAddress> addresses = new ArrayList<>();
+        for (String value : sorted(source, NULL_SAFE_STRINGS)) {
+            addresses.add(RoleAddress.parse(value));
+        }
+        return addresses;
+    }
+
+    private static List<GrantAddress> toCurrentGrantAddresses(List<String> source) {
+        List<GrantAddress> addresses = new ArrayList<>();
+        for (String value : sorted(source, NULL_SAFE_STRINGS)) {
+            addresses.add(GrantAddress.parse(value));
+        }
+        return addresses;
+    }
+
+    private static List<ScopedRole> toCurrentScopedRoles(List<OrionV2.ScopedRole> source) {
+        requireUniqueIds(source, OrionV2.ScopedRole::getId, "role");
+        List<OrionV2.ScopedRole> sortedRoles = sorted(
+                source,
+                Comparator.comparing(OrionV2.ScopedRole::getId, NULL_SAFE_STRINGS));
+        List<ScopedRole> roles = new ArrayList<>();
+        for (OrionV2.ScopedRole role : sortedRoles) {
+            Objects.requireNonNull(role, "scoped role");
+            roles.add(new ScopedRole(
+                    new RoleId(role.getId()),
+                    toCurrentRoleAddresses(role.getRoleReferences()),
+                    toCurrentGrantAddresses(role.getGrantReferences())));
+        }
+        return roles;
+    }
+
+    private static List<ScopedGrant> toCurrentScopedGrants(List<OrionV2.ScopedGrant> source) {
+        requireUniqueIds(source, OrionV2.ScopedGrant::getId, "grant");
+        List<OrionV2.ScopedGrant> sortedGrants = sorted(
+                source,
+                Comparator.comparing(OrionV2.ScopedGrant::getId, NULL_SAFE_STRINGS));
+        List<ScopedGrant> grants = new ArrayList<>();
+        for (OrionV2.ScopedGrant grant : sortedGrants) {
+            Objects.requireNonNull(grant, "scoped grant");
+            grants.add(new ScopedGrant(
+                    new GrantId(grant.getId()),
+                    enumValue(ScopedGrant.Effect.class, grant.getEffect()),
+                    toCurrentScopedExpressions(grant.getExpressions())));
+        }
+        return grants;
+    }
+
+    private static List<AccessControl.GrantExpression> toCurrentScopedExpressions(
+            List<OrionV2.ScopedGrantExpression> source) {
+        List<OrionV2.ScopedGrantExpression> sortedExpressions = sorted(
+                source,
+                Comparator.comparing(
+                                (OrionV2.ScopedGrantExpression expression) -> enumName(expression.getKey()),
+                                NULL_SAFE_STRINGS)
+                        .thenComparing(OrionV2.ScopedGrantExpression::getValue, NULL_SAFE_STRINGS));
+        List<AccessControl.GrantExpression> expressions = new ArrayList<>();
+        for (OrionV2.ScopedGrantExpression expression : sortedExpressions) {
+            Objects.requireNonNull(expression, "scoped grant expression");
+            expressions.add(new AccessControl.GrantExpression(
+                    enumValue(AccessControl.GrantKey.class, expression.getKey()),
+                    expression.getValue()));
+        }
+        return expressions;
     }
 
     private static RepositoryPolicy toCurrent(OrionV2.RepositoryPolicy source) {
@@ -362,6 +505,9 @@ public final class OrionV2Mapper {
             organizations.add(new OrionV2.Organization(
                     organization.id().value(),
                     organization.displayName(),
+                    fromCurrentOrganizationUsers(organization.users()),
+                    fromCurrentScopedGrants(organization.grants()),
+                    fromCurrentScopedRoles(organization.roles()),
                     fromCurrentTeams(organization.teams())));
         }
         return organizations;
@@ -376,6 +522,8 @@ public final class OrionV2Mapper {
             teams.add(new OrionV2.Team(
                     team.id().value(),
                     team.displayName(),
+                    fromCurrentScopedGrants(team.grants()),
+                    fromCurrentScopedRoles(team.roles()),
                     fromCurrentRepositories(team.repositories())));
         }
         return teams;
@@ -393,9 +541,120 @@ public final class OrionV2Mapper {
                     repository.displayName(),
                     repository.defaultBranch(),
                     fromCurrent(repository.policy()),
-                    fromCurrentRemotes(repository.remotes())));
+                    fromCurrentRemotes(repository.remotes()),
+                    fromCurrentScopedGrants(repository.grants()),
+                    fromCurrentScopedRoles(repository.roles())));
         }
         return repositories;
+    }
+
+    private static List<OrionV2.OrganizationUser> fromCurrentOrganizationUsers(
+            List<OrganizationUser> source) {
+        List<OrganizationUser> sortedUsers = sorted(
+                source,
+                Comparator.comparing(user -> user.id().value()));
+        List<OrionV2.OrganizationUser> users = new ArrayList<>();
+        for (OrganizationUser user : sortedUsers) {
+            users.add(new OrionV2.OrganizationUser(
+                    user.id().value(),
+                    user.enabled(),
+                    user.first(),
+                    user.last(),
+                    user.email(),
+                    fromCurrentOrganizationCredentials(user.credentials()),
+                    fromCurrentTeamIds(user.teamMemberships()),
+                    fromCurrentRoleAddresses(user.roleAssignments())));
+        }
+        return users;
+    }
+
+    private static List<OrionV2.OrganizationCredential> fromCurrentOrganizationCredentials(
+            List<UserCredential> source) {
+        List<UserCredential> sortedCredentials = sorted(
+                source,
+                Comparator.comparing(UserCredential::type)
+                        .thenComparing(UserCredential::keyId, NULL_SAFE_STRINGS)
+                        .thenComparing(UserCredential::value));
+        List<OrionV2.OrganizationCredential> credentials = new ArrayList<>();
+        for (UserCredential credential : sortedCredentials) {
+            credentials.add(new OrionV2.OrganizationCredential(
+                    enumValue(OrionV2.OrganizationCredentialType.class, credential.type()),
+                    credential.keyId(),
+                    credential.value()));
+        }
+        return credentials;
+    }
+
+    private static List<String> fromCurrentTeamIds(List<TeamId> source) {
+        List<TeamId> sortedIds = sorted(source, Comparator.comparing(TeamId::value));
+        List<String> ids = new ArrayList<>();
+        for (TeamId id : sortedIds) {
+            ids.add(id.value());
+        }
+        return ids;
+    }
+
+    private static List<String> fromCurrentRoleAddresses(List<RoleAddress> source) {
+        List<RoleAddress> sortedAddresses = sorted(source, Comparator.comparing(RoleAddress::toString));
+        List<String> addresses = new ArrayList<>();
+        for (RoleAddress address : sortedAddresses) {
+            addresses.add(address.toString());
+        }
+        return addresses;
+    }
+
+    private static List<String> fromCurrentGrantAddresses(List<GrantAddress> source) {
+        List<GrantAddress> sortedAddresses = sorted(source, Comparator.comparing(GrantAddress::toString));
+        List<String> addresses = new ArrayList<>();
+        for (GrantAddress address : sortedAddresses) {
+            addresses.add(address.toString());
+        }
+        return addresses;
+    }
+
+    private static List<OrionV2.ScopedRole> fromCurrentScopedRoles(List<ScopedRole> source) {
+        List<ScopedRole> sortedRoles = sorted(
+                source,
+                Comparator.comparing(role -> role.id().value()));
+        List<OrionV2.ScopedRole> roles = new ArrayList<>();
+        for (ScopedRole role : sortedRoles) {
+            roles.add(new OrionV2.ScopedRole(
+                    role.id().value(),
+                    fromCurrentRoleAddresses(role.roleReferences()),
+                    fromCurrentGrantAddresses(role.grantReferences())));
+        }
+        return roles;
+    }
+
+    private static List<OrionV2.ScopedGrant> fromCurrentScopedGrants(List<ScopedGrant> source) {
+        List<ScopedGrant> sortedGrants = sorted(
+                source,
+                Comparator.comparing(grant -> grant.id().value()));
+        List<OrionV2.ScopedGrant> grants = new ArrayList<>();
+        for (ScopedGrant grant : sortedGrants) {
+            grants.add(new OrionV2.ScopedGrant(
+                    grant.id().value(),
+                    enumValue(OrionV2.ScopedGrantEffect.class, grant.effect()),
+                    fromCurrentScopedExpressions(grant.expressions())));
+        }
+        return grants;
+    }
+
+    private static List<OrionV2.ScopedGrantExpression> fromCurrentScopedExpressions(
+            List<AccessControl.GrantExpression> source) {
+        List<AccessControl.GrantExpression> sortedExpressions = sorted(
+                source,
+                Comparator.comparing(
+                                (AccessControl.GrantExpression expression) -> enumName(expression.getKey()),
+                                NULL_SAFE_STRINGS)
+                        .thenComparing(AccessControl.GrantExpression::getValue, NULL_SAFE_STRINGS));
+        List<OrionV2.ScopedGrantExpression> expressions = new ArrayList<>();
+        for (AccessControl.GrantExpression expression : sortedExpressions) {
+            expressions.add(new OrionV2.ScopedGrantExpression(
+                    enumValue(OrionV2.GrantKey.class, expression.getKey()),
+                    expression.getValue()));
+        }
+        return expressions;
     }
 
     private static OrionV2.RepositoryPolicy fromCurrent(RepositoryPolicy source) {

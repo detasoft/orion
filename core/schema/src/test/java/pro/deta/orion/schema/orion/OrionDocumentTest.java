@@ -16,10 +16,10 @@ class OrionDocumentTest {
     void modelsRepositoriesInsideTheirTeamAndOrganization() {
         AccessControl accessControl = ACLUtil.generateDefaultAccessControl("root-password-hash");
         OrionDocument.Repository repository = repository("api", "API");
-        OrionDocument.Team team =
-                new OrionDocument.Team(new TeamId("platform"), "Platform", List.of(repository));
-        OrionDocument.Organization organization =
-                new OrionDocument.Organization(new OrganizationId("acme"), "Acme", List.of(team));
+        OrionDocument.Team team = new OrionDocument.Team(
+                new TeamId("platform"), "Platform", List.of(), List.of(), List.of(repository));
+        OrionDocument.Organization organization = new OrionDocument.Organization(
+                new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), List.of(team));
 
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(accessControl),
@@ -39,10 +39,11 @@ class OrionDocumentTest {
     void copiesHierarchyCollections() {
         List<OrionDocument.Repository> repositories = new ArrayList<>();
         repositories.add(repository("api", "API"));
-        OrionDocument.Team team = new OrionDocument.Team(new TeamId("platform"), "Platform", repositories);
+        OrionDocument.Team team = new OrionDocument.Team(
+                new TeamId("platform"), "Platform", List.of(), List.of(), repositories);
         List<OrionDocument.Team> teams = new ArrayList<>(List.of(team));
-        OrionDocument.Organization organization =
-                new OrionDocument.Organization(new OrganizationId("acme"), "Acme", teams);
+        OrionDocument.Organization organization = new OrionDocument.Organization(
+                new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), teams);
         List<OrionDocument.Organization> organizations = new ArrayList<>(List.of(organization));
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl()),
@@ -123,21 +124,25 @@ class OrionDocumentTest {
     void rejectsNullHierarchyNodes() {
         assertThatThrownBy(() -> new OrionDocument(null, List.of()))
                 .isInstanceOf(NullPointerException.class);
-        assertThatThrownBy(() -> new OrionDocument.Organization(new OrganizationId("acme"), null, null))
+        assertThatThrownBy(() -> new OrionDocument.Organization(
+                new OrganizationId("acme"), null, List.of(), List.of(), List.of(), null))
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OrionDocument.Team(
                 new TeamId("platform"),
                 null,
+                List.of(),
+                List.of(),
                 Collections.singletonList(null)))
                 .isInstanceOf(NullPointerException.class);
     }
 
     private static OrionDocument.Organization organization(String id, List<OrionDocument.Team> teams) {
-        return new OrionDocument.Organization(new OrganizationId(id), null, teams);
+        return new OrionDocument.Organization(
+                new OrganizationId(id), null, List.of(), List.of(), List.of(), teams);
     }
 
     private static OrionDocument.Team team(String id, List<OrionDocument.Repository> repositories) {
-        return new OrionDocument.Team(new TeamId(id), null, repositories);
+        return new OrionDocument.Team(new TeamId(id), null, List.of(), List.of(), repositories);
     }
 
     private static OrionDocument.Repository repository(String id) {
@@ -150,6 +155,8 @@ class OrionDocumentTest {
                 displayName,
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
+                List.of(),
+                List.of(),
                 List.of());
     }
 }

@@ -122,11 +122,20 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "teams"})
+    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams"})
     public static final class Organization {
         @XmlAttribute(name = "id", required = true)
         private String id;
         private String displayName;
+        @XmlElementWrapper(name = "users")
+        @XmlElement(name = "user")
+        private List<OrganizationUser> users;
+        @XmlElementWrapper(name = "grants")
+        @XmlElement(name = "grant")
+        private List<ScopedGrant> grants;
+        @XmlElementWrapper(name = "roles")
+        @XmlElement(name = "role")
+        private List<ScopedRole> roles;
         @XmlElementWrapper(name = "teams", required = true)
         @XmlElement(name = "team")
         private List<Team> teams;
@@ -136,11 +145,54 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "repositories"})
+    @XmlType(propOrder = {"first", "last", "email", "credentials", "memberships", "roles"})
+    public static final class OrganizationUser {
+        @XmlAttribute(name = "id", required = true)
+        private String id;
+        @XmlAttribute(name = "enabled", required = true)
+        private boolean enabled;
+        private String first;
+        private String last;
+        private String email;
+        @XmlElementWrapper(name = "credentials")
+        @XmlElement(name = "credential")
+        private List<OrganizationCredential> credentials;
+        @XmlElementWrapper(name = "memberships")
+        @XmlElement(name = "team")
+        private List<String> memberships;
+        @XmlElementWrapper(name = "roles")
+        @XmlElement(name = "role")
+        private List<String> roles;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"type", "keyId", "value"})
+    public static final class OrganizationCredential {
+        @XmlElement(required = true)
+        private OrganizationCredentialType type;
+        private String keyId;
+        @XmlElement(required = true)
+        private String value;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"displayName", "grants", "roles", "repositories"})
     public static final class Team {
         @XmlAttribute(name = "id", required = true)
         private String id;
         private String displayName;
+        @XmlElementWrapper(name = "grants")
+        @XmlElement(name = "grant")
+        private List<ScopedGrant> grants;
+        @XmlElementWrapper(name = "roles")
+        @XmlElement(name = "role")
+        private List<ScopedRole> roles;
         @XmlElementWrapper(name = "repositories", required = true)
         @XmlElement(name = "repository")
         private List<Repository> repositories;
@@ -150,7 +202,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes"})
+    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes", "grants", "roles"})
     public static final class Repository {
         @XmlAttribute(name = "id", required = true)
         private String id;
@@ -160,6 +212,55 @@ public class OrionV2 {
         @XmlElementWrapper(name = "remotes")
         @XmlElement(name = "remote")
         private List<Remote> remotes;
+        @XmlElementWrapper(name = "grants")
+        @XmlElement(name = "grant")
+        private List<ScopedGrant> grants;
+        @XmlElementWrapper(name = "roles")
+        @XmlElement(name = "role")
+        private List<ScopedRole> roles;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"roleReferences", "grantReferences"})
+    public static final class ScopedRole {
+        @XmlAttribute(name = "id", required = true)
+        private String id;
+        @XmlElementWrapper(name = "roleReferences")
+        @XmlElement(name = "roleReference")
+        private List<String> roleReferences;
+        @XmlElementWrapper(name = "grantReferences")
+        @XmlElement(name = "grantReference")
+        private List<String> grantReferences;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"expressions"})
+    public static final class ScopedGrant {
+        @XmlAttribute(name = "id", required = true)
+        private String id;
+        @XmlAttribute(name = "effect", required = true)
+        private ScopedGrantEffect effect;
+        @XmlElementWrapper(name = "expressions")
+        @XmlElement(name = "expression")
+        private List<ScopedGrantExpression> expressions;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"key", "value"})
+    public static final class ScopedGrantExpression {
+        @XmlElement(required = true)
+        private GrantKey key;
+        @XmlElement(required = true)
+        private String value;
     }
 
     @Data
@@ -343,6 +444,24 @@ public class OrionV2 {
         SHA3_256,
         ARGON2,
         JWT_SIGNING_PUBLIC_KEY
+    }
+
+    @XmlEnum(String.class)
+    public enum OrganizationCredentialType {
+        @XmlEnumValue("ARGON2")
+        ARGON2,
+        @XmlEnumValue("SHA1")
+        SHA1,
+        @XmlEnumValue("OPENSSH_PUBLIC_KEY")
+        OPENSSH_PUBLIC_KEY
+    }
+
+    @XmlEnum(String.class)
+    public enum ScopedGrantEffect {
+        @XmlEnumValue("ALLOW")
+        ALLOW,
+        @XmlEnumValue("DENY")
+        DENY
     }
 
     public enum GrantKey {

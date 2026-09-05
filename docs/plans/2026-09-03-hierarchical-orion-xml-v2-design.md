@@ -5,9 +5,10 @@
 Replace the writable ACL-only XML document with a strictly validated, deterministic Orion configuration document
 while retaining explicit read compatibility with legacy ACL v1 documents.
 
-The first v2 slice defines stable hierarchy identities and the document envelope. Organization-local users, scoped
-roles and grants, repository policies, mirrors, and configuration activation remain in their existing follow-up
-tasks.
+The v2 document defines stable hierarchy identities, organization-local users, and scoped roles and grants at the
+organization, team, and repository levels. Repository policies and remotes are also present. Runtime configuration
+activation remains in its follow-up task; publishing these fields in the document does not activate them in the
+running authorization service.
 
 ## Document Shape
 
@@ -21,12 +22,28 @@ The writable document has a lowercase root matching the task contract:
   <organizations>
     <organization id="acme">
       <displayName>Acme</displayName>
+      <users>
+        <user id="alice" enabled="true">
+          <memberships><team>platform</team></memberships>
+          <roles><role>acme/member</role></roles>
+        </user>
+      </users>
+      <grants>
+        <grant id="read" effect="ALLOW">...</grant>
+      </grants>
+      <roles>
+        <role id="member">...</role>
+      </roles>
       <teams>
         <team id="platform">
           <displayName>Platform</displayName>
+          <grants>...</grants>
+          <roles>...</roles>
           <repositories>
             <repository id="api">
               <displayName>API</displayName>
+              <grants>...</grants>
+              <roles>...</roles>
             </repository>
           </repositories>
         </team>
@@ -36,9 +53,12 @@ The writable document has a lowercase root matching the task contract:
 </orion>
 ```
 
-The system access-control section carries the current global ACL without making the immutable domain model depend
-on JAXB. Organization-local users remain inline under their owning organization when that follow-up is implemented;
-v2 does not introduce external user files or include processing.
+The system access-control section carries the existing global ACL without making the immutable domain model depend
+on JAXB. Organization-local users are inline under their owning organization; their credentials, team memberships,
+and qualified role assignments are separate from the system ACL. Scoped definitions remain nested under the
+organization, team, or repository that owns them. The detailed identity and reference rules are in
+[Organization Users and Scoped Roles Design](2026-09-05-organization-users-scoped-roles-design.md). V2 does not
+introduce external user files or include processing.
 
 ## Hierarchy and Identity
 
@@ -90,7 +110,7 @@ meaning. Repeated writes of equivalent models therefore produce identical UTF-8 
 
 Generated XSD validation enforces the structural wire contract and rejects unknown fields. Domain mapping enforces
 semantic rules that generated JAXB schemas cannot express reliably, including canonical identifiers, duplicate
-siblings, canonical addresses, and cross-scope references.
+siblings, canonical addresses, missing memberships and assignments, cross-scope references, and role cycles.
 
 Read and write failures preserve their causes and identify whether root/version detection, schema validation,
 unmarshalling, or semantic mapping failed. XML processing disables DTDs, external entities, and external schemas.
@@ -102,12 +122,16 @@ Focused schema tests cover:
 - legacy unversioned and explicit v1 reads;
 - a complete v2 round trip with system ACL and nested hierarchy;
 - immutable domain and version-specific DTO separation;
+- organization-local users, credentials, disabled state, memberships, and role assignments;
+- organization, team, and repository roles and grants, including ancestor composition and explicit deny grants;
 - deterministic output from differently ordered equivalent inputs;
 - generated-schema rejection of unknown elements and attributes;
 - duplicate organizations, teams, repositories, and ACL identifiers;
+- missing or escaping scoped references and cyclic role composition;
 - invalid and escaping identifier/address forms;
 - missing and unsupported versions and unknown roots.
 
-The checked-in example configuration is migrated only if it exists in the current repository layout. Runtime
-snapshot publication and preservation of non-ACL sections during administrative ACL updates remain owned by the
-native configuration snapshot and administration tasks.
+The checked-in v2 fixture exercises the published users and scoped authorization definitions while retaining the
+existing system ACL and repository remote. Runtime snapshot publication, authorization activation, and preservation
+of non-ACL sections during administrative ACL updates remain owned by the native configuration snapshot,
+hierarchical authorization, and administration tasks.

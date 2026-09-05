@@ -21,7 +21,9 @@ class RepositoryConfigurationTest {
                 "Project",
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
-                List.of(upstream));
+                List.of(upstream),
+                List.of(),
+                List.of());
 
         assertThat(repository.remotes()).containsExactly(upstream);
     }
@@ -71,6 +73,8 @@ class RepositoryConfigurationTest {
                 "Project",
                 "main",
                 RepositoryPolicy.safeDefaults(),
+                List.of(),
+                List.of(),
                 List.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("canonical full ref");
@@ -142,7 +146,9 @@ class RepositoryConfigurationTest {
                 "Project",
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
-                remotes);
+                remotes,
+                List.of(),
+                List.of());
     }
 
     private static RepositoryRemote primaryUpstream() {

@@ -13,8 +13,6 @@ queues, leases, observations, and last-run state remain outside this document.
 
 ## Child Tasks
 
-- [ ] [Model organization-local users](organization-users/TASK.md)
-- [ ] [Add scoped roles and grants](scoped-roles-and-grants/TASK.md)
 - [ ] [Implement hierarchical authorization](hierarchical-authorization/TASK.md)
 - [ ] [Load and activate native Git configuration snapshots](native-git-configuration-snapshots/TASK.md)
 - [ ] [Add configuration administration and acceptance coverage](administration-and-acceptance/TASK.md)
