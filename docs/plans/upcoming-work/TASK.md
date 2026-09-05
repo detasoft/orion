@@ -15,6 +15,7 @@ tasks may be ready at the same time.
 - [ ] [Externalize repository storage](externalized-repository-storage/TASK.md)
 - [ ] [Simplify Git client architecture](git-client-architecture-simplification/TASK.md)
 - [ ] [Simplify Git wire architecture](git-wire-architecture-simplification/TASK.md)
+- [ ] [Refactor Git report-status to blocking streaming parsing](git-report-status-blocking-parser/TASK.md)
 - [ ] [Review Git server transport composition](git-server-transport-architecture-review/TASK.md)
 - [ ] [Move Jetty and SSH Git transports to virtual threads](virtual-thread-jetty-ssh-git-transport/TASK.md)
 - [ ] [Review the Agent session control plane](agent-session-control-plane-architecture-review/TASK.md)
