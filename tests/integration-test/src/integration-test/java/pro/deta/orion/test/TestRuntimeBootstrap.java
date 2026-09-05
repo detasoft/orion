@@ -6,7 +6,9 @@ import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
 import pro.deta.orion.util.ConfigurationContext;
@@ -40,6 +42,8 @@ final class TestRuntimeBootstrap {
                 .configurationProvider(() -> configuration)
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(identity)
+                .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                .tlsCapability(TlsCapability.unavailable())
                 .nativeGitRepositoryProvider(provider)
                 .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(source)));
     }

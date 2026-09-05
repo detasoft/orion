@@ -1,19 +1,16 @@
 package pro.deta.orion.transport.http;
 
+import java.security.cert.X509Certificate;
 import java.util.List;
 
 public record IssuedAcmeCertificate(
         List<String> domains,
-        String certificateChainPem,
-        String privateKeyPem) {
+        List<X509Certificate> certificateChain) {
     public IssuedAcmeCertificate {
         domains = List.copyOf(domains);
-    }
-
-    public String nginxPem() {
-        if (certificateChainPem.endsWith("\n")) {
-            return certificateChainPem + privateKeyPem;
+        certificateChain = List.copyOf(certificateChain);
+        if (certificateChain.isEmpty()) {
+            throw new IllegalArgumentException("Issued ACME certificate chain must not be empty");
         }
-        return certificateChainPem + "\n" + privateKeyPem;
     }
 }

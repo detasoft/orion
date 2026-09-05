@@ -40,6 +40,5 @@ public class OrionConfiguration {
         private GitTransportConfig git = new GitTransportConfig();
         private SshTransportConfig ssh = new SshTransportConfig(null, 8022);
         private HttpTransportConfig http = new HttpTransportConfig(null, 8000);
-        private HttpsTransportConfig https = new HttpsTransportConfig(null, 8443);
     }
 }

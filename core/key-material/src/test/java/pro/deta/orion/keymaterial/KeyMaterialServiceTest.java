@@ -78,19 +78,68 @@ class KeyMaterialServiceTest {
         service.generateKeyIfMissing(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS,
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.CA_ISSUER_PURPOSE));
-        X509Certificate issuerCertificate = (X509Certificate) service.getCertificateChain(
+        X509Certificate storageCertificate = (X509Certificate) service.getCertificateChain(
                 KeyMaterialTestConstants.ORION_CA_2026_05_ALIAS)[0];
-        service.setTrustedCertificate(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS, issuerCertificate);
+        X509Certificate issuerCertificate = TestCertificateChain.root("Public Root").certificate();
+        TrustedCertificateDescriptor descriptor = trustedCertificate(
+                KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS,
+                1,
+                KeyMaterialScope.cluster("orion-prod"));
+
+        assertThatThrownBy(() -> service.setTrustedCertificate(descriptor, storageCertificate))
+                .hasMessageContaining("certificate authority");
+        service.setTrustedCertificate(descriptor, issuerCertificate);
         service.save();
 
         KeyMaterialService reloaded = KeyMaterialService.open(store, options());
-        X509Certificate trustedCertificate =
-                reloaded.getTrustedCertificate(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS);
+        X509Certificate trustedCertificate = reloaded.getTrustedCertificate(descriptor);
 
         assertThat(trustedCertificate.getEncoded()).isEqualTo(issuerCertificate.getEncoded());
         assertThatThrownBy(() -> reloaded.getPrivateKey(KeyMaterialTestConstants.ORION_CA_CERT_2026_05_ALIAS))
                 .isInstanceOf(Exception.class)
                 .hasMessageContaining("Private key alias not found");
+    }
+
+    @Test
+    void validatesTypedTrustedCertificateMetadataAndEntryType() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        TrustedCertificateDescriptor original = trustedCertificate(
+                "public-root-v1", 1, KeyMaterialScope.cluster("orion-prod"));
+        KeyMaterialDescriptor privateEntry = new KeyMaterialDescriptor(
+                new KeyMaterialAlias("private-entry-v1"),
+                KeyMaterialPurpose.SERVER_SIGNING,
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(1),
+                KeyMaterialScope.cluster("orion-prod"));
+        TestCertificateChain.Authority root = TestCertificateChain.root("Public Root");
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            service.setTrustedCertificate(original, root.certificate());
+            service.generateKeyIfMissing(privateEntry, 2048);
+            service.save();
+        }
+
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            TrustedCertificateDescriptor wrongVersion = trustedCertificate(
+                    original.alias().value(), 2, original.scope());
+            TrustedCertificateDescriptor wrongScope = trustedCertificate(
+                    original.alias().value(), 1, KeyMaterialScope.cluster("other"));
+            TrustedCertificateDescriptor wrongAlgorithm = new TrustedCertificateDescriptor(
+                    original.alias(),
+                    KeyMaterialAlgorithm.EC,
+                    original.version(),
+                    original.scope());
+            TrustedCertificateDescriptor wrongEntryType = trustedCertificate(
+                    privateEntry.alias().value(), 1, privateEntry.scope());
+
+            assertThatThrownBy(() -> service.validateExisting(wrongVersion))
+                    .hasMessageContaining("version");
+            assertThatThrownBy(() -> service.validateExisting(wrongScope))
+                    .hasMessageContaining("scope");
+            assertThatThrownBy(() -> service.validateExisting(wrongAlgorithm))
+                    .hasMessageContaining("algorithm");
+            assertThatThrownBy(() -> service.validateExisting(wrongEntryType))
+                    .hasMessageContaining("entry type");
+        }
     }
 
     @Test
@@ -106,11 +155,17 @@ class KeyMaterialServiceTest {
                 KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
         Certificate[] mismatchedChain = service.getCertificateChain(
                 KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
+        KeyMaterialDescriptor descriptor = new KeyMaterialDescriptor(
+                new KeyMaterialAlias(KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS),
+                KeyMaterialPurpose.SERVER_SIGNING,
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(1),
+                KeyMaterialScope.cluster("orion-prod"));
 
         assertThatThrownBy(() -> service.setPrivateKey(
-                KeyMaterialTestConstants.BAD_SERVER_SIGNING_ALIAS,
+                descriptor,
                 signingKey,
-                mismatchedChain))
+                List.of(mismatchedChain)))
                 .isInstanceOf(Exception.class)
                 .hasMessageContaining("Certificate public key does not match");
     }
@@ -245,5 +300,16 @@ class KeyMaterialServiceTest {
 
     private static KeyMaterialOptions options() {
         return KeyMaterialOptions.pkcs12(KeyMaterialTestConstants.password());
+    }
+
+    private static TrustedCertificateDescriptor trustedCertificate(
+            String alias,
+            long version,
+            KeyMaterialScope scope) {
+        return new TrustedCertificateDescriptor(
+                new KeyMaterialAlias(alias),
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(version),
+                scope);
     }
 }

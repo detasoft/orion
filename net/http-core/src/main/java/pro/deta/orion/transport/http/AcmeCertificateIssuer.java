@@ -3,12 +3,9 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import org.shredzone.acme4j.Status;
-import org.shredzone.acme4j.util.KeyPairUtils;
 
-import java.io.IOException;
-import java.io.StringWriter;
-import java.io.Writer;
 import java.security.KeyPair;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.List;
 
@@ -35,8 +32,7 @@ public class AcmeCertificateIssuer {
             finalizeOrder(order, request);
             return new IssuedAcmeCertificate(
                     request.domains(),
-                    certificateChainPem(order),
-                    privateKeyPem(request.domainKeyPair()));
+                    order.certificateChain());
         } catch (AcmeCertificateIssueException e) {
             throw e;
         } catch (Exception e) {
@@ -97,18 +93,6 @@ public class AcmeCertificateIssuer {
         }
     }
 
-    private static String certificateChainPem(AcmeOrder order) throws IOException {
-        StringWriter writer = new StringWriter();
-        order.writeCertificate(writer);
-        return writer.toString();
-    }
-
-    private static String privateKeyPem(KeyPair domainKeyPair) throws IOException {
-        StringWriter writer = new StringWriter();
-        KeyPairUtils.writeKeyPair(domainKeyPair, writer);
-        return writer.toString();
-    }
-
     interface AcmeClient {
         AcmeAccount createAccount(AcmeCertificateIssueRequest request) throws Exception;
     }
@@ -126,7 +110,7 @@ public class AcmeCertificateIssuer {
 
         Status waitForCompletion(Duration timeout) throws Exception;
 
-        void writeCertificate(Writer writer) throws IOException;
+        List<X509Certificate> certificateChain();
     }
 
     interface AcmeAuthorization {

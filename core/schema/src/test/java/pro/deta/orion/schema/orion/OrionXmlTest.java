@@ -11,6 +11,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,6 +30,7 @@ class OrionXmlTest {
 
         assertThat(fromUnversioned).isEqualTo(fromExplicit);
         assertThat(fromUnversioned.organizations()).isEmpty();
+        assertThat(fromUnversioned.system().https()).isEmpty();
         assertThat(fromUnversioned.system().accessControl().getUsers().getFirst().getId()).isEqualTo("root");
     }
 
@@ -53,6 +55,83 @@ class OrionXmlTest {
         assertThat(serialized).contains("<reference>github-token</reference>");
         assertThat(serialized).doesNotContain("github-token@");
         assertThat(OrionXml.currentSchemaVersion()).isEqualTo(OrionXmlSchemaVersion.V2);
+    }
+
+    @Test
+    void roundTripsHttpsAndAcmeMaterialReferencesInTheSystemConfiguration() throws Exception {
+        OrionMaterialReference identity = new OrionMaterialReference("https-identity", 3);
+        OrionMaterialReference issuer = new OrionMaterialReference("server-root", 1);
+        OrionMaterialReference clientRoot = new OrionMaterialReference("client-root", 2);
+        OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
+                true,
+                URI.create("acme://letsencrypt.org/staging"),
+                "admin@example.test",
+                List.of("example.test", "www.example.test"),
+                "ORION",
+                Optional.of(new OrionMaterialReference("acme-account", 4)),
+                30,
+                40,
+                true,
+                false);
+        OrionHttpsConfiguration https = new OrionHttpsConfiguration(
+                true,
+                "127.0.0.1",
+                8443,
+                URI.create("https://example.test"),
+                Optional.of(identity),
+                Optional.of(issuer),
+                OrionHttpsConfiguration.ClientAuthentication.REQUIRED,
+                List.of(clientRoot),
+                Optional.of(acme));
+        OrionDocument document = new OrionDocument(
+                new OrionDocument.SystemConfiguration(
+                        new AccessControl(),
+                        Optional.of(https)),
+                List.of());
+
+        String serialized = write(document);
+        OrionDocument restored = read(serialized);
+
+        assertThat(restored).isEqualTo(document);
+        assertThat(serialized).contains("<https>");
+        assertThat(serialized).contains("<identity alias=\"https-identity\" version=\"3\"");
+        assertThat(serialized).contains("<accountMaterial alias=\"acme-account\" version=\"4\"");
+        assertThat(serialized).doesNotContain("PRIVATE KEY");
+    }
+
+    @Test
+    void rejectsInvalidHttpsAndAcmeDesiredState() {
+        OrionMaterialReference identity = new OrionMaterialReference("identity", 1);
+
+        assertThatThrownBy(() -> new OrionMaterialReference(" ", 1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OrionMaterialReference("identity", 0))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new OrionHttpsConfiguration(
+                true,
+                "localhost",
+                8443,
+                URI.create("https://localhost"),
+                Optional.of(identity),
+                Optional.empty(),
+                OrionHttpsConfiguration.ClientAuthentication.REQUIRED,
+                List.of(),
+                Optional.empty()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("trust anchors");
+        assertThatThrownBy(() -> new OrionAcmeConfiguration(
+                true,
+                URI.create("acme://letsencrypt.org/staging"),
+                "admin@example.test",
+                List.of("example.test", "example.test"),
+                null,
+                Optional.of(new OrionMaterialReference("account", 1)),
+                30,
+                30,
+                false,
+                false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Duplicate ACME domain");
     }
 
     @Test

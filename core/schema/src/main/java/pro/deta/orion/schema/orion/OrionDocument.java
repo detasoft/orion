@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public record OrionDocument(SystemConfiguration system, List<Organization> organizations) {
@@ -17,6 +18,12 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
 
     public static OrionDocument withAccessControl(AccessControl accessControl) {
         return new OrionDocument(new SystemConfiguration(accessControl), List.of());
+    }
+
+    public OrionDocument replaceAccessControl(AccessControl accessControl) {
+        return new OrionDocument(
+                new SystemConfiguration(accessControl, system.https()),
+                organizations);
     }
 
     private static List<Organization> copyOrganizations(List<Organization> source) {
@@ -31,9 +38,16 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
         return List.copyOf(source);
     }
 
-    public record SystemConfiguration(AccessControl accessControl) {
+    public record SystemConfiguration(
+            AccessControl accessControl,
+            Optional<OrionHttpsConfiguration> https) {
+        public SystemConfiguration(AccessControl accessControl) {
+            this(accessControl, Optional.empty());
+        }
+
         public SystemConfiguration {
             Objects.requireNonNull(accessControl, "accessControl");
+            https = Objects.requireNonNullElseGet(https, Optional::empty);
         }
     }
 

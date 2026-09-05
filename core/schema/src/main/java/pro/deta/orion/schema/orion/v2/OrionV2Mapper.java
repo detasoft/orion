@@ -3,7 +3,10 @@ package pro.deta.orion.schema.orion.v2;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.OrganizationId;
+import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
 import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 import pro.deta.orion.schema.orion.RemoteAlias;
 import pro.deta.orion.schema.orion.RemoteProvider;
 import pro.deta.orion.schema.orion.RemoteRefMapping;
@@ -23,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public final class OrionV2Mapper {
@@ -41,7 +45,9 @@ public final class OrionV2Mapper {
         AccessControl accessControl = toCurrent(
                 Objects.requireNonNull(system.getAccessControl(), "system access control"));
         return new OrionDocument(
-                new OrionDocument.SystemConfiguration(accessControl),
+                new OrionDocument.SystemConfiguration(
+                        accessControl,
+                        Optional.ofNullable(system.getHttps()).map(OrionV2Mapper::toCurrent)),
                 toCurrentOrganizations(source.getOrganizations()));
     }
 
@@ -49,8 +55,93 @@ public final class OrionV2Mapper {
         Objects.requireNonNull(source, "source");
         return new OrionV2(
                 OrionV2.SchemaVersion.V2,
-                new OrionV2.SystemConfiguration(fromCurrent(source.system().accessControl())),
+                new OrionV2.SystemConfiguration(
+                        fromCurrent(source.system().accessControl()),
+                        source.system().https().map(OrionV2Mapper::fromCurrent).orElse(null)),
                 fromCurrentOrganizations(source.organizations()));
+    }
+
+    private static OrionHttpsConfiguration toCurrent(OrionV2.Https source) {
+        List<OrionMaterialReference> clientRoots = new ArrayList<>();
+        for (OrionV2.MaterialReference reference : listOrEmpty(source.getClientTrustAnchors())) {
+            clientRoots.add(toCurrent(reference));
+        }
+        return new OrionHttpsConfiguration(
+                source.isEnabled(),
+                source.getAddress(),
+                source.getPort(),
+                source.getPublicUrl() == null ? null : URI.create(source.getPublicUrl()),
+                Optional.ofNullable(source.getIdentity()).map(OrionV2Mapper::toCurrent),
+                Optional.ofNullable(source.getServerIssuerTrustAnchor()).map(OrionV2Mapper::toCurrent),
+                toCurrent(source.getClientAuthentication()),
+                clientRoots,
+                Optional.ofNullable(source.getAcme()).map(OrionV2Mapper::toCurrent));
+    }
+
+    private static OrionV2.Https fromCurrent(OrionHttpsConfiguration source) {
+        List<OrionV2.MaterialReference> clientRoots = new ArrayList<>();
+        for (OrionMaterialReference reference : source.clientTrustAnchors()) {
+            clientRoots.add(fromCurrent(reference));
+        }
+        return new OrionV2.Https(
+                source.enabled(),
+                source.address(),
+                source.port(),
+                source.publicUrl() == null ? null : source.publicUrl().toString(),
+                source.identity().map(OrionV2Mapper::fromCurrent).orElse(null),
+                source.serverIssuerTrustAnchor().map(OrionV2Mapper::fromCurrent).orElse(null),
+                fromCurrent(source.clientAuthentication()),
+                clientRoots,
+                source.acme().map(OrionV2Mapper::fromCurrent).orElse(null));
+    }
+
+    private static OrionAcmeConfiguration toCurrent(OrionV2.Acme source) {
+        return new OrionAcmeConfiguration(
+                source.isEnabled(),
+                URI.create(source.getDirectoryUrl()),
+                source.getAccountEmail(),
+                source.getDomains(),
+                source.getOrganization(),
+                Optional.ofNullable(source.getAccountMaterial()).map(OrionV2Mapper::toCurrent),
+                source.getAuthorizationTimeoutSeconds(),
+                source.getOrderTimeoutSeconds(),
+                source.isAgreeToTermsOfService(),
+                source.isAllowRequestedDomains());
+    }
+
+    private static OrionV2.Acme fromCurrent(OrionAcmeConfiguration source) {
+        return new OrionV2.Acme(
+                source.enabled(),
+                source.directoryUrl().toString(),
+                source.accountEmail(),
+                source.domains(),
+                source.organization(),
+                source.accountMaterial().map(OrionV2Mapper::fromCurrent).orElse(null),
+                source.authorizationTimeoutSeconds(),
+                source.orderTimeoutSeconds(),
+                source.agreeToTermsOfService(),
+                source.allowRequestedDomains());
+    }
+
+    private static OrionMaterialReference toCurrent(OrionV2.MaterialReference source) {
+        return new OrionMaterialReference(source.getAlias(), source.getVersion());
+    }
+
+    private static OrionV2.MaterialReference fromCurrent(OrionMaterialReference source) {
+        return new OrionV2.MaterialReference(source.alias(), source.version());
+    }
+
+    private static OrionHttpsConfiguration.ClientAuthentication toCurrent(
+            OrionV2.ClientAuthentication source) {
+        if (source == null) {
+            return OrionHttpsConfiguration.ClientAuthentication.DISABLED;
+        }
+        return enumValue(OrionHttpsConfiguration.ClientAuthentication.class, source);
+    }
+
+    private static OrionV2.ClientAuthentication fromCurrent(
+            OrionHttpsConfiguration.ClientAuthentication source) {
+        return enumValue(OrionV2.ClientAuthentication.class, source);
     }
 
     private static List<OrionDocument.Organization> toCurrentOrganizations(

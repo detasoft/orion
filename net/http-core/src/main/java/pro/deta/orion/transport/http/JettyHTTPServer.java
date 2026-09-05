@@ -12,18 +12,30 @@ import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
+import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialScope;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.keymaterial.TlsClientAuthentication;
+import pro.deta.orion.keymaterial.TlsMaterialConfiguration;
+import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.config.HttpTransportConfig;
-import pro.deta.orion.schema.config.HttpsTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.schema.config.SSLKeyStoreConfig;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
-import pro.deta.orion.util.CertUtils;
-import pro.deta.orion.util.OrionUtils;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.security.KeyStore;
+import java.security.GeneralSecurityException;
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -34,9 +46,10 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     public static final String ROOT_CONTEXT_PATH = "/";
     private static final long STOP_TIMEOUT_MILLIS = 1_000;
 
-
     private final HttpTransportConfig httpTransportConfig;
-    private final HttpsTransportConfig httpsTransportConfig;
+    private final KeyMaterialScope clusterScope;
+    private final OrionDesiredState desiredState;
+    private final TlsCapability tls;
     private final OrionHttpRouteServlet rootServlet;
     private final OrionAuthorizationFilter authorizationFilter;
     private final AtomicReference<Server> jettyServer = new AtomicReference<>();
@@ -44,37 +57,41 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     @Inject
     public JettyHTTPServer(
             OrionConfiguration orionConfiguration,
+            OrionDesiredState desiredState,
+            TlsCapability tls,
             OrionHttpRouteServlet rootServlet,
             OrionAuthorizationFilter authorizationFilter) {
         this.httpTransportConfig = orionConfiguration.getTransport().getHttp();
-        this.httpsTransportConfig = orionConfiguration.getTransport().getHttps();
+        this.clusterScope = KeyMaterialScope.cluster(
+                orionConfiguration.getBootstrap().getKeyMaterial().getClusterId());
+        this.desiredState = desiredState;
+        this.tls = tls;
         this.rootServlet = rootServlet;
         this.authorizationFilter = authorizationFilter;
-    }
-
-    public JettyHTTPServer(OrionConfiguration orionConfiguration, OrionHttpRouteServlet rootServlet) {
-        this(orionConfiguration, rootServlet, null);
     }
 
     public void onStart() {
         if (!isEnabled()) {
             return;
         }
-        jettyServer.set(getNewServer());
-
         try {
-            jettyServer.get().start();
+            Server server = getNewServer();
+            jettyServer.set(server);
+            server.start();
         } catch (Exception e) {
             destroyFailedServer();
             throw new IllegalStateException("Cannot start Jetty HTTP server", e);
         }
-        log.warn("HTTP Listening on http://{}:{}", httpTransportConfig.getAddress(), httpTransportConfig.getPort());
-        log.warn("HTTPS Listening on https://{}:{}", httpsTransportConfig.getAddress(), httpsTransportConfig.getPort());
+        if (httpTransportConfig != null && httpTransportConfig.isEnabled()) {
+            log.warn("HTTP Listening on http://{}:{}", httpTransportConfig.getAddress(), boundHttpPort());
+        }
+        httpsConfiguration().filter(OrionHttpsConfiguration::enabled).ifPresent(https ->
+                log.warn("HTTPS Listening on https://{}:{}", https.address(), boundHttpsPort()));
     }
 
     public boolean isEnabled() {
         return (httpTransportConfig != null && httpTransportConfig.isEnabled())
-                || (httpsTransportConfig != null && httpsTransportConfig.isEnabled());
+                || httpsConfiguration().map(OrionHttpsConfiguration::enabled).orElse(false);
     }
 
     public boolean isRunning() {
@@ -120,7 +137,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
 
             enableHttpIfNeeded(server, httpTransportConfig);
 
-            enableHttpsIfNeeded(server, httpsTransportConfig);
+            enableHttpsIfNeeded(server, httpsConfiguration());
 
             return server;
         } catch (Exception e) {
@@ -129,43 +146,29 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         }
     }
 
-    private static void enableHttpsIfNeeded(Server server, HttpsTransportConfig httpsTransportConfig) throws Exception {
-        if (httpsTransportConfig != null && httpsTransportConfig.isEnabled()) {
-            // Create and configure SSL Context Factory
-            SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
-            KeyStore keyStore;
-            SSLKeyStoreConfig sslKeyStore = httpsTransportConfig.getKsystore();
-            if (sslKeyStore != null && sslKeyStore.getType() == SSLKeyStoreConfig.SSLKeyStoreType.JKS) {
-                keyStore = CertUtils.readKeyWithCertsFromJKS(sslKeyStore.getPath(), sslKeyStore.getKeyStorePassword().toCharArray());
-                if (sslKeyStore.getAlias() != null)
-                    sslContextFactory.setCertAlias(sslKeyStore.getAlias());
-                if (sslKeyStore.getKeyStorePassword() != null)
-                    sslContextFactory.setKeyStorePassword(sslKeyStore.getKeyStorePassword());
-                sslContextFactory.setKeyManagerPassword(sslKeyStore.getKeyPassword());
-            } else {
-                CertUtils.PrivateKeyWithCerts pkWithCert;
-                if (sslKeyStore != null && sslKeyStore.getType() == SSLKeyStoreConfig.SSLKeyStoreType.PEM) {
-                    pkWithCert = CertUtils.readKeyWithCertsFromPEM(sslKeyStore.getPath(), sslKeyStore.getKeyPassword());
-                } else {
-                    pkWithCert = CertUtils.generateSelfSignedCertificate();
-                }
-                char[] keyStorePassword = OrionUtils.generatePassword(34);
-                String alias = "jetty";
-                keyStore = CertUtils.convertToKeyStore(pkWithCert, alias, keyStorePassword);
-                sslContextFactory.setCertAlias(alias);
-                sslContextFactory.setKeyManagerPassword(new String(keyStorePassword));
-            }
-            sslContextFactory.setKeyStore(keyStore);
-
-            // Create HTTPS connector
-            ServerConnector httpsConnector = new ServerConnector(server,
-                    new SslConnectionFactory(sslContextFactory, "http/1.1"),
-                    new HttpConnectionFactory(new HttpConfiguration()));
-            httpsConnector.setName("https");
-            httpsConnector.setHost(httpsTransportConfig.getAddress());
-            httpsConnector.setPort(httpsTransportConfig.getPort());
-            server.addConnector(httpsConnector);
+    private void enableHttpsIfNeeded(
+            Server server,
+            Optional<OrionHttpsConfiguration> configured) throws GeneralSecurityException {
+        if (configured.isEmpty() || !configured.orElseThrow().enabled()) {
+            return;
         }
+        OrionHttpsConfiguration https = configured.orElseThrow();
+        TlsMaterialConfiguration material = tlsMaterial(https);
+        SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
+        sslContextFactory.setSslContext(tls.createContext(material));
+        sslContextFactory.setWantClientAuth(
+                material.clientAuthentication() == TlsClientAuthentication.WANT);
+        sslContextFactory.setNeedClientAuth(
+                material.clientAuthentication() == TlsClientAuthentication.REQUIRED);
+
+        ServerConnector httpsConnector = new ServerConnector(
+                server,
+                new SslConnectionFactory(sslContextFactory, "http/1.1"),
+                new HttpConnectionFactory(new HttpConfiguration()));
+        httpsConnector.setName("https");
+        httpsConnector.setHost(https.address());
+        httpsConnector.setPort(https.port());
+        server.addConnector(httpsConnector);
     }
 
     private static void enableHttpIfNeeded(Server server, HttpTransportConfig httpTransportConfig) {
@@ -232,10 +235,57 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
     }
 
     public URL relativiseHttp(String path) throws MalformedURLException {
-        return new URL("http://%s:%d%s".formatted(httpTransportConfig.getAddress(), httpTransportConfig.getPort(), path));
+        int boundPort = boundHttpPort();
+        int port = boundPort > 0 ? boundPort : httpTransportConfig.getPort();
+        return new URL("http://%s:%d%s".formatted(httpTransportConfig.getAddress(), port, path));
     }
 
     public URL relativiseHttps(String path) throws MalformedURLException {
-        return new URL("https://%s:%d%s".formatted(httpsTransportConfig.getAddress(), httpsTransportConfig.getPort(), path));
+        OrionHttpsConfiguration https = httpsConfiguration()
+                .orElseThrow(() -> new IllegalStateException("HTTPS desired state is not configured"));
+        int boundPort = boundHttpsPort();
+        int port = boundPort > 0 ? boundPort : https.port();
+        return new URL("https://%s:%d%s".formatted(https.address(), port, path));
+    }
+
+    private Optional<OrionHttpsConfiguration> httpsConfiguration() {
+        return desiredState.current().document().system().https();
+    }
+
+    private TlsMaterialConfiguration tlsMaterial(OrionHttpsConfiguration https) {
+        KeyMaterialDescriptor identity = descriptor(
+                https.identity().orElseThrow(
+                        () -> new IllegalStateException("Enabled HTTPS requires identity material")),
+                KeyMaterialPurpose.TLS_IDENTITY);
+        Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
+                .map(this::trustedCertificate);
+        List<TrustedCertificateDescriptor> clientRoots = new ArrayList<>();
+        for (OrionMaterialReference root : https.clientTrustAnchors()) {
+            clientRoots.add(trustedCertificate(root));
+        }
+        return new TlsMaterialConfiguration(
+                identity,
+                issuer,
+                clientRoots,
+                TlsClientAuthentication.valueOf(https.clientAuthentication().name()));
+    }
+
+    private KeyMaterialDescriptor descriptor(
+            OrionMaterialReference reference,
+            KeyMaterialPurpose purpose) {
+        return new KeyMaterialDescriptor(
+                new KeyMaterialAlias(reference.alias()),
+                purpose,
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(reference.version()),
+                clusterScope);
+    }
+
+    private TrustedCertificateDescriptor trustedCertificate(OrionMaterialReference reference) {
+        return new TrustedCertificateDescriptor(
+                new KeyMaterialAlias(reference.alias()),
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(reference.version()),
+                clusterScope);
     }
 }

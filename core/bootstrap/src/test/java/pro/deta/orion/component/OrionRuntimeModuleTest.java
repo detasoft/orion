@@ -18,6 +18,8 @@ import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.keymaterial.KeyMaterialService;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -29,6 +31,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class OrionRuntimeModuleTest {
     private static final String BRANCH = "master";
@@ -39,6 +42,16 @@ class OrionRuntimeModuleTest {
     private Path tempDir;
 
     private final XmlService xmlService = new XmlService();
+
+    @Test
+    void runtimeComponentExposesNoRawMaterialOwnerOrService() {
+        assertThat(OrionComponent.class.getMethods())
+                .noneMatch(method -> method.getReturnType().equals(OrionKeyMaterial.class))
+                .noneMatch(method -> method.getReturnType().equals(KeyMaterialService.class));
+        assertThat(OrionComponent.Builder.class.getMethods())
+                .noneMatch(method -> List.of(method.getParameterTypes()).contains(OrionKeyMaterial.class))
+                .noneMatch(method -> List.of(method.getParameterTypes()).contains(KeyMaterialService.class));
+    }
 
     @Test
     void fileAclStartsFromLocalDirectory() throws Exception {

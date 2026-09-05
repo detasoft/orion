@@ -14,7 +14,7 @@ import java.util.Set;
 
 final class TestPorts {
     private static final String HOST = "localhost";
-    private static final int DEFAULT_BATCH_SIZE = 4;
+    private static final int DEFAULT_BATCH_SIZE = 3;
     private static final Set<Integer> RESERVED_PORTS = new HashSet<>();
 
     private TestPorts() {
@@ -89,10 +89,6 @@ final class TestPorts {
             return base + 2;
         }
 
-        int https() {
-            return base + 3;
-        }
-
         void configure(OrionConfiguration configuration) {
             configuration.getTransport().getGit().setAddress(HOST);
             configuration.getTransport().getGit().setPort(git());
@@ -103,8 +99,6 @@ final class TestPorts {
             configuration.getTransport().getSsh().setAddress(HOST);
             configuration.getTransport().getSsh().setPort(ssh());
 
-            configuration.getTransport().getHttps().setAddress(HOST);
-            configuration.getTransport().getHttps().setPort(https());
         }
     }
 }

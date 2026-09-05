@@ -6,7 +6,10 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
-import pro.deta.orion.keymaterial.ServerIdentityMaterial;
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.KeyMaterialConfig;
@@ -30,15 +33,15 @@ public final class BootstrapContext implements AutoCloseable {
 
     private final ProxyAwareNativeGitRepositoryProvider repositoryProvider;
     private final BootstrapRepositorySources repositorySources;
-    private final ServerIdentityMaterial serverIdentity;
+    private final OrionKeyMaterial keyMaterial;
 
     private BootstrapContext(
             ProxyAwareNativeGitRepositoryProvider repositoryProvider,
             BootstrapRepositorySources repositorySources,
-            ServerIdentityMaterial serverIdentity) {
+            OrionKeyMaterial keyMaterial) {
         this.repositoryProvider = repositoryProvider;
         this.repositorySources = repositorySources;
-        this.serverIdentity = serverIdentity;
+        this.keyMaterial = keyMaterial;
     }
 
     public static BootstrapContext open(
@@ -61,7 +64,7 @@ public final class BootstrapContext implements AutoCloseable {
             OrionConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryProvider backend) {
-        ServerIdentityMaterial identity = null;
+        OrionKeyMaterial keyMaterial = null;
         try {
             ProxyAwareNativeGitRepositoryProvider provider =
                     ProxyAwareNativeGitRepositoryProvider.bootstrap(backend, environment);
@@ -82,17 +85,17 @@ public final class BootstrapContext implements AutoCloseable {
                     BootstrapRepositorySources.MATERIAL,
                     configuredMaterial,
                     true);
-            identity = openServerIdentity(
+            keyMaterial = openKeyMaterial(
                     configuration,
                     environment,
                     provider,
                     materialSource);
             BootstrapRepositorySources sources = new BootstrapRepositorySources(
                     List.of(configurationSource, materialSource));
-            return new BootstrapContext(provider, sources, identity);
+            return new BootstrapContext(provider, sources, keyMaterial);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
-            if (identity != null) {
-                identity.close();
+            if (keyMaterial != null) {
+                keyMaterial.close();
             }
             throw new IllegalStateException(FAILURE_MESSAGE, failure);
         }
@@ -106,13 +109,21 @@ public final class BootstrapContext implements AutoCloseable {
         return repositorySources;
     }
 
-    public ServerIdentityMaterial serverIdentity() {
-        return serverIdentity;
+    public ServerIdentityCapability serverIdentity() {
+        return keyMaterial.serverIdentity();
+    }
+
+    public AcmeKeyMaterialCapability acmeKeyMaterial() {
+        return keyMaterial.acme();
+    }
+
+    public TlsCapability tlsKeyMaterial() {
+        return keyMaterial.tls();
     }
 
     @Override
     public void close() {
-        serverIdentity.close();
+        keyMaterial.close();
     }
 
     private static ResolvedBootstrapSource validateDirectConfiguration(
@@ -166,13 +177,13 @@ public final class BootstrapContext implements AutoCloseable {
                 resolved.createIfMissing());
     }
 
-    private static ServerIdentityMaterial openServerIdentity(
+    private static OrionKeyMaterial openKeyMaterial(
             OrionConfiguration configuration,
             Map<String, String> environment,
             ProxyAwareNativeGitRepositoryProvider provider,
             ResolvedBootstrapSource resolved) throws IOException, GeneralSecurityException {
         if (resolved.repositoryName().isPresent()) {
-            return ServerIdentityMaterialFactory.open(
+            return OrionKeyMaterialFactory.open(
                     configuration,
                     environment,
                     new NativeGitKeyMaterialContentStore(
@@ -181,7 +192,7 @@ public final class BootstrapContext implements AutoCloseable {
                             resolved.refName(),
                             resolved.path()));
         }
-        return ServerIdentityMaterialFactory.open(configuration, environment);
+        return OrionKeyMaterialFactory.open(configuration, environment);
     }
 
     private static Path directFileRoot(

@@ -8,9 +8,8 @@ import org.shredzone.acme4j.Session;
 import org.shredzone.acme4j.Status;
 import org.shredzone.acme4j.challenge.Http01Challenge;
 
-import java.io.IOException;
-import java.io.Writer;
 import java.security.KeyPair;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -65,8 +64,8 @@ final class Acme4jClient implements AcmeCertificateIssuer.AcmeClient {
         }
 
         @Override
-        public void writeCertificate(Writer writer) throws IOException {
-            order.getCertificate().writeCertificate(writer);
+        public List<X509Certificate> certificateChain() {
+            return List.copyOf(order.getCertificate().getCertificateChain());
         }
     }
 

@@ -1,10 +1,11 @@
 package pro.deta.orion.test;
 
-import pro.deta.orion.ServerIdentityMaterialFactory;
+import pro.deta.orion.OrionKeyMaterialFactory;
 import pro.deta.orion.keymaterial.KeyMaterialOptions;
 import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
-import pro.deta.orion.keymaterial.ServerIdentityMaterial;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.nio.file.Files;
@@ -16,10 +17,10 @@ final class TestServerIdentityMaterial implements AutoCloseable {
     private static final String PASSWORD_ENV = "ORION_TEST_KEY_MATERIAL_PASSWORD";
     private static final String PASSWORD = "integration-test-password";
 
-    private final ServerIdentityMaterial material;
+    private final OrionKeyMaterial material;
     private final KeyPair keyPair;
 
-    private TestServerIdentityMaterial(ServerIdentityMaterial material, KeyPair keyPair) {
+    private TestServerIdentityMaterial(OrionKeyMaterial material, KeyPair keyPair) {
         this.material = material;
         this.keyPair = keyPair;
     }
@@ -30,7 +31,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         configuration.getBootstrap().getKeyMaterial().setLocation(
                 baseDirectory.toRealPath().resolve("material.p12").toString());
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
-        ServerIdentityMaterial material = ServerIdentityMaterialFactory.open(
+        OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, PASSWORD));
         try {
             return new TestServerIdentityMaterial(material, readActiveKey(configuration));
@@ -40,8 +41,8 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         }
     }
 
-    ServerIdentityMaterial capability() {
-        return material;
+    ServerIdentityCapability capability() {
+        return material.serverIdentity();
     }
 
     KeyPair keyPair() {

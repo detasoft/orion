@@ -218,7 +218,6 @@ class OrionStartupIT {
         OrionConfiguration configuration = serverConfiguration(orionRoot);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
-        configuration.getTransport().getHttps().setEnabled(false);
 
         ServerSocket occupiedHttpPort = bindHttpPort(configuration);
         try {
@@ -252,7 +251,6 @@ class OrionStartupIT {
         configuration.getBootstrap().getAccessControl().setPaths(List.of(ACL_FILE));
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
-        configuration.getTransport().getHttps().setEnabled(false);
 
         assertThatThrownBy(() -> BootstrapContext.open(configuration, Map.of()))
                 .isInstanceOf(IllegalStateException.class)
@@ -471,7 +469,6 @@ class OrionStartupIT {
         configuration.getBootstrap().getAccessControl().setRef("refs/heads/" + BRANCH);
 
         TestPorts.nextBatch().configure(configuration);
-        configuration.getTransport().getHttps().setEnabled(false);
         return configuration;
     }
 

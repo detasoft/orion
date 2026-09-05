@@ -9,7 +9,7 @@ import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
-import pro.deta.orion.keymaterial.ServerIdentityMaterial;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.nio.charset.StandardCharsets;
@@ -52,6 +52,8 @@ class BootstrapContextTest {
             assertThat(materialRepository).isEqualTo(configurationRepository);
             assertThat(context.repositoryProvider().repositoryNames()).containsExactly("orion");
             assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
+            assertThat(context.acmeKeyMaterial()).isNotNull();
+            assertThat(context.tlsKeyMaterial()).isNotNull();
         }
     }
 
@@ -273,7 +275,6 @@ class BootstrapContextTest {
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
         configuration.getTransport().getHttp().setEnabled(false);
-        configuration.getTransport().getHttps().setEnabled(false);
         return configuration;
     }
 
@@ -292,7 +293,7 @@ class BootstrapContextTest {
 
     private static byte[] materialBytes(OrionConfiguration configuration) throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        try (ServerIdentityMaterial ignored = ServerIdentityMaterialFactory.open(
+        try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
                 configuration,
                 ENVIRONMENT,
                 store)) {

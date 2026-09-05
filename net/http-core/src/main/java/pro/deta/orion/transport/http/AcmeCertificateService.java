@@ -2,19 +2,26 @@ package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import org.shredzone.acme4j.util.KeyPairUtils;
-import pro.deta.orion.schema.config.AcmeConfig;
+import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.AcmeKeyMaterial;
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialConstants;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialScope;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 
 import java.io.IOException;
-import java.io.Reader;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.NoSuchAlgorithmException;
+import java.security.GeneralSecurityException;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,82 +29,163 @@ import java.util.Optional;
 
 @Singleton
 public class AcmeCertificateService {
-    private static final int RSA_KEY_SIZE = 2048;
+    private static final int RSA_KEY_SIZE = KeyMaterialConstants.RSA_KEY_SIZE_BITS;
 
-    private final OrionConfiguration configuration;
+    private final String clusterId;
+    private final OrionDesiredState desiredState;
+    private final AcmeKeyMaterialCapability keyMaterial;
     private final AcmeCertificateIssuer certificateIssuer;
 
     @Inject
-    public AcmeCertificateService(OrionConfiguration configuration, AcmeCertificateIssuer certificateIssuer) {
-        this.configuration = configuration;
+    public AcmeCertificateService(
+            OrionConfiguration bootstrapConfiguration,
+            OrionDesiredState desiredState,
+            AcmeKeyMaterialCapability keyMaterial,
+            AcmeCertificateIssuer certificateIssuer) {
+        this.clusterId = required(
+                bootstrapConfiguration.getBootstrap().getKeyMaterial().getClusterId(),
+                "Key material cluster id is required");
+        this.desiredState = desiredState;
+        this.keyMaterial = keyMaterial;
         this.certificateIssuer = certificateIssuer;
     }
 
-    public IssuedAcmeCertificate issue(IssueRequest request) throws IOException {
+    public IssuedAcmeCertificate issue(IssueRequest request) {
         IssueSettings settings = settingsFrom(request);
-        KeyPair accountKeyPair = readOrCreateKeyPair(settings.accountKeyPath());
-        KeyPair domainKeyPair = readOrCreateKeyPair(settings.domainKeyPath());
-        IssuedAcmeCertificate certificate = certificateIssuer.issue(new AcmeCertificateIssueRequest(
+        AcmeKeyMaterial keys;
+        try {
+            keys = keyMaterial.acquire(settings.material(), RSA_KEY_SIZE, RSA_KEY_SIZE);
+        } catch (IOException | GeneralSecurityException failure) {
+            throw new AcmeCertificateIssueException("Cannot acquire ACME key material", failure);
+        }
+        IssuedAcmeCertificate issued = certificateIssuer.issue(new AcmeCertificateIssueRequest(
                 settings.directoryUrl(),
                 settings.accountEmail(),
-                accountKeyPair,
-                domainKeyPair,
+                keys.accountKeyPair(),
+                keys.domainKeyPair(),
                 settings.domains(),
                 settings.organization(),
                 Duration.ofSeconds(settings.authorizationTimeoutSeconds()),
                 Duration.ofSeconds(settings.orderTimeoutSeconds()),
                 settings.agreeToTermsOfService()));
-        if (settings.persist()) {
-            writeNginxCertificate(settings.certificatePath(), certificate);
+        try {
+            CertificateMaterial certificates = certificateMaterial(settings.material(), issued.certificateChain());
+            keyMaterial.installCertificateChain(
+                    settings.material(),
+                    certificates.chain(),
+                    certificates.issuerTrustAnchor());
+            return new IssuedAcmeCertificate(issued.domains(), certificates.chain());
+        } catch (IOException | GeneralSecurityException failure) {
+            throw new AcmeCertificateIssueException("Cannot store issued ACME certificate", failure);
         }
-        return certificate;
     }
 
-    public Optional<String> savedNginxCertificate() throws IOException {
-        Path certificatePath = resolveConfiguredPath(acmeConfig().getCertificatePath(), "ACME certificate path is required");
-        if (!Files.exists(certificatePath)) {
-            return Optional.empty();
+    public Optional<IssuedAcmeCertificate> savedCertificate() {
+        IssueSettings settings = settingsFrom(IssueRequest.EMPTY);
+        try {
+            return keyMaterial.certificateChain(settings.material())
+                    .map(chain -> new IssuedAcmeCertificate(settings.domains(), chain));
+        } catch (GeneralSecurityException failure) {
+            throw new AcmeCertificateIssueException("Cannot read issued ACME certificate", failure);
         }
-        return Optional.of(Files.readString(certificatePath, StandardCharsets.UTF_8));
+    }
+
+    private CertificateMaterial certificateMaterial(
+            AcmeMaterialConfiguration configuration,
+            List<X509Certificate> issuedChain) throws GeneralSecurityException {
+        List<X509Certificate> chain = new ArrayList<>(issuedChain);
+        Optional<X509Certificate> issuer = Optional.empty();
+        if (chain.size() > 1 && isTrustAnchor(chain.getLast())) {
+            issuer = Optional.of(chain.removeLast());
+        }
+        if (configuration.issuerTrustAnchor().isPresent() && issuer.isEmpty()) {
+            issuer = keyMaterial.issuerTrustAnchor(configuration);
+        }
+        if (configuration.issuerTrustAnchor().isEmpty()) {
+            issuer = Optional.empty();
+        }
+        return new CertificateMaterial(List.copyOf(chain), issuer);
     }
 
     private IssueSettings settingsFrom(IssueRequest request) {
         IssueRequest effectiveRequest = request == null ? IssueRequest.EMPTY : request;
-        AcmeConfig config = acmeConfig();
+        OrionHttpsConfiguration https = desiredState.current()
+                .document()
+                .system()
+                .https()
+                .orElseThrow(() -> new IllegalStateException("HTTPS desired state is not configured"));
+        OrionAcmeConfiguration acme = https.acme()
+                .filter(OrionAcmeConfiguration::enabled)
+                .orElseThrow(() -> new IllegalStateException("ACME desired state is not enabled"));
 
-        List<String> domains = domainsFrom(effectiveRequest, config);
-        requireRequestedDomainsAllowed(domains, effectiveRequest, config);
-
+        List<String> domains = domainsFrom(effectiveRequest, acme);
+        requireRequestedDomainsAllowed(domains, effectiveRequest, acme);
+        KeyMaterialScope scope = KeyMaterialScope.cluster(clusterId);
+        KeyMaterialDescriptor account = descriptor(
+                acme.accountMaterial().orElseThrow(
+                        () -> new IllegalStateException("ACME account material is not configured")),
+                KeyMaterialPurpose.ACME_ACCOUNT,
+                scope);
+        KeyMaterialDescriptor identity = descriptor(
+                https.identity().orElseThrow(
+                        () -> new IllegalStateException("ACME TLS identity material is not configured")),
+                KeyMaterialPurpose.TLS_IDENTITY,
+                scope);
+        Optional<TrustedCertificateDescriptor> issuer = https.serverIssuerTrustAnchor()
+                .map(reference -> trustedCertificate(reference, scope));
         return new IssueSettings(
-                firstNotBlank(effectiveRequest.directoryUrl(), config.getDirectoryUrl(), "ACME directory URL is required"),
-                firstNotBlank(effectiveRequest.accountEmail(), config.getAccountEmail(), "ACME account email is required"),
+                firstNotBlank(
+                        effectiveRequest.directoryUrl(),
+                        acme.directoryUrl().toString(),
+                        "ACME directory URL is required"),
+                firstNotBlank(
+                        effectiveRequest.accountEmail(),
+                        acme.accountEmail(),
+                        "ACME account email is required"),
                 domains,
-                firstNonBlank(effectiveRequest.organization(), config.getOrganization()),
+                firstNonBlank(effectiveRequest.organization(), acme.organization()),
                 secondsOrDefault(
                         effectiveRequest.authorizationTimeoutSeconds(),
-                        config.getAuthorizationTimeoutSeconds(),
+                        acme.authorizationTimeoutSeconds(),
                         "ACME authorization timeout must be positive"),
                 secondsOrDefault(
                         effectiveRequest.orderTimeoutSeconds(),
-                        config.getOrderTimeoutSeconds(),
+                        acme.orderTimeoutSeconds(),
                         "ACME order timeout must be positive"),
-                boolOrDefault(effectiveRequest.agreeToTermsOfService(), config.isAgreeToTermsOfService()),
-                boolOrDefault(effectiveRequest.persist(), false),
-                resolveConfiguredPath(config.getAccountKeyPath(), "ACME account key path is required"),
-                resolveConfiguredPath(config.getDomainKeyPath(), "ACME domain key path is required"),
-                resolveConfiguredPath(config.getCertificatePath(), "ACME certificate path is required"));
+                boolOrDefault(
+                        effectiveRequest.agreeToTermsOfService(),
+                        acme.agreeToTermsOfService()),
+                new AcmeMaterialConfiguration(account, identity, issuer));
     }
 
-    private AcmeConfig acmeConfig() {
-        return configuration.getTransport().getHttps().getAcme();
+    private static KeyMaterialDescriptor descriptor(
+            OrionMaterialReference reference,
+            KeyMaterialPurpose purpose,
+            KeyMaterialScope scope) {
+        return new KeyMaterialDescriptor(
+                new KeyMaterialAlias(reference.alias()),
+                purpose,
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(reference.version()),
+                scope);
     }
 
-    private List<String> domainsFrom(IssueRequest request, AcmeConfig config) {
+    private static TrustedCertificateDescriptor trustedCertificate(
+            OrionMaterialReference reference,
+            KeyMaterialScope scope) {
+        return new TrustedCertificateDescriptor(
+                new KeyMaterialAlias(reference.alias()),
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(reference.version()),
+                scope);
+    }
+
+    private static List<String> domainsFrom(IssueRequest request, OrionAcmeConfiguration configuration) {
         List<String> requestedDomains = validatedDomainsOrEmpty(request.domains());
         if (!requestedDomains.isEmpty()) {
             return requestedDomains;
         }
-        List<String> configuredDomains = validatedDomainsOrEmpty(config.getDomains());
+        List<String> configuredDomains = validatedDomainsOrEmpty(configuration.domains());
         if (configuredDomains.isEmpty()) {
             throw new IllegalArgumentException("At least one ACME domain is required");
         }
@@ -107,63 +195,28 @@ public class AcmeCertificateService {
     private static void requireRequestedDomainsAllowed(
             List<String> domains,
             IssueRequest request,
-            AcmeConfig config) {
+            OrionAcmeConfiguration configuration) {
         List<String> requestedDomains = validatedDomainsOrEmpty(request.domains());
         if (requestedDomains.isEmpty()) {
             return;
         }
-        List<String> configuredDomains = validatedDomainsOrEmpty(config.getDomains());
-        if (config.isAllowRequestedDomains() || requestedDomains.equals(configuredDomains)) {
+        List<String> configuredDomains = validatedDomainsOrEmpty(configuration.domains());
+        if (configuration.allowRequestedDomains() || requestedDomains.equals(configuredDomains)) {
             return;
         }
         throw new IllegalArgumentException("Requested ACME domains are not allowed by configuration");
     }
 
-    private Path resolveConfiguredPath(String path, String message) {
-        String configuredPath = firstNotBlank(null, path, message);
-        Path result = Path.of(configuredPath);
-        if (result.isAbsolute()) {
-            return result;
+    private static boolean isTrustAnchor(X509Certificate certificate) {
+        if (certificate.getBasicConstraints() < 0
+                || !certificate.getSubjectX500Principal().equals(certificate.getIssuerX500Principal())) {
+            return false;
         }
-        String baseDir = configuration.getBootstrap().getBaseDir();
-        if (baseDir == null || baseDir.isBlank()) {
-            return result;
-        }
-        return Path.of(baseDir).resolve(result);
-    }
-
-    private KeyPair readOrCreateKeyPair(Path path) throws IOException {
-        if (Files.exists(path)) {
-            try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-                return KeyPairUtils.readKeyPair(reader);
-            }
-        }
-        Path parent = path.getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
-        }
-        KeyPair keyPair = generateKeyPair();
-        try (Writer writer = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
-            KeyPairUtils.writeKeyPair(keyPair, writer);
-        }
-        return keyPair;
-    }
-
-    private void writeNginxCertificate(Path path, IssuedAcmeCertificate certificate) throws IOException {
-        Path parent = path.getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
-        }
-        Files.writeString(path, certificate.nginxPem(), StandardCharsets.UTF_8);
-    }
-
-    private static KeyPair generateKeyPair() {
         try {
-            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-            generator.initialize(RSA_KEY_SIZE);
-            return generator.generateKeyPair();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("Cannot generate ACME key pair", e);
+            certificate.verify(certificate.getPublicKey());
+            return true;
+        } catch (GeneralSecurityException | RuntimeException failure) {
+            return false;
         }
     }
 
@@ -211,6 +264,13 @@ public class AcmeCertificateService {
         return requested == null ? configured : requested;
     }
 
+    private static String required(String value, String message) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(message);
+        }
+        return value;
+    }
+
     public record IssueRequest(
             String directoryUrl,
             String accountEmail,
@@ -218,9 +278,8 @@ public class AcmeCertificateService {
             String organization,
             Long authorizationTimeoutSeconds,
             Long orderTimeoutSeconds,
-            Boolean agreeToTermsOfService,
-            Boolean persist) {
-        static final IssueRequest EMPTY = new IssueRequest(null, null, null, null, null, null, null, null);
+            Boolean agreeToTermsOfService) {
+        static final IssueRequest EMPTY = new IssueRequest(null, null, null, null, null, null, null);
     }
 
     private record IssueSettings(
@@ -231,9 +290,11 @@ public class AcmeCertificateService {
             long authorizationTimeoutSeconds,
             long orderTimeoutSeconds,
             boolean agreeToTermsOfService,
-            boolean persist,
-            Path accountKeyPath,
-            Path domainKeyPath,
-            Path certificatePath) {
+            AcmeMaterialConfiguration material) {
+    }
+
+    private record CertificateMaterial(
+            List<X509Certificate> chain,
+            Optional<X509Certificate> issuerTrustAnchor) {
     }
 }

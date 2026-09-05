@@ -1,12 +1,32 @@
 package pro.deta.orion.transport.http;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.AcmeKeyMaterial;
+import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialScope;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.keymaterial.TrustedCertificateDescriptor;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.HttpTransportConfig;
-import pro.deta.orion.schema.config.HttpsTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 import pro.deta.orion.util.NetworkUtils;
 
 import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import java.io.IOException;
@@ -15,6 +35,12 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -26,64 +52,97 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHTTPServerTest {
+    private static final String CLUSTER = "test-cluster";
+    private static final KeyMaterialDescriptor SIGNING = descriptor(
+            "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
+    private static final KeyMaterialDescriptor ACCOUNT = descriptor(
+            "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT);
+    private static final KeyMaterialDescriptor IDENTITY = descriptor(
+            "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
+    private static final TrustedCertificateDescriptor SERVER_ROOT = trusted("server-root-v1");
+    private static final TrustedCertificateDescriptor CLIENT_ROOT = trusted("client-root-v1");
 
     @Test
-    void testServerWithHttpAndHttps() throws Exception {
-        // Configure test ports
-        int httpPort = NetworkUtils.findAvailablePort();
-        int httpsPort = NetworkUtils.findAvailablePort();
+    void servesMaterialBackedHttpsWithoutRootInTheServerChain() throws Exception {
+        try (MaterialFixture material = material()) {
+            OrionConfiguration bootstrap = httpConfiguration(true);
+            OrionDesiredState desiredState = desiredState(
+                    OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                    List.of());
+            JettyHTTPServer server = server(bootstrap, desiredState, material.owner().tls(), new OkRoute());
+            server.onStart();
 
-        // Create configuration
-        OrionConfiguration orionConfiguration = new OrionConfiguration();
-        OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
-        transports.setHttp(new HttpTransportConfig("localhost", httpPort));
-        transports.setHttps(new HttpsTransportConfig("localhost", httpsPort));
-        orionConfiguration.setTransport(transports);
+            try {
+                HttpURLConnection http = (HttpURLConnection) server.relativiseHttp("/ok").openConnection();
+                assertThat(http.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
 
-        // Create and start server
-        OrionHttpRouteServlet rootServlet = new OrionHttpRouteServlet(
-                new OrionHttpRouteRegistry(Set.of(new OkRoute())),
-                new OrionHttpResponseWriter(new com.fasterxml.jackson.databind.ObjectMapper()));
-        JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, rootServlet);
-        server.onStart();
+                HttpsURLConnection https = httpsConnection(server, clientContext(null, null));
+                assertThat(https.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+                assertThat(https.getServerCertificates())
+                        .extracting(Certificate::getPublicKey)
+                        .containsExactly(material.serverCertificate().getPublicKey());
+            } finally {
+                server.onStop();
+            }
+        }
+    }
 
-        try {
-            assertThat(server.isRunning()).isTrue();
-            // Configure SSL context to trust our self-signed certificate
-            SSLContext sslContext = SSLContext.getInstance("TLS");
-            sslContext.init(null, new TrustManager[] {TrustAllX509TrustManager.INSTANCE}, new java.security.SecureRandom());
-            HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+    @Test
+    void appliesDisabledWantAndRequiredClientAuthenticationWithRoleSeparatedRoots() throws Exception {
+        try (MaterialFixture material = material()) {
+            SSLContext anonymous = clientContext(null, null);
+            SSLContext trusted = clientContext(material.trustedClientKey(), material.trustedClientCertificate());
+            SSLContext serverIssuerClient = clientContext(
+                    material.serverIssuerClientKey(), material.serverIssuerClientCertificate());
 
-            // Test HTTP connection
-            URL httpUrl = server.relativiseHttp("/ok");
-            HttpURLConnection httpConn = (HttpURLConnection) httpUrl.openConnection();
-            assertThat(httpConn.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+            assertHttpsSucceeds(material, OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of(), anonymous);
+            assertHttpsSucceeds(material, OrionHttpsConfiguration.ClientAuthentication.WANT, List.of(CLIENT_ROOT), anonymous);
+            assertHttpsSucceeds(material, OrionHttpsConfiguration.ClientAuthentication.WANT, List.of(CLIENT_ROOT), trusted);
+            assertHttpsFails(material, OrionHttpsConfiguration.ClientAuthentication.REQUIRED, List.of(CLIENT_ROOT), anonymous);
+            assertHttpsSucceeds(
+                    material,
+                    OrionHttpsConfiguration.ClientAuthentication.REQUIRED,
+                    List.of(CLIENT_ROOT),
+                    trusted);
+            assertHttpsFails(
+                    material,
+                    OrionHttpsConfiguration.ClientAuthentication.REQUIRED,
+                    List.of(CLIENT_ROOT),
+                    serverIssuerClient);
+            assertHttpsSucceeds(
+                    material,
+                    OrionHttpsConfiguration.ClientAuthentication.REQUIRED,
+                    List.of(CLIENT_ROOT, SERVER_ROOT),
+                    serverIssuerClient);
+        }
+    }
 
-            // Test HTTPS connection
-            URL httpsUrl = server.relativiseHttps("/ok");
-            HttpsURLConnection httpsConn = (HttpsURLConnection) httpsUrl.openConnection();
-            assertThat(httpsConn.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+    @Test
+    void failsHttpsStartupForStorageOnlyIdentity() throws Exception {
+        try (OrionKeyMaterial owner = owner()) {
+            AcmeMaterialConfiguration acme = new AcmeMaterialConfiguration(
+                    ACCOUNT, IDENTITY, Optional.empty());
+            owner.acme().acquire(acme, 2048, 2048);
+            JettyHTTPServer server = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    owner.tls(),
+                    new OkRoute());
 
-        } finally {
-            server.onStop();
+            assertThatThrownBy(server::onStart)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Cannot start Jetty HTTP server");
+            assertThat(server.isRunning()).isFalse();
         }
     }
 
     @Test
     void failsStartupWhenHttpPortIsAlreadyInUse() throws Exception {
-        try (ServerSocket occupiedHttpPort = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
-            OrionConfiguration orionConfiguration = new OrionConfiguration();
-            OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
-            transports.setHttp(new HttpTransportConfig("127.0.0.1", occupiedHttpPort.getLocalPort()));
-            HttpsTransportConfig https = new HttpsTransportConfig("127.0.0.1", 0);
-            https.setEnabled(false);
-            transports.setHttps(https);
-            orionConfiguration.setTransport(transports);
-
-            OrionHttpRouteServlet rootServlet = new OrionHttpRouteServlet(
-                    new OrionHttpRouteRegistry(Set.of(new OkRoute())),
-                    new OrionHttpResponseWriter(new com.fasterxml.jackson.databind.ObjectMapper()));
-            JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, rootServlet);
+        try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+            OrionConfiguration bootstrap = httpConfiguration(false);
+            bootstrap.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", occupied.getLocalPort()));
+            JettyHTTPServer server = server(
+                    bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), new OkRoute());
 
             assertThatThrownBy(server::onStart)
                     .isInstanceOf(IllegalStateException.class)
@@ -94,20 +153,10 @@ class JettyHTTPServerTest {
 
     @Test
     void stopClearsServerReferenceAfterGracefulShutdownTimeout() throws Exception {
-        int httpPort = NetworkUtils.findAvailablePort();
-        OrionConfiguration orionConfiguration = new OrionConfiguration();
-        OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
-        transports.setHttp(new HttpTransportConfig("localhost", httpPort));
-        HttpsTransportConfig https = new HttpsTransportConfig("localhost", 0);
-        https.setEnabled(false);
-        transports.setHttps(https);
-        orionConfiguration.setTransport(transports);
-
+        OrionConfiguration bootstrap = httpConfiguration(true);
         BlockingRoute route = new BlockingRoute();
-        OrionHttpRouteServlet rootServlet = new OrionHttpRouteServlet(
-                new OrionHttpRouteRegistry(Set.of(route)),
-                new OrionHttpResponseWriter(new com.fasterxml.jackson.databind.ObjectMapper()));
-        JettyHTTPServer server = new JettyHTTPServer(orionConfiguration, rootServlet);
+        JettyHTTPServer server = server(
+                bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), route);
         ExecutorService clientExecutor = Executors.newSingleThreadExecutor();
         server.onStart();
 
@@ -117,7 +166,6 @@ class JettyHTTPServerTest {
 
         try {
             server.onStop();
-
             assertThat(server.getJettyServer().get()).isNull();
             assertThat(server.isRunning()).isFalse();
         } finally {
@@ -129,17 +177,11 @@ class JettyHTTPServerTest {
 
     @Test
     void compressesApplicationJavaScriptResponses() throws Exception {
-        OrionConfiguration configuration = new OrionConfiguration();
-        OrionConfiguration.AppTransport transports = new OrionConfiguration.AppTransport();
-        transports.setHttp(new HttpTransportConfig("127.0.0.1", 0));
-        HttpsTransportConfig https = new HttpsTransportConfig("127.0.0.1", 0);
-        https.setEnabled(false);
-        transports.setHttps(https);
-        configuration.setTransport(transports);
-        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
-                new OrionHttpRouteRegistry(Set.of(new JavascriptRoute())),
-                new OrionHttpResponseWriter(new com.fasterxml.jackson.databind.ObjectMapper()));
-        JettyHTTPServer server = new JettyHTTPServer(configuration, servlet);
+        JettyHTTPServer server = server(
+                httpConfiguration(true),
+                desiredStateWithoutHttps(),
+                TlsCapability.unavailable(),
+                new JavascriptRoute());
         server.onStart();
 
         try {
@@ -153,6 +195,195 @@ class JettyHTTPServerTest {
         } finally {
             server.onStop();
         }
+    }
+
+    private static void assertHttpsSucceeds(
+            MaterialFixture material,
+            OrionHttpsConfiguration.ClientAuthentication mode,
+            List<TrustedCertificateDescriptor> clientRoots,
+            SSLContext clientContext) throws Exception {
+        JettyHTTPServer server = startHttps(material, mode, clientRoots);
+        try {
+            assertThat(httpsConnection(server, clientContext).getResponseCode())
+                    .isEqualTo(HttpURLConnection.HTTP_OK);
+        } finally {
+            server.onStop();
+        }
+    }
+
+    private static void assertHttpsFails(
+            MaterialFixture material,
+            OrionHttpsConfiguration.ClientAuthentication mode,
+            List<TrustedCertificateDescriptor> clientRoots,
+            SSLContext clientContext) throws Exception {
+        JettyHTTPServer server = startHttps(material, mode, clientRoots);
+        try {
+            assertThatThrownBy(() -> httpsConnection(server, clientContext).getResponseCode())
+                    .isInstanceOf(IOException.class);
+        } finally {
+            server.onStop();
+        }
+    }
+
+    private static JettyHTTPServer startHttps(
+            MaterialFixture material,
+            OrionHttpsConfiguration.ClientAuthentication mode,
+            List<TrustedCertificateDescriptor> clientRoots) throws IOException {
+        JettyHTTPServer server = server(
+                httpConfiguration(false),
+                desiredState(mode, clientRoots),
+                material.owner().tls(),
+                new OkRoute());
+        server.onStart();
+        return server;
+    }
+
+    private static HttpsURLConnection httpsConnection(JettyHTTPServer server, SSLContext context)
+            throws IOException {
+        HttpsURLConnection connection = (HttpsURLConnection) server.relativiseHttps("/ok").openConnection();
+        connection.setSSLSocketFactory(context.getSocketFactory());
+        connection.setHostnameVerifier((hostname, session) -> true);
+        connection.setConnectTimeout(2_000);
+        connection.setReadTimeout(2_000);
+        return connection;
+    }
+
+    private static SSLContext clientContext(KeyPair keyPair, X509Certificate certificate) throws Exception {
+        javax.net.ssl.KeyManager[] keyManagers = null;
+        if (keyPair != null) {
+            char[] password = "client-password".toCharArray();
+            KeyStore keyStore = KeyStore.getInstance("PKCS12");
+            keyStore.load(null, password);
+            keyStore.setKeyEntry("client", keyPair.getPrivate(), password, new Certificate[]{certificate});
+            KeyManagerFactory factory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            factory.init(keyStore, password);
+            keyManagers = factory.getKeyManagers();
+        }
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(
+                keyManagers,
+                new TrustManager[]{TrustAllX509TrustManager.INSTANCE},
+                new java.security.SecureRandom());
+        return context;
+    }
+
+    private static MaterialFixture material() throws Exception {
+        OrionKeyMaterial owner = owner();
+        try {
+            TestCertificateChain.Authority serverRoot = TestCertificateChain.root("Server Root");
+            TestCertificateChain.Authority clientRoot = TestCertificateChain.root("Client Root");
+            AcmeMaterialConfiguration clientProvisioning = new AcmeMaterialConfiguration(
+                    ACCOUNT, IDENTITY, Optional.of(CLIENT_ROOT));
+            AcmeKeyMaterial keys = owner.acme().acquire(clientProvisioning, 2048, 2048);
+            owner.acme().installCertificateChain(
+                    clientProvisioning,
+                    List.of(TestCertificateChain.leaf("localhost", keys.domainKeyPair(), clientRoot)),
+                    Optional.of(clientRoot.certificate()));
+            AcmeMaterialConfiguration serverProvisioning = new AcmeMaterialConfiguration(
+                    ACCOUNT, IDENTITY, Optional.of(SERVER_ROOT));
+            X509Certificate serverCertificate = TestCertificateChain.leaf(
+                    "localhost", keys.domainKeyPair(), serverRoot);
+            owner.acme().installCertificateChain(
+                    serverProvisioning,
+                    List.of(serverCertificate),
+                    Optional.of(serverRoot.certificate()));
+            KeyPair trustedClientKey = TestCertificateChain.keyPair();
+            KeyPair serverIssuerClientKey = TestCertificateChain.keyPair();
+            return new MaterialFixture(
+                    owner,
+                    serverCertificate,
+                    trustedClientKey,
+                    TestCertificateChain.leaf("trusted-client", trustedClientKey, clientRoot),
+                    serverIssuerClientKey,
+                    TestCertificateChain.leaf("server-issuer-client", serverIssuerClientKey, serverRoot));
+        } catch (Exception failure) {
+            owner.close();
+            throw failure;
+        }
+    }
+
+    private static OrionKeyMaterial owner() throws Exception {
+        return OrionKeyMaterial.open(
+                new InMemoryKeyMaterialContentStore(),
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                new SigningMaterialSet(SIGNING, List.of()),
+                2048);
+    }
+
+    private static OrionDesiredState desiredState(
+            OrionHttpsConfiguration.ClientAuthentication mode,
+            List<TrustedCertificateDescriptor> clientRoots) throws IOException {
+        List<OrionMaterialReference> references = new java.util.ArrayList<>();
+        for (TrustedCertificateDescriptor root : clientRoots) {
+            references.add(new OrionMaterialReference(root.alias().value(), root.version().value()));
+        }
+        OrionHttpsConfiguration https = new OrionHttpsConfiguration(
+                true,
+                "localhost",
+                NetworkUtils.findAvailablePort(),
+                null,
+                Optional.of(reference(IDENTITY)),
+                Optional.of(reference(SERVER_ROOT)),
+                mode,
+                references,
+                Optional.empty());
+        return desiredState(Optional.of(https));
+    }
+
+    private static OrionDesiredState desiredStateWithoutHttps() {
+        return desiredState(Optional.empty());
+    }
+
+    private static OrionDesiredState desiredState(Optional<OrionHttpsConfiguration> https) {
+        OrionDesiredState desiredState = new OrionDesiredState();
+        desiredState.publish(new OrionDocument(
+                new OrionDocument.SystemConfiguration(new AccessControl(), https),
+                List.of()), Optional.of("test-revision"));
+        return desiredState;
+    }
+
+    private static OrionConfiguration httpConfiguration(boolean enabled) {
+        OrionConfiguration configuration = new OrionConfiguration();
+        configuration.getBootstrap().getKeyMaterial().setClusterId(CLUSTER);
+        configuration.getTransport().setHttp(new HttpTransportConfig("127.0.0.1", 0));
+        configuration.getTransport().getHttp().setEnabled(enabled);
+        return configuration;
+    }
+
+    private static JettyHTTPServer server(
+            OrionConfiguration bootstrap,
+            OrionDesiredState desiredState,
+            TlsCapability tls,
+            OrionHttpRoute route) {
+        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(route)),
+                new OrionHttpResponseWriter(new ObjectMapper()));
+        return new JettyHTTPServer(bootstrap, desiredState, tls, servlet, null);
+    }
+
+    private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
+        return new KeyMaterialDescriptor(
+                new KeyMaterialAlias(alias),
+                purpose,
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(1),
+                KeyMaterialScope.cluster(CLUSTER));
+    }
+
+    private static TrustedCertificateDescriptor trusted(String alias) {
+        return new TrustedCertificateDescriptor(
+                new KeyMaterialAlias(alias),
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(1),
+                KeyMaterialScope.cluster(CLUSTER));
+    }
+
+    private static OrionMaterialReference reference(KeyMaterialDescriptor descriptor) {
+        return new OrionMaterialReference(descriptor.alias().value(), descriptor.version().value());
+    }
+
+    private static OrionMaterialReference reference(TrustedCertificateDescriptor descriptor) {
+        return new OrionMaterialReference(descriptor.alias().value(), descriptor.version().value());
     }
 
     private static void request(URL url) {
@@ -215,6 +446,19 @@ class JettyHTTPServerTest {
 
         private void release() {
             release.countDown();
+        }
+    }
+
+    private record MaterialFixture(
+            OrionKeyMaterial owner,
+            X509Certificate serverCertificate,
+            KeyPair trustedClientKey,
+            X509Certificate trustedClientCertificate,
+            KeyPair serverIssuerClientKey,
+            X509Certificate serverIssuerClientCertificate) implements AutoCloseable {
+        @Override
+        public void close() {
+            owner.close();
         }
     }
 }

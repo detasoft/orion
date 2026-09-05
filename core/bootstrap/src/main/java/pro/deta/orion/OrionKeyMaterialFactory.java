@@ -10,7 +10,7 @@ import pro.deta.orion.keymaterial.KeyMaterialPurpose;
 import pro.deta.orion.keymaterial.KeyMaterialResourceResolver;
 import pro.deta.orion.keymaterial.KeyMaterialScope;
 import pro.deta.orion.keymaterial.KeyMaterialVersion;
-import pro.deta.orion.keymaterial.ServerIdentityMaterial;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.SigningMaterialSet;
 import pro.deta.orion.schema.config.KeyMaterialConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -28,11 +28,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-public final class ServerIdentityMaterialFactory {
-    private ServerIdentityMaterialFactory() {
+public final class OrionKeyMaterialFactory {
+    private OrionKeyMaterialFactory() {
     }
 
-    public static ServerIdentityMaterial open(
+    public static OrionKeyMaterial open(
             OrionConfiguration configuration,
             Map<String, String> environment) throws IOException, GeneralSecurityException {
         if (configuration == null) {
@@ -47,7 +47,7 @@ public final class ServerIdentityMaterialFactory {
         return open(configuration, environment, store);
     }
 
-    public static ServerIdentityMaterial open(
+    public static OrionKeyMaterial open(
             OrionConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialContentStore store) throws IOException, GeneralSecurityException {
@@ -61,7 +61,7 @@ public final class ServerIdentityMaterialFactory {
         String password = resolveAgainstBaseDirectory(material.getPassword(), baseDirectory, "password");
         SigningMaterialSet signingMaterial = signingMaterial(material);
         try (KeyMaterialOptions options = resolver.pkcs12Options(password)) {
-            return ServerIdentityMaterial.open(
+            return OrionKeyMaterial.open(
                     store,
                     options,
                     signingMaterial,
@@ -136,7 +136,7 @@ public final class ServerIdentityMaterialFactory {
 
     private static String required(String value, String label) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("Server identity " + label + " must not be empty");
+            throw new IllegalArgumentException("Orion key material " + label + " must not be empty");
         }
         return value;
     }

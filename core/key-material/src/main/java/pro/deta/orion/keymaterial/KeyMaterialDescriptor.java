@@ -22,6 +22,9 @@ public record KeyMaterialDescriptor(
         if (scope == null) {
             throw new IllegalArgumentException("Key material scope must not be null");
         }
+        if (purpose == KeyMaterialPurpose.TRUST_ANCHOR) {
+            throw new IllegalArgumentException("Trust anchors require a trusted certificate descriptor");
+        }
         if (purpose == KeyMaterialPurpose.CONFIGURATION_CIPHER && algorithm != KeyMaterialAlgorithm.AES) {
             throw new IllegalArgumentException("Configuration cipher material must use AES");
         }

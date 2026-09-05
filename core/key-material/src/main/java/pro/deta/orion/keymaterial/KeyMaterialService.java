@@ -178,8 +178,16 @@ public class KeyMaterialService implements AutoCloseable {
         return Arrays.copyOf(chain, chain.length);
     }
 
-    public synchronized X509Certificate getTrustedCertificate(String alias) throws GeneralSecurityException {
+    public synchronized X509Certificate getTrustedCertificate(TrustedCertificateDescriptor descriptor)
+            throws GeneralSecurityException {
         requireOpen();
+        requireDescriptor(descriptor);
+        validateExisting(descriptor);
+        String alias = descriptor.alias().value();
+        return trustedCertificate(alias);
+    }
+
+    private X509Certificate trustedCertificate(String alias) throws GeneralSecurityException {
         requireAlias(alias);
         if (!keyStore.entryInstanceOf(alias, KeyStore.TrustedCertificateEntry.class)) {
             throw new GeneralSecurityException("Trusted certificate alias not found: " + alias);
@@ -205,10 +213,38 @@ public class KeyMaterialService implements AutoCloseable {
         return List.copyOf(keys);
     }
 
-    public synchronized void setPrivateKey(String alias, KeyPair keyPair, Certificate[] certificateChain)
+    public synchronized void setPrivateKey(
+            KeyMaterialDescriptor descriptor,
+            KeyPair keyPair,
+            List<? extends Certificate> certificateChain)
             throws GeneralSecurityException {
         requireOpen();
+        requireDescriptor(descriptor);
+        if (descriptor.purpose() == KeyMaterialPurpose.CONFIGURATION_CIPHER
+                || descriptor.purpose() == KeyMaterialPurpose.TRUST_ANCHOR) {
+            throw new IllegalArgumentException("Private key descriptor must have a private key purpose");
+        }
+        Certificate[] certificates = requireCertificateChain(certificateChain);
+        requireMatchingLeaf(descriptor.alias().value(), keyPair, certificates);
+        setTypedPrivateKey(descriptor, keyPair, certificates);
+    }
+
+    private void setUntypedPrivateKey(String alias, KeyPair keyPair, Certificate[] certificateChain)
+            throws GeneralSecurityException {
         requireAlias(alias);
+        requireMatchingLeaf(alias, keyPair, certificateChain);
+        char[] password = options.password();
+        try {
+            keyStore.setKeyEntry(alias, keyPair.getPrivate(), password, certificateChain);
+        } finally {
+            clear(password);
+        }
+    }
+
+    private static void requireMatchingLeaf(
+            String alias,
+            KeyPair keyPair,
+            Certificate[] certificateChain) throws GeneralSecurityException {
         if (keyPair == null || keyPair.getPrivate() == null || keyPair.getPublic() == null) {
             throw new IllegalArgumentException("Key pair must include public and private keys");
         }
@@ -219,34 +255,35 @@ public class KeyMaterialService implements AutoCloseable {
             throw new GeneralSecurityException(
                     "Certificate public key does not match private key alias: " + alias);
         }
-        char[] password = options.password();
-        try {
-            keyStore.setKeyEntry(alias, keyPair.getPrivate(), password, certificateChain);
-        } finally {
-            clear(password);
-        }
     }
 
-    public synchronized X509Certificate setPrivateKeyWithStorageCertificate(
+    private X509Certificate setPrivateKeyWithStorageCertificate(
             String alias,
             String purpose,
             KeyPair keyPair)
             throws GeneralSecurityException {
         requireOpen();
         X509Certificate certificate = storageCertificateFactory.create(alias, purpose, keyPair);
-        setPrivateKey(alias, keyPair, new Certificate[]{certificate});
+        setUntypedPrivateKey(alias, keyPair, new Certificate[]{certificate});
         return certificate;
     }
 
     public synchronized void setTrustedCertificate(
-            String alias,
-            Certificate certificate) throws GeneralSecurityException {
+            TrustedCertificateDescriptor descriptor,
+            X509Certificate certificate) throws GeneralSecurityException {
         requireOpen();
-        requireAlias(alias);
+        requireDescriptor(descriptor);
         if (certificate == null) {
             throw new IllegalArgumentException("Trusted certificate must not be null");
         }
-        keyStore.setCertificateEntry(alias, certificate);
+        if (certificate.getBasicConstraints() < 0) {
+            throw new GeneralSecurityException("Trusted certificate must be a certificate authority");
+        }
+        certificate.checkValidity();
+        requireAlgorithm(descriptor, certificate.getPublicKey().getAlgorithm());
+        KeyStore.TrustedCertificateEntry entry = new KeyStore.TrustedCertificateEntry(
+                certificate, descriptorAttributes(descriptor));
+        keyStore.setEntry(descriptor.alias().value(), entry, null);
     }
 
     public synchronized KeyPair generateKeyIfMissing(
@@ -340,6 +377,52 @@ public class KeyMaterialService implements AutoCloseable {
         KeyPair keyPair = getKeyPair(alias);
         requireAlgorithm(descriptor, keyPair.getPrivate().getAlgorithm());
         validateDescriptorMetadata(descriptor);
+    }
+
+    public synchronized void validateExisting(TrustedCertificateDescriptor descriptor)
+            throws GeneralSecurityException {
+        requireOpen();
+        requireDescriptor(descriptor);
+        String alias = descriptor.alias().value();
+        if (!keyStore.containsAlias(alias)) {
+            throw new GeneralSecurityException("Key material alias not found: " + alias);
+        }
+        if (!keyStore.entryInstanceOf(alias, KeyStore.TrustedCertificateEntry.class)) {
+            throw new GeneralSecurityException("Key material entry type does not match purpose: " + alias);
+        }
+        X509Certificate certificate = trustedCertificate(alias);
+        requireAlgorithm(descriptor, certificate.getPublicKey().getAlgorithm());
+        validateDescriptorMetadata(descriptor);
+    }
+
+    synchronized AcmeKeyMaterial acquireAcmeKeys(
+            KeyMaterialDescriptor account,
+            int accountKeySize,
+            KeyMaterialDescriptor identity,
+            int domainKeySize) throws IOException, GeneralSecurityException {
+        requireOpen();
+        boolean saveRequired = !keyStore.containsAlias(account.alias().value())
+                || !keyStore.containsAlias(identity.alias().value());
+        KeyPair accountKeyPair = generateKeyIfMissing(account, accountKeySize);
+        KeyPair domainKeyPair = generateKeyIfMissing(identity, domainKeySize);
+        if (saveRequired) {
+            save();
+        }
+        return new AcmeKeyMaterial(accountKeyPair, domainKeyPair);
+    }
+
+    synchronized void installAcmeCertificateChain(
+            KeyMaterialDescriptor identity,
+            List<X509Certificate> certificateChain,
+            Optional<TrustedCertificateDescriptor> issuerDescriptor,
+            Optional<X509Certificate> issuerCertificate) throws IOException, GeneralSecurityException {
+        requireOpen();
+        KeyPair domainKeyPair = getKeyPair(identity.alias().value());
+        setPrivateKey(identity, domainKeyPair, certificateChain);
+        if (issuerDescriptor.isPresent()) {
+            setTrustedCertificate(issuerDescriptor.orElseThrow(), issuerCertificate.orElseThrow());
+        }
+        save();
     }
 
     public synchronized KeyMaterialSigningKeyConfig rotate(
@@ -495,11 +578,25 @@ public class KeyMaterialService implements AutoCloseable {
     }
 
     private static Set<KeyStore.Entry.Attribute> descriptorAttributes(KeyMaterialDescriptor descriptor) {
-        String encodedScope = encodeScope(descriptor.scope());
-        String value = descriptor.purpose().name()
-                + ";" + descriptor.algorithm().name()
-                + ";" + descriptor.version().value()
-                + ";" + encodedScope;
+        return descriptorAttributes(
+                descriptor.purpose(), descriptor.algorithm(), descriptor.version(), descriptor.scope());
+    }
+
+    private static Set<KeyStore.Entry.Attribute> descriptorAttributes(
+            TrustedCertificateDescriptor descriptor) {
+        return descriptorAttributes(
+                descriptor.purpose(), descriptor.algorithm(), descriptor.version(), descriptor.scope());
+    }
+
+    private static Set<KeyStore.Entry.Attribute> descriptorAttributes(
+            KeyMaterialPurpose purpose,
+            KeyMaterialAlgorithm algorithm,
+            KeyMaterialVersion version,
+            KeyMaterialScope scope) {
+        String value = purpose.name()
+                + ";" + algorithm.name()
+                + ";" + version.value()
+                + ";" + encodeScope(scope);
         return Set.of(new PKCS12Attribute(DESCRIPTOR_ATTRIBUTE_OID, value));
     }
 
@@ -518,14 +615,63 @@ public class KeyMaterialService implements AutoCloseable {
         }
     }
 
+    private void validateDescriptorMetadata(TrustedCertificateDescriptor descriptor)
+            throws GeneralSecurityException {
+        String actual = trustedCertificateDescriptorMetadata(descriptor.alias().value());
+        String[] fields = actual.split(";", -1);
+        if (fields.length != 4) {
+            throw metadataFailure(descriptor.alias().value(), "format");
+        }
+        requireMetadataField(descriptor.alias().value(), "purpose", descriptor.purpose().name(), fields[0]);
+        requireMetadataField(descriptor.alias().value(), "algorithm", descriptor.algorithm().name(), fields[1]);
+        requireMetadataField(
+                descriptor.alias().value(), "version", Long.toString(descriptor.version().value()), fields[2]);
+        requireMetadataField(descriptor.alias().value(), "scope", encodeScope(descriptor.scope()), fields[3]);
+    }
+
+    private String trustedCertificateDescriptorMetadata(String alias) throws GeneralSecurityException {
+        KeyStore.Entry entry = keyStore.getEntry(alias, null);
+        if (entry == null) {
+            throw new GeneralSecurityException("Key material alias not found: " + alias);
+        }
+        for (KeyStore.Entry.Attribute attribute : entry.getAttributes()) {
+            if (DESCRIPTOR_ATTRIBUTE_OID.equals(attribute.getName())) {
+                return attribute.getValue();
+            }
+        }
+        throw new GeneralSecurityException("Typed key material metadata is missing for alias: " + alias);
+    }
+
+    private static void requireMetadataField(
+            String alias,
+            String field,
+            String expected,
+            String actual) throws GeneralSecurityException {
+        if (!expected.equals(actual)) {
+            throw metadataFailure(alias, field);
+        }
+    }
+
     private static GeneralSecurityException metadataFailure(
             KeyMaterialDescriptor descriptor,
             String field) {
-        return new GeneralSecurityException(
-                "Key material " + field + " does not match alias: " + descriptor.alias().value());
+        return metadataFailure(descriptor.alias().value(), field);
+    }
+
+    private static GeneralSecurityException metadataFailure(String alias, String field) {
+        return new GeneralSecurityException("Key material " + field + " does not match alias: " + alias);
     }
 
     private static void requireAlgorithm(KeyMaterialDescriptor descriptor, String actual)
+            throws GeneralSecurityException {
+        if (!descriptor.algorithm().acceptsKeyAlgorithm(actual)) {
+            throw new GeneralSecurityException(
+                    "Key material algorithm does not match alias " + descriptor.alias().value()
+                            + ": expected " + descriptor.algorithm().keyAlgorithm() + ", found " + actual);
+        }
+    }
+
+    private static void requireAlgorithm(TrustedCertificateDescriptor descriptor, String actual)
             throws GeneralSecurityException {
         if (!descriptor.algorithm().acceptsKeyAlgorithm(actual)) {
             throw new GeneralSecurityException(
@@ -538,6 +684,25 @@ public class KeyMaterialService implements AutoCloseable {
         if (descriptor == null) {
             throw new IllegalArgumentException("Key material descriptor must not be null");
         }
+    }
+
+    private static void requireDescriptor(TrustedCertificateDescriptor descriptor) {
+        if (descriptor == null) {
+            throw new IllegalArgumentException("Trusted certificate descriptor must not be null");
+        }
+    }
+
+    private static Certificate[] requireCertificateChain(List<? extends Certificate> certificateChain) {
+        if (certificateChain == null || certificateChain.isEmpty()) {
+            throw new IllegalArgumentException("Certificate chain must not be empty");
+        }
+        Certificate[] certificates = certificateChain.toArray(Certificate[]::new);
+        for (Certificate certificate : certificates) {
+            if (certificate == null) {
+                throw new IllegalArgumentException("Certificate chain must not contain null certificates");
+            }
+        }
+        return certificates;
     }
 
     private static boolean publicKeysMatch(PublicKey expected, PublicKey actual) {

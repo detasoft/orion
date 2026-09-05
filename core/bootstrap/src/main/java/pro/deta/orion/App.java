@@ -77,6 +77,8 @@ public class App {
                         .configurationProvider(() -> configuration)
                         .runtimeOptions(options.runtimeOptions())
                         .serverIdentityCapability(bootstrap.serverIdentity())
+                        .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
+                        .tlsCapability(bootstrap.tlsKeyMaterial())
                         .nativeGitRepositoryProvider(bootstrap.repositoryProvider())
                         .bootstrapRepositorySources(bootstrap.repositorySources())
                         .build();

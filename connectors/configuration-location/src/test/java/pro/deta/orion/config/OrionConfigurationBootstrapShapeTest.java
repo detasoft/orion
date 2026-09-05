@@ -92,24 +92,6 @@ class OrionConfigurationBootstrapShapeTest {
                   http:
                     enabled: false
                     port: 8000
-                  https:
-                    enabled: false
-                    port: 8443
-                    acme:
-                      enabled: true
-                      directoryUrl: acme://letsencrypt.org/staging
-                      accountEmail: admin@example.test
-                      domains:
-                        - example.test
-                        - www.example.test
-                      organization: ORION
-                      accountKeyPath: keys/account.keypair
-                      domainKeyPath: keys/domain.keypair
-                      certificatePath: certs/nginx.pem
-                      authorizationTimeoutSeconds: 30
-                      orderTimeoutSeconds: 40
-                      agreeToTermsOfService: true
-                      allowRequestedDomains: true
                 """);
 
         OrionConfiguration configuration = new LocationConfigurationProvider()
@@ -169,18 +151,26 @@ class OrionConfigurationBootstrapShapeTest {
                         .getPackfileUri()
                         .getTrustedProxyAddresses()
                         .getFirst());
-        assertEquals("acme://letsencrypt.org/staging", configuration.getTransport().getHttps().getAcme().getDirectoryUrl());
-        assertEquals("admin@example.test", configuration.getTransport().getHttps().getAcme().getAccountEmail());
-        assertEquals("example.test", configuration.getTransport().getHttps().getAcme().getDomains().getFirst());
-        assertEquals("www.example.test", configuration.getTransport().getHttps().getAcme().getDomains().get(1));
-        assertEquals("ORION", configuration.getTransport().getHttps().getAcme().getOrganization());
-        assertEquals("keys/account.keypair", configuration.getTransport().getHttps().getAcme().getAccountKeyPath());
-        assertEquals("keys/domain.keypair", configuration.getTransport().getHttps().getAcme().getDomainKeyPath());
-        assertEquals("certs/nginx.pem", configuration.getTransport().getHttps().getAcme().getCertificatePath());
-        assertEquals(30, configuration.getTransport().getHttps().getAcme().getAuthorizationTimeoutSeconds());
-        assertEquals(40, configuration.getTransport().getHttps().getAcme().getOrderTimeoutSeconds());
-        assertEquals(true, configuration.getTransport().getHttps().getAcme().isAgreeToTermsOfService());
-        assertEquals(true, configuration.getTransport().getHttps().getAcme().isAllowRequestedDomains());
+    }
+
+    @Test
+    void legacyHttpsBootstrapShapeIsRejected() throws Exception {
+        Path configFile = tempDir.resolve("legacy-https.yml");
+        Files.writeString(configFile, """
+                transport:
+                  https:
+                    enabled: true
+                    port: 8443
+                    ksystore:
+                      path: certs/server.pem
+                    acme:
+                      accountKeyPath: keys/account.keypair
+                      domainKeyPath: keys/domain.keypair
+                      certificatePath: certs/nginx.pem
+                """);
+
+        assertThrows(RuntimeException.class, () -> new LocationConfigurationProvider()
+                .configurationLookup(configFile.toString()));
     }
 
     @Test

@@ -3,10 +3,16 @@ package pro.deta.orion.acl;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.ACLUtil;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -134,6 +140,36 @@ class XmlServiceTest {
         assertThat(acl.getGrants().getFirst().getInfo()).hasSize(1);
         assertThat(acl.getGrants().getFirst().getInfo().getFirst().getKey())
                 .isEqualTo(AccessControl.GrantKey.NETWORK_SOURCE);
+    }
+
+    @Test
+    void preservesTheWholeOrionDocument() throws Exception {
+        OrionHttpsConfiguration https = new OrionHttpsConfiguration(
+                true,
+                "localhost",
+                8443,
+                URI.create("https://localhost:8443"),
+                Optional.of(new OrionMaterialReference("https-identity", 1)),
+                Optional.empty(),
+                OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                List.of(),
+                Optional.empty());
+        OrionDocument document = new OrionDocument(
+                new OrionDocument.SystemConfiguration(
+                        ACLUtil.generateDefaultAccessControl("root-password-hash"),
+                        Optional.of(https)),
+                List.of());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        xmlService.serializeDocument(document, output);
+        OrionDocument restored = xmlService.deserializeDocument(
+                new ByteArrayInputStream(output.toByteArray()));
+
+        assertThat(restored.system().https()).contains(https);
+        assertThat(restored.system().accessControl().getUsers())
+                .extracting(AccessControl.User::getId)
+                .containsExactly("root");
+        assertThat(restored.organizations()).isEmpty();
     }
 
     private String serialize(AccessControl accessControl) throws Exception {

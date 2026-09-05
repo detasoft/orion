@@ -6,6 +6,7 @@ import pro.deta.orion.acl.storage.AccessControlConcurrentUpdateException;
 import pro.deta.orion.acl.storage.AccessControlSnapshot;
 import pro.deta.orion.acl.storage.AccessControlStorage;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
+import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.AccessControlCredentialUpdate;
 import pro.deta.orion.auth.AccessControlUserUpdate;
@@ -15,17 +16,24 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.event.OrionEventManager;
+import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
+import pro.deta.orion.schema.orion.OrionXml;
 import pro.deta.orion.util.OrionProvider;
 import pro.deta.orion.util.Result;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.ByteArrayInputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -50,6 +58,61 @@ class OrionAccessControlServiceImplTest {
     private static final KeyPair KEY_ONE = keyPair("RSA", 2048);
     private static final KeyPair KEY_TWO = keyPair("EC", 256);
     private static final KeyPair KEY_THREE = keyPair("RSA", 2048);
+
+    @Test
+    void publishesAndPreservesTheWholeDesiredStateWhenAclChanges() throws Exception {
+        OrionHttpsConfiguration https = new OrionHttpsConfiguration(
+                true,
+                "localhost",
+                8443,
+                URI.create("https://localhost:8443"),
+                Optional.of(new OrionMaterialReference("https-identity", 1)),
+                Optional.empty(),
+                OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                List.of(),
+                Optional.empty());
+        OrionDocument initial = new OrionDocument(
+                new OrionDocument.SystemConfiguration(
+                        new AccessControl(),
+                        Optional.of(https)),
+                List.of());
+        InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
+                Map.of(ACL_PATH, serialize(initial)),
+                Optional.of("version-one")));
+        OrionDesiredState desiredState = new OrionDesiredState();
+        OrionEventManager eventManager = new OrionEventManager();
+        OrionProvider provider = new OrionProvider(() -> null, () -> eventManager, () -> null);
+        OrionAccessControlServiceImpl service = new OrionAccessControlServiceImpl(
+                storage,
+                new OrionPasswordHashingService(),
+                provider,
+                OrionRuntimeOptions.defaults(),
+                testServerIdentity(),
+                desiredState);
+        eventManager.onStart();
+        service.onStart();
+        try {
+            assertThat(desiredState.current().revision()).contains("version-one");
+            assertThat(desiredState.current().document().system().https()).contains(https);
+
+            service.createOrUpdateUser(userUpdate("alice", "password-hash"));
+
+            OrionDocument persisted = parseDocument(storage.snapshot.files().get(ACL_PATH));
+            assertThat(persisted.system().https()).contains(https);
+            assertThat(desiredState.current().document()).isEqualTo(persisted);
+
+            OrionDesiredState.Snapshot lastValid = desiredState.current();
+            storage.snapshot = new AccessControlSnapshot(
+                    Map.of(ACL_PATH, "not xml".getBytes(StandardCharsets.UTF_8)),
+                    Optional.of("broken-version"));
+            eventManager.publishAndWait(new RequestToAclUpdate("malformed desired state"));
+
+            assertThat(desiredState.current()).isSameAs(lastValid);
+        } finally {
+            service.onStop();
+            eventManager.onStop();
+        }
+    }
 
     @Test
     void listsCanonicalDeduplicatedSshCredentialsForOnlyTheSelectedUser() {
@@ -447,7 +510,8 @@ class OrionAccessControlServiceImplTest {
                 new OrionPasswordHashingService(),
                 provider,
                 runtimeOptions,
-                testServerIdentity());
+                testServerIdentity(),
+                new OrionDesiredState());
         ByteArrayOutputStream processOutput = new ByteArrayOutputStream();
         PrintStream originalOut = System.out;
         eventManager.onStart();
@@ -493,7 +557,8 @@ class OrionAccessControlServiceImplTest {
                 new OrionPasswordHashingService(),
                 provider,
                 OrionRuntimeOptions.defaults(),
-                serverIdentity);
+                serverIdentity,
+                new OrionDesiredState());
         eventManager.onStart();
         service.onStart();
         return new ServiceFixture(service, storage, eventManager);
@@ -518,6 +583,23 @@ class OrionAccessControlServiceImplTest {
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             new XmlService().serialize(accessControl, output);
             return output.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static byte[] serialize(OrionDocument document) {
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            OrionXml.write(document, output);
+            return output.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static OrionDocument parseDocument(byte[] content) {
+        try {
+            return OrionXml.read(new ByteArrayInputStream(content));
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }

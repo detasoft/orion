@@ -73,11 +73,12 @@ Default local listeners:
 
 - SSH Git transport: `localhost:8022`
 - HTTP Git transport: `http://localhost:8000/r/<repository>`
-- HTTPS Git transport: `https://localhost:8443/r/<repository>`
 - Native Git transport: `git://localhost:9419/<repository>`
 
-The HTTPS listener uses a self-signed certificate unless
-`transport.https.ksystore` is configured.
+HTTPS is disabled in the initial desired state. Its listener, ACME policy, and
+material references belong to the versioned `orion.xml` document. Enabling
+HTTPS requires an identity with an installed certificate chain in the
+protected material store; Orion does not create a self-signed fallback.
 
 Use `--config <location>` to point Orion at a different YAML or TOML
 configuration. Configuration paths can use `env:NAME`, for example
@@ -318,19 +319,38 @@ transport:
   http:
     enabled: true
     port: 8000
-  https:
-    enabled: true
-    port: 8443
-    acme:
-      enabled: false
-      directoryUrl: acme://letsencrypt.org/staging
-      accountKeyPath: acme/account.keypair
-      domainKeyPath: acme/domain.keypair
-      certificatePath: acme/nginx.pem
   ssh:
     enabled: true
     port: 8022
 ```
+
+HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
+
+```xml
+<https>
+  <enabled>false</enabled>
+  <address>0.0.0.0</address>
+  <port>8443</port>
+  <publicUrl>https://orion.example.test</publicUrl>
+  <identity alias="https-identity" version="1"/>
+  <clientAuthentication>disabled</clientAuthentication>
+  <clientTrustAnchors/>
+  <acme>
+    <enabled>false</enabled>
+    <directoryUrl>acme://letsencrypt.org/staging</directoryUrl>
+    <accountEmail>admin@example.test</accountEmail>
+    <domains><domain>orion.example.test</domain></domains>
+    <accountMaterial alias="acme-account" version="1"/>
+    <authorizationTimeoutSeconds>60</authorizationTimeoutSeconds>
+    <orderTimeoutSeconds>60</orderTimeoutSeconds>
+    <agreeToTermsOfService>false</agreeToTermsOfService>
+    <allowRequestedDomains>false</allowRequestedDomains>
+  </acme>
+</https>
+```
+
+ACME account and domain private keys remain inside `material.p12`. The ACME
+admin route returns only the public certificate chain.
 
 `storage.location` supports local filesystem storage with `file:` locations.
 `bootstrap.accessControl.location` can point to a local ACL directory with

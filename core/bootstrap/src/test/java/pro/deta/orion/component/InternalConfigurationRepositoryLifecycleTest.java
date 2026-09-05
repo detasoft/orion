@@ -26,7 +26,9 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
@@ -797,7 +799,6 @@ class InternalConfigurationRepositoryLifecycleTest {
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
         configuration.getTransport().getHttp().setEnabled(false);
-        configuration.getTransport().getHttps().setEnabled(false);
         return configuration;
     }
 
@@ -832,6 +833,8 @@ class InternalConfigurationRepositoryLifecycleTest {
                 .configurationProvider(() -> configuration)
                 .runtimeOptions(runtimeOptions)
                 .serverIdentityCapability(serverIdentity)
+                .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                .tlsCapability(TlsCapability.unavailable())
                 .nativeGitRepositoryProvider(provider)
                 .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)))
                 .build();

@@ -35,7 +35,6 @@ final class RuntimeHttpTestSupport {
         TestPorts.nextBatch().configure(configuration);
         configuration.getTransport().getGit().setEnabled(false);
         configuration.getTransport().getSsh().setEnabled(false);
-        configuration.getTransport().getHttps().setEnabled(false);
         customizer.accept(configuration);
         return configuration;
     }

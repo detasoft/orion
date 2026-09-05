@@ -2,12 +2,20 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.TlsCapability;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.GitTransportConfig;
 import pro.deta.orion.schema.config.HttpTransportConfig;
-import pro.deta.orion.schema.config.HttpsTransportConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 
+import java.net.URI;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,9 +28,6 @@ class OrionAdminTransportsRouteTest {
     void reportsOnlyRunningTransportEndpoints() {
         OrionConfiguration.AppTransport transport = new OrionConfiguration.AppTransport();
         transport.setHttp(new HttpTransportConfig("0.0.0.0", 9080));
-        HttpsTransportConfig httpsConfig = new HttpsTransportConfig("0.0.0.0", 9443);
-        httpsConfig.setEnabled(false);
-        transport.setHttps(httpsConfig);
         transport.setSsh(new SshTransportConfig("0.0.0.0", 2222));
         transport.setGit(new GitTransportConfig("0.0.0.0", 9418));
         transport.getHttp().setPublicUrl("https://git.example");
@@ -30,7 +35,16 @@ class OrionAdminTransportsRouteTest {
         OrionAdminTransportsRoute.TransportDescriptor http =
                 OrionAdminTransportsRoute.descriptor(transport.getHttp(), "http", 9080);
         OrionAdminTransportsRoute.TransportDescriptor httpsDescriptor =
-                OrionAdminTransportsRoute.descriptor(transport.getHttps(), "https", 9443);
+                OrionAdminTransportsRoute.descriptor(new OrionHttpsConfiguration(
+                        false,
+                        "0.0.0.0",
+                        9443,
+                        null,
+                        Optional.empty(),
+                        Optional.empty(),
+                        OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                        List.of(),
+                        Optional.empty()), 9443);
         OrionAdminTransportsRoute.TransportDescriptor ssh =
                 OrionAdminTransportsRoute.descriptor(transport.getSsh(), "ssh", 2222);
         OrionAdminTransportsRoute.TransportDescriptor nativeGit =
@@ -74,19 +88,22 @@ class OrionAdminTransportsRouteTest {
         OrionConfiguration configuration = new OrionConfiguration();
         OrionConfiguration.AppTransport transport = new OrionConfiguration.AppTransport();
         transport.setHttp(new HttpTransportConfig("127.0.0.1", 0));
-        HttpsTransportConfig https = new HttpsTransportConfig("127.0.0.1", 0);
-        https.setEnabled(false);
-        transport.setHttps(https);
         configuration.setTransport(transport);
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
                 new OrionHttpRouteRegistry(Set.of()),
                 new OrionHttpResponseWriter(new ObjectMapper()));
-        JettyHTTPServer server = new JettyHTTPServer(configuration, servlet);
+        OrionDesiredState desiredState = new OrionDesiredState();
+        desiredState.publish(new OrionDocument(
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty()),
+                List.of()), Optional.of("test-revision"));
+        JettyHTTPServer server = new JettyHTTPServer(
+                configuration, desiredState, TlsCapability.unavailable(), servlet, null);
         server.onStart();
 
         try {
             OrionAdminTransportsRoute route = new OrionAdminTransportsRoute(
                     configuration,
+                    desiredState,
                     () -> server,
                     null,
                     null);
@@ -101,6 +118,43 @@ class OrionAdminTransportsRouteTest {
         } finally {
             server.onStop();
         }
+    }
+
+    @Test
+    void reportsDesiredStateHttpsWhenBootstrapTransportsAreAbsent() {
+        OrionConfiguration configuration = new OrionConfiguration();
+        OrionDesiredState desiredState = new OrionDesiredState();
+        desiredState.publish(new OrionDocument(
+                new OrionDocument.SystemConfiguration(
+                        new AccessControl(),
+                        Optional.of(new OrionHttpsConfiguration(
+                                true,
+                                "127.0.0.1",
+                                9443,
+                                URI.create("https://git.example"),
+                                Optional.of(new OrionMaterialReference("https-identity", 1)),
+                                Optional.empty(),
+                                OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                                List.of(),
+                                Optional.empty()))),
+                List.of()), Optional.of("test-revision"));
+        JettyHTTPServer server = new JettyHTTPServer(
+                configuration, desiredState, TlsCapability.unavailable(), null, null) {
+            @Override
+            public int boundHttpsPort() {
+                return 9443;
+            }
+        };
+        configuration.setTransport(null);
+        OrionAdminTransportsRoute route = new OrionAdminTransportsRoute(
+                configuration, desiredState, () -> server, null, null);
+
+        OrionAdminTransportsRoute.AdminTransportsResponse response =
+                (OrionAdminTransportsRoute.AdminTransportsResponse) route.doGet(null).body();
+
+        assertTrue(response.https().enabled());
+        assertEquals("https://git.example", response.https().url());
+        assertFalse(response.http().enabled());
     }
 
     @Test

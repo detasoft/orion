@@ -15,6 +15,8 @@ import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
@@ -42,6 +44,8 @@ public interface OrionComponent {
         @BindsInstance Builder configurationProvider(ConfigurationProvider configurationProvider);
         @BindsInstance Builder runtimeOptions(OrionRuntimeOptions runtimeOptions);
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
+        @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
+        @BindsInstance Builder tlsCapability(TlsCapability capability);
         @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryProvider repositoryProvider);
         @BindsInstance Builder bootstrapRepositorySources(BootstrapRepositorySources repositorySources);
 
@@ -56,6 +60,8 @@ public interface OrionComponent {
             return configurationProvider(() -> configuration)
                     .runtimeOptions(OrionRuntimeOptions.defaults())
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
+                    .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
+                    .tlsCapability(TlsCapability.unavailable())
                     .nativeGitRepositoryProvider(repositoryProvider)
                     .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)));
         }

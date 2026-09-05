@@ -2,8 +2,8 @@ package pro.deta.orion;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.keymaterial.ServerIdentityMaterial;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 
@@ -16,7 +16,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class ServerIdentityMaterialFactoryTest {
+class OrionKeyMaterialFactoryTest {
     private static final String PASSWORD_ENV = "ORION_TEST_KEY_MATERIAL_PASSWORD";
 
     @TempDir
@@ -27,15 +27,19 @@ class ServerIdentityMaterialFactoryTest {
         OrionConfiguration configuration = configuration();
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
-        try (ServerIdentityMaterial identity = ServerIdentityMaterialFactory.open(
+        try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"))) {
+            var identity = material.serverIdentity();
             signature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
+            assertThat(material.acme()).isNotNull();
+            assertThat(material.tls()).isNotNull();
         }
 
-        try (ServerIdentityMaterial reloaded = ServerIdentityMaterialFactory.open(
+        try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"))) {
-            assertThat(reloaded.verify("cluster-signing-v2", payload, signature)).isTrue();
+            assertThat(material.serverIdentity().verify(
+                    "cluster-signing-v2", payload, signature)).isTrue();
         }
 
         assertThat(Files.isRegularFile(tempDir.resolve("security/orion.p12"))).isTrue();
@@ -46,7 +50,7 @@ class ServerIdentityMaterialFactoryTest {
         OrionConfiguration configuration = configuration();
         configuration.getBootstrap().setBaseDir("env:ORION_TEST_ROOT/material-home");
 
-        try (ServerIdentityMaterial ignored = ServerIdentityMaterialFactory.open(
+        try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
                 configuration,
                 Map.of(
                         "ORION_TEST_ROOT", tempDir.toString(),
@@ -60,7 +64,7 @@ class ServerIdentityMaterialFactoryTest {
     @Test
     void resolvesConfiguredRetainedAliases() throws Exception {
         OrionConfiguration configuration = configuration();
-        try (ServerIdentityMaterial ignored = ServerIdentityMaterialFactory.open(
+        try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password"))) {
             // Initialize the active alias in a new store.
         }
@@ -69,7 +73,7 @@ class ServerIdentityMaterialFactoryTest {
                 .getServerSigning()
                 .setVerification(List.of(new SigningKeyReferenceConfig("missing-retained", 1)));
 
-        assertThatThrownBy(() -> ServerIdentityMaterialFactory.open(
+        assertThatThrownBy(() -> OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, "test-password")))
                 .isInstanceOf(Exception.class)
                 .hasMessageContaining("missing-retained");
@@ -79,7 +83,7 @@ class ServerIdentityMaterialFactoryTest {
     void missingProtectedPasswordFailsWithoutCreatingStore() {
         OrionConfiguration configuration = configuration();
 
-        assertThatThrownBy(() -> ServerIdentityMaterialFactory.open(configuration, Map.of()))
+        assertThatThrownBy(() -> OrionKeyMaterialFactory.open(configuration, Map.of()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(PASSWORD_ENV);
         assertThat(Files.exists(tempDir.resolve("security/orion.p12"))).isFalse();
@@ -91,11 +95,11 @@ class ServerIdentityMaterialFactoryTest {
         configuration.getBootstrap().getKeyMaterial().setLocation("git+https://example.test/private.git");
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
 
-        try (ServerIdentityMaterial identity = ServerIdentityMaterialFactory.open(
+        try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
                 store)) {
-            assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
+            assertThat(material.serverIdentity().activeKeyId()).isEqualTo("cluster-signing-v2");
         }
 
         assertThat(store.read()).isPresent();

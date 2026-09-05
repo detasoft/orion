@@ -3,8 +3,10 @@ package pro.deta.orion.transport.http;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.servlet.http.HttpServletRequest;
+import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.TransportConfig;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.transport.git.GitSshTransportService;
 
@@ -14,6 +16,7 @@ import java.util.Set;
 
 public class OrionAdminTransportsRoute extends BaseAdminRoute {
     private final OrionConfiguration configuration;
+    private final OrionDesiredState desiredState;
     private final Provider<JettyHTTPServer> httpServer;
     private final Provider<GitSshTransportService> sshServer;
     private final Provider<GitNativeTransportService> nativeGitServer;
@@ -21,35 +24,26 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
     @Inject
     public OrionAdminTransportsRoute(
             OrionConfiguration configuration,
+            OrionDesiredState desiredState,
             Provider<JettyHTTPServer> httpServer,
             Provider<GitSshTransportService> sshServer,
             Provider<GitNativeTransportService> nativeGitServer) {
         super(OrionAdminPaths.TRANSPORTS, "GET");
         this.configuration = configuration;
+        this.desiredState = desiredState;
         this.httpServer = httpServer;
         this.sshServer = sshServer;
         this.nativeGitServer = nativeGitServer;
     }
 
-    OrionAdminTransportsRoute(OrionConfiguration configuration) {
-        this(configuration, null, null, null);
-    }
-
     @Override
     protected OrionHttpResponse doGet(HttpServletRequest req) {
         OrionConfiguration.AppTransport transport = configuration.getTransport();
-        if (transport == null) {
-            return OrionHttpResponse.ok(new AdminTransportsResponse(
-                    descriptor(null, "http", 0),
-                    descriptor(null, "https", 0),
-                    descriptor(null, "ssh", 0),
-                    descriptor(null, "git", 0)));
-        }
         return OrionHttpResponse.ok(new AdminTransportsResponse(
-                descriptor(transport.getHttp(), "http", httpPort()),
-                descriptor(transport.getHttps(), "https", httpsPort()),
-                descriptor(transport.getSsh(), "ssh", sshPort()),
-                descriptor(transport.getGit(), "git", nativeGitPort())));
+                descriptor(transport == null ? null : transport.getHttp(), "http", httpPort()),
+                httpsDescriptor(),
+                descriptor(transport == null ? null : transport.getSsh(), "ssh", sshPort()),
+                descriptor(transport == null ? null : transport.getGit(), "git", nativeGitPort())));
     }
 
     static TransportDescriptor descriptor(TransportConfig config, String scheme, int boundPort) {
@@ -65,6 +59,23 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
             return new TransportDescriptor(true, null);
         }
         return new TransportDescriptor(true, "%s://%s:%d".formatted(scheme, urlHost(address), boundPort));
+    }
+
+    static TransportDescriptor descriptor(OrionHttpsConfiguration config, int boundPort) {
+        if (config == null || !config.enabled() || boundPort <= 0) {
+            return new TransportDescriptor(false, null);
+        }
+        if (config.publicUrl() != null) {
+            return new TransportDescriptor(
+                    true,
+                    validPublicUrl(config.publicUrl().toString(), "https"));
+        }
+        if (!LOOPBACK_HOSTS.contains(config.address())) {
+            return new TransportDescriptor(true, null);
+        }
+        return new TransportDescriptor(
+                true,
+                "https://%s:%d".formatted(urlHost(config.address()), boundPort));
     }
 
     private static String validPublicUrl(String value, String transportScheme) {
@@ -107,6 +118,15 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
 
     private int httpsPort() {
         return httpServer == null ? 0 : httpServer.get().boundHttpsPort();
+    }
+
+    private TransportDescriptor httpsDescriptor() {
+        OrionHttpsConfiguration https = desiredState.current()
+                .document()
+                .system()
+                .https()
+                .orElse(null);
+        return descriptor(https, httpsPort());
     }
 
     private int sshPort() {

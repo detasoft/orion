@@ -43,6 +43,32 @@
         </grant>
       </grants>
     </accessControl>
+    <https>
+      <enabled>false</enabled>
+      <address>0.0.0.0</address>
+      <port>8443</port>
+      <publicUrl>https://orion.example.test</publicUrl>
+      <identity alias="https-identity" version="1"/>
+      <serverIssuerTrustAnchor alias="https-issuer-root" version="1"/>
+      <clientAuthentication>disabled</clientAuthentication>
+      <clientTrustAnchors>
+        <trustAnchor alias="https-client-root" version="1"/>
+      </clientTrustAnchors>
+      <acme>
+        <enabled>false</enabled>
+        <directoryUrl>acme://letsencrypt.org/staging</directoryUrl>
+        <accountEmail>admin@example.test</accountEmail>
+        <domains>
+          <domain>orion.example.test</domain>
+        </domains>
+        <organization>ORION</organization>
+        <accountMaterial alias="acme-account" version="1"/>
+        <authorizationTimeoutSeconds>60</authorizationTimeoutSeconds>
+        <orderTimeoutSeconds>60</orderTimeoutSeconds>
+        <agreeToTermsOfService>false</agreeToTermsOfService>
+        <allowRequestedDomains>false</allowRequestedDomains>
+      </acme>
+    </https>
   </system>
   <organizations>
     <organization id="acme">

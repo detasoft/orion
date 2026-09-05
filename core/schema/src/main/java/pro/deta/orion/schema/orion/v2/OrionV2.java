@@ -36,10 +36,86 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"accessControl"})
+    @XmlType(propOrder = {"accessControl", "https"})
     public static final class SystemConfiguration {
         @XmlElement(name = "accessControl", required = true)
         private AccessControl accessControl;
+        private Https https;
+
+        public SystemConfiguration(AccessControl accessControl) {
+            this(accessControl, null);
+        }
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {
+            "enabled",
+            "address",
+            "port",
+            "publicUrl",
+            "identity",
+            "serverIssuerTrustAnchor",
+            "clientAuthentication",
+            "clientTrustAnchors",
+            "acme"
+    })
+    public static final class Https {
+        private boolean enabled;
+        private String address;
+        private int port;
+        private String publicUrl;
+        private MaterialReference identity;
+        private MaterialReference serverIssuerTrustAnchor;
+        private ClientAuthentication clientAuthentication;
+        @XmlElementWrapper(name = "clientTrustAnchors")
+        @XmlElement(name = "trustAnchor")
+        private List<MaterialReference> clientTrustAnchors;
+        private Acme acme;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    public static final class MaterialReference {
+        @XmlAttribute(required = true)
+        private String alias;
+        @XmlAttribute(required = true)
+        private long version;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {
+            "enabled",
+            "directoryUrl",
+            "accountEmail",
+            "domains",
+            "organization",
+            "accountMaterial",
+            "authorizationTimeoutSeconds",
+            "orderTimeoutSeconds",
+            "agreeToTermsOfService",
+            "allowRequestedDomains"
+    })
+    public static final class Acme {
+        private boolean enabled;
+        private String directoryUrl;
+        private String accountEmail;
+        @XmlElementWrapper(name = "domains")
+        @XmlElement(name = "domain")
+        private List<String> domains;
+        private String organization;
+        private MaterialReference accountMaterial;
+        private long authorizationTimeoutSeconds;
+        private long orderTimeoutSeconds;
+        private boolean agreeToTermsOfService;
+        private boolean allowRequestedDomains;
     }
 
     @Data
@@ -316,6 +392,16 @@ public class OrionV2 {
         PERIODIC_AUDIT,
         @XmlEnumValue("MANUAL_RETRY")
         MANUAL_RETRY
+    }
+
+    @XmlEnum(String.class)
+    public enum ClientAuthentication {
+        @XmlEnumValue("disabled")
+        DISABLED,
+        @XmlEnumValue("want")
+        WANT,
+        @XmlEnumValue("required")
+        REQUIRED
     }
 
     @XmlEnum(String.class)

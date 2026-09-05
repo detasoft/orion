@@ -1258,7 +1258,6 @@ class GitSshTransportEndToEndIT {
 
         configuration.getTransport().getSsh().setEnabled(true);
 
-        configuration.getTransport().getHttps().setEnabled(false);
         return configuration;
     }
 

@@ -2,12 +2,30 @@ package pro.deta.orion.transport.http;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.schema.config.AcmeConfig;
-import pro.deta.orion.schema.config.HttpsTransportConfig;
+import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialScope;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
+import pro.deta.orion.keymaterial.OrionKeyMaterial;
+import pro.deta.orion.keymaterial.SigningMaterialSet;
+import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.orion.OrionAcmeConfiguration;
+import pro.deta.orion.schema.orion.OrionDocument;
+import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
+import pro.deta.orion.schema.orion.OrionMaterialReference;
 
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -16,106 +34,168 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AcmeCertificateServiceTest {
-    private static final String CERTIFICATE_PEM = """
-            -----BEGIN CERTIFICATE-----
-            TEST
-            -----END CERTIFICATE-----
-            """;
-    private static final String PRIVATE_KEY_PEM = """
-            -----BEGIN RSA PRIVATE KEY-----
-            TEST
-            -----END RSA PRIVATE KEY-----
-            """;
+    private static final String CLUSTER = "test-cluster";
+    private static final KeyMaterialDescriptor SIGNING = descriptor(
+            "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
 
     @TempDir
     private Path tempDir;
 
     @Test
-    void issuesCertificateUsingHttpsAcmeConfiguration() throws Exception {
-        OrionConfiguration configuration = configuration();
-        RecordingIssuer issuer = new RecordingIssuer();
-        AcmeCertificateService service = new AcmeCertificateService(configuration, issuer);
+    void issuesFromDesiredStatePersistsInMaterialStoreAndReloadsWithoutLegacyFiles() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        OrionDesiredState desiredState = desiredState(false);
+        OrionConfiguration bootstrap = bootstrap();
 
-        IssuedAcmeCertificate certificate = service.issue(new AcmeCertificateService.IssueRequest(
-                null, null, null, null, null, null, null, true));
+        try (OrionKeyMaterial owner = owner(store)) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap, desiredState, owner.acme(), issuer);
 
-        assertThat(issuer.lastRequest.directoryUrl()).isEqualTo("acme://letsencrypt.org/staging");
-        assertThat(issuer.lastRequest.accountEmail()).isEqualTo("admin@example.test");
-        assertThat(issuer.lastRequest.domains()).containsExactly("example.test");
-        assertThat(issuer.lastRequest.organization()).isEqualTo("ORION");
-        assertThat(issuer.lastRequest.authorizationTimeout()).isEqualTo(Duration.ofSeconds(30));
-        assertThat(issuer.lastRequest.orderTimeout()).isEqualTo(Duration.ofSeconds(40));
-        assertThat(issuer.lastRequest.agreeToTermsOfService()).isTrue();
-        assertThat(certificate.nginxPem()).contains(CERTIFICATE_PEM).contains(PRIVATE_KEY_PEM);
-        assertThat(Files.readString(tempDir.resolve("certs/nginx.pem"))).isEqualTo(certificate.nginxPem());
+            IssuedAcmeCertificate certificate = service.issue(AcmeCertificateService.IssueRequest.EMPTY);
+
+            assertThat(issuer.lastRequest.directoryUrl()).isEqualTo("acme://letsencrypt.org/staging");
+            assertThat(issuer.lastRequest.accountEmail()).isEqualTo("admin@example.test");
+            assertThat(issuer.lastRequest.domains()).containsExactly("example.test");
+            assertThat(issuer.lastRequest.organization()).isEqualTo("ORION");
+            assertThat(issuer.lastRequest.authorizationTimeout()).isEqualTo(Duration.ofSeconds(30));
+            assertThat(issuer.lastRequest.orderTimeout()).isEqualTo(Duration.ofSeconds(40));
+            assertThat(issuer.lastRequest.agreeToTermsOfService()).isTrue();
+            assertThat(certificate.certificateChain()).hasSize(1);
+            assertThat(service.savedCertificate()).isPresent();
+        }
+
+        try (OrionKeyMaterial owner = owner(store)) {
+            AcmeCertificateService restarted = new AcmeCertificateService(
+                    bootstrap, desiredState, owner.acme(), new RecordingIssuer(false));
+
+            assertThat(restarted.savedCertificate().orElseThrow().certificateChain()).hasSize(1);
+        }
+
+        assertThat(Files.exists(tempDir.resolve("acme/account.keypair"))).isFalse();
+        assertThat(Files.exists(tempDir.resolve("acme/domain.keypair"))).isFalse();
+        assertThat(Files.exists(tempDir.resolve("acme/nginx.pem"))).isFalse();
     }
 
     @Test
-    void rejectsRequestedDomainsUnlessConfigurationAllowsIt() {
-        OrionConfiguration configuration = configuration();
-        AcmeCertificateService service = new AcmeCertificateService(configuration, new RecordingIssuer());
+    void rejectsRequestedDomainsUnlessDesiredStateAllowsIt() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(false));
 
-        assertThatThrownBy(() -> service.issue(new AcmeCertificateService.IssueRequest(
-                null, null, List.of("other.example.test"), null, null, null, null, false)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Requested ACME domains are not allowed");
+            assertThatThrownBy(() -> service.issue(new AcmeCertificateService.IssueRequest(
+                    null, null, List.of("other.example.test"), null, null, null, null)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Requested ACME domains are not allowed");
+        }
     }
 
     @Test
-    void allowsRequestedDomainsWhenConfigurationAllowsIt() throws Exception {
-        OrionConfiguration configuration = configuration();
-        configuration.getTransport().getHttps().getAcme().setAllowRequestedDomains(true);
-        RecordingIssuer issuer = new RecordingIssuer();
-        AcmeCertificateService service = new AcmeCertificateService(configuration, issuer);
+    void allowsRequestedDomainsWhenDesiredStateAllowsIt() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            RecordingIssuer issuer = new RecordingIssuer(false);
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(true), owner.acme(), issuer);
 
-        service.issue(new AcmeCertificateService.IssueRequest(
-                null, null, List.of("other.example.test"), null, null, null, null, false));
+            service.issue(new AcmeCertificateService.IssueRequest(
+                    null, null, List.of("other.example.test"), null, null, null, null));
 
-        assertThat(issuer.lastRequest.domains()).containsExactly("other.example.test");
+            assertThat(issuer.lastRequest.domains()).containsExactly("other.example.test");
+        }
     }
 
     @Test
-    void downloadsSavedNginxCertificate() throws Exception {
-        OrionConfiguration configuration = configuration();
-        Path certificatePath = tempDir.resolve("certs/nginx.pem");
-        Files.createDirectories(certificatePath.getParent());
-        Files.writeString(certificatePath, CERTIFICATE_PEM + PRIVATE_KEY_PEM);
-        AcmeCertificateService service = new AcmeCertificateService(configuration, new RecordingIssuer());
+    void invalidIssuedChainDoesNotBecomeSavedMaterial() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        try (OrionKeyMaterial owner = owner(store)) {
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), new RecordingIssuer(true));
 
-        Optional<String> certificate = service.savedNginxCertificate();
-
-        assertThat(certificate).contains(CERTIFICATE_PEM + PRIVATE_KEY_PEM);
+            assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
+                    .isInstanceOf(AcmeCertificateIssueException.class)
+                    .hasMessageContaining("store issued ACME certificate");
+            assertThat(service.savedCertificate()).isEmpty();
+        }
     }
 
-    private OrionConfiguration configuration() {
+    private OrionConfiguration bootstrap() {
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
-        HttpsTransportConfig https = configuration.getTransport().getHttps();
-        AcmeConfig acme = https.getAcme();
-        acme.setDirectoryUrl("acme://letsencrypt.org/staging");
-        acme.setAccountEmail("admin@example.test");
-        acme.setDomains(List.of("example.test"));
-        acme.setOrganization("ORION");
-        acme.setAccountKeyPath("keys/account.keypair");
-        acme.setDomainKeyPath("keys/domain.keypair");
-        acme.setCertificatePath("certs/nginx.pem");
-        acme.setAuthorizationTimeoutSeconds(30);
-        acme.setOrderTimeoutSeconds(40);
-        acme.setAgreeToTermsOfService(true);
+        configuration.getBootstrap().getKeyMaterial().setClusterId(CLUSTER);
         return configuration;
     }
 
+    private static OrionDesiredState desiredState(boolean allowRequestedDomains) {
+        OrionAcmeConfiguration acme = new OrionAcmeConfiguration(
+                true,
+                URI.create("acme://letsencrypt.org/staging"),
+                "admin@example.test",
+                List.of("example.test"),
+                "ORION",
+                Optional.of(new OrionMaterialReference("acme-account-v1", 1)),
+                30,
+                40,
+                true,
+                allowRequestedDomains);
+        OrionHttpsConfiguration https = new OrionHttpsConfiguration(
+                false,
+                "localhost",
+                8443,
+                URI.create("https://example.test"),
+                Optional.of(new OrionMaterialReference("https-identity-v1", 1)),
+                Optional.empty(),
+                OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                List.of(),
+                Optional.of(acme));
+        OrionDesiredState desiredState = new OrionDesiredState();
+        desiredState.publish(new OrionDocument(
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https)),
+                List.of()), Optional.of("test-revision"));
+        return desiredState;
+    }
+
+    private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
+        return OrionKeyMaterial.open(
+                store,
+                KeyMaterialOptions.pkcs12("test-password".toCharArray()),
+                new SigningMaterialSet(SIGNING, List.of()),
+                2048);
+    }
+
+    private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {
+        return new KeyMaterialDescriptor(
+                new KeyMaterialAlias(alias),
+                purpose,
+                KeyMaterialAlgorithm.RSA,
+                new KeyMaterialVersion(1),
+                KeyMaterialScope.cluster(CLUSTER));
+    }
+
     private static final class RecordingIssuer extends AcmeCertificateIssuer {
+        private final boolean wrongKey;
         private AcmeCertificateIssueRequest lastRequest;
 
-        private RecordingIssuer() {
+        private RecordingIssuer(boolean wrongKey) {
             super(new AcmeHttpChallengeService());
+            this.wrongKey = wrongKey;
         }
 
         @Override
         public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
             lastRequest = request;
-            return new IssuedAcmeCertificate(request.domains(), CERTIFICATE_PEM, PRIVATE_KEY_PEM);
+            try {
+                KeyPair keyPair = wrongKey ? keyPair() : request.domainKeyPair();
+                X509Certificate leaf = TestCertificateChain.selfSignedLeaf("example.test", keyPair);
+                return new IssuedAcmeCertificate(request.domains(), List.of(leaf));
+            } catch (Exception failure) {
+                throw new AssertionError(failure);
+            }
+        }
+
+        private static KeyPair keyPair() throws Exception {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            return generator.generateKeyPair();
         }
     }
 }

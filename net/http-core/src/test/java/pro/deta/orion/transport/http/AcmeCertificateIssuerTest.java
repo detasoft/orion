@@ -3,10 +3,9 @@ package pro.deta.orion.transport.http;
 import org.junit.jupiter.api.Test;
 import org.shredzone.acme4j.Status;
 
-import java.io.IOException;
-import java.io.Writer;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.List;
 
@@ -26,9 +25,7 @@ class AcmeCertificateIssuerTest {
         IssuedAcmeCertificate certificate = issuer.issue(request());
 
         assertThat(certificate.domains()).containsExactly("example.test");
-        assertThat(certificate.nginxPem())
-                .contains("-----BEGIN CERTIFICATE-----")
-                .contains("-----BEGIN RSA PRIVATE KEY-----");
+        assertThat(certificate.certificateChain()).containsExactly(acmeClient.order.certificate);
         assertThat(acmeClient.order.executed).isTrue();
         assertThat(acmeClient.order.organization).isEqualTo("ORION");
         assertThat(acmeClient.authorization.challenge.triggered).isTrue();
@@ -100,6 +97,7 @@ class AcmeCertificateIssuerTest {
         private final RecordingAcmeAuthorization authorization;
         private boolean executed;
         private String organization;
+        private X509Certificate certificate;
 
         private RecordingAcmeOrder(RecordingAcmeAuthorization authorization) {
             this.authorization = authorization;
@@ -119,6 +117,11 @@ class AcmeCertificateIssuerTest {
         public void execute(KeyPair domainKeyPair, String organization) {
             this.organization = organization;
             executed = true;
+            try {
+                certificate = TestCertificateChain.selfSignedLeaf("example.test", domainKeyPair);
+            } catch (Exception failure) {
+                throw new AssertionError(failure);
+            }
         }
 
         @Override
@@ -127,12 +130,8 @@ class AcmeCertificateIssuerTest {
         }
 
         @Override
-        public void writeCertificate(Writer writer) throws IOException {
-            writer.write("""
-                    -----BEGIN CERTIFICATE-----
-                    TEST
-                    -----END CERTIFICATE-----
-                    """);
+        public List<X509Certificate> certificateChain() {
+            return List.of(certificate);
         }
     }
 
