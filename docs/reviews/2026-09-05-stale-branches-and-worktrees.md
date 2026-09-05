@@ -192,3 +192,14 @@ No source code, tests, candidate refs,
 worktree files or other task ownership were changed. Maven was not run because
 this was a review with documentation-only commits, as required by AGENTS.md
 and the review verification-ownership rule.
+
+## Cleanup follow-up, 2026-09-05
+
+At the user’s request to start with the simplest candidates, removed local
+`work` (`a51cfe9b`) using `git branch -d work`. Immediately before deletion,
+`git merge-base --is-ancestor work main` succeeded, `git rev-list --count
+main..work` returned zero, and no registered worktree used that branch.
+The audit above records the earlier state; the other five candidates remain
+retained for the reasons documented there. Remote refs and worktrees were
+unchanged. Next: adapt the two close-failure regression tests from
+`native-git-client-session-machines` before reconsidering that branch.
