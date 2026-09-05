@@ -369,6 +369,61 @@ class GitBlockingClientsTest {
     }
 
     @Test
+    void reportsCloseFailureAfterSuccessfulExchange() {
+        IOException closeFailure = new IOException("close failed");
+        ClosingFailureTransport transport = new ClosingFailureTransport(
+                advertisement(""), closeFailure);
+
+        GitClientResult<GitRemoteAdvertisement> result =
+                new GitUploadPackClient(transport).discover(
+                        REMOTE, GitClientOptions.defaults());
+
+        GitClientFailure failure = failure(result);
+        assertThat(failure.kind()).isEqualTo(GitClientFailure.Kind.TRANSPORT_UNAVAILABLE);
+        assertThat(failure.phase()).isEqualTo(GitClientFailure.Phase.CLOSE);
+        assertThat(failure.cause()).isSameAs(closeFailure);
+    }
+
+    @Test
+    void suppressesCloseFailureOnPrimaryTransportFailure() {
+        IOException readFailure = new IOException("read failed");
+        IOException closeFailure = new IOException("close failed");
+        ClosingFailureTransport transport = new ClosingFailureTransport(
+                new BufferedByteInput() {
+                    @Override
+                    public int available() {
+                        return 0;
+                    }
+
+                    @Override
+                    public int readUnsignedByte() throws IOException {
+                        throw readFailure;
+                    }
+
+                    @Override
+                    public ByteBuf readCopy(int length, ByteBufAllocator allocator) {
+                        throw new AssertionError("not reached");
+                    }
+
+                    @Override
+                    public int readInto(ByteBuf target, int maxLength) {
+                        return 0;
+                    }
+                },
+                closeFailure);
+
+        GitClientResult<GitRemoteAdvertisement> result =
+                new GitUploadPackClient(transport).discover(
+                        REMOTE, GitClientOptions.defaults());
+
+        GitClientFailure failure = failure(result);
+        assertThat(failure.kind()).isEqualTo(GitClientFailure.Kind.TRANSPORT_UNAVAILABLE);
+        assertThat(failure.phase()).isEqualTo(GitClientFailure.Phase.ADVERTISEMENT);
+        assertThat(failure.cause()).isSameAs(readFailure);
+        assertThat(readFailure.getSuppressed()).containsExactly(closeFailure);
+    }
+
+    @Test
     void rejectsPushPackThatExceedsConfiguredLimit() {
         RecordingTransport transport = new RecordingTransport(
                 advertisement("report-status"));
@@ -601,6 +656,57 @@ class GitBlockingClientsTest {
                 URI remoteUri,
                 GitClientOptions options) {
             return session;
+        }
+    }
+
+    private static final class ClosingFailureTransport implements GitClientTransport {
+        private final ClosingFailureSession session;
+
+        private ClosingFailureTransport(
+                byte[] input,
+                IOException closeFailure) {
+            this(new FragmentedInput(input), closeFailure);
+        }
+
+        private ClosingFailureTransport(
+                BufferedByteInput input,
+                IOException closeFailure) {
+            session = new ClosingFailureSession(input, closeFailure);
+        }
+
+        @Override
+        public GitClientTransportSession open(
+                GitClientService service,
+                URI remoteUri,
+                GitClientOptions options) {
+            return session;
+        }
+    }
+
+    private static final class ClosingFailureSession implements GitClientTransportSession {
+        private final BufferedByteInput input;
+        private final IOException closeFailure;
+
+        private ClosingFailureSession(
+                BufferedByteInput input,
+                IOException closeFailure) {
+            this.input = input;
+            this.closeFailure = closeFailure;
+        }
+
+        @Override
+        public BufferedByteInput input() {
+            return input;
+        }
+
+        @Override
+        public BufferedByteOutput output() {
+            return new RecordingOutput();
+        }
+
+        @Override
+        public void close() throws IOException {
+            throw closeFailure;
         }
     }
 
