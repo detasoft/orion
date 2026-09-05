@@ -85,43 +85,9 @@ class ServerMakeTargetsTest {
     }
 
     @Test
-    void generatesMissingAdminIdentity() throws Exception {
-        Path capture = tempDir.resolve("ssh-keygen-invocation");
-        Path bin = Files.createDirectory(tempDir.resolve("ssh-keygen-bin"));
-        createExecutable(bin.resolve("ssh-keygen"), """
-                #!/bin/sh
-                printf 'arg=%s\n' "$@" > "$CAPTURE_FILE"
-                while [ "$#" -gt 0 ]; do
-                    if [ "$1" = '-f' ]; then
-                        touch "$2" "$2.pub"
-                        break
-                    fi
-                    shift
-                done
-                """);
-        Path identity = tempDir.resolve("orion/admin-identity.pem");
-        ProcessBuilder builder = make("admin-key", "ORION_SSH_KEY=" + identity);
-        configureFakeCommand(builder, bin, capture);
-
-        Process process = builder.start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        assertThat(process.waitFor()).as(output).isZero();
-        assertThat(Files.readAllLines(capture)).containsExactly(
-                "arg=-q",
-                "arg=-t",
-                "arg=ed25519",
-                "arg=-N",
-                "arg=",
-                "arg=-f",
-                "arg=" + identity);
-    }
-
-    @Test
     void enrollsGeneratedAdminIdentityInteractivelyWithoutForwardingPasswordEnvironment() throws Exception {
         Path capture = tempDir.resolve("ssh-enrollment");
         Path bin = Files.createDirectory(tempDir.resolve("ssh-enrollment-bin"));
-        Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
         createExecutable(bin.resolve("ssh"), """
                 #!/bin/sh
                 {
@@ -132,9 +98,7 @@ class ServerMakeTargetsTest {
                     printf 'askpass-require=%s\n' "$SSH_ASKPASS_REQUIRE"
                 } > "$CAPTURE_FILE"
                 """);
-        ProcessBuilder builder = make(
-                "enroll-admin-key",
-                "ORION_SSH_KEY=" + identity);
+        ProcessBuilder builder = make("enroll-admin-key");
         configureFakeCommand(builder, bin, capture);
         builder.environment().put("ORION_ROOT_PASSWORD", "must-not-forward");
         builder.environment().put("DISPLAY", "must-not-forward");
@@ -145,23 +109,12 @@ class ServerMakeTargetsTest {
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
         assertThat(process.waitFor()).as(output).isZero();
-        assertThat(output).contains("Admin SSH key enrolled: " + identity);
+        assertThat(output).contains("Admin SSH key enrolled using the SSH client configuration.");
         List<String> invocation = Files.readAllLines(capture);
         assertThat(invocation)
-                .containsSubsequence(
-                        "arg=-F",
-                        "arg=/dev/null",
-                        "arg=-o",
-                        "arg=IdentitiesOnly=yes",
-                        "arg=-o",
-                        "arg=IdentityFile=none")
-                .containsSubsequence("arg=-i", "arg=" + identity)
                 .containsSubsequence("arg=-o", "arg=PreferredAuthentications=publickey,keyboard-interactive")
                 .containsSubsequence("arg=-o", "arg=PasswordAuthentication=no")
-                .containsSubsequence("arg=-l", "arg=root", "arg=localhost", "arg=enroll-key")
-                .doesNotContain("arg=~/.ssh/id_rsa");
-        assertThat(invocation).filteredOn(line -> line.equals("arg=-i")).hasSize(1);
-        assertThat(invocation).filteredOn(line -> line.equals("arg=" + identity)).hasSize(1);
+                .containsSubsequence("arg=-l", "arg=root", "arg=localhost", "arg=enroll-key");
         assertThat(String.join("\n", invocation))
                 .contains("root-password=", "display=", "askpass=", "askpass-require=")
                 .doesNotContain("must-not-forward");
@@ -171,7 +124,6 @@ class ServerMakeTargetsTest {
     void issueTokenUsesPublicKeyOnlyBatchAuthentication() throws Exception {
         Path capture = tempDir.resolve("ssh-token");
         Path bin = Files.createDirectory(tempDir.resolve("ssh-token-bin"));
-        Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
         createExecutable(bin.resolve("ssh"), """
                 #!/bin/sh
                 printf 'arg=%s\n' "$@" > "$CAPTURE_FILE"
@@ -179,8 +131,7 @@ class ServerMakeTargetsTest {
                 """);
 
         ProcessBuilder builder = make(
-                "issue-token-raw",
-                "ORION_SSH_KEY=" + identity);
+                "issue-token-raw");
         configureFakeCommand(builder, bin, capture);
         Process process = builder.start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -194,11 +145,8 @@ class ServerMakeTargetsTest {
 
     @Test
     void runServerRequiresKeyMaterialPassword() throws Exception {
-        Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
-
         Process process = make(
                 "run-server",
-                "ORION_SSH_KEY=" + identity,
                 "ORION_KEY_MATERIAL_PASSWORD=").start();
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
@@ -211,14 +159,12 @@ class ServerMakeTargetsTest {
         String password = "store-\"password-$(must-not-run);-$HOME";
         Path capture = tempDir.resolve("maven-environment");
         Path bin = Files.createDirectory(tempDir.resolve("maven-bin"));
-        Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
         createExecutable(bin.resolve("mvn"), """
                 #!/bin/sh
                 printf '%s' "$ORION_KEY_MATERIAL_PASSWORD" > "$CAPTURE_FILE"
                 """);
         ProcessBuilder builder = make(
                 "run-server",
-                "ORION_SSH_KEY=" + identity,
                 "MAVEN=mvn");
         configureFakeCommand(builder, bin, capture);
         builder.environment().put("ORION_KEY_MATERIAL_PASSWORD", password);
@@ -234,14 +180,12 @@ class ServerMakeTargetsTest {
     void runServerForwardsOrionArguments() throws Exception {
         Path capture = tempDir.resolve("maven-arguments");
         Path bin = Files.createDirectory(tempDir.resolve("maven-arguments-bin"));
-        Path identity = Files.createFile(tempDir.resolve("admin-identity.pem"));
         createExecutable(bin.resolve("mvn"), """
                 #!/bin/sh
                 printf 'arg=%s\n' "$@" > "$CAPTURE_FILE"
                 """);
         ProcessBuilder builder = make(
                 "run-server",
-                "ORION_SSH_KEY=" + identity,
                 "ORION_ARGS=--reset-root-pass",
                 "MAVEN=mvn");
         configureFakeCommand(builder, bin, capture);

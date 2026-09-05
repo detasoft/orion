@@ -5,13 +5,9 @@ ORION_SSH_PORT ?= 8022
 ORION_HTTP_HOST ?= localhost
 ORION_HTTP_PORT ?= 8000
 ORION_SSH_USER ?= root
-ORION_SSH_KEY ?= $(ORION_ROOT)/admin-identity.pem
-ORION_SSH_CONFIG ?= /dev/null
-ORION_SSH_OPTIONS ?= -F $(ORION_SSH_CONFIG) -o IdentitiesOnly=yes -o IdentityFile=none \
-	-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+ORION_SSH_OPTIONS ?=
 ORION_TOKEN_TTL_SECONDS ?= 3600
 ORION_GIT_USER ?= $(ORION_SSH_USER)
-ORION_GIT_KEY ?= $(ORION_SSH_KEY)
 ORION_REPOSITORY ?= project.git
 ORION_REPOSITORY_NAME ?= $(patsubst %.git,%,$(ORION_REPOSITORY))
 ORION_CLONE_DIR ?= $(CURDIR)/target/orion-clone
@@ -25,10 +21,10 @@ ORION_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_REPO
 ORION_CHECK_GIT_URL = ssh://$(ORION_GIT_USER)@$(ORION_SSH_HOST):$(ORION_SSH_PORT)/$(ORION_CHECK_REPOSITORY)
 ORION_CHECK_HTTP_GIT_URL = http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(ORION_CHECK_REPOSITORY)
 ISSUE_TOKEN_COMMAND = ssh $(ORION_SSH_OPTIONS) -o BatchMode=yes \
-	-o PreferredAuthentications=publickey -o PasswordAuthentication=no -i $(ORION_SSH_KEY) \
+	-o PreferredAuthentications=publickey -o PasswordAuthentication=no \
 	-p $(ORION_SSH_PORT) -l root $(ORION_SSH_HOST) issue-token $(ORION_TOKEN_TTL_SECONDS)
 
-.PHONY: run-server admin-key enroll-admin-key require-key-material-password issue-token issue-token-raw
+.PHONY: run-server enroll-admin-key require-key-material-password issue-token issue-token-raw
 .PHONY: ssh-state ssh-status list-repos clone-repository clone-repo clone-http-repo
 .PHONY: admin-acl admin-acl-with-token
 .PHONY: check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
@@ -48,27 +44,21 @@ require-key-material-password:
 		exit 2; \
 	}
 
-admin-key:
-	@if [ ! -f "$(ORION_SSH_KEY)" ]; then \
-		mkdir -p "$(dir $(ORION_SSH_KEY))"; \
-		ssh-keygen -q -t ed25519 -N '' -f "$(ORION_SSH_KEY)"; \
-	fi
-
-enroll-admin-key: admin-key
+enroll-admin-key:
 	@env -u ORION_ROOT_PASSWORD -u DISPLAY -u SSH_ASKPASS -u SSH_ASKPASS_REQUIRE \
 		ssh $(ORION_SSH_OPTIONS) -o PreferredAuthentications=publickey,keyboard-interactive \
-		-o PasswordAuthentication=no -i "$(ORION_SSH_KEY)" -p $(ORION_SSH_PORT) \
+		-o PasswordAuthentication=no -p $(ORION_SSH_PORT) \
 		-l root $(ORION_SSH_HOST) enroll-key
-	@printf 'Admin SSH key enrolled: %s\n' "$(ORION_SSH_KEY)"
+	@printf 'Admin SSH key enrolled using the SSH client configuration.\n'
 
-run-server: require-key-material-password admin-key
+run-server: require-key-material-password
 	$(MAVEN) -pl core/bootstrap -am -Prun-server \
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
 
 # Scenario:
 # 1. Export ORION_KEY_MATERIAL_PASSWORD, then start the server: make run-server
 #    To recover the root user and password: make run-server ORION_ARGS=--reset-root-pass
-# 2. Enroll the generated admin key with the generated Orion root password.
+# 2. Enroll a key selected by the SSH client with the generated Orion root password.
 # 3. Issue a temporary admin token and export it into the current shell:
 #      eval "$$(make -s issue-token)"
 # 3. Use that token for the HTTP admin API:
@@ -85,20 +75,20 @@ issue-token-raw:
 # SSH admin status:
 #   make ssh-state
 ssh-state:
-	ssh $(ORION_SSH_OPTIONS) -i $(ORION_SSH_KEY) -p $(ORION_SSH_PORT) -l $(ORION_SSH_USER) $(ORION_SSH_HOST) state
+	ssh $(ORION_SSH_OPTIONS) -p $(ORION_SSH_PORT) -l $(ORION_SSH_USER) $(ORION_SSH_HOST) state
 
 ssh-status: ssh-state
 
 # List native repositories through the Orion SSH admin command:
 #   make list-repos
 list-repos:
-	@ssh $(ORION_SSH_OPTIONS) -i $(ORION_SSH_KEY) -p $(ORION_SSH_PORT) \
+	@ssh $(ORION_SSH_OPTIONS) -p $(ORION_SSH_PORT) \
 		-l $(ORION_SSH_USER) $(ORION_SSH_HOST) repositories
 
 # Clone a repository over Orion SSH:
-#   make clone-repository ORION_GIT_USER=e2e ORION_GIT_KEY=/path/to/id_rsa ORION_REPOSITORY=project.git ORION_CLONE_DIR=target/project
+#   make clone-repository ORION_GIT_USER=e2e ORION_REPOSITORY=project.git ORION_CLONE_DIR=target/project
 clone-repository:
-	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' git clone $(ORION_GIT_URL) $(ORION_CLONE_DIR)
+	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS)' git clone $(ORION_GIT_URL) $(ORION_CLONE_DIR)
 
 clone-repo: clone-repository
 
@@ -155,7 +145,7 @@ check-ssh-git:
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	printf 'ORION_TOKEN=%s\n' "$$token"; \
 	printf 'Checking SSH Git upload-pack: %s\n' "$(ORION_CHECK_GIT_URL)"; \
-	response="$$(GIT_TRACE_PACKET=1 GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' \
+	response="$$(GIT_TRACE_PACKET=1 GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS)' \
 		git -c protocol.version=2 ls-remote "$(ORION_CHECK_GIT_URL)" 2>&1)" || { \
 			printf '%s\n' "$$response"; \
 			echo "SSH Git upload-pack failed. Make sure the native repository exists." >&2; \
@@ -182,7 +172,7 @@ check-ssh-git-push-create:
 		-c user.name='Orion Check' \
 		-c user.email='orion-check@example.test' \
 		commit -m 'orion check'
-	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' \
+	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS)' \
 		git -C $(ORION_CHECK_PUSH_DIR) \
 		-c protocol.version=2 \
 		push $(ORION_CHECK_GIT_URL) HEAD:refs/heads/main
@@ -193,7 +183,7 @@ check-ssh-git-push-create:
 check-ssh-git-clone:
 	rm -rf $(ORION_CHECK_SSH_CLONE_DIR)
 	printf 'Checking SSH Git clone: %s\n' "$(ORION_CHECK_GIT_URL)"
-	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS) -i $(ORION_GIT_KEY)' \
+	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS)' \
 		git -c protocol.version=2 clone $(ORION_CHECK_GIT_URL) $(ORION_CHECK_SSH_CLONE_DIR)
 	test -d $(ORION_CHECK_SSH_CLONE_DIR)/.git
 	printf 'SSH Git clone OK: %s\n' "$(ORION_CHECK_GIT_URL)"

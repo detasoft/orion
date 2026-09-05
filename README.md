@@ -43,8 +43,8 @@ By default the server uses `orion_root` as its base directory and
 `target` tree, so `mvn clean` does not remove generated keys or the local ACL.
 The protected `material.p12` key-material store is created in the local
 `orion` repository alongside `orion.xml`; its password is read only from
-`ORION_KEY_MATERIAL_PASSWORD`. The Make helper also creates a separate local
-admin SSH identity at `orion_root/admin-identity.pem` when it is missing.
+`ORION_KEY_MATERIAL_PASSWORD`. SSH commands use the client's normal SSH
+configuration and agent, so the administrator chooses which key to use.
 
 On first startup Orion creates a default ACL in the `orion` repository and
 prints the generated `root` password:
@@ -53,8 +53,8 @@ prints the generated `root` password:
 ---ROOT PASSWORD: <generated-password>
 ```
 
-Keep the server running and enroll the generated admin identity from another
-terminal:
+Keep the server running and enroll a key selected by your SSH client from
+another terminal:
 
 ```sh
 make enroll-admin-key
@@ -182,8 +182,8 @@ The command fails closed when no expected release key fingerprint is supplied.
 ## Admin API
 
 Most `/api/admin/*` routes require a bearer token from an application admin
-user. For local development, issue a token through the SSH helper that
-authenticates as `root` with the enrolled `admin-identity.pem` key:
+user. For local development, issue a token through the SSH helper using the
+client's normal SSH configuration:
 
 ```sh
 eval "$(make -s issue-token)"
