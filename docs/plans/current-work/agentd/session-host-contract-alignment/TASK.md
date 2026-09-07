@@ -1,6 +1,7 @@
 # Align AgentD with the Stabilized Session-Host Contract
 
-Status: todo
+Status: in progress (documentation audit; runtime changes are outside this request)
+Owner: codex, session contract-docs-20260907-a91f, started 2026-09-07 07:49 Europe/Amsterdam.
 Parent: ../TASK.md
 Depends on:
 [unified AgentD native controls](../native-control-contract/TASK.md),
