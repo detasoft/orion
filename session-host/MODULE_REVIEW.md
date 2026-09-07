@@ -1,7 +1,7 @@
 # Module Review: `session-host`
 
 Date: 2026-09-07
-Status: reviewed in isolation; contract questions remain open
+Status: reviewed in isolation; journal-failure behavior accepted on 2026-09-07; client-count question remains open
 
 ## Scope and coverage
 
@@ -80,8 +80,6 @@ acknowledgement when a later segment-only update arrives.
   latest inputs.
 - Avoid introducing a worker registry or async runtime until the required control-client bound is known; a fixed
   admission bound is the smaller model.
-- Remove `journal_available` if journal failure becomes session-fatal. It currently suppresses repeated logging
-  but does not expose a recoverable or durable state.
 
 ## Proposed conceptual model
 
@@ -89,17 +87,15 @@ acknowledgement when a later segment-only update arrives.
 - One operation sequence high-water mark for host-lifetime replay protection, without a result ledger.
 - One ordinary-effect serialization path, with explicit `TERMINATE` bypass for blocked PTY input.
 - One maintenance reconciliation operation for compression and retention.
-- Three failure classes: connection-local delivery failure, non-fatal metadata refresh failure, and fatal loss of
-  the authoritative journal writer.
+- Connection-local delivery failures and non-fatal metadata/journal append failures, preserving the current
+  rule that a failed receipt or append does not replay the effect or stop the child.
 
 ## Incremental migration path
 
-1. Resolve the journal-failure and post-exec start-outcome questions below and update the protocol text first.
-2. Add fault tests for the selected behavior before changing process cleanup or PTY-reader coordination.
-3. Apply one explicit fatal-journal path if the journal remains authoritative; keep metadata refresh failures
-   non-fatal.
-4. Merge the maintenance commands without changing reconciliation or retention behavior.
-5. Define and enforce a control-client bound only when the required concurrency is known.
+1. Preserve the accepted journal-failure and post-exec start-outcome behavior documented below.
+2. Keep any later process-cleanup or PTY-reader changes covered by the existing failure semantics.
+3. Merge the maintenance commands without changing reconciliation or retention behavior.
+4. Define and enforce a control-client bound only when the required concurrency is known.
 
 ## Do not change
 
@@ -112,46 +108,40 @@ acknowledgement when a later segment-only update arrives.
   identity checks.
 - Preserve the documented macOS process-tracking limitations and current Windows unsupported status.
 
+## Accepted journal-failure behavior
+
+Documentation decision, 2026-09-07: the current implementation is the accepted
+baseline. The earlier suggestions to terminate on journal loss or require a
+durable start record before publishing a live session are superseded; they are
+not implementation requirements.
+
+### Output append failure
+
+`copy_pty_output` keeps draining the PTY after a failed append. It discards the
+failed chunk, reports the error on stderr, and attempts later chunks. The child
+continues running. The local `journal_available` flag suppresses repeated
+messages; it is not a STATUS flag or durable state. Because event IDs advance
+only for appended records, a reader cannot detect every lost output chunk from
+the journal. Durable history contains successfully persisted records, not a
+guarantee of complete output after storage failure.
+
+### Start-outcome append failure
+
+`PendingStartOutcome::started` attempts `PROCESS_STARTED` after exec. If the
+append fails, it logs the error and returns the journal so startup can publish
+a live session. A missing start record therefore does not prove a pre-exec
+failure or a dead process. The host does not write `SESSION_START_FAILED` after
+exec or stop the child solely because the start record could not be persisted.
+Pre-exec failure attempts `SESSION_START_FAILED`; failure of that append is
+reported together with the launch failure. Neither path guarantees a durable
+outcome when storage fails.
+
+AgentD documentation must preserve this uncertainty and must not introduce a
+local shutdown or recovery policy to satisfy the superseded stronger promise.
+
 ## Open questions
 
-### 1. Should the host continue after losing journal output?
-
-The current behavior conflicts with the stated purpose of `session-host`. The task requires a durable ordered
-journal and preservation of terminal bytes for deterministic replay
-([native session-host task](../docs/plans/current-work/native-session-host/TASK.md)). The availability requirement
-only says that the host and child survive the process that launched them
-([module README](README.md)); it does not require the child to continue after loss of the host's own journal.
-
-`copy_pty_output` currently discards a PTY chunk when its append fails and may append later chunks after the
-writer recovers (`src/platform/unix.rs`). `JournalWriter::append_at` advances the event ID only after a successful
-append (`src/journal.rs`). A reader therefore sees an apparently continuous event sequence and cannot detect that
-terminal bytes were lost between records.
-
-The local `journal_available` flag only suppresses repeated stderr output. It is absent from `STATUS` and durable
-state, so it does not make the degraded session observable or recoverable.
-
-The preferred resolution is to treat loss of the authoritative journal writer as fatal to the session. The host
-should stop accepting controls, terminate and reap its owned process tree, and continue draining the PTY only as
-needed to avoid blocking cleanup. If process availability must instead win over deterministic replay, the
-contract needs an explicit observable gap/degraded-state model before this behavior can be considered safe.
-
-### 2. What happens when `PROCESS_STARTED` cannot be persisted after exec?
-
-The child has crossed the exec boundary, so writing `SESSION_START_FAILED` would record a false lifecycle fact.
-The current implementation instead logs the failed `PROCESS_STARTED` append and publishes a live session. That
-conflicts with the protocol promise of exactly one durable start outcome and with journal-based recovery, which
-then has no authoritative record that the process started.
-
-The preferred resolution is to publish the live session only after `PROCESS_STARTED` is durable. If that append
-fails, the host should perform immediate owned-process cleanup, return a distinct post-exec persistence failure,
-and must not write `SESSION_START_FAILED`. The protocol should state that exactly one start outcome is guaranteed
-when its durable append succeeds; storage failure can leave no durable outcome but must never create a live
-session without `PROCESS_STARTED`.
-
-This cleanup is failure containment for a host invariant, not server-owned graceful shutdown: it has no grace
-period, escalation policy, or effect retry.
-
-### 3. How many simultaneous control clients must one session support?
+### 1. How many simultaneous control clients must one session support?
 
 The answer determines whether a fixed connection limit is sufficient or whether connection workers require
 explicit ownership beyond the current detached-thread model.

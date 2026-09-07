@@ -27,9 +27,13 @@ forward durable commit acknowledgements to `session-host` for safe retention.
 - Accept only monotonic batch acknowledgements issued after durable server
   commit and forward their exact watermark to the matching host as
   `ACK_JOURNAL`.
-- Never journal `ACK_JOURNAL`, persist an AgentD cursor, read cursor state from
-  a session directory, or treat the host retention watermark as replication
-  authority.
+- Send `ACK_JOURNAL` as a schema-2 operation with an operation sequence and
+  exact opaque envelope. The host journals its `COMMAND_RESULT`; an empty
+  `RECEIVED` confirms admission only. Coordinate sequence allocation with
+  command orchestration and avoid an ACK feedback loop driven solely by ACK
+  result records.
+- Never persist an AgentD cursor, read replication cursor state from a session
+  directory, or treat the host retention watermark as replication authority.
 - When the server cursor precedes the locally retained floor, report an
   explicit integrity gap and pause that session until the server decides how
   synchronization proceeds.
@@ -40,8 +44,10 @@ forward durable commit acknowledgements to `session-host` for safe retention.
   server's durably committed cursor.
 - Interrupted or unacknowledged batches are resent without skipping records,
   and duplicate monotonic acknowledgements are harmless.
-- Acknowledgements reach the host only after durable server commit and complete
-  only after the host durably applies its retention state.
+- Acknowledgements reach the host only after durable server commit. Observe
+  successful completion through the journaled ACK result after durable
+  retention-state publication; a missing result remains unknown, and
+  `RECEIVED` is not evidence of publication or physical deletion.
 - No AgentD cursor file or session-directory cursor dependency is introduced.
 - A cursor below the retained floor reports an integrity gap and sends no
   replacement history until the server responds.

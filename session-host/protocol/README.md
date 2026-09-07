@@ -109,10 +109,13 @@ at most 4096 bytes.
 `SESSION_START_FAILED` stores the `START_SESSION` CommandId, a strict UTF-8
 diagnostic of at most 1 MiB, and the number of omitted diagnostic bytes. A
 longer diagnostic keeps a UTF-8-safe prefix of at most 64 KiB and suffix of at
-most 960 KiB. Once the host creates a journal, it durably appends exactly one
-start outcome before leaving the start phase: `PROCESS_STARTED` after the
-child crosses the exec boundary or `SESSION_START_FAILED` for an earlier
-failure. Failures before journal creation have no native outcome record.
+most 960 KiB. Once the host creates a journal, it attempts one durable start
+outcome before leaving the start phase: `PROCESS_STARTED` after the child
+crosses the exec boundary or `SESSION_START_FAILED` for an earlier failure.
+A failed append can leave no durable outcome. In particular, failure to append
+`PROCESS_STARTED` is logged to stderr and the host still publishes the live
+session; it does not record `SESSION_START_FAILED` after exec. Failures before
+journal creation have no native outcome record.
 
 Readers expose an unknown event type and its encoded payload as an opaque
 record, preserve its complete encoded record, and continue with later events.
@@ -196,9 +199,10 @@ but the live host rejects schema 1 for these five operation controls.
 The host serializes new operation effects and keeps only an in-memory accepted
 sequence high-water mark. A sequence at or below that mark is stale; gaps above
 it are valid. Every new effect is applied once, synchronously. The host writes
-one `COMMAND_RESULT` after every operation effect, with an empty detail after
-successful application or diagnostic detail when application fails. Successful operations
-receive `RECEIVED` with the frame sequence in the response header. Validation
+one `COMMAND_RESULT` after every operation effect when the durable append succeeds,
+with an empty detail after successful application or diagnostic detail when
+application fails. Admitted operations receive an empty `RECEIVED` before the
+effect, with the frame sequence in the response header. Validation
 and stale-sequence failures receive `RECEIVED` with the same sequence and an
 error payload. Journal append failures go only to stderr.
 
@@ -230,14 +234,16 @@ The server owns escalation timing and sends a later force operation when needed.
 
 `APPEND_EVENT` begins with a 16-byte producer event UUID, u16 journal event
 type, u16 payload-schema version, u32 event flags, then the exact event payload.
-Version 1 accepts only event types in `0x1000-0x1fff`. The host assigns the
-journal event ID. A producer UUID has no deduplication semantics in
-`session-host`.
+The reserved version-1 layout allows event types in `0x1000-0x1fff`, with a
+host-assigned journal event ID and no producer UUID deduplication semantics.
+The current Unix host rejects `APPEND_EVENT` with an unsupported-message error;
+ordered harness ingress is not implemented yet.
 
 `ACK_JOURNAL` is recorded as `COMMAND_RESULT` using its operation sequence and
 exact command envelope. Its effect is the supplied journal event ID.
-AgentD sends it only after the server confirms durable storage through that
-event ID. The host first durably publishes the monotonic
+An AgentD integration must send it only after the server confirms durable
+storage through that event ID; Java ACK forwarding is still pending. The host
+first durably publishes the monotonic
 `control-retention-state` sidecar and only then allows newly covered closed
 segments to be deleted. A repeated or lower value does not lower the watermark.
 The sidecar contains only `stateVersion: 1` and `acknowledgedEventId`; it is
@@ -261,9 +267,11 @@ sequence in the response header:
 | `0x8002` | `ERROR` | u32 error code and UTF-8 detail |
 | `0x8003` | `STATUS_RESPONSE` | Fixed 64-byte status |
 
-`RECEIVED` means only that the operation passed admission and will be applied
-by this host incarnation; it is not a durable journal confirmation. The
-operation's durable acceptance and result are observed through the journal.
+An empty `RECEIVED` means only that the operation passed admission and is
+scheduled for one execution attempt by this host incarnation; it is not a
+durable journal confirmation. There is no separate durable acceptance record.
+The execution result is observed through `COMMAND_RESULT` when its append
+succeeds. Failure to deliver `RECEIVED` does not cancel an admitted effect.
 Validation and stale-sequence failures use `RECEIVED` with an error. An I/O failure while
 appending a journal event is reported on stderr; the effect is never retried.
 

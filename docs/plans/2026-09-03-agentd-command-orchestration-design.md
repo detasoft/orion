@@ -1,5 +1,14 @@
 # AgentD Command Orchestration Design
 
+> Contract update, 2026-09-07: native-control and recovery passages below are
+> historical proposals, not a description of current runtime behavior. The
+> [current native contract and Java interface comparison](2026-09-03-native-control-journal-idempotency-design.md)
+> supersede assumptions about durable command intents, result-ledger retries,
+> direct result event IDs, non-journaled ACK, and guaranteed start records.
+> Recovery from recorded sequence maxima alone is not established when an
+> admitted operation has a pending or missing result. Reconcile affected steps
+> with that document before implementing the remaining orchestration work.
+
 ## Status
 
 Approved on 2026-09-03. This design supersedes the command-result and

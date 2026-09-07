@@ -1,197 +1,179 @@
-# Native Control Journal Idempotency Design
+# Native Control and Journal Contract
 
-Status: approved on 2026-09-03.
+Status: reconciled with the current implementation on 2026-09-07.
+This replaces the 2026-09-03 intent/result-ledger design. Current native
+behavior is the accepted baseline; this document does not request runtime
+changes. Wire layouts are specified in
+[the native protocol](../../session-host/protocol/README.md). Implementation
+references are [native framing](../../session-host/src/protocol.rs),
+[Unix admission and execution](../../session-host/src/platform/unix.rs), and
+[retention publication](../../session-host/src/journal_acknowledgement.rs).
 
-## Context
+## Owners and implementation boundary
 
-The native `session-host` outlives AgentD connections and keeps the session
-process, PTY, and journal running while AgentD disconnects or restarts. AgentD
-must recover without a private durable command ledger and without blindly
-repeating controls whose responses were lost.
+`session-host` owns the process tree, PTY, local journal, control admission,
+and retention permission. The server owns durable replicated history,
+termination timing, and escalation. AgentD launches and discovers hosts and
+provides the local Java control client. Server command orchestration and
+journal synchronization remain queued work, not completed integration.
 
-The server is the authority for the journal prefix it has durably committed.
-The live host journal is the authority for the later local suffix. Current
-physical-size retention compresses closed segments and may delete the oldest
-closed prefix without knowing whether the server saved it. That deletion rule
-must become acknowledgement-gated.
+The Rust host and Java client currently expose different operation layouts.
+The comparison below records both implementations; the
+[alignment task](current-work/agentd/session-host-contract-alignment/TASK.md)
+tracks the remaining Java integration work. Do not infer interoperability from
+both sides calling their payload schema `2`.
 
-## Selected Architecture
+## Native operation contract
 
-AgentD assigns one unsigned, monotonically increasing `operationSequence` to
-each established-session `INPUT`, `RESIZE`, `SIGNAL`, and `TERMINATE` command.
-Gaps are valid. `START_SESSION` and `APPEND_EVENT` remain outside this flow.
+`INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`, and `ACK_JOURNAL` use schema 2.
+One unsigned sequence in the 32-byte frame header identifies the operation and
+correlates its response. Live operation admission accepts values from `1`
+through `u64::MAX - 1`; gaps and values above `i64::MAX` are valid.
+`u64::MAX` is reserved for responses without an associated sequence.
 
-Each request carries the sequence, the bounded CommandId, the exact opaque
-server CBOR command item, and the existing typed effect payload. Native code
-does not decode or re-encode the command item. The complete retry identity is
-the sequence, CommandId bytes, command-envelope bytes, control type, and effect
-bytes.
+The little-endian operation payload is:
 
-Before an external effect, the host durably appends `COMMAND_ACCEPTED`. After
-the effect, it durably appends `COMMAND_RESULT` and returns that result record's
-`eventId`. An identical completed retry returns the original result `eventId`
-without another effect or journal append. Reusing a sequence with different
-identity is a conflict, and an unknown sequence below the accepted high-water
-mark is stale.
+```text
+u32 commandEnvelopeLength
+commandEnvelopeLength opaque bytes
+command-specific effect bytes
+```
 
-`COMMAND_ACCEPTED` contains the operation sequence and exact command envelope.
-`COMMAND_RESULT` contains the operation sequence, separately supplied CommandId,
-outcome, and bounded detail. The accepted record does not repeat CommandId:
-AgentD already retains the typed command view used during recovery, while the
-native host has no reason to interpret the envelope.
+The nonempty envelope is preserved exactly without decoding its CBOR contents.
+There is no separately encoded native CommandId or payload operation sequence.
+`INPUT` retains its 16-byte input UUID and raw bytes; `RESIZE` contains two u32
+dimensions; `SIGNAL` contains u16 kind, u16 reserved zero, and i32 platform code;
+`TERMINATE` contains only u16 mode and u16 reserved zero; `ACK_JOURNAL` contains
+one u64 journal event ID. The complete payload is bounded to 16 MiB.
 
-The host keeps a bounded in-memory table for accepted operations that the
-server has not yet acknowledged. The table distinguishes pending and completed
-operations, so reconnects cannot duplicate an effect while its original
-handler is still running. The accepted-operation high-water mark remains in
-memory after completed details are evicted. A full table rejects a genuinely
-new operation before intent or effect while still allowing matching retries and
-`STATUS` or `ACK_JOURNAL` controls.
+`STATUS` remains a schema-1 empty request with a 64-byte response. The
+`APPEND_EVENT` schema-1 layout is reserved, but the live Unix host rejects it
+because ordered harness ingress is not implemented.
 
-The host incarnation is not restarted to continue a live session. If the host
-dies, that session fails instead of reconstructing and resuming its control
-ledger. In particular, the host does not synthesize `AMBIGUOUS` results by
-scanning old accepted intents. Recovery in this design means AgentD recovery
-while the host remains alive.
+## Admission, execution, and journal results
 
-## AgentD Recovery
+The host keeps only an in-memory accepted-sequence high-water mark for replay
+protection. A sequence at or below it is rejected, including a byte-identical
+retry. Admission advances the mark and registers an active operation; it does
+not append a durable intent or retain a result ledger.
 
-After AgentD connects or restarts, the server supplies for each session:
+The host sends an empty `RECEIVED` before applying the effect. Admission
+rejection uses `RECEIVED` with u32 error code and bounded UTF-8 detail.
+Failure to deliver the receipt is logged and does not cancel the admitted
+effect. `ERROR` handles other control errors. Response frames use schema 1.
 
-1. its authoritative durably committed journal `eventId`; and
-2. the highest `operationSequence` represented by that committed prefix.
+After executing an admitted effect once, the host attempts to durably append:
 
-AgentD scans the host journal strictly after the server cursor through a stable
-tail and observes `COMMAND_ACCEPTED`, `COMMAND_RESULT`, and lifecycle events.
-The next operation sequence is one greater than the maximum of the server
-prefix and local suffix. Commands wait in the session's bounded serial lane
-until this scan completes.
+```text
+[eventId, COMMAND_RESULT,
+ [operationSequence, exactCommandEnvelope, outcome, detail]]
+```
 
-Correct retention guarantees that the server cursor cannot fall below the
-local retained floor: every deleted event was covered by a server-confirmed
-watermark. A missing or corrupt required suffix blocks only that session;
-AgentD never guesses a sequence.
+A live host produces succeeded or failed results. Rejected and ambiguous
+outcomes remain values understood by shared journal readers. Admission
+rejection does not create a result record. A failed effect can have partial
+side effects; `PTY_INPUT` records requested bytes, not confirmed delivery.
+A result-append failure is logged to stderr and does not replay the effect.
+A missing result therefore means unknown outcome.
 
-## Durable Journal Acknowledgement
+Ordinary effects share a mutex; `TERMINATE` bypasses it to signal descendants
+while an ordinary effect is blocked. Sequences identify attempts, not FIFO
+positions across connections. Match journal results by sequence rather than
+record position. The host has no grace timer, escalation loop, or signal retry.
 
-`ACK_JOURNAL` is a non-journaled control command carrying one nonzero journal
-`eventId`. AgentD may generate it only after the server confirms that it has
-durably saved the complete journal prefix through that ID. Writing bytes to a
-network connection is not sufficient.
+## Journal acknowledgement and retention
 
-The host validates that the watermark does not exceed its current logical
-journal tail. A greater watermark atomically replaces a versioned
-`control-retention-state` sidecar beside the journal. The file contains only
-the acknowledged journal `eventId`; it is local retention permission, not an
-AgentD cursor, session metadata field, or server-replication authority.
+`ACK_JOURNAL` uses the same admission and result path as the other operations,
+including an opaque envelope and its own operation sequence. Its watermark
+must represent a complete server-durable prefix; a network write alone is
+not authority to delete local history. Java forwarding is still pending.
 
-Durable publication is ordered as follows:
+During effect execution, the host rejects zero watermarks and values beyond
+the current journal tail. These effect failures produce failed results when
+the journal is writable. A greater valid watermark is published in
+`control-retention-state`, containing `stateVersion: 1` and
+`acknowledgedEventId`. Publication writes and syncs a temporary file, renames
+it, and syncs the directory before newly covered deletion is authorized.
+The sidecar is local deletion permission, not an AgentD replication cursor.
 
-1. write the complete next checkpoint to a temporary file;
-2. sync the temporary file data;
-3. atomically rename it over `control-retention-state`;
-4. sync the containing directory; and
-5. only then make newly covered segments eligible for deletion.
+Repeated or lower watermarks in newly admitted operations do not lower the
+stored watermark. Reusing an operation sequence is still stale. The handler
+requests retention maintenance and then follows the ordinary `COMMAND_RESULT`
+path. `RECEIVED` does not confirm checkpoint publication or physical deletion.
+An ACK itself adds a result record; it does not acknowledge that new record.
+ACK scheduling, including avoiding a feedback loop driven solely by ACK
+results, belongs to the pending journal-sync implementation.
 
-The host replies `ACCEPTED` only after the new watermark is durable. Repeated
-or lower watermarks do not lower state and return the current durable
-watermark. A repeated request also wakes maintenance so a prior deletion
-failure can be retried.
+Compression is independent of acknowledgement. Physical-size retention can
+delete only the oldest closed prefix covered by the durable watermark; it
+never deletes the active segment or unacknowledged history to meet the size
+target. Compression/deletion failures do not revoke a durable watermark.
+Readers behind the retained floor report a retention gap.
 
-ACK completion includes durable watermark publication, operation-ledger
-acknowledgement, and a non-waiting maintenance wake. The handler releases
-shared host state before constructing its response. It does not wait for
-segment discovery, compression, scanning, deletion, or directory
-synchronization. Physical retention is eventual cleanup: wakes coalesce to the
-greatest watermark and active-segment boundary, and later wakes or host finish
-retry an unresolved maintenance failure.
+## Start and journal-write failures
 
-A crash before checkpoint publication leaves the previous watermark and
-therefore cannot authorize new deletion. A crash after publication may leave
-eligible files present; later maintenance may finish deleting them. No crash
-boundary permits deletion ahead of the durable checkpoint.
+After journal creation, the host attempts `PROCESS_STARTED` after the child
+crosses exec, or `SESSION_START_FAILED` on an earlier start failure. A durable
+start outcome exists only when its append succeeds. Failure to append
+`PROCESS_STARTED` is logged; the host still publishes the live session.
+It does not substitute a false pre-exec failure or terminate the child solely
+because this append failed.
 
-## Compression and Retention
+The PTY reader continues draining after an output append fails. Failed chunks
+are discarded, later chunks may be journaled, and the child remains running.
+There is no durable gap event or STATUS degradation flag for this loss.
+A reader cannot prove complete terminal history from increasing event IDs.
+These are accepted current behaviors, not requests for fatal journal handling.
 
-Compression remains independent of server acknowledgement. The maintenance
-worker may compress every closed raw segment and safely replace it with its
-equivalent `.cbor.zst` representation.
+Metadata remains a discovery manifest, not a lifecycle record or journal
+index. Live STATUS reports current process observations and journal bounds;
+missing journal evidence cannot be reconstructed from metadata.
 
-Deletion remains an oldest-prefix physical-size policy with an additional
-hard gate. A closed segment is eligible only when its last `eventId` is at or
-below the durable acknowledged watermark. The active segment is never deleted.
-If the size target requires deleting unacknowledged data, maintenance retains
-that data and the physical journal is allowed to exceed `journal_max_bytes`.
-Absence of a checkpoint means that no segment is eligible for deletion.
+## Current Java interface and remaining alignment
 
-Retention collects physical segment sizes with checked arithmetic before
-decoding records. A journal already within its size target needs no record
-scan. When oversized, maintenance streams only the oldest closed candidates
-in order and stops as soon as the target is met or a candidate extends beyond
-the acknowledged watermark. Noncandidate segments are not eagerly decoded;
-their corruption is reported only when a reader or later retention attempt
-needs them. The worker conservatively retains any segment that could still be
-the writer's active segment by coalescing the greatest observed active-segment
-number.
+Sources: `ControlCommand`, `NativeControlCodec`, `ControlResult`, and
+`SessionControlClient` under `agentd/src/main/java/pro/deta/orion/agentd/session/`.
 
-The existing single maintenance worker remains the sole segment mutator. It
-receives the acknowledged watermark, discovers closed segment event ranges,
-compresses closed segments, and deletes only the size-selected eligible prefix.
-It must make each deletion and directory update durable. The control layer is
-the sole writer of `control-retention-state`; journal maintenance never writes
-a second watermark.
+| Area | Current AgentD implementation | Current native host |
+| --- | --- | --- |
+| Frame correlation | Independent positive request ID allocated by the client | Operation sequence in the header |
+| Schema-2 prefix | u64 operation sequence, u16 CommandId length, CommandId, u32 envelope length, envelope | u32 envelope length and envelope |
+| TERMINATE effect | Eight bytes, including u32 graceMillis | Four bytes, mode and reserved zero |
+| Operation response | 0x8000/0x8001 select accepted/duplicate, with an eight-byte journal timestamp | 0x8000 RECEIVED, empty or an error payload |
+| ACK_JOURNAL | No ControlCommand variant or encoder path | Schema-2 operation with a journaled result |
+| Replay | One retry of a non-STATUS request within its deadline | Any sequence at or below the high-water mark is rejected |
+| STATUS | Schema-1 request and 64-byte response; Java omits journal bounds from HostStatus | Schema-1 snapshot including retained journal bounds |
 
-## Failure Handling
+The Java client preserves the same request bytes for its retry. In the current
+implementation a decoded retry response can end the exchange even when the
+first delivery was uncertain; it does not recover a native durable result.
+Launch uses the native CLI and a manifest/journal/host handoff probe. Discovery
+reads the manifest and observes host and journal state. These implemented
+paths do not imply that command routing, result projection, or server-durable
+ACK forwarding has been completed.
 
-Malformed v2 controls, zero sequences, invalid CommandIds, empty or oversized
-envelopes, future ACK watermarks, conflicting sequence reuse, and unexplained
-stale sequences are rejected before external effects. Expected control errors
-remain protocol responses rather than process failures.
+## Recovery limits and future implementation
 
-An I/O failure before `COMMAND_ACCEPTED` leaves the operation unaccepted and
-safe for AgentD to retry. Once intent is durable, the host must append and sync
-the actual result before reporting success. Loss of the direct response is
-harmless because a retry reuses the journaled result.
+The server-durable prefix plus local journal suffix provide recorded operation
+and lifecycle evidence. They do not expose the host's complete admission
+high-water mark: an admitted operation may have no result record, or its effect
+may still be running. Therefore `max(recorded sequence) + 1` is not proven to
+be a fresh sequence on reconnect. No native API currently returns that mark.
+The orchestration task must resolve this under the existing admission contract;
+this documentation does not invent an intent log, replay ledger, or recovery
+protocol. Missing results never authorize automatic effect replay.
 
-Checkpoint publication failure leaves the old watermark and forbids newly
-eligible deletion. Compression or deletion failure does not invalidate an
-already durable server acknowledgement; maintenance records the failure and
-retries it without lowering the watermark.
+The host does not restart a failed incarnation to resume its live process tree.
+Source-aware controls, addressed process controls, PTY closure events, and
+Windows ConPTY remain separate queued work. Their proposed contracts must not
+be described as current behavior.
 
-## Compatibility and Scope
+## Verification reference
 
-The existing v1 control and journal fixtures remain byte-for-byte frozen.
-Additive v2 control fixtures and command-event fixtures cover values above
-`i64::MAX`, exact unknown CBOR fields, and cross-language decoding.
-
-This work changes the native control protocol, journal event allocation,
-in-memory control ledger, acknowledgement sidecar, retention gate, tests,
-fixtures, and directly necessary documentation. AgentD generation and retry
-timing, server projection, ordered harness-event ingress, and resumption of a
-failed host incarnation remain outside this task.
-
-## Testing
-
-Tests cover all four v2 controls, exact owned command-envelope bytes, sequence
-gaps, identical pending and completed retries, conflicts, stale sequences,
-capacity and ACK-driven eviction, and result `eventId` reuse across AgentD
-reconnects.
-
-Retention tests cover no deletion without a checkpoint, compression without an
-ACK, deletion only through the acknowledged segment boundary, a size target
-that cannot be met without unacknowledged deletion, monotonic repeated and
-lower ACKs, future and zero ACK rejection, and deletion retry.
-
-Filesystem seams cover failure before checkpoint rename, durable checkpoint
-publication before deletion, and durable deletion afterward. Compatibility
-tests keep v1 bytes frozen and verify the additive native and Java fixtures.
-
-## Rejected Alternatives
-
-Journaled ACK records were rejected because they add retention facts to the
-replicated stream they acknowledge and can create an ACK feedback cycle.
-Memory-only acknowledgement was rejected because a crash between permission
-receipt and deletion leaves no durable explanation of what may be removed.
-An AgentD-local durable cursor was rejected because AgentD recovery deliberately
-uses the server prefix plus host-journal suffix instead of a second local
-authority.
+Native protocol fixtures and Rust tests describe the implemented native bytes.
+In particular, `control-idempotency-v2.bin` covers all five operation types,
+unsigned sequences above `i64::MAX`, and opaque envelopes with unknown fields.
+Older schema-1 operation fixture bytes remain frozen, although the live host
+rejects those operation requests. Java alignment acceptance must compare with
+the current native fixtures and exercise a real host; documentation updates
+alone do not establish that these checks pass.

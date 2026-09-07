@@ -1,5 +1,14 @@
 # AgentD Command Orchestration Implementation Plan
 
+> Contract update, 2026-09-07: native-control and recovery passages below are
+> historical proposals, not a description of current runtime behavior. The
+> [current native contract and Java interface comparison](2026-09-03-native-control-journal-idempotency-design.md)
+> supersede assumptions about durable command intents, result-ledger retries,
+> direct result event IDs, non-journaled ACK, and guaranteed start records.
+> Recovery from recorded sequence maxima alone is not established when an
+> admitted operation has a pending or missing result. Reconcile affected steps
+> with that document before implementing the remaining orchestration work.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Route server session commands through stateless, bounded per-session orchestration whose durable
