@@ -24,6 +24,7 @@ commands, and survives independently of `agentd`.
 
 - [ ] [Add explicit sources to session control commands](source-aware-controls/TASK.md)
 - [ ] [Harden Linux process-tree control](linux-process-tree-control/TASK.md)
+- [ ] [Handle Linux proc discovery access failures](linux-proc-discovery-errors/TASK.md)
 - [ ] [Expose process control and PTY closure](process-control-and-pty-closure/TASK.md)
 - [ ] [Coordinate session termination](termination-coordination/TASK.md)
 - [ ] [Keep native session shutdown simple](termination-shutdown-hardening/TASK.md)
