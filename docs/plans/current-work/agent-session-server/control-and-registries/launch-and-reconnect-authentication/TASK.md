@@ -13,7 +13,7 @@ the connection available to other server operations.
 - Issue bounded, short-lived launch permits and atomically consume each permit
   once together with durable publication of the reconnect-token hash and expiry.
   Send `WELCOME` only after that state is committed.
-- Verify reconnect tokens against durable state and reject expired, replayed,
+- Verify reusable reconnect tokens against durable state and reject expired,
   mismatched, missing, or superseded credentials without exposing secrets.
 - Specify reconnect-token lifetime and renewal, including lost `WELCOME`
   responses. If an initial permit was consumed before its token reached AgentD,

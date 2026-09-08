@@ -15,6 +15,11 @@ forward durable commit acknowledgements to `session-host` for safe retention.
 - Native-host `ACK_JOURNAL` compatibility contract from
   the [control-journal idempotency design](../../../2026-09-03-native-control-journal-idempotency-design.md).
 
+Control integration: consume the authenticated connection lifecycle from
+[AgentD control connection work](../control-connection-lifecycle/TASK.md).
+Journal synchronization owns session-stream resume, not another control
+authentication, heartbeat, or reconnect loop.
+
 ## Requirements
 
 - Open one current HTTP/2 stream for each syncing session, send `SESSION_OPEN`
