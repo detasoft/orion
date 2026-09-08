@@ -1,5 +1,15 @@
 # Native Control Journal Idempotency Implementation Plan
 
+> Historical plan: the implementation is complete and the current runtime
+> contract is documented in
+> [Native Control and Journal Contract](2026-09-03-native-control-journal-idempotency-design.md).
+> The plan below is retained as an implementation record. Its proposed
+> durable `COMMAND_ACCEPTED` ledger, duplicate-result replay, ACK without a
+> journal result, and crash recovery of unmatched intents are not current
+> behavior and must not be used as acceptance criteria for AgentD integration.
+> The live host admits operations in memory, returns `RECEIVED`, executes once,
+> and appends `COMMAND_RESULT` when that append succeeds.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Make native established-session controls idempotent across AgentD reconnects and restarts while

@@ -14,6 +14,13 @@
 **Goal:** Route server session commands through stateless, bounded per-session orchestration whose durable
 outcomes and recovery state come exclusively from session journals.
 
+> Contract note (2026-09-07): this plan predates the accepted native runtime
+> behavior. Sections that require durable `COMMAND_ACCEPTED`, native result
+> event IDs in control responses, unmatched-intent recovery, or guaranteed
+> start outcomes are historical proposals. Implementing remaining steps must
+> follow the reconciled [native contract](2026-09-03-native-control-journal-idempotency-design.md)
+> and the current task acceptance criteria.
+
 **Architecture:** Keep the exact inbound server CBOR item beside its typed message, queue commands in one
 bounded serial lane per session, and run different session lanes concurrently. Recover each lane from the
 server's acknowledged operation prefix plus an independent local journal suffix scan; delegate durable
