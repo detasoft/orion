@@ -1,6 +1,6 @@
 # Agent Server HTTP/2 Control Transport
 
-Task: [HTTP/2 control transport](current-work/agent-session-server/control-and-registries/http2-control-transport/TASK.md)
+Task: `current-work/agent-session-server/control-and-registries/http2-control-transport`
 Pool: [Server agent registration](current-work/agent-session-server/control-and-registries/TASK.md)
 Protocol: [Agent protocol](../../agent-protocol/protocol/README.md)
 
@@ -67,9 +67,11 @@ store, replication cursor, retry loop, feature flag, or separate server here.
 
 ## HTTP and Control Semantics
 
-- Match exactly `/agent/control`; require `POST` over HTTPS HTTP/2 and the
-  existing Agent CBOR media type. Reject invalid requests before accepting the
-  response stream. Preserve existing routing for other paths.
+- Match exactly `/agent/control` and require `POST` over HTTPS HTTP/2. Existing
+  AgentD sends `HttpFields.EMPTY`, so accept requests without `Content-Type`;
+  the endpoint itself selects the Agent CBOR protocol. Do not add media-type
+  negotiation or a mandatory client header in this leaf. Reject invalid method
+  or transport before accepting the response stream and preserve other routes.
 - Emit successful response headers with no end-of-stream before waiting for
   request-body `HELLO`. Otherwise the existing AgentD and server deadlock.
 - Incrementally decode bounded input without buffering an unbounded request.
@@ -104,7 +106,7 @@ The implementation worker owns all Maven execution, outside the sandbox.
   response headers arriving before `HELLO`, and full-duplex ordered traffic.
 - Cover fragmented and coalesced CBOR, unknown/recoverable semantic input under
   existing codec rules, structural corruption, oversize input, invalid method,
-  transport/media type, and production rejection without authentication.
+  transport, absent request headers, and production rejection without authentication.
 - Exercise quiet-handshake timeout, blocked output/backpressure, peer reset,
   disconnect, and server shutdown. Verify pending work settles and resources
   are released rather than checking only a flag or a timeout exception.
@@ -127,8 +129,7 @@ ordering, boundedness, deadlines, and lifecycle ownership.
 Return a committed implementation for orchestrator review. After review fixes,
 the worker prepares one squashed task commit, removes the completed leaf and
 its queue links, and updates next-task references. Keep this ordinary plan as
-the implementation record; replacing its completed task link with a plain task
-identifier is an orchestrator-owned follow-up if needed.
+the implementation record under its stable task identifier.
 
 Do not transfer to `main` or remove the worktree before the orchestrator's
 per-task user gate. The next server task is durable agent and launch records.
