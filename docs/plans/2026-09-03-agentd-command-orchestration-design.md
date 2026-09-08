@@ -3,8 +3,8 @@
 > Contract update, 2026-09-07: native-control and recovery passages below are
 > historical proposals, not a description of current runtime behavior. The
 > [current native contract and Java interface comparison](2026-09-03-native-control-journal-idempotency-design.md)
-> supersede assumptions about durable command intents, result-ledger retries,
-> direct result event IDs, non-journaled ACK, and guaranteed start records.
+> define in-memory admission, journaled command results, schema-2 ACK, and
+> start-outcome uncertainty.
 > Recovery from recorded sequence maxima alone is not established when an
 > admitted operation has a pending or missing result. Reconcile affected steps
 > with that document before implementing the remaining orchestration work.
@@ -44,15 +44,16 @@ or substituted for one another:
 - `eventId` is the unsigned, strictly increasing order of durable records in
   one session journal. The server replication cursor is an `eventId`.
 - `operationSequence` is the order AgentD assigns to accepted local control
-  attempts for one session. It appears in command intent and result records;
-  it is not a journal cursor and gaps are valid.
+  attempts for one session. It appears in frame headers and command result
+  records; it is not a journal cursor and gaps are valid.
 - metadata `latestTimestamp` or similarly named latest-event fields are
   observational snapshots only. They are neither an `eventId` authority nor
   an `operationSequence` allocator.
 
 `ACK_JOURNAL` carries a server-durably-committed journal `eventId` watermark to
-the host. It is a non-journaled, idempotent retention-control command. AgentD
-never treats the host retention watermark as replication authority and never
+the host through a schema-2 operation with its own sequence and opaque envelope.
+It produces `COMMAND_RESULT` when the result append succeeds. AgentD never
+treats the host retention watermark as replication authority and never
 persists it as an AgentD cursor.
 
 ## Considered Approaches
@@ -76,11 +77,11 @@ avoids.
 
 ### Journal-authoritative stateless router
 
-The selected approach records command intent and outcome in the host journal,
-lets the server complete commands only from replicated journal records, and
-reconstructs AgentD's next operation sequence from server and local journal
-facts. This requires coordinated protocol changes, but it gives each durable
-fact one owner and contains ambiguity without blind retries.
+The selected approach observes command outcomes in the host journal and lets
+the server complete commands only from replicated results. Local delivery and
+admission are transient observations. A missing result leaves the effect
+unknown, and sequence allocation after reconnect remains unresolved when
+recorded history does not expose every admitted operation.
 
 ## Recovery and Sequence Allocation
 
@@ -93,25 +94,22 @@ session:
 
 AgentD independently scans the local journal strictly after that cursor through
 the current tail. This scan is not an HTTP/2 upload and does not wait for the
-replication pump. It finds the maximum unacknowledged `operationSequence`,
-reconstructs command intent/result observations, and observes lifecycle
-records. Once the scan reaches the tail, the next sequence is:
+replication pump. It finds recorded operation sequences, command results, and
+lifecycle facts.
 
-```text
-max(server acknowledged operationSequence,
-    local suffix maximum operationSequence) + 1
-```
+The maximum sequence in the server prefix and local suffix is only a lower
+bound on the live host's admission high-water mark. An operation may still be
+running or may have failed to append its result. Reaching the journal tail
+therefore does not prove that the next recorded sequence is safe to allocate.
+The orchestration implementation must resolve allocation before enabling
+commands after reconnect; it must not infer permission to replay from absent
+records or a stale rejection.
 
-An empty session starts at sequence `1`. Commands that arrive during recovery
-remain in the bounded session lane and do not start until the scan reaches the
-tail. Journal backlog upload may continue concurrently after command execution
-is enabled. New journal records are coordinated with the tail handoff so the
-scan cannot miss an operation between its final read and live observation.
-
-If the server cursor is below the retained local floor, or the suffix is
-corrupt, AgentD pauses only that session and reports the integrity failure. It
-must not guess a sequence. With correct `ACK_JOURNAL` retention, removed records
-are already represented by the server's acknowledged sequence prefix.
+Commands awaiting recovery remain in the bounded session lane. Journal backlog
+upload may continue independently. A retention gap or corrupt suffix pauses
+only the affected session and is reported as an integrity failure. Correct
+`ACK_JOURNAL` retention ensures deleted results are represented in the
+server-durable prefix, but does not expose unrecorded admissions.
 
 ## Exact Command Envelope
 
@@ -119,14 +117,12 @@ AgentD validates a typed view of each server command while retaining the exact
 CBOR item received from the server, including identifiers and future fields.
 It must not reconstruct that envelope by re-encoding a Java record. The local
 control request carries the allocated `operationSequence` and the unchanged
-server envelope so the host can durably record it and compare exact retry
-bytes.
+server envelope so the host can preserve it in the result record.
 
-The host accepts a new sequence greater than its durable high-water mark; gaps
-are valid. Repeating a sequence with the same envelope is a retry. Reusing a
-sequence with different bytes, or presenting an unexplained stale sequence,
-is rejected without executing it as new work. All four established-session
-controls use this contract, including `RESIZE` and `TERMINATE`.
+The host accepts a new sequence greater than its in-memory high-water mark;
+gaps are valid. Any sequence at or below that mark is stale, including a
+byte-identical retry. All established-session operation controls use this
+contract, including `RESIZE`, `TERMINATE`, and `ACK_JOURNAL`.
 
 ## Established-Session Command Flow
 
@@ -136,30 +132,28 @@ assigns the next `operationSequence` and sends both to the matching host.
 
 The host then:
 
-1. validates lifecycle, sequence, envelope identity, and command payload;
-2. durably appends `COMMAND_ACCEPTED` containing the operation sequence and
-   exact command envelope;
-3. performs the requested external side effect;
-4. durably appends `COMMAND_RESULT` with the same operation sequence and the
-   actual succeeded, failed, rejected, or ambiguous outcome; and
-5. replies to AgentD with the result record's journal `eventId`.
+1. validates the operation sequence, envelope bounds, and typed effect;
+2. advances its in-memory high-water mark and registers the admitted operation;
+3. sends an empty `RECEIVED` admission receipt;
+4. performs the requested side effect once; and
+5. attempts a durable `COMMAND_RESULT` append with the same sequence, exact
+   envelope, and succeeded or failed outcome.
+
+Admission rejection returns `RECEIVED` with an error payload. Receipt delivery
+failure does not cancel an admitted effect. Ordinary effects share a mutex;
+`TERMINATE` bypasses it. Journal results are correlated by sequence, because
+physical result order need not match admission order across connections.
 
 AgentD may report transient delivery progress or failure on the control stream,
-but it sends no successful direct `COMMAND_RESULT`. The server completes a
-command only after the journaled result is durably replicated. This keeps a
-lost control response from disagreeing with durable history.
+but sends no successful direct `COMMAND_RESULT`. The server completes a
+command only after its journaled result is durably replicated.
 
-A retry after a complete result returns that result's original event ID without
-repeating the effect. A crash before durable intent leaves no accepted
-operation and is safe to redeliver. A crash after intent but before a durable
-result, including a crash during the side effect or after the effect but before
-result append, leaves an unmatched intent. Recovery appends
-`COMMAND_RESULT(AMBIGUOUS)` and never blindly retries the effect. Later commands
-then continue in sequence order.
-
-This conservative outcome applies uniformly even where a particular resize or
-signal might appear harmless. It avoids making recovery depend on
-operation-specific guesses about external process state.
+A missing result leaves the effect unknown. A failed result can describe a
+partial effect. Repeating a sequence is stale and does not return a saved
+result; using a new sequence is a new attempt that may repeat a partial effect.
+The host logs result-append failure and neither retries the effect nor
+synthesizes a recovery result. AgentD must preserve this uncertainty across
+reconnects.
 
 ## Session Start Flow
 
@@ -204,15 +198,15 @@ claim cryptographic or durable incarnation fencing.
 Protocol bounds and typed fields are validated before lane admission. Server
 policy and lifecycle validation should prevent invalid work from reaching
 AgentD; AgentD repeats safety-critical local validation before mutation. Host
-validation and side-effect failures become journaled command results whenever
-a host journal exists.
+admission failures are transient receipts with errors. Admitted side-effect
+failures produce journaled command results when the result append succeeds.
 
 Connection, timeout, queue-capacity, missing-session, corrupt-journal, and
 unreachable-host reports on the control stream are transient delivery facts,
 not durable command completion. The server keeps or resolves the durable
 command according to journal evidence. AgentD does not automatically replay an
-operation after ambiguous local delivery; it scans or asks the host for the
-journaled intent/result state.
+operation after ambiguous local delivery; it observes journaled results and
+keeps a missing result unresolved.
 
 Each session owns its bounded lane and recovery state. A lane failure rejects
 or pauses only that session. Cross-session workers remain available, and
@@ -227,29 +221,28 @@ fixtures rather than silently changing frozen fields:
 
 - Agent protocol decoding must expose the exact bytes of known command items
   and carry recovery's acknowledged operation sequence.
-- Native control must carry `operationSequence` plus the opaque command
-  envelope for all four controls and return the durable result event ID.
-- The journal contract must allocate and preserve `COMMAND_ACCEPTED`,
-  `COMMAND_RESULT`, and `SESSION_START_FAILED` records.
+- Native control must use the header `operationSequence`, opaque command
+  envelope, and typed effect for all schema-2 operations. `RECEIVED` is an
+  admission receipt; completion comes from the journal.
+- Java journal projection must consume the native `COMMAND_RESULT` and
+  `SESSION_START_FAILED` layouts and preserve the exact command envelope.
 - Journal reading must expose operation and lifecycle observations while still
   preserving unknown records byte-for-byte.
 - Server command handling must stop treating direct successful results as
   completion and instead project durable journal results.
 
-The older AgentD plan says no acknowledgement protocol and describes direct
-`SESSION_STARTED`/`COMMAND_RESULT`; the current journal-sync task instead
-requires durable batch acknowledgement and non-journaled `ACK_JOURNAL`. The
-current native control-idempotency task names only input, signal, and append
-event, so it must eventually cover resize and terminate too. The server command
-task currently allows transient results to appear stronger than this design.
-Those prerequisite tasks are not edited here; their implementations must align
-with this approved design.
+Journal-sync sends schema-2 `ACK_JOURNAL` only from a complete server-durable
+prefix and observes its journaled result. It must avoid a feedback loop driven
+solely by ACK results. The
+[native-control task](current-work/agentd/native-control-contract/TASK.md) and
+[alignment task](current-work/agentd/session-host-contract-alignment/TASK.md)
+track the Java changes needed to conform to the current native contract.
 
 ## Verification Design
 
 Protocol and compatibility tests cover exact known-command CBOR preservation,
 future tails, all new journal records, all four local-control envelopes,
-sequence gaps, exact retries, conflicting reuse, and legacy fixture reading.
+sequence gaps, stale retry rejection, result correlation, and legacy fixture reading.
 
 Command-orchestrator tests cover every command's validation and happy path;
 same-session order; cross-session concurrency; bounded lane overload; unknown,
@@ -257,14 +250,16 @@ missing, corrupt, and journal-exited sessions; and independence from heartbeat
 and upload backpressure.
 
 Recovery tests provide different server prefix and local suffix maxima, append
-while scanning, and large upload backlogs. They prove commands remain paused
-until the independent local scan reaches the tail, choose the exact next
-sequence, and begin without waiting for upload catch-up.
+while scanning, and large upload backlogs. Include an admitted operation whose
+result is pending or missing; reaching the tail must not by itself enable a
+sequence allocator. Verify the eventual allocation decision separately from
+journal upload progress.
 
-Crash-window tests cover failure before intent, after intent and before effect,
-during or after the effect, after result and before host reply, and after reply
-but before server replication. They verify unmatched intent becomes one
-durable ambiguous result and dangerous effects are never blindly repeated.
+Failure-window tests cover disconnect around admission, during or after the
+effect, during result append, and before server replication. They preserve
+unknown outcomes and verify that stale rejection or missing records never
+trigger automatic replay. Persisted results complete commands through normal
+replication.
 
 Start tests cover journaled success, journaled failure, collision/retry of the
 same identities, failure before journal creation, the one-record in-memory

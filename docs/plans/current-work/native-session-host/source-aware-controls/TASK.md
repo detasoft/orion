@@ -15,8 +15,10 @@ sequences by an explicit source while keeping one execution path and journal.
   `operationSequence`. Preserve the full unsigned `u64` range; do not encode
   source in reserved bits or assign priority by numeric range.
 - Keep `SERVER` ordering and deduplication scoped to the host session across
-  AgentD reconnects. Preserve exact opaque server command envelopes and durable
-  accepted/result records.
+  AgentD reconnects. Admit operations through an in-memory sequence high-water
+  mark and preserve exact opaque server command envelopes in `COMMAND_RESULT`.
+  Attempt durable result append after each effect; missing results remain
+  unknown and do not authorize replay.
 - Scope `MANUAL` ordering and retry identity to the control connection. A new
   connection may start its own sequence; do not automatically replay commands
   whose delivery became uncertain on disconnect. Manual commands need no
@@ -53,10 +55,12 @@ sequences by an explicit source while keeping one execution path and journal.
   connection's in-flight operation. Server retries retain their session scope.
 - AgentD recovery obtains the same next server sequence with or without manual
   records in either the server prefix or local suffix, including `u64` values
-  above `i64::MAX`.
+  above `i64::MAX`. Use the reconnect allocation contract resolved by command
+  orchestration; recorded maxima alone do not expose pending or missing results.
 - Manual input works without AgentD and without ACK; bounded bookkeeping does
-  not fill the server ledger. Manual reading does not advance the retention
-  watermark, and an observer gap does not disable independent manual numbering.
+  not depend on retained server results. Manual reading does not advance the
+  retention watermark, and an observer gap does not disable independent manual
+  numbering.
 - Real-host tests cover simultaneous Java clients, reconnects, interleaved
   input/resize, result attribution, and unchanged server ACK durability.
 

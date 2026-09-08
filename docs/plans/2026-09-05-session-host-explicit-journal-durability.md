@@ -129,8 +129,8 @@ reactor.
 
 1. Use buffered append for PTY output, PTY input, resize, and signal records. Remove the `SharedState` append-plus-
    flush wrapper and name the remaining wrapper `append_buffered`.
-2. Keep session start success/failure and command accepted/result records on `append_durable`; these are current
-   authority and idempotency boundaries.
+2. Keep session start success/failure and `COMMAND_RESULT` records on `append_durable`. Operation admission
+   advances an in-memory sequence high-water mark; durable result append is attempted after the effect.
 3. Replace the final `PROCESS_EXITED` append plus flush with `finish_durably(exit_code)`. Update in-memory status
    fields as before and propagate any final append/sync error out of `run_session`.
 4. Keep `finish_maintenance` at the existing shutdown point. Do not change termination triggers, escalation,

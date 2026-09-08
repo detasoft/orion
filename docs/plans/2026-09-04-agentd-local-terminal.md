@@ -520,9 +520,9 @@ Expected: FAIL because terminal assembly and optional ACK are incomplete.
 
 **Step 3: Wire terminal components and ACK policy**
 
-Pass one acknowledgement policy from parsed options into the follower. Reuse the shared non-journaled
-`ACK_JOURNAL` control and result types introduced by journal-sync. The watermark is the last EventId of the fully
-consumed contiguous page and is never persisted by AgentD terminal mode.
+Pass one acknowledgement policy from parsed options into the follower. Reuse the shared schema-2
+`ACK_JOURNAL` operation and its journaled `COMMAND_RESULT` introduced by journal-sync. The watermark is the
+last EventId of the fully consumed contiguous page and is never persisted by AgentD terminal mode.
 
 Make `TerminalMain` acquire the terminal, resolve the target, construct observer/command lane/follower, enter raw
 mode only after preflight succeeds, run `TerminalSession`, and close resources in reverse order. Error messages

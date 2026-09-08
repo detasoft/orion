@@ -2,8 +2,8 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Return `ACK_JOURNAL` after its watermark and ledger effects are durable while physical retention runs
-asynchronously and scans only the oldest segment prefix needed for a deletion decision.
+**Goal:** Complete the schema-2 `ACK_JOURNAL` effect after durable watermark publication while physical
+retention runs asynchronously and scans only the oldest segment prefix needed for a deletion decision.
 
 **Architecture:** Keep the existing single journal-maintenance worker as the sole segment mutator. Replace the
 synchronous retention request/result exchange with fire-and-forget wake commands that the worker drains and
@@ -18,15 +18,17 @@ Cargo tests, Maven reactor.
 
 ## Constraints
 
-- Preserve the `ACK_JOURNAL` request/response bytes and its meaning: `ACCEPTED` confirms durable deletion
-  permission, never completion of physical deletion.
+- Preserve the schema-2 `ACK_JOURNAL` request and schema-1 response framing. `RECEIVED` confirms admission;
+  `COMMAND_RESULT` records the effect outcome when its durable append succeeds. Neither waits for physical
+  deletion.
 - Preserve the versioned `control-retention-state` bytes and its durable publication order. Do not move the
   watermark into journal records, metadata, or a second authority.
 - Keep one maintenance worker and one production retention path. Delete the synchronous result channel and old
   `apply_retention_through` API; do not add an alternate synchronous operation, compatibility wrapper, mode, or
   feature flag.
 - Keep compression and deletion on the maintenance worker. An ACK must not wait for segment discovery,
-  compression, decoding, deletion, directory synchronization, a prior maintenance failure, or a busy worker.
+  compression, decoding, deletion, cleanup directory synchronization, a prior maintenance failure, or a busy
+  worker. Durable watermark publication still requires its own directory sync before authorizing deletion.
 - A maintenance failure does not invalidate an already durable ACK. Retain the greatest watermark in worker
   state, record the latest reconciliation failure, and retry on a repeated/lower ACK, rotation wake, or finish.
 - Active-segment snapshots may be stale only conservatively: maintenance may retain an extra closed segment, but
@@ -88,15 +90,14 @@ Cargo tests, Maven reactor.
 - Modify: `session-host/src/platform/unix.rs`
 - Test: `session-host/tests/unix_process_host.rs`
 
-1. Keep watermark validation, `JournalAcknowledgement::advance`, and operation-ledger acknowledgement inside the
-   existing serialized `SharedState` section.
-2. Schedule the durable watermark on journal maintenance without waiting, then explicitly release `SharedState`
-   before constructing and returning the `ACCEPTED` response.
+1. Keep watermark validation and `JournalAcknowledgement::advance` inside the existing serialized `SharedState`
+   section. Admission has already advanced the in-memory operation sequence and sent `RECEIVED`.
+2. Schedule the durable watermark on journal maintenance without waiting, then release `SharedState` and return
+   through the ordinary effect path, which attempts to durably append `COMMAND_RESULT`.
 3. Treat scheduling failure as a maintenance diagnostic, not an ACK failure: the durable watermark remains valid
    deletion permission and physical cleanup may be retried or surfaced at host finish.
-4. Update the existing ACK integration test to wait eventually for physical deletion instead of requiring it
-   to have completed when the ACK frame arrives. Continue to assert the sidecar bytes and immediate ledger
-   eviction.
+4. Update the existing ACK integration test to wait eventually for physical deletion. Observe the successful
+   `COMMAND_RESULT` before asserting durable sidecar bytes; the earlier `RECEIVED` is admission only.
 5. Add deterministic coverage, using the narrowest test seam available, that a stalled maintenance attempt does
    not prevent a journal append and a non-retention control from completing. Do not introduce a production
    retention mode or test-only public API.
@@ -137,16 +138,17 @@ Cargo tests, Maven reactor.
 - Verify: `session-host/src/journal.rs`
 - Verify: `session-host/src/platform/unix.rs`
 
-1. State that ACK completion ends after durable watermark publication, ledger update, and non-waiting
-   maintenance scheduling. Physical retention is eventual, coalesced, retryable cleanup.
+1. State that ACK effect completion follows durable watermark publication and non-waiting maintenance
+   scheduling, then attempts the ordinary durable result append. Physical retention is eventual, coalesced
+   cleanup.
 2. Document size-first planning and oldest-prefix-only decoding, including the conservative active-segment race
    rule and deferred validation of noncandidate segments.
 3. Hash every checked-in `session-host/protocol/fixtures/*` file before implementation and compare after it; do
    not regenerate fixtures.
 4. Search production code and confirm the result-bearing `ApplyRetention`, its one-shot channel,
    `apply_retention_through`, `SegmentSize`, and full retention pre-scan are absent.
-5. Confirm the ACK handler performs no wait for maintenance and explicitly releases shared state before
-   response.
+5. Confirm the ACK effect performs no wait for maintenance and releases shared state before returning to
+   the ordinary command-result path.
 6. Run `git diff --check` and the repository line-length check.
 7. Run `make session-host-test` outside the sandbox.
 8. Create the logical implementation commit, then run `make test` outside the sandbox as required by

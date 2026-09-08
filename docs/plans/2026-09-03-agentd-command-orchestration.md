@@ -3,8 +3,8 @@
 > Contract update, 2026-09-07: native-control and recovery passages below are
 > historical proposals, not a description of current runtime behavior. The
 > [current native contract and Java interface comparison](2026-09-03-native-control-journal-idempotency-design.md)
-> supersede assumptions about durable command intents, result-ledger retries,
-> direct result event IDs, non-journaled ACK, and guaranteed start records.
+> define in-memory admission, journaled command results, schema-2 ACK, and
+> start-outcome uncertainty.
 > Recovery from recorded sequence maxima alone is not established when an
 > admitted operation has a pending or missing result. Reconcile affected steps
 > with that document before implementing the remaining orchestration work.
@@ -14,18 +14,11 @@
 **Goal:** Route server session commands through stateless, bounded per-session orchestration whose durable
 outcomes and recovery state come exclusively from session journals.
 
-> Contract note (2026-09-07): this plan predates the accepted native runtime
-> behavior. Sections that require durable `COMMAND_ACCEPTED`, native result
-> event IDs in control responses, unmatched-intent recovery, or guaranteed
-> start outcomes are historical proposals. Implementing remaining steps must
-> follow the reconciled [native contract](2026-09-03-native-control-journal-idempotency-design.md)
-> and the current task acceptance criteria.
-
 **Architecture:** Keep the exact inbound server CBOR item beside its typed message, queue commands in one
-bounded serial lane per session, and run different session lanes concurrently. Recover each lane from the
-server's acknowledged operation prefix plus an independent local journal suffix scan; delegate durable
-execution intent/result recording to the prerequisite native host and durable upload/ACK handling to the
-prerequisite journal sync service.
+bounded serial lane per session, and run different session lanes concurrently. Observe recorded results through
+the server-durable prefix and an independent local journal suffix scan. Resolve fresh sequence allocation
+separately when admissions may have pending or missing results. The native host owns effect execution and
+result append; journal-sync owns durable upload and schema-2 ACK forwarding.
 
 **Tech Stack:** Java 25, Maven, JUnit 5, AssertJ, Jetty HTTP/2, CBOR Sequence, existing AgentD runtime,
 discovery, local-control, journal-reader, and journal-sync boundaries.
@@ -87,19 +80,20 @@ If any task remains, stop. Do not copy its implementation into this leaf.
 Confirm the integrated host contract and fixtures provide all of these:
 
 ```text
-INPUT, RESIZE, SIGNAL, TERMINATE share operationSequence
-request payload retains exact Agent server CBOR envelope
-COMMAND_ACCEPTED is durable before the external effect
-COMMAND_RESULT is durable before the host response
-host response contains the COMMAND_RESULT eventId
-unmatched COMMAND_ACCEPTED recovers as COMMAND_RESULT(AMBIGUOUS)
+INPUT, RESIZE, SIGNAL, TERMINATE, ACK_JOURNAL use the schema-2 operation wrapper
+operationSequence is in the frame header; the payload retains the exact server CBOR envelope
+admission advances an in-memory high-water mark and sends transient RECEIVED
+an admitted effect executes once, then COMMAND_RESULT durable append is attempted
+stale sequences are rejected, including identical retries
+missing COMMAND_RESULT leaves the effect unknown and does not authorize replay
 ```
 
-Expected: every line is implemented and covered by native fixtures/tests. If `RESIZE` or `TERMINATE` is still
-missing, stop and return the prerequisite task to its owner.
+Expected: every line is implemented and covered by native fixtures/tests. Align Java controls with those
+fixtures and a real host before enabling command routing.
 
-Separately verify the integrated journal-sync contract sends non-journaled `ACK_JOURNAL` only for a server
-durability acknowledgement and completes only after the host durably applies that retention watermark.
+Separately verify journal-sync sends schema-2 `ACK_JOURNAL` only for a complete server-durable prefix. Its
+`RECEIVED` is admission only; observe effect completion through the journaled `COMMAND_RESULT`. Physical
+cleanup is asynchronous. ACK scheduling must not form a feedback loop driven solely by ACK results.
 
 **Step 4: Verify start-outcome coverage**
 
@@ -281,8 +275,7 @@ round trips for:
 
 ```java
 new SessionEventPayload.ProcessStarted(processId)
-new SessionEventPayload.CommandAccepted(sequence, exactEnvelope)
-new SessionEventPayload.CommandResult(sequence, commandId, outcome, detail)
+new SessionEventPayload.CommandResult(sequence, exactEnvelope, outcome, detail)
 new SessionEventPayload.SessionStartFailed(commandId, diagnostic, omittedByteCount)
 ```
 
@@ -302,8 +295,9 @@ Expected: FAIL because Java does not know the prerequisite host event allocation
 
 **Step 7: Implement only the Java-side event model and codec**
 
-Add the typed payload records, bounds, and codec cases. `COMMAND_ACCEPTED` must preserve the raw command byte
-string. `COMMAND_RESULT` must expose its command identity and operation sequence for server/local projection.
+Add the typed payload records, bounds, and codec cases. `COMMAND_RESULT` must preserve the exact command
+byte string and expose its operation sequence for server/local projection. Extract command identity from the
+preserved envelope in the consuming projection.
 `SESSION_START_FAILED` must carry the omission count separately from diagnostic text. Do not change the native
 writer in this leaf.
 
@@ -331,18 +325,15 @@ Expected: PASS.
 - Create: `agentd/src/main/java/pro/deta/orion/agentd/session/SessionCommandState.java`
 - Test: `agentd/src/test/java/pro/deta/orion/agentd/session/CommandJournalScannerTest.java`
 
-**Step 1: Write the failing prefix/suffix maximum test**
+**Step 1: Write the failing recorded-state recovery tests**
 
-Build prerequisite-reader test records with accepted/result sequences `7` and `11`, pass server prefix `9`,
-and assert:
+Build prerequisite-reader records with result sequences `7` and `11` and server prefix `9`. Assert the scan
+observes maximum recorded sequence `11` and reaches the local tail. Repeat with an empty suffix and absent
+prefix. These are recorded-history facts, not proof of the host's complete admission high-water mark.
 
-```java
-SessionCommandState state = scanner.scan(localSession, new EventId(40), new OperationSequence(9));
-assertThat(state.nextOperationSequence()).isEqualTo(new OperationSequence(12));
-assertThat(state.tailReached()).isTrue();
-```
-
-Also assert an empty suffix uses server prefix plus one, and no prefix/suffix starts at one.
+Add an admitted operation whose result is pending or missing. The scanner must leave sequence allocation
+unresolved rather than treating recorded maximum plus one as safe. Resolve the allocation contract before
+implementing the command-dispatch steps that depend on a fresh sequence.
 
 **Step 2: Run the scanner test to verify it fails**
 
@@ -352,20 +343,16 @@ Expected: FAIL because the scanner and state do not exist.
 
 **Step 3: Implement the minimal independent suffix scan**
 
-Inject the prerequisite `SessionJournalReader`; call `readAfter` with the server `eventId` cursor and iterate with
-ordinary loops. Observe only known command/lifecycle payloads while leaving every record available to journal
-sync. Compute:
+Inject the prerequisite `SessionJournalReader`; call `readAfter` with the server `eventId` cursor and iterate
+with ordinary loops. Observe known command results and lifecycle payloads while leaving every record available
+to journal sync. Return the recorded maximum and tail observation without claiming they expose admissions
+whose results are pending or missing. Any allocator subsequently selected must handle sequence exhaustion.
 
-```java
-OperationSequence next = maximum(serverAcknowledged, localSuffixMaximum).incrementExact();
-```
+**Step 4: Add failing lifecycle and missing-result tests**
 
-Return an explicit exhausted result rather than wrapping unsigned `u64`.
-
-**Step 4: Add failing lifecycle and unmatched-intent tests**
-
-Cover `PROCESS_EXITED`, matching accepted/result records, unmatched intent already resolved by the host as
-`AMBIGUOUS`, and duplicate observations. Assert metadata state and control `STATUS` never set authoritative exit.
+Cover `PROCESS_EXITED`, persisted command results, missing results after uncertain delivery, and duplicate
+observations. Preserve unknown outcomes without synthesizing a host result or replaying an effect. Metadata
+state and control `STATUS` never set authoritative exit.
 
 **Step 5: Run the scanner test to verify the new cases fail**
 
@@ -375,8 +362,9 @@ Expected: FAIL until lifecycle and command-result observations are represented.
 
 **Step 6: Complete immutable recovered state**
 
-`SessionCommandState` should contain the next sequence, journal-authoritative exit flag, observed command results,
-and the scanned tail `eventId`. Do not copy metadata `latestTimestamp` into any of these fields.
+`SessionCommandState` should contain the recorded sequence maximum, journal-authoritative exit flag, observed
+command results, and scanned tail `eventId`. Keep allocation readiness explicit until the reconnect contract
+is resolved. Do not copy metadata `latestTimestamp` into any of these fields.
 
 **Step 7: Add concurrent-tail handoff and failure tests**
 
@@ -497,9 +485,9 @@ Expected: FAIL because the dispatcher does not exist and current commands lack t
 
 **Step 3: Adapt the Java control client to the integrated native contract**
 
-Remove v1's INPUT-only retry rule. Every established-session request now uses the prerequisite host's exact
-operation retry contract and returns either a durable result event ID, a semantic rejection, or a transient
-delivery failure. Rename `journalTimestamp` to `resultEventId`; use `EventId`, not signed-positive `long`.
+Remove automatic operation retries. Encode the operation sequence in the frame header and preserve the exact
+opaque envelope in the schema-2 payload. Decode empty or rejected `RECEIVED` as transient admission, and
+observe completion through `COMMAND_RESULT`. Remove the native timestamp/duplicate-response model.
 Continue using `OperationDeadline` and transport-native cancellation; do not add per-call timeout threads.
 
 **Step 4: Run local control tests**
@@ -511,20 +499,21 @@ make run-test MODULE=agentd \
   TEST='pro.deta.orion.agentd.session.NativeControlCodecTest,pro.deta.orion.agentd.session.SessionControlClientTest'
 ```
 
-Expected: PASS for exact retry of all four operations, durable result IDs, rejection, framing, timeout, and
-ambiguous transport failure.
+Expected: PASS for all four operations, transient admission, stale rejection, journaled result correlation,
+framing, timeout, and uncertain delivery without automatic replay.
 
 **Step 5: Implement routing and transient reports**
 
 Look up the `LocalSession` by server SessionId, reject a journal-authoritative exited state before delivery,
-and route through its manifest endpoint. A host result event ID is a wake-up hint for local scanning/upload,
-not direct command success. Emit direct control reports only for rejected admission or transient delivery
+and route through its manifest endpoint. A receipt does not prove execution or durable completion. Observe
+results through the journal and emit direct control reports only for rejected admission or transient delivery
 failures; never emit `CommandOutcome.SUCCEEDED`.
 
 **Step 6: Add failure and duplicate tests**
 
 Cover unknown session, degraded/corrupt recovery, exited journal, host rejection, connection failure, timeout,
-same-envelope retry, conflicting sequence reuse rejected by the host, and response loss after durable result.
+stale rejection after same-envelope retry or conflicting reuse, missing results, and receipt loss around
+execution. A stale rejection must not resolve an earlier uncertain attempt.
 
 **Step 7: Run dispatcher and control tests**
 
@@ -655,7 +644,8 @@ Expected: PASS.
 
 **Step 1: Write the failing observation tests**
 
-Feed `COMMAND_ACCEPTED`, matching `COMMAND_RESULT`, `PROCESS_STARTED`, and `PROCESS_EXITED` records in event order.
+Feed `COMMAND_RESULT`, `PROCESS_STARTED`, and `PROCESS_EXITED` records in event order. Correlate results by
+operation sequence, including results whose physical journal order differs from operation admission order.
 Assert duplicate observations are harmless, result observations wake replication, and only `PROCESS_EXITED`
 marks process completion.
 
@@ -867,10 +857,10 @@ ordering races.
 Cover:
 
 ```text
-crash before COMMAND_ACCEPTED -> server redelivery may execute
-crash after COMMAND_ACCEPTED -> recovered COMMAND_RESULT(AMBIGUOUS), no effect retry
-crash after COMMAND_RESULT before local reply -> original result eventId returned
-large upload backlog -> local suffix scan enables commands independently
+uncertain delivery without COMMAND_RESULT -> unknown outcome, no automatic replay
+receipt loss with a pending or missing result -> stale rejection does not resolve the earlier attempt
+persisted COMMAND_RESULT before server replication -> normal journal recovery completes the command
+large upload backlog -> local scan proceeds independently; allocation readiness is checked separately
 PROCESS_EXITED -> later command is not delivered
 pre-journal START failure -> one in-memory eventId=1 failure record
 ```
