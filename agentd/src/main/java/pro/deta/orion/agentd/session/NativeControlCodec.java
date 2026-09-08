@@ -1,14 +1,11 @@
 package pro.deta.orion.agentd.session;
 
-import pro.deta.orion.agent.protocol.CommandId;
-import pro.deta.orion.agent.protocol.ProtocolBytes;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
+import java.util.Arrays;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.zip.CRC32C;
@@ -18,96 +15,76 @@ public final class NativeControlCodec {
     public static final int MAX_PAYLOAD_LENGTH = 16 * 1024 * 1024;
     private static final byte[] MAGIC = {'O', 'R', 'C', 'T'};
     private static final int VERSION = 1;
+    private static final long STATUS_SEQUENCE = 1;
 
-    public byte[] encode(ControlCommand command, long requestId) {
+    public byte[] encode(ControlCommand command) {
         if (command instanceof ControlCommand.Input input) {
-            ByteBuffer effect = payload(16 + input.bytes().toByteArray().length).order(ByteOrder.BIG_ENDIAN);
+            byte[] bytes = input.bytes().toByteArray();
+            ByteBuffer effect = payload(16 + bytes.length).order(ByteOrder.BIG_ENDIAN);
             effect.putLong(input.inputId().getMostSignificantBits());
             effect.putLong(input.inputId().getLeastSignificantBits());
-            effect.put(input.bytes().toByteArray());
-            return frame(
-                    1,
-                    2,
-                    requestId,
-                    operationPayload(
-                            input.commandId().orElseThrow(),
-                            input.operationSequence(),
-                            input.commandEnvelope(),
-                            effect.array()));
+            effect.put(bytes);
+            return operationFrame(1, input.sequence(), input.commandEnvelope().toByteArray(), effect.array());
         }
         if (command instanceof ControlCommand.Resize resize) {
-            ByteBuffer payload = payload(8);
-            payload.putInt(resize.columns()).putInt(resize.rows());
-            return frame(
-                    2,
-                    2,
-                    requestId,
-                    operationPayload(
-                            resize.commandId().orElseThrow(),
-                            resize.operationSequence(),
-                            resize.commandEnvelope(),
-                            payload.array()));
+            ByteBuffer effect = payload(8);
+            effect.putInt(resize.columns()).putInt(resize.rows());
+            return operationFrame(2, resize.sequence(), resize.commandEnvelope().toByteArray(), effect.array());
         }
         if (command instanceof ControlCommand.Signal signal) {
-            ByteBuffer payload = payload(8);
-            payload.putShort((short) signal.kind().wireCode()).putShort((short) 0);
-            payload.putInt(signal.platformCode());
-            return frame(
-                    3,
-                    2,
-                    requestId,
-                    operationPayload(
-                            signal.commandId().orElseThrow(),
-                            signal.operationSequence(),
-                            signal.commandEnvelope(),
-                            payload.array()));
+            ByteBuffer effect = payload(8);
+            effect.putShort((short) signal.kind().wireCode()).putShort((short) 0);
+            effect.putInt(signal.platformCode());
+            return operationFrame(3, signal.sequence(), signal.commandEnvelope().toByteArray(), effect.array());
         }
         if (command instanceof ControlCommand.Terminate terminate) {
-            ByteBuffer payload = payload(8);
-            payload.putShort((short) terminate.mode().wireCode()).putShort((short) 0);
-            payload.putInt((int) terminate.graceMillis());
-            return frame(
-                    4,
-                    2,
-                    requestId,
-                    operationPayload(
-                            terminate.commandId().orElseThrow(),
-                            terminate.operationSequence(),
-                            terminate.commandEnvelope(),
-                            payload.array()));
+            ByteBuffer effect = payload(4);
+            effect.putShort((short) terminate.mode().wireCode()).putShort((short) 0);
+            return operationFrame(
+                    4, terminate.sequence(), terminate.commandEnvelope().toByteArray(), effect.array());
         }
-        return frame(5, requestId, new byte[0]);
+        if (command instanceof ControlCommand.AckJournal acknowledgement) {
+            ByteBuffer effect = payload(8);
+            effect.putLong(acknowledgement.acknowledgedEventId());
+            return operationFrame(
+                    7,
+                    acknowledgement.sequence(),
+                    acknowledgement.commandEnvelope().toByteArray(),
+                    effect.array());
+        }
+        return frame(5, STATUS_SEQUENCE, new byte[0]);
     }
 
-    public ControlResult decode(ControlCommand command, long requestId, byte[] frame) {
-        Optional<CommandId> commandId = command.commandId();
-        String framingFailure = validateFrame(requestId, frame);
+    public ControlResult decode(ControlCommand command, byte[] encodedFrame) {
+        OptionalLong operationSequence = command.operationSequence();
+        long expectedSequence = operationSequence.orElse(STATUS_SEQUENCE);
+        String framingFailure = validateFrame(expectedSequence, encodedFrame);
         if (framingFailure != null) {
-            return new ControlResult.Failed(commandId, ControlResult.FailureKind.FRAMING, framingFailure);
+            return new ControlResult.Failed(
+                    operationSequence, ControlResult.FailureKind.FRAMING, framingFailure);
         }
-        ByteBuffer header = ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer header = ByteBuffer.wrap(encodedFrame).order(ByteOrder.LITTLE_ENDIAN);
         int type = Short.toUnsignedInt(header.getShort(8));
         int payloadLength = header.getInt(24);
-        ByteBuffer payload = ByteBuffer.wrap(frame, HEADER_LENGTH, payloadLength)
+        ByteBuffer payload = ByteBuffer.wrap(encodedFrame, HEADER_LENGTH, payloadLength)
                 .slice().order(ByteOrder.LITTLE_ENDIAN);
         try {
             return switch (type) {
-                case 0x8000 -> acknowledgement(command, payload, false);
-                case 0x8001 -> acknowledgement(command, payload, true);
-                case 0x8002 -> rejection(commandId, payload);
+                case 0x8000 -> received(command, payload);
+                case 0x8002 -> rejection(operationSequence, payload);
                 case 0x8003 -> status(command, payload);
-                default -> failed(commandId, "unsupported response message type " + type);
+                default -> failed(operationSequence, "unsupported response message type " + type);
             };
         } catch (IllegalArgumentException error) {
-            return failed(commandId, error.getMessage());
+            return failed(operationSequence, error.getMessage());
         }
     }
 
-    static byte[] frame(int type, long requestId, byte[] payload) {
-        return frame(type, 1, requestId, payload);
+    static byte[] frame(int type, long sequence, byte[] payload) {
+        return frame(type, 1, sequence, payload);
     }
 
-    static byte[] frame(int type, int payloadSchemaVersion, long requestId, byte[] payload) {
+    static byte[] frame(int type, int payloadSchemaVersion, long sequence, byte[] payload) {
         if (payload.length > MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("control payload exceeds 16 MiB");
         }
@@ -118,11 +95,26 @@ public final class NativeControlCodec {
         encoded.putShort((short) type);
         encoded.putShort((short) payloadSchemaVersion);
         encoded.putInt(0);
-        encoded.putLong(requestId);
+        encoded.putLong(sequence);
         encoded.putInt(payload.length);
         encoded.putInt(checksum(payload));
         encoded.put(payload);
         return encoded.array();
+    }
+
+    private static byte[] operationPayload(byte[] envelope, byte[] effect) {
+        if (envelope.length > MAX_PAYLOAD_LENGTH - Integer.BYTES - effect.length) {
+            throw new IllegalArgumentException("control payload exceeds 16 MiB");
+        }
+        ByteBuffer encoded = payload(Integer.BYTES + envelope.length + effect.length);
+        encoded.putInt(envelope.length);
+        encoded.put(envelope);
+        encoded.put(effect);
+        return encoded.array();
+    }
+
+    private static byte[] operationFrame(int type, long sequence, byte[] envelope, byte[] effect) {
+        return frame(type, 2, sequence, operationPayload(envelope, effect));
     }
 
     private static ByteBuffer payload(int length) {
@@ -132,7 +124,7 @@ public final class NativeControlCodec {
         return ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
     }
 
-    private static String validateFrame(long requestId, byte[] frame) {
+    private static String validateFrame(long expectedSequence, byte[] frame) {
         if (frame == null || frame.length < HEADER_LENGTH) {
             return "response is shorter than the control header";
         }
@@ -148,66 +140,39 @@ public final class NativeControlCodec {
                 || header.getInt(12) != 0) {
             return "response has unsupported framing fields";
         }
-        if (header.getLong(16) != requestId) {
-            return "response request ID does not match";
+        if (header.getLong(16) != expectedSequence) {
+            return "response sequence does not match";
         }
         int payloadLength = header.getInt(24);
         if (payloadLength < 0 || payloadLength > MAX_PAYLOAD_LENGTH
                 || frame.length != HEADER_LENGTH + payloadLength) {
             return "response payload length is invalid";
         }
-        byte[] payload = java.util.Arrays.copyOfRange(frame, HEADER_LENGTH, frame.length);
+        byte[] payload = Arrays.copyOfRange(frame, HEADER_LENGTH, frame.length);
         if (checksum(payload) != header.getInt(28)) {
             return "response payload checksum does not match";
         }
         return null;
     }
 
-    private static ControlResult acknowledgement(
-            ControlCommand command,
-            ByteBuffer payload,
-            boolean duplicate
-    ) {
-        if (payload.remaining() != Long.BYTES || command.commandId().isEmpty()) {
-            throw new IllegalArgumentException("acknowledgement payload or command is invalid");
+    private static ControlResult received(ControlCommand command, ByteBuffer payload) {
+        if (command.operationSequence().isEmpty()) {
+            throw new IllegalArgumentException("RECEIVED response request is invalid");
         }
-        long timestamp = payload.getLong();
-        if (timestamp < 0) {
-            throw new IllegalArgumentException("journal timestamp exceeds the supported range");
+        if (payload.hasRemaining()) {
+            return rejection(command.operationSequence(), payload);
         }
-        return new ControlResult.Acknowledged(command.commandId().orElseThrow(), duplicate, timestamp);
+        return new ControlResult.Received(command.operationSequence().orElseThrow());
     }
 
-    private static byte[] operationPayload(
-            CommandId commandId,
-            long operationSequence,
-            ProtocolBytes commandEnvelope,
-            byte[] effect
-    ) {
-        byte[] commandIdBytes = commandId.value().getBytes(StandardCharsets.UTF_8);
-        byte[] envelope = commandEnvelope.toByteArray();
-        ByteBuffer payload = payload(
-                Long.BYTES
-                        + Short.BYTES
-                        + commandIdBytes.length
-                        + Integer.BYTES
-                        + envelope.length
-                        + effect.length)
-                .order(ByteOrder.LITTLE_ENDIAN);
-        payload.putLong(operationSequence);
-        payload.putShort((short) commandIdBytes.length);
-        payload.put(commandIdBytes);
-        payload.putInt(envelope.length);
-        payload.put(envelope);
-        payload.put(effect);
-        return payload.array();
-    }
-
-    private static ControlResult rejection(Optional<CommandId> commandId, ByteBuffer payload) {
+    private static ControlResult rejection(OptionalLong operationSequence, ByteBuffer payload) {
         if (payload.remaining() < Integer.BYTES || payload.remaining() > Integer.BYTES + 4096) {
-            throw new IllegalArgumentException("ERROR payload length is invalid");
+            throw new IllegalArgumentException("error payload length is invalid");
         }
         int code = payload.getInt();
+        if (code < 1) {
+            throw new IllegalArgumentException("error code is invalid");
+        }
         byte[] detailBytes = new byte[payload.remaining()];
         payload.get(detailBytes);
         try {
@@ -215,9 +180,9 @@ public final class NativeControlCodec {
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(detailBytes)).toString();
-            return new ControlResult.Rejected(commandId, code, detail);
+            return new ControlResult.Rejected(operationSequence, code, detail);
         } catch (CharacterCodingException error) {
-            throw new IllegalArgumentException("ERROR detail is not valid UTF-8");
+            throw new IllegalArgumentException("error detail is not valid UTF-8");
         }
     }
 
@@ -266,8 +231,8 @@ public final class NativeControlCodec {
                 controlVersion));
     }
 
-    private static ControlResult failed(Optional<CommandId> commandId, String detail) {
-        return new ControlResult.Failed(commandId, ControlResult.FailureKind.FRAMING, detail);
+    private static ControlResult failed(OptionalLong operationSequence, String detail) {
+        return new ControlResult.Failed(operationSequence, ControlResult.FailureKind.FRAMING, detail);
     }
 
     private static int checksum(byte[] payload) {

@@ -90,9 +90,9 @@ class ControlHostProbeTest {
     void mapsConnectionFailureToUnreachableAndFramingFailureToDegradedError() throws Exception {
         SessionManifest manifest = manifest(4242);
         ControlHostProbe unreachable = new ControlHostProbe((endpoint, command) -> new ControlResult.Failed(
-                command.commandId(), ControlResult.FailureKind.CONNECTION, "refused"));
+                command.operationSequence(), ControlResult.FailureKind.CONNECTION, "refused"));
         ControlHostProbe malformed = new ControlHostProbe((endpoint, command) -> new ControlResult.Failed(
-                command.commandId(), ControlResult.FailureKind.FRAMING, "bad frame"));
+                command.operationSequence(), ControlResult.FailureKind.FRAMING, "bad frame"));
 
         assertThat(unreachable.probe(Path.of("session"), manifest))
                 .isEqualTo(HostObservation.unreachable());
@@ -106,7 +106,7 @@ class ControlHostProbeTest {
         AtomicReference<OperationDeadline> observed = new AtomicReference<>();
         ControlHostProbe probe = new ControlHostProbe(
                 (endpoint, command) -> new ControlResult.Failed(
-                        command.commandId(), ControlResult.FailureKind.CONNECTION, "unused"),
+                        command.operationSequence(), ControlResult.FailureKind.CONNECTION, "unused"),
                 (endpoint, command, deadline) -> {
                     observed.set(deadline);
                     return new ControlResult.Status(status(4242, true, true, 1, 1));

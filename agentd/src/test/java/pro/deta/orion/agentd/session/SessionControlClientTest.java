@@ -4,7 +4,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
 
 import java.io.IOException;
@@ -12,19 +11,16 @@ import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.OptionalLong;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +28,6 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.assertThatIOException;
 
 class SessionControlClientTest {
-    private static final CommandId COMMAND_ID = new CommandId("command-1");
     private static final ProtocolBytes COMMAND_ENVELOPE = ProtocolBytes.copyOf(new byte[]{0x11});
 
     @TempDir
@@ -52,14 +47,11 @@ class SessionControlClientTest {
     @Test
     void exchangesStatusOverARealUnixDomainSocket() throws Exception {
         try (ServerSocketChannel server = listen("status.sock")) {
-            Future<Void> peer = serve(server, request -> {
-                long requestId = requestId(request);
-                byte[] status = runningStatus(4242, 4343);
-                return NativeControlCodec.frame(0x8003, requestId, status);
-            });
+            Future<Void> peer = serve(server, request ->
+                    NativeControlCodec.frame(0x8003, sequence(request), runningStatus(4242, 4343)));
 
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
-            ControlResult result = client.send(endpoint("status.sock"), new ControlCommand.Status());
+            ControlResult result = new SessionControlClient(Duration.ofSeconds(2))
+                    .send(endpoint("status.sock"), new ControlCommand.Status());
 
             assertThat(result).isInstanceOf(ControlResult.Status.class);
             assertThat(((ControlResult.Status) result).status().hostPid()).isEqualTo(4242);
@@ -68,20 +60,94 @@ class SessionControlClientTest {
     }
 
     @Test
-    void returnsHostErrorsAsTypedResults() throws Exception {
+    void returnsReceivedRejectionAsAnOperationResult() throws Exception {
         try (ServerSocketChannel server = listen("error.sock")) {
             Future<Void> peer = serve(server, request -> {
                 ByteBuffer error = ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN);
                 error.putInt(4).put("exited".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                return NativeControlCodec.frame(0x8002, requestId(request), error.array());
+                return NativeControlCodec.frame(0x8000, sequence(request), error.array());
             });
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
+            ControlCommand.Resize resize = new ControlCommand.Resize(3, COMMAND_ENVELOPE, 80, 24);
 
-            ControlResult result = client.send(
-                    endpoint("error.sock"), new ControlCommand.Resize(
-                            COMMAND_ID, 3, COMMAND_ENVELOPE, 80, 24));
+            ControlResult result = new SessionControlClient(Duration.ofSeconds(2))
+                    .send(endpoint("error.sock"), resize);
 
-            assertThat(result).isEqualTo(new ControlResult.Rejected(Optional.of(COMMAND_ID), 4, "exited"));
+            assertThat(result).isEqualTo(new ControlResult.Rejected(OptionalLong.of(3), 4, "exited"));
+            await(peer);
+        }
+    }
+
+    @Test
+    void doesNotRetryAnOperationAfterUncertainDelivery() throws Exception {
+        try (ServerSocketChannel server = listen("no-retry.sock")) {
+            AtomicInteger connections = new AtomicInteger();
+            Future<Void> peer = executor.submit(() -> {
+                try (SocketChannel channel = server.accept()) {
+                    connections.incrementAndGet();
+                    readFrame(channel);
+                }
+                server.configureBlocking(false);
+                long deadline = System.nanoTime() + Duration.ofMillis(200).toNanos();
+                while (System.nanoTime() < deadline) {
+                    try (SocketChannel unexpected = server.accept()) {
+                        if (unexpected != null) {
+                            connections.incrementAndGet();
+                            break;
+                        }
+                    }
+                    Thread.sleep(5);
+                }
+                return null;
+            });
+            ControlCommand.Resize resize = new ControlCommand.Resize(3, COMMAND_ENVELOPE, 81, 25);
+
+            ControlResult result = new SessionControlClient(Duration.ofSeconds(1))
+                    .send(endpoint("no-retry.sock"), resize);
+
+            assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY, OptionalLong.of(3));
+            await(peer);
+            assertThat(connections).hasValue(1);
+        }
+    }
+
+    @Test
+    void laterStaleResponseCannotReplaceAmbiguityFromAMalformedReceipt() {
+        AtomicInteger exchanges = new AtomicInteger();
+        ControlTransport transport = (endpoint, request, deadline) -> {
+            if (exchanges.getAndIncrement() == 0) {
+                byte[] response = NativeControlCodec.frame(0x8000, sequence(request), new byte[0]);
+                response[28] ^= 1;
+                return new ControlTransport.Exchange.Response(response);
+            }
+            byte[] stale = ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN)
+                    .putInt(4).put("stale".getBytes(java.nio.charset.StandardCharsets.UTF_8)).array();
+            return new ControlTransport.Exchange.Response(
+                    NativeControlCodec.frame(0x8000, sequence(request), stale));
+        };
+        SessionControlClient client = new SessionControlClient(
+                Duration.ofSeconds(1),
+                endpoint -> new ControlTransportFactory.Selection.Available(transport));
+        ControlCommand.Resize resize = new ControlCommand.Resize(9, COMMAND_ENVELOPE, 81, 25);
+
+        ControlResult result = client.send(endpoint("unused.sock"), resize);
+
+        assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY, OptionalLong.of(9));
+        assertThat(exchanges).hasValue(1);
+    }
+
+    @Test
+    void malformedStatusResponseRemainsAFramingFailure() throws Exception {
+        try (ServerSocketChannel server = listen("malformed-status.sock")) {
+            Future<Void> peer = serve(server, request -> {
+                byte[] response = NativeControlCodec.frame(0x8003, sequence(request), runningStatus(1, 2));
+                response[28] ^= 1;
+                return response;
+            });
+
+            ControlResult result = new SessionControlClient(Duration.ofSeconds(1))
+                    .send(endpoint("malformed-status.sock"), new ControlCommand.Status());
+
+            assertFailure(result, ControlResult.FailureKind.FRAMING, OptionalLong.empty());
             await(peer);
         }
     }
@@ -96,188 +162,12 @@ class SessionControlClientTest {
                 }
                 return null;
             });
-            SessionControlClient client = new SessionControlClient(Duration.ofMillis(40));
 
-            ControlResult result = client.send(endpoint("timeout.sock"), new ControlCommand.Status());
+            ControlResult result = new SessionControlClient(Duration.ofMillis(40))
+                    .send(endpoint("timeout.sock"), new ControlCommand.Status());
 
-            assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY);
+            assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY, OptionalLong.empty());
             await(peer);
-        }
-    }
-
-    @Test
-    void reconnectsInputWithTheExactSameFrameAndAcceptsDuplicate() throws Exception {
-        try (ServerSocketChannel server = listen("retry.sock")) {
-            Future<byte[][]> peer = executor.submit(() -> {
-                byte[][] requests = new byte[2][];
-                try (SocketChannel first = server.accept()) {
-                    requests[0] = readFrame(first);
-                }
-                try (SocketChannel second = server.accept()) {
-                    requests[1] = readFrame(second);
-                    writeFully(second, NativeControlCodec.frame(
-                            0x8001, requestId(requests[1]), littleEndianLong(91)));
-                }
-                return requests;
-            });
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
-            ControlCommand.Input input = new ControlCommand.Input(
-                    COMMAND_ID,
-                    1,
-                    COMMAND_ENVELOPE,
-                    UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
-                    ProtocolBytes.copyOf(new byte[]{1, 2, 3}));
-
-            ControlResult result = client.send(endpoint("retry.sock"), input);
-
-            assertThat(result).isEqualTo(new ControlResult.Acknowledged(COMMAND_ID, true, 91));
-            byte[][] requests = peer.get(2, TimeUnit.SECONDS);
-            assertThat(requests[1]).isEqualTo(requests[0]);
-        }
-    }
-
-    @Test
-    void retriesTheExactInputFrameAfterAMalformedResponse() throws Exception {
-        try (ServerSocketChannel server = listen("malformed-input.sock")) {
-            Future<byte[][]> peer = executor.submit(() -> {
-                byte[][] requests = new byte[2][];
-                try (SocketChannel first = server.accept()) {
-                    requests[0] = readFrame(first);
-                    writeFully(first, malformedAcknowledgement(requestId(requests[0])));
-                }
-                try (SocketChannel second = server.accept()) {
-                    requests[1] = readFrame(second);
-                    writeFully(second, NativeControlCodec.frame(
-                            0x8001, requestId(requests[1]), littleEndianLong(91)));
-                }
-                return requests;
-            });
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
-            ControlCommand.Input input = new ControlCommand.Input(
-                    COMMAND_ID,
-                    1,
-                    COMMAND_ENVELOPE,
-                    UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
-                    ProtocolBytes.copyOf(new byte[]{1, 2, 3}));
-
-            ControlResult result = client.send(endpoint("malformed-input.sock"), input);
-
-            assertThat(result).isEqualTo(new ControlResult.Acknowledged(COMMAND_ID, true, 91));
-            byte[][] requests = peer.get(2, TimeUnit.SECONDS);
-            assertThat(requests[1]).isEqualTo(requests[0]);
-        }
-    }
-
-    @Test
-    void reportsAmbiguousInputWhenBothExactFrameAttemptsReceiveMalformedResponses() throws Exception {
-        try (ServerSocketChannel server = listen("twice-malformed-input.sock")) {
-            Future<byte[][]> peer = executor.submit(() -> {
-                byte[][] requests = new byte[2][];
-                try (SocketChannel first = server.accept()) {
-                    requests[0] = readFrame(first);
-                    writeFully(first, malformedAcknowledgement(requestId(requests[0])));
-                }
-                try (SocketChannel second = server.accept()) {
-                    requests[1] = readFrame(second);
-                    writeFully(second, malformedAcknowledgement(requestId(requests[1])));
-                }
-                return requests;
-            });
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));
-            ControlCommand.Input input = new ControlCommand.Input(
-                    COMMAND_ID,
-                    1,
-                    COMMAND_ENVELOPE,
-                    UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
-                    ProtocolBytes.copyOf(new byte[]{1, 2, 3}));
-
-            ControlResult result = client.send(endpoint("twice-malformed-input.sock"), input);
-
-            assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY);
-            byte[][] requests = peer.get(2, TimeUnit.SECONDS);
-            assertThat(requests[1]).isEqualTo(requests[0]);
-        }
-    }
-
-    @Test
-    void malformedResizeResponseIsAmbiguousAfterReplay() throws Exception {
-        try (ServerSocketChannel server = listen("malformed-resize.sock")) {
-            AtomicInteger connections = new AtomicInteger();
-            Future<Void> peer = executor.submit(() -> {
-                try (SocketChannel first = server.accept()) {
-                    connections.incrementAndGet();
-                    byte[] request = readFrame(first);
-                    writeFully(first, malformedAcknowledgement(requestId(request)));
-                }
-                server.configureBlocking(false);
-                long deadline = System.nanoTime() + Duration.ofMillis(200).toNanos();
-                while (System.nanoTime() < deadline) {
-                    try (SocketChannel unexpected = server.accept()) {
-                        if (unexpected != null) {
-                            connections.incrementAndGet();
-                            break;
-                        }
-                    }
-                    Thread.sleep(5);
-                }
-                return null;
-            });
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
-
-            ControlResult result = client.send(
-                    endpoint("malformed-resize.sock"), new ControlCommand.Resize(
-                            COMMAND_ID, 3, COMMAND_ENVELOPE, 81, 25));
-
-            assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY);
-            await(peer);
-            assertThat(connections).hasValue(2);
-        }
-    }
-
-    @Test
-    void malformedStatusResponseRemainsAFramingFailure() throws Exception {
-        try (ServerSocketChannel server = listen("malformed-status.sock")) {
-            Future<Void> peer = serve(server, request -> malformedAcknowledgement(requestId(request)));
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
-
-            ControlResult result = client.send(endpoint("malformed-status.sock"), new ControlCommand.Status());
-
-            assertFailure(result, ControlResult.FailureKind.FRAMING);
-            await(peer);
-        }
-    }
-
-    @Test
-    void replaysResizeAfterAmbiguousDelivery() throws Exception {
-        try (ServerSocketChannel server = listen("no-retry.sock")) {
-            AtomicInteger connections = new AtomicInteger();
-            Future<Void> peer = executor.submit(() -> {
-                try (SocketChannel first = server.accept()) {
-                    connections.incrementAndGet();
-                    readFrame(first);
-                }
-                server.configureBlocking(false);
-                long deadline = System.nanoTime() + Duration.ofMillis(200).toNanos();
-                while (System.nanoTime() < deadline) {
-                    try (SocketChannel unexpected = server.accept()) {
-                        if (unexpected != null) {
-                            connections.incrementAndGet();
-                            break;
-                        }
-                    }
-                    Thread.sleep(5);
-                }
-                return null;
-            });
-            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
-
-            ControlResult result = client.send(
-                    endpoint("no-retry.sock"), new ControlCommand.Resize(
-                            COMMAND_ID, 3, COMMAND_ENVELOPE, 81, 25));
-
-            assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY);
-            await(peer);
-            assertThat(connections).hasValue(2);
         }
     }
 
@@ -291,7 +181,7 @@ class SessionControlClientTest {
 
         ControlResult result = client.send(endpoint, new ControlCommand.Status());
 
-        assertFailure(result, ControlResult.FailureKind.UNSUPPORTED_TRANSPORT);
+        assertFailure(result, ControlResult.FailureKind.UNSUPPORTED_TRANSPORT, OptionalLong.empty());
     }
 
     @Test
@@ -304,8 +194,7 @@ class SessionControlClientTest {
     @Test
     void continuousReadProgressCannotExtendTheWholeOperationDeadline() {
         AtomicInteger clock = new AtomicInteger();
-        OperationDeadline deadline = OperationDeadline.after(
-                Duration.ofNanos(3), clock::getAndIncrement);
+        OperationDeadline deadline = OperationDeadline.after(Duration.ofNanos(3), clock::getAndIncrement);
         OneByteProgressChannel channel = new OneByteProgressChannel();
         ByteBuffer target = ByteBuffer.allocate(8);
 
@@ -324,8 +213,7 @@ class SessionControlClientTest {
     @Test
     void continuousWriteProgressCannotExtendTheWholeOperationDeadline() {
         AtomicInteger clock = new AtomicInteger();
-        OperationDeadline deadline = OperationDeadline.after(
-                Duration.ofNanos(3), clock::getAndIncrement);
+        OperationDeadline deadline = OperationDeadline.after(Duration.ofNanos(3), clock::getAndIncrement);
         OneByteProgressChannel channel = new OneByteProgressChannel();
         ByteBuffer source = ByteBuffer.allocate(8);
 
@@ -387,9 +275,7 @@ class SessionControlClientTest {
         int payloadLength = ByteBuffer.wrap(header.array()).order(ByteOrder.LITTLE_ENDIAN).getInt(24);
         ByteBuffer complete = ByteBuffer.allocate(NativeControlCodec.HEADER_LENGTH + payloadLength);
         complete.put(header.array());
-        ByteBuffer payload = complete.slice();
-        readFully(channel, payload);
-        complete.position(complete.capacity());
+        readFully(channel, complete.slice());
         return complete.array();
     }
 
@@ -408,7 +294,7 @@ class SessionControlClientTest {
         }
     }
 
-    private static long requestId(byte[] frame) {
+    private static long sequence(byte[] frame) {
         return ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN).getLong(16);
     }
 
@@ -423,19 +309,15 @@ class SessionControlClientTest {
         return payload;
     }
 
-    private static byte[] littleEndianLong(long value) {
-        return ByteBuffer.allocate(Long.BYTES).order(ByteOrder.LITTLE_ENDIAN).putLong(value).array();
-    }
-
-    private static byte[] malformedAcknowledgement(long requestId) {
-        byte[] response = NativeControlCodec.frame(0x8001, requestId, littleEndianLong(91));
-        response[28] ^= 1;
-        return response;
-    }
-
-    private static void assertFailure(ControlResult result, ControlResult.FailureKind kind) {
-        assertThat(result).isInstanceOf(ControlResult.Failed.class);
-        assertThat(((ControlResult.Failed) result).kind()).isEqualTo(kind);
+    private static void assertFailure(
+            ControlResult result,
+            ControlResult.FailureKind kind,
+            OptionalLong operationSequence
+    ) {
+        assertThat(result).isEqualTo(new ControlResult.Failed(
+                operationSequence,
+                kind,
+                ((ControlResult.Failed) result).detail()));
     }
 
     private static void await(Future<?> future) throws InterruptedException, ExecutionException {

@@ -23,7 +23,6 @@ the AgentD lifecycle.
 ## Child Tasks
 
 - [ ] [Synchronize and resume journal events](journal-sync/TASK.md)
-- [ ] [Unify the AgentD native control contract](native-control-contract/TASK.md)
 - [ ] [Remove graceMillis from AgentD termination control](terminate-control-contract/TASK.md)
 - [ ] [Align AgentD with the stabilized session-host contract](session-host-contract-alignment/TASK.md)
 - [ ] [Route server session commands](command-orchestration/TASK.md)

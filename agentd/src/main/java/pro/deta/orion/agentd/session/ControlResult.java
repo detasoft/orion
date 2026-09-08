@@ -1,24 +1,15 @@
 package pro.deta.orion.agentd.session;
 
-import pro.deta.orion.agent.protocol.CommandId;
-
 import java.util.Objects;
-import java.util.Optional;
+import java.util.OptionalLong;
 
 public sealed interface ControlResult {
-    record Acknowledged(CommandId commandId, boolean duplicate, long journalTimestamp)
-            implements ControlResult {
-        public Acknowledged {
-            Objects.requireNonNull(commandId, "commandId");
-            if (journalTimestamp < 0) {
-                throw new IllegalArgumentException("journalTimestamp must fit a signed positive long");
-            }
-        }
+    record Received(long operationSequence) implements ControlResult {
     }
 
-    record Rejected(Optional<CommandId> commandId, int errorCode, String detail) implements ControlResult {
+    record Rejected(OptionalLong operationSequence, int errorCode, String detail) implements ControlResult {
         public Rejected {
-            commandId = Objects.requireNonNull(commandId, "commandId");
+            operationSequence = Objects.requireNonNull(operationSequence, "operationSequence");
             if (errorCode <= 0) {
                 throw new IllegalArgumentException("errorCode must be positive");
             }
@@ -32,9 +23,9 @@ public sealed interface ControlResult {
         }
     }
 
-    record Failed(Optional<CommandId> commandId, FailureKind kind, String detail) implements ControlResult {
+    record Failed(OptionalLong operationSequence, FailureKind kind, String detail) implements ControlResult {
         public Failed {
-            commandId = Objects.requireNonNull(commandId, "commandId");
+            operationSequence = Objects.requireNonNull(operationSequence, "operationSequence");
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(detail, "detail");
         }
