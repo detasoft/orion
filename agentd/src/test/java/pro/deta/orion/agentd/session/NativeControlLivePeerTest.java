@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -43,20 +44,7 @@ class NativeControlLivePeerTest {
         Path executable = extractSessionHost();
         Path sessionDirectory = Files.createDirectory(temporaryDirectory.resolve("session"));
         Path log = temporaryDirectory.resolve("session-host.log");
-        Process host = new ProcessBuilder(
-                executable.toString(),
-                "--session-id", "java-live-peer",
-                "--start-command-id", "command.start",
-                "--session-dir", sessionDirectory.toString(),
-                "--cwd", temporaryDirectory.toString(),
-                "--cols", "80",
-                "--rows", "24",
-                "--term", "xterm-256color",
-                "--",
-                "/bin/cat")
-                .redirectError(log.toFile())
-                .redirectOutput(log.toFile())
-                .start();
+        Process host = startSessionHost(executable, "java-live-peer", sessionDirectory, log);
         try {
             ControlEndpoint endpoint = new ControlEndpoint(
                     ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
@@ -90,6 +78,7 @@ class NativeControlLivePeerTest {
             JournalReadPage completed = awaitCommandResults(
                     sessionDirectory, List.of(1L, 2L, 3L, acknowledgementSequence, terminateSequence));
             assertThat(completed.issue()).isEmpty();
+            assertSignal(completed.records(), 3, 9);
             for (SessionEventRecord record : completed.records()) {
                 if (record.eventType() == 0x0002) {
                     assertThat(record.encodedPayload().toByteArray())
@@ -102,6 +91,54 @@ class NativeControlLivePeerTest {
                 host.waitFor();
             }
         }
+    }
+
+    @Test
+    void terminatesGracefullyWithTheRealSessionHost() throws Exception {
+        Path executable = extractSessionHost();
+        Path sessionDirectory = Files.createDirectory(temporaryDirectory.resolve("session"));
+        Path log = temporaryDirectory.resolve("graceful-session-host.log");
+        Process host = startSessionHost(executable, "java-graceful-terminate", sessionDirectory, log);
+        try {
+            ControlEndpoint endpoint = new ControlEndpoint(
+                    ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
+                    "control.sock",
+                    sessionDirectory.resolve("control.sock"));
+            SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
+            awaitStatus(client, endpoint, host, log);
+
+            assertReceived(client.send(endpoint, new ControlCommand.Terminate(
+                    1, ENVELOPE, AgentMessage.TerminationMode.GRACEFUL)), 1);
+            assertThat(host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)).isTrue();
+            assertThat(host.exitValue()).as(Files.readString(log)).isZero();
+
+            JournalReadPage completed = awaitCommandResults(sessionDirectory, List.of(1L));
+            assertThat(completed.issue()).isEmpty();
+            assertSignal(completed.records(), 2, 15);
+        } finally {
+            if (host.isAlive()) {
+                host.destroyForcibly();
+                host.waitFor();
+            }
+        }
+    }
+
+    private Process startSessionHost(Path executable, String sessionId, Path sessionDirectory, Path log)
+            throws Exception {
+        return new ProcessBuilder(
+                executable.toString(),
+                "--session-id", sessionId,
+                "--start-command-id", "command.start",
+                "--session-dir", sessionDirectory.toString(),
+                "--cwd", temporaryDirectory.toString(),
+                "--cols", "80",
+                "--rows", "24",
+                "--term", "xterm-256color",
+                "--",
+                "/bin/cat")
+                .redirectError(log.toFile())
+                .redirectOutput(log.toFile())
+                .start();
     }
 
     private Path extractSessionHost() throws Exception {
@@ -174,6 +211,19 @@ class NativeControlLivePeerTest {
             sequences.add(sequence);
         }
         return sequences;
+    }
+
+    private static void assertSignal(List<SessionEventRecord> records, int kind, int platformCode) {
+        byte[] expected = new byte[]{(byte) 0x82, (byte) kind, (byte) platformCode};
+        boolean found = false;
+        for (SessionEventRecord record : records) {
+            if (record.eventType() == 0x0202
+                    && Arrays.equals(record.encodedPayload().toByteArray(), expected)) {
+                found = true;
+                break;
+            }
+        }
+        assertThat(found).as("SIGNAL payload for kind %s and platform code %s", kind, platformCode).isTrue();
     }
 
     private static long unsignedLong(ByteBuffer payload, int prefix) {

@@ -3,9 +3,6 @@
 Status: todo (runtime alignment remains; documentation audit completed 2026-09-07)
 Parent: ../TASK.md
 Current contract: ../../../2026-09-03-native-control-journal-idempotency-design.md
-Depends on:
-[unified AgentD native controls](../native-control-contract/TASK.md),
-[AgentD termination control cleanup](../terminate-control-contract/TASK.md)
 Session-host review: ../../../../../session-host/MODULE_REVIEW.md
 
 Bring every remaining AgentD session-host integration path to the final native
