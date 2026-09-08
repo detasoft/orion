@@ -3,6 +3,7 @@
 Status: todo
 Journal contract: ../../2026-09-02-session-journal-cbor-sequence.md
 Agent counterpart: ../agentd/TASK.md
+Next available task: [Agent connection and registration](control-and-registries/TASK.md).
 
 Accept outbound AgentD connections, retain the replicated part of every session
 journal, route commands, and expose durable history and live events to clients.
@@ -22,8 +23,8 @@ journal, route commands, and expose durable history and live events to clients.
 
 ## Child Tasks
 
-- [ ] [Replicate session journals over HTTP/2](session-replication/TASK.md)
 - [ ] [Implement control streams and registries](control-and-registries/TASK.md)
+- [ ] [Replicate session journals over HTTP/2](session-replication/TASK.md)
 - [ ] [Route commands to connected agents](command-service/TASK.md)
 - [ ] [Expose historical and live session events](live-event-api/TASK.md)
 - [ ] [Connect the first web terminal consumer](web-terminal/TASK.md)

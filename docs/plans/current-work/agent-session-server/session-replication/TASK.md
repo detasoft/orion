@@ -3,8 +3,6 @@
 Status: todo
 Depends on: completed server Agent protocol contracts and journal storage.
 
-- Owner: codex, session 9f26e6fe, started 2026-09-04 02:27 Europe/Amsterdam.
-
 Accept one current logical replication stream per session and resume directly
 from the durable server journal after every reconnect.
 
