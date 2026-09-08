@@ -21,3 +21,4 @@ tasks may be ready at the same time.
 - [ ] [Review the Agent session control plane](agent-session-control-plane-architecture-review/TASK.md)
 - [ ] [Review the Orion runtime composition root](runtime-composition-root-architecture-review/TASK.md)
 - [ ] [Add safe macOS AgentD process inspection](macos-agentd-process-inspector/TASK.md)
+- [ ] [Evaluate a session-host control request queue](session-host-control-request-queue/TASK.md)
