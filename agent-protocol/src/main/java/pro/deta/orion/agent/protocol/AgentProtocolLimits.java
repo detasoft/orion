@@ -7,6 +7,8 @@ public record AgentProtocolLimits(
         int maxBinaryBytes,
         int maxNestingDepth
 ) {
+    private static final int SESSION_HOST_MAX_START_DIAGNOSTIC_BYTES = 1024 * 1024;
+
     public static final int HARD_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
     public static final int HARD_MAX_JOURNAL_RECORD_BYTES = HARD_MAX_MESSAGE_BYTES + 4 * 1024;
     public static final int DEFAULT_MAX_MESSAGE_BYTES = HARD_MAX_MESSAGE_BYTES;
@@ -44,7 +46,7 @@ public record AgentProtocolLimits(
         return new AgentProtocolLimits(
                 HARD_MAX_JOURNAL_RECORD_BYTES,
                 1_024,
-                256 * 1024,
+                SESSION_HOST_MAX_START_DIAGNOSTIC_BYTES,
                 DEFAULT_MAX_MESSAGE_BYTES,
                 64);
     }

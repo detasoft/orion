@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 class SessionEventCodecTest {
+    private static final int SESSION_HOST_MAX_START_DIAGNOSTIC_BYTES = 1024 * 1024;
     private static final AgentProtocolLimits LIMITS = AgentProtocolLimits.defaults();
     private static final SessionEventCodec CODEC = new SessionEventCodec(LIMITS);
 
@@ -147,6 +148,25 @@ class SessionEventCodecTest {
                                 new byte[AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES + 1]))))
                 .extracting(AgentProtocolException::reason)
                 .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
+    }
+
+    @Test
+    void acceptsMaximumSessionHostStartFailureDiagnosticFromJournal() throws Exception {
+        byte[] encoded = encodeSessionStartFailed(SESSION_HOST_MAX_START_DIAGNOSTIC_BYTES);
+
+        SessionEventRecord record = new SessionEventCodec(
+                AgentProtocolLimits.journalDefaults()).decode(encoded);
+
+        assertThat(record.eventType()).isEqualTo(0x0203);
+        assertThat(record.encodedRecord().toByteArray()).containsExactly(encoded);
+    }
+
+    @Test
+    void rejectsStartFailureDiagnosticAboveSessionHostMaximum() throws Exception {
+        byte[] encoded = encodeSessionStartFailed(SESSION_HOST_MAX_START_DIAGNOSTIC_BYTES + 1);
+
+        assertLimitExceeded(() -> new SessionEventCodec(
+                AgentProtocolLimits.journalDefaults()).decode(encoded));
     }
 
     @Test
@@ -325,6 +345,24 @@ class SessionEventCodecTest {
 
     private static AgentProtocolLimits nestingLimits() {
         return new AgentProtocolLimits(64, 8, 4, 4, 2);
+    }
+
+    private static byte[] encodeSessionStartFailed(int diagnosticBytes) throws Exception {
+        AgentProtocolLimits producerLimits = new AgentProtocolLimits(
+                AgentProtocolLimits.HARD_MAX_JOURNAL_RECORD_BYTES,
+                1_024,
+                diagnosticBytes,
+                AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES,
+                64);
+        CborWriter writer = new CborWriter(producerLimits);
+        writer.array(3);
+        writer.unsigned(new EventId(1));
+        writer.unsigned(0x0203);
+        writer.array(3);
+        writer.text("00000000-0000-0000-0000-000000000001");
+        writer.text("x".repeat(diagnosticBytes));
+        writer.unsigned(0);
+        return writer.toByteArray();
     }
 
     private static List<byte[]> rawValuesAtStringLimits() {
