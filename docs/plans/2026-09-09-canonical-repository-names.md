@@ -312,6 +312,10 @@ git commit -m "Canonicalize bootstrap repository identities"
 - Modify: `net/http-core/src/test/java/pro/deta/orion/transport/http/OrionAdminCreateRepositoryRouteTest.java`
 - Modify: `net/http-core/src/test/java/pro/deta/orion/transport/http/OrionGitPackfileRouteTest.java`
 - Modify: `net/http-core/src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java`
+- Modify: `net/frontend/ui/src/lib/orion-api.js`
+- Modify: `net/frontend/ui/src/lib/orion-api.test.js`
+- Modify: `net/frontend/ui/src/App.vue`
+- Modify: `net/frontend/ui/src/App.test.js`
 - Modify: `tests/git-engine-orion-adapters/pom.xml`
 - Modify: `tests/git-engine-orion-adapters/src/main/java/pro/deta/orion/git/workflow/orion/OrionGitServer.java`
 - Modify as required by compilation: transport-facing Orion adapter tests under
@@ -349,22 +353,36 @@ Add an explicit `schema` dependency to `tests/git-engine-orion-adapters`. Replac
 `GitWireBootstrap.normalizeRepositoryPath` with `RepositoryName.fromGitPath(...).value()`. Preserve `.git` in remote
 URIs because it is transport decoration, while provider calls use the canonical value. Do not add a local parser.
 
-**Step 5: Run HTTP and adapter tests**
+**Step 5: Remove frontend canonicalization**
+
+Delete the exported `normalizeRepositoryName` function from `orion-api.js`. Make `createRepository(name)` serialize
+the supplied `name` unchanged. In `App.vue`, remove the normalizer import and pass `newRepository.value.name`
+unchanged to the client; retain only the empty-string check and let the server own validation.
+
+Remove the frontend unit tests and mock for the deleted normalizer. Change the App creation fixture from the now
+invalid `platform/my repo#?` spelling to a canonical example such as `platform/my-repo`, and update its displayed
+clone URLs. Add/adjust the client test to assert that a decorated spelling such as `/platform/console.git` is sent
+unchanged in JSON. Do not recreate the Java character policy in JavaScript.
+
+**Step 6: Run HTTP, frontend, and adapter tests**
 
 Run:
 
 ```bash
 make run-test MODULE=net/http-core \
   TEST='OrionAdminCreateRepositoryRouteTest,OrionGitPackfileRouteTest,OrionGitRouteNativeTest'
+make run-test MODULE=net/frontend/ui TEST='FrontendUiNoJavaTest'
 make run-test MODULE=tests/git-engine-orion-adapters TEST='OrionGitServerTest,OrionGitClientTest'
 ```
 
 Expected: PASS.
 
-**Step 6: Commit the slice**
+**Step 7: Commit the slice**
 
 ```bash
 git add net/http-core/src/main net/http-core/src/test \
+  net/frontend/ui/src/lib/orion-api.js net/frontend/ui/src/lib/orion-api.test.js \
+  net/frontend/ui/src/App.vue net/frontend/ui/src/App.test.js \
   tests/git-engine-orion-adapters/pom.xml \
   tests/git-engine-orion-adapters/src/main \
   tests/git-engine-orion-adapters/src/test

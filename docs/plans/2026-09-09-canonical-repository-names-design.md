@@ -48,6 +48,8 @@ defining competing alphabets.
   public normalization path and its real consumers are removed together.
 - HTTP Git and admin routes canonicalize before authorization and provider lookup. The string used for the grant
   decision is exactly the string passed to the native provider.
+- The frontend sends the repository name entered by the operator unchanged to the admin route. It does not trim,
+  remove transport decoration, or maintain a JavaScript copy of the canonicalization policy.
 - Bootstrap and proxy resolution replace `Path.of(...).normalize()` repository-name checks with the ordinary-name
   entry point. `ResolvedBootstrapSource.repositoryName()` contains only the canonical string.
 - Native providers apply the ordinary-name entry point to `exists`, `find`, and `create` calls and validate names read
@@ -77,11 +79,12 @@ Shared contract tests cover:
 - malformed and double percent encoding, invalid UTF-8, uppercase, Unicode, whitespace, `+`, empty segments,
   traversal segments, repeated punctuation, extra leading separators, and repeated `.git` suffixes.
 
-Ingress tests cover Git wire, HTTP admin and Git routes, bootstrap/proxy resolution, and native providers. They prove
-that invalid input does not reach a provider and that authorization and provider selection receive the same
-canonical identity. Storage tests cover canonical metadata across reopen and fail-fast behavior for invalid persisted
-metadata. Dependency verification confirms that `acl-storage` does not depend on `git-parser` and that the shared
-contract has no transport dependency.
+Ingress tests cover Git wire, HTTP admin and Git routes, the frontend admin client, bootstrap/proxy resolution, and
+native providers. They prove that invalid input does not reach a provider, that the frontend does not rewrite the
+operator's spelling, and that authorization and provider selection receive the same canonical identity. Storage
+tests cover canonical metadata across reopen and fail-fast behavior for invalid persisted metadata. Dependency
+verification confirms that `acl-storage` does not depend on `git-parser` and that the shared contract has no
+transport dependency.
 
 Focused tests run through the repository `make run-test` target. Routine development verification uses
 `mvn verify -Pdev -T 4`; after the implementation commit is integrated on `main`, `make test` provides the required
