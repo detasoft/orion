@@ -77,11 +77,12 @@ and explicitly assigns replay protection to `operationSequence`, not to this fie
 
 **Contract.** Preserve the version-1 journal's existing text bytes and byte-for-byte fixtures. Distinguish the
 server command correlation ID, the input identity carried into `PTY_INPUT`, and the native operation sequence
-used for admission/replay. This finding does not establish a new deduplication or journal-confirmation policy.
+used for admission/replay. Preserve the typed field's existing 1–128-character safe-ASCII validation. This
+finding does not establish a new deduplication or journal-confirmation policy.
 
 **Minimal repair.** Correct the shared documentation and typed Java payload name/meaning to input identity while
-preserving the existing text wire representation and permissive version-1 decoding. Update fixtures and tests
-to use different command and input identities so they can no longer mask the boundary.
+preserving the existing text wire representation and identifier validation. Update fixtures and tests to use
+different command and input identities so they can no longer mask the boundary.
 
 **Alternatives and consequences.** Changing the persisted field to raw UUID bytes or adding an operation
 sequence is a versioned wire change and is not needed to fix the semantic label. A new wrapper type would state

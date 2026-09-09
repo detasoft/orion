@@ -15,8 +15,9 @@ changing the version-1 journal bytes.
 
 - Name the first `PTY_INPUT` payload field `ptyInputId` in the typed Java model
   and in both shared and native protocol documentation.
-- Replace the typed Java payload's `CommandId` representation with the existing
-  permissive text representation of the input identity; add no new wrapper.
+- Replace the typed Java payload's `CommandId` representation with a `String`
+  named `ptyInputId`; preserve the existing safe-ASCII identifier validation
+  and add no new wrapper.
 - Update every in-repository typed consumer, fixture construction, and test.
 - Preserve the encoded text bytes, byte-for-byte version-1 fixtures, opaque
   event forwarding, and the native operation sequence used for replay control.

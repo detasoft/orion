@@ -33,7 +33,7 @@ The initial event payloads include:
 ```text
 PTY_OUTPUT:     [eventId, PTY_OUTPUT, byte-string]
 PTY_RESIZE:     [eventId, PTY_RESIZE, [cols, rows]]
-PTY_INPUT:      [eventId, PTY_INPUT, [commandId, byte-string]]
+PTY_INPUT:      [eventId, PTY_INPUT, [ptyInputId, byte-string]]
 PROCESS_EXITED: [eventId, PROCESS_EXITED, [exitCode]]
 ```
 
