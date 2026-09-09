@@ -100,7 +100,7 @@ rule to plan corrections discovered during review.
 Spawn a fresh worker for the selected leaf with:
 
 - model `gpt-5.6-sol`;
-- reasoning effort `medium`;
+- reasoning effort `high`;
 - `fork_turns="none"`, or the smallest supported bounded fork, so the explicit
   model and effort override is applied rather than inherited;
 - only the context needed for this task rather than the whole review thread,
@@ -234,6 +234,6 @@ progress.
 
 After integration, tests, worktree removal, and branch deletion are all
 confirmed, automatically select the next ready leaf from the same pool and
-start a fresh Sol/medium worker. Do not ask for another selection
+start a fresh Sol/high worker. Do not ask for another selection
 confirmation. Apply the same review and user gate to every leaf until the pool
 is exhausted.
