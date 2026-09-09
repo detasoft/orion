@@ -1,10 +1,16 @@
 # Use Canonical Repository Names
 
-Status: todo
+Status: in progress
+
+- Owner: codex, session canonical-repository-names-c2a9, started 2026-09-09 21:22 Europe/Amsterdam.
 
 Define one storage-neutral contract for parsing, normalizing, and validating
 repository names, then use it at every repository ingress instead of retaining
 connector- and transport-specific string checks.
+
+Design: [Canonical repository names](../../2026-09-09-canonical-repository-names-design.md)
+
+Plan: [Canonical repository names implementation](../../2026-09-09-canonical-repository-names.md)
 
 ## Scope
 
@@ -38,4 +44,4 @@ connector- and transport-specific string checks.
 
 ## Coordination
 
-- [Parser/storage boundary](../02_git-wire-architecture-simplification/03_parser-storage-boundary.md)
+- [Parser/storage boundary](../../upcoming-work/02_git-wire-architecture-simplification/03_parser-storage-boundary.md)

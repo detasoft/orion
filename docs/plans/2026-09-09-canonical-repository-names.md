@@ -21,7 +21,7 @@ authorization-, and route-local repository-name normalizers are removed.
 - Do not edit this plan, `MODULE_REVIEW.md`, or task-tree files in the implementation worktree.
 - Run every test command outside the sandbox. Use `make run-test` for focused tests.
 - Intermediate slice commits are allowed, but before the integration gate squash the worker branch to
-  `Use canonical repository names [task: 01_acl-storage-hardening/03_canonical-repository-names.md]`.
+  `Use canonical repository names [task: 12_acl-storage-hardening/03_canonical-repository-names.md]`.
 - Do not add migration, aliases, fallback parsing, dual-read behavior, or a second repository-name policy.
 
 ### Task 1: Define the shared canonical value
@@ -425,7 +425,7 @@ that `RepositoryAddress` and repository-content path validators remain separate 
 Squash all change-unique commits into:
 
 ```text
-Use canonical repository names [task: 01_acl-storage-hardening/03_canonical-repository-names.md]
+Use canonical repository names [task: 12_acl-storage-hardening/03_canonical-repository-names.md]
 ```
 
 Run `git diff --check`, confirm the worktree is clean, and return the exact base SHA, prepared SHA, branch, worktree,
