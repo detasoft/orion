@@ -152,6 +152,33 @@ new failure modes, containment, compatibility impact, and the concrete
 structure removed. If evidence shows the guarantee is required, preserve it and
 choose the next-smallest repair.
 
+## Review Unit Boundaries
+
+Treat one module audit and one authorized repair as separate bounded review
+units. An analysis worker belongs to one module audit only. After the primary
+agent validates its result and commits the corresponding report state, do not
+message or reuse that worker for another module, a later refresh, or repair
+revalidation. Any later analysis uses a fresh worker with no inherited turns.
+
+A repair unit remains active through its implementation, review fixes,
+integration, cleanup, and the separate revalidation commit for
+`MODULE_REVIEW.md`. Once those steps are complete, apply the orchestrator's
+completed-task boundary and retire every subagent assigned to that repair. A
+direct small repair has the same context boundary even though it uses no worker.
+
+Before leaving either completed unit, show the user what was reviewed or solved,
+how the result was established, which parts and report entries changed, actual
+verification and coverage limits, remaining risks or work, and concrete next
+steps. Then reconstruct the next review context from current `HEAD`, workspace
+state, active task-tree nodes, applicable rules and plans, unresolved user
+decisions, and a fresh read of the relevant `MODULE_REVIEW.md`. Its active
+findings are the canonical repair queue. Do not carry a resolved finding's
+investigation, rejected alternatives, worker conversation, or deleted report
+text into the next unit. Preserve a cross-finding fact only when it is still
+supported by current repository evidence, a retained active finding, or an
+unresolved decision. Use native context compaction when available; otherwise
+the reconstructed working set is the context reset.
+
 ## Interactive repair loop
 
 When repair was requested, first classify each authorized repair. It qualifies
