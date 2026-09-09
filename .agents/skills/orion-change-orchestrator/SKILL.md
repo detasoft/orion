@@ -220,3 +220,26 @@ continuing pool or explicit change list, select the next ready item automaticall
 in its applicable order and launch a fresh Sol/high worker. Apply the same review
 and user gate to each item; a single direct change ends when its integration and
 cleanup are complete.
+
+## Completed Task Boundary
+
+After all completion conditions for one bounded change are confirmed, emit a
+self-contained user-facing completion report before starting later work. State
+what was solved, how it was solved, which parts changed and what changed in each,
+actual verification results, remaining risks or work, and concrete next steps
+that can be taken.
+
+The completed task's worker is then retired. Do not send it messages or
+follow-up tasks and never reuse it for another direct change or queued leaf.
+Reuse of the same worker for review fixes, commit preparation, and integration
+is required only while its original bounded change remains active.
+
+For a continuing pool or explicit change list, reconstruct the next item's
+working context from current durable evidence: `HEAD`, workspace and worktree
+state, active task-tree nodes, applicable plans and rules, relevant current
+review reports, unresolved user decisions, and the still-authorized scope. Do
+not carry forward the completed task's investigation chronology, rejected
+alternatives, transient reasoning, or worker conversation. Retain a completed
+task fact only when current repository evidence makes it a dependency or
+invariant of the next item. Use native context compaction when available; when
+it is not available, this reconstructed working set is the context reset.
