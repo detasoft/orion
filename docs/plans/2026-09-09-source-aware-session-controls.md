@@ -1,0 +1,336 @@
+# Source-Aware Session Controls Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Let `SERVER` and `MANUAL` commands share the native session-control path while applying replay protection only to server commands.
+
+**Architecture:** Replace operation payload schema 2 with one current schema-3 layout carrying an explicit source. Keep the existing host-owned execution serialization and journal order; branch only at admission, where `SERVER` advances the session high-water mark and every valid `MANUAL` delivery is admitted without retained sequence state. Persist a source-aware `COMMAND_RESULT` and consume the same fixtures from Rust and Java without a legacy codec path.
+
+**Tech Stack:** Rust 2024, Unix domain sockets, CBOR Sequence journals, Java 21, JUnit 5, AssertJ, Maven, Make.
+
+---
+
+## Behavioral delta
+
+**Current model:** Every native operation uses schema 2, carries a nonempty opaque server envelope, and shares one session-wide sequence high-water mark. `COMMAND_RESULT` contains sequence, server envelope, outcome, and detail. AgentD encodes only this server-shaped model, and its journal codec leaves command results opaque.
+
+**Required behavioral delta:** Schema 3 adds `SERVER = 1` and `MANUAL = 2`. Server commands retain the current high-water semantics; manual commands have no high-water, deduplication, replay, reconnect, or cleanup state. Both sources can issue all five existing operations and share the current effect and result paths.
+
+**Preserved behavior and invariants:** The 32-byte control frame, response schema, sequence correlation, unsigned `u64` range, `RECEIVED` admission boundary, operation coordinator, ordinary-effect serialization, `TERMINATE` bypass, effect behavior, journal `eventId` ordering, retention rules, and result-append failure behavior remain unchanged.
+
+**Chosen implementation:** Extend the existing operation payload and `COMMAND_RESULT`; do not add another control message family, dispatcher, execution lane, ledger, or persistent state. Add only source/outcome value types needed by both Java control and journal models.
+
+## Canonical replacement layouts
+
+Operation request frames use payload schema `3` only. The header sequence remains `operationSequence`.
+
+```text
+u16 source                 # 1 SERVER, 2 MANUAL
+u16 reserved               # zero
+u32 serverEnvelopeLength
+serverEnvelopeLength bytes # nonempty for SERVER, zero for MANUAL
+command-specific effect
+```
+
+For a successful decode, retain both the typed effect and the result envelope:
+
+- `SERVER`: the result envelope is the exact opaque server envelope bytes.
+- `MANUAL`: the result envelope is the exact received schema-3 operation payload, including source prefix and effect.
+
+The current journal payload is:
+
+```text
+[source, operationSequence, exactSourceEnvelope, outcome, detail]
+```
+
+No schema-1/schema-2 operation reader, writer, fixture, fallback, migration mode, or negative compatibility test remains. STATUS, responses, and unrelated payloads keep their existing schemas.
+
+### Task 1: Replace the Rust wire and journal model
+
+**Files:**
+
+- Modify: `session-host/src/protocol.rs`
+- Modify: `session-host/src/journal.rs`
+- Modify: `session-host/src/bin/generate_protocol_fixtures.rs`
+- Modify: `session-host/tests/support/journal.rs`
+- Modify: `session-host/protocol/fixtures/command-events-v1.hex`
+- Create: `session-host/protocol/fixtures/control-source-aware.bin`
+- Delete: `session-host/protocol/fixtures/control-idempotency-v2.bin`
+- Delete: `session-host/protocol/fixtures/control-v1.bin`
+
+**Step 1: Add the minimal compilable model skeleton**
+
+Add `OperationSource::{Server, Manual}` with wire codes `1` and `2`. Extend `OperationControlPayload` with `source` and `result_envelope`, and extend `JournalEvent::CommandResult` plus `encode_command_result` with source. Change the operation encoder signature to accept source and an optional server-envelope slice; leave admission behavior unchanged until Task 2.
+
+**Step 2: Add protocol tests for the new behavior**
+
+Replace the schema-two tests in `protocol.rs` with schema-three cases that assert:
+
+- all five effects round-trip for both sources;
+- only `SERVER` requires a nonempty inner envelope;
+- `MANUAL` retains the exact encoded operation payload as its result envelope;
+- reserved bytes and unknown sources are rejected;
+- sequences above `i64::MAX` survive both control and journal encoding;
+- `COMMAND_RESULT` encodes exactly as `[source, sequence, envelope, outcome, detail]`.
+
+Update the test journal decoder to expose source before sequence so real-host assertions do not infer fields from byte offsets.
+
+**Step 3: Run the selected Rust test and observe the behavioral failure**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+```
+
+Expected: the new source-aware assertions fail until the codec and journal encoder implement the replacement layouts; the crate must compile.
+
+**Step 4: Implement the canonical codecs**
+
+Decode the source prefix once, validate the source-specific envelope rule, retain exact request payload bytes only for `MANUAL`, and keep the existing effect validators source-neutral. Encode the five-field result and pass source/result envelope through `JournalEvent::CommandResult`. Do not retain a schema-2 function or branch.
+
+**Step 5: Replace the canonical fixtures**
+
+Rename the generator entry to `control_source_aware`, emit both sources for all five operation types, and regenerate fixtures:
+
+```bash
+make session-host-fixtures
+```
+
+Delete the two superseded operation fixtures and their generator/test references. Keep `command-events-v1.hex` because journal format version 1 remains current, but replace its bytes with source-aware server and manual results.
+
+**Step 6: Verify and commit the Rust contract slice**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+```
+
+Expected: all Rust tests pass.
+
+Commit:
+
+```bash
+git add session-host
+git commit -m "Define source-aware native control records"
+```
+
+### Task 2: Apply source-specific host admission
+
+**Files:**
+
+- Modify: `session-host/src/platform/unix.rs`
+- Modify: `session-host/tests/unix_process_host.rs`
+
+**Step 1: Add real-host admission tests**
+
+Add source parameters to the existing operation helpers and keep established tests explicitly `SERVER`. Add cases that:
+
+- interleave `SERVER:42`, `MANUAL:1`, `SERVER:43`, and `MANUAL:2` and retain journal order;
+- reject a repeated server sequence;
+- execute repeated manual sequence `1` again on the same and another connection;
+- accept a manual sequence below the server high-water mark without changing that mark;
+- attribute each result to its source and exact source envelope;
+- exercise all five operation decoders for each source while retaining existing effect-level tests, including manual ACK behavior and the terminate bypass.
+
+Reuse the existing lost-receipt, effect-failure, and result-append-failure coverage by updating its frames and result assertions to the current schema. Do not add a test whose only purpose is to reject schema 2.
+
+**Step 2: Run the host tests and observe manual stale rejection**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+```
+
+Expected: the new repeated/interleaved `MANUAL` tests fail because the global high-water mark still applies to every operation.
+
+**Step 3: Make admission source-aware in the existing handler**
+
+Keep `handle_operation`, `OperationCoordinator`, `operation_order`, and `execute_operation_effect` as the sole production path. In the existing shared-state lock:
+
+```text
+SERVER -> reject at/below accepted_sequence_high_watermark, otherwise advance it
+MANUAL -> do not read or write accepted_sequence_high_watermark
+both   -> register the active operation or reject finalizing state
+```
+
+After `RECEIVED`, execute and append the same `JournalEvent::CommandResult` for either source. Do not add connection-owned or durable manual state.
+
+**Step 4: Verify and commit host behavior**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+```
+
+Expected: all Rust unit and real-host tests pass.
+
+Commit:
+
+```bash
+git add session-host/src/platform/unix.rs session-host/tests/unix_process_host.rs
+git commit -m "Apply source-specific control admission"
+```
+
+### Task 3: Decode source-aware command results in the shared Java protocol
+
+**Files:**
+
+- Create: `agent-protocol/src/main/java/pro/deta/orion/agent/protocol/SessionCommandSource.java`
+- Create: `agent-protocol/src/main/java/pro/deta/orion/agent/protocol/SessionCommandOutcome.java`
+- Modify: `agent-protocol/src/main/java/pro/deta/orion/agent/protocol/SessionEventPayload.java`
+- Modify: `agent-protocol/src/main/java/pro/deta/orion/agent/protocol/SessionEventType.java`
+- Modify: `agent-protocol/src/main/java/pro/deta/orion/agent/protocol/SessionEventCodec.java`
+- Modify: `agent-protocol/src/main/java/pro/deta/orion/agent/protocol/CborWriter.java`
+- Modify: `agent-protocol/src/test/java/pro/deta/orion/agent/protocol/SessionEventCodecTest.java`
+- Create: `agent-protocol/protocol/fixtures/command-events-v1.hex`
+
+**Step 1: Add the compilable Java payload skeleton**
+
+Add source and outcome enums with exact native wire codes. Add `SessionEventPayload.CommandResult(source, operationSequence, sourceEnvelope, outcome, detail)` and the `COMMAND_RESULT = 0x0002` event type. Validate the native sequence exclusions, nonempty copied envelope, successful empty detail, and 4096-byte UTF-8 detail limit.
+
+**Step 2: Add failing codec and shared-fixture tests**
+
+Cover server/manual round trips, unsigned sequences above `Long.MAX_VALUE`, malformed source/outcome/field shapes, exact envelope preservation, and exact equality with the Rust-generated `command-events-v1.hex`. Preserve opaque unknown-event and outer-tail behavior.
+
+**Step 3: Run the focused protocol test**
+
+Run outside the sandbox:
+
+```bash
+make run-test MODULE=agent-protocol TEST='SessionEventCodecTest'
+```
+
+Expected: new command-result decode assertions fail until the codec recognizes event `0x0002`.
+
+**Step 4: Implement typed encoding and decoding**
+
+Extend the existing `SessionEventCodec` switch and payload helpers; do not add a second journal reader or CBOR implementation. Add the narrow package-private unsigned-`long` CBOR support needed to preserve the full `u64` sequence.
+
+**Step 5: Verify and commit the shared journal slice**
+
+Run outside the sandbox:
+
+```bash
+make run-test MODULE=agent-protocol TEST='SessionEventCodecTest'
+```
+
+Expected: the focused test passes.
+
+Commit:
+
+```bash
+git add agent-protocol
+git commit -m "Decode source-aware session command results"
+```
+
+### Task 4: Replace the AgentD operation model and codec
+
+**Files:**
+
+- Modify: `agentd/src/main/java/pro/deta/orion/agentd/session/ControlCommand.java`
+- Modify: `agentd/src/main/java/pro/deta/orion/agentd/session/NativeControlCodec.java`
+- Modify: `agentd/src/main/java/pro/deta/orion/agentd/session/package-info.java`
+- Modify: `agentd/src/test/java/pro/deta/orion/agentd/session/NativeControlCodecTest.java`
+- Modify: `agentd/src/test/java/pro/deta/orion/agentd/session/SessionControlClientTest.java`
+
+**Step 1: Change the model signatures without adding compatibility constructors**
+
+Give every operation record a mandatory `SessionCommandSource` and `Optional<ProtocolBytes> serverCommandEnvelope`. Require a present, nonempty envelope for `SERVER` and an empty optional for `MANUAL`. Keep STATUS source-free. Update all real callers directly; do not retain the old constructor family.
+
+**Step 2: Add current-layout codec tests**
+
+Replace the old fixture assertions with `control-source-aware.bin`. Verify both sources for all five operations, schema `3`, zero reserved bytes, absent manual server envelope, full unsigned sequences, exact effect bytes, and unchanged response decoding. Keep the existing single-exchange ambiguous-delivery test for manual commands to prove the client does not retry.
+
+**Step 3: Run the focused AgentD tests**
+
+Run outside the sandbox:
+
+```bash
+make run-test MODULE=agentd TEST='NativeControlCodecTest,SessionControlClientTest'
+```
+
+Expected: new schema/source assertions fail until `NativeControlCodec` writes the replacement prefix.
+
+**Step 4: Implement the current encoder only**
+
+Use one `OPERATION_PAYLOAD_SCHEMA = 3` constant and one operation-frame function for both sources. Write source, reserved zero, optional server-envelope length/bytes, and the unchanged effect. Remove schema-2 names and text from AgentD; do not decode or emit the old layout.
+
+**Step 5: Verify and commit the AgentD codec slice**
+
+Run outside the sandbox:
+
+```bash
+make run-test MODULE=agentd TEST='NativeControlCodecTest,SessionControlClientTest'
+```
+
+Expected: focused tests pass and `rg -n -i 'schema.?2|schema two|control-idempotency-v2' agentd` returns no matches.
+
+Commit:
+
+```bash
+git add agentd
+git commit -m "Encode source-aware native controls"
+```
+
+### Task 5: Prove Java/Rust interoperability and perform current-only cleanup
+
+**Files:**
+
+- Modify: `agentd/src/test/java/pro/deta/orion/agentd/session/NativeControlLivePeerTest.java`
+- Modify as required by complete replacement: `session-host/src/protocol.rs`
+- Modify as required by complete replacement: `session-host/tests/unix_process_host.rs`
+
+**Step 1: Extend the live-peer test**
+
+Send server and manual operations through `SessionControlClient`, including repeated manual sequences and a server stale rejection. Decode `COMMAND_RESULT` with `SessionEventCodec.decodeKnownPayload` and assert source, unsigned sequence, exact server envelope, exact manual operation payload, outcome, and detail. Keep ACK and TERMINATE available to both sources; client policy in the future terminal is outside this task.
+
+**Step 2: Run cross-language tests**
+
+Run outside the sandbox:
+
+```bash
+make session-host-build
+make run-test MODULE=agentd TEST='NativeControlLivePeerTest'
+```
+
+Expected: the Java client interoperates with the newly built native host and the live journal decodes through the shared typed codec.
+
+**Step 3: Remove legacy-only assertions in a separate work commit**
+
+After the replacement behavior passes, remove remaining tests that exist only to exercise or reject the old operation payloads. Do not add source-scanning tests; use repository search as a review check. Commit this cleanup separately during implementation so its intent is reviewable; the orchestrator will still prepare the single final queued-task commit required by `AGENTS.md`.
+
+```bash
+git add session-host agentd agent-protocol
+git commit -m "Remove superseded native operation coverage"
+```
+
+**Step 4: Run complete verification**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+make test
+mvn verify -Pdev -T 4
+git diff --check
+```
+
+Expected: every command succeeds. Inspect the complete branch diff and confirm there is one source enum per language, one operation decoder/encoder per language, one host handler/effect path, only the server high-water mark, no new persistent state, and no schema-2 operation reference.
+
+**Step 5: Prepare the queued-task commit**
+
+Squash all task-unique implementation commits into one clean commit with the required subject:
+
+```text
+Add source-aware session controls [task: 05_native-session-host/07_source-aware-controls.md]
+```
+
+Leave the task leaf and claim unchanged in the worker branch and return the final SHA for coordinator review. Do not integrate into `main` or delete the worktree before the user gate.
+
+## Coordinator follow-up after integration
+
+After the reviewed implementation is authorized, transferred, and verified on `main`, update `session-host/protocol/README.md`, the reconciled native-control design/record, and affected AgentD/local-terminal/command-orchestration plans to describe only the current source-aware contract. Commit those documentation-only edits directly on `main` without tests, then perform task-tree completion cleanup through `orion-task-runner`.
