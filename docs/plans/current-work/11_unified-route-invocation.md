@@ -1,7 +1,10 @@
 # Unify HTTP Route Invocation
 
-Status: todo
-Source: finding 2 in [the module review](../../../../net/http-core/MODULE_REVIEW.md)
+Status: in progress
+Source: finding 2 in [the module review](../../../net/http-core/MODULE_REVIEW.md)
+
+- [ ] Replace the dual HTTP route invocation contract.
+  - Owner: codex, session http-route-3e7a, started 2026-09-09 21:48 Europe/Amsterdam.
 
 Replace the dual `service()`/`handle()` route protocol with one invocation
 contract that applies route policy consistently without buffering Git,
