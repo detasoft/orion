@@ -116,6 +116,10 @@ When several implementations satisfy the requirement, choose in this order:
 
 ## Architectural-change trigger
 
+Always use both the `minimal-delta` and `architecture-simplifier` skills when
+reviewing changes or developing tasks, regardless of the scope or complexity
+of the work.
+
 Before making a change that introduces or materially modifies any of the following, apply the `minimal-delta` skill:
 
 - public API or protocol
