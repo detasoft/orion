@@ -13,6 +13,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public final class OrionXmlSchema {
     private final String document;
@@ -25,6 +28,15 @@ public final class OrionXmlSchema {
 
     public String document() {
         return document;
+    }
+
+    public static void main(String[] args) throws IOException {
+        if (args.length != 1) {
+            throw new IllegalArgumentException("Usage: OrionXmlSchema <output.xsd>");
+        }
+        Path output = Path.of(args[0]).toAbsolutePath();
+        Files.createDirectories(output.getParent());
+        Files.writeString(output, new OrionXmlSchema().document(), StandardCharsets.UTF_8);
     }
 
     public ValidationResult validate(InputStream input) throws IOException {
@@ -54,7 +66,7 @@ public final class OrionXmlSchema {
                     return result;
                 }
             });
-            return document.toString();
+            return document.toString().stripTrailing() + System.lineSeparator();
         } catch (IOException e) {
             throw new IllegalStateException("Cannot generate Orion XML v2 schema", e);
         }

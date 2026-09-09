@@ -1,0 +1,491 @@
+<?xml version="1.0" standalone="yes"?>
+<xs:schema version="1.0" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <xs:element name="orion" type="orionV2"/>
+
+  <xs:complexType name="orionV2">
+    <xs:sequence>
+      <xs:element name="system" type="systemConfiguration"/>
+      <xs:element name="organizations">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="organization" type="organization" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="schemaVersion" type="schemaVersion" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="systemConfiguration" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="accessControl" type="accessControl"/>
+      <xs:element name="https" type="https" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="accessControl" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="users">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="user" type="user" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="roles">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="role" type="role" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="grants">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grant" type="grant" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="user" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="first" type="xs:string" minOccurs="0"/>
+      <xs:element name="last" type="xs:string" minOccurs="0"/>
+      <xs:element name="email" type="xs:string" minOccurs="0"/>
+      <xs:element name="credentials">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="credential" type="credential" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="roles">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="role" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="grants">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grant" type="grant" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="credential" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="type" type="credentialType"/>
+      <xs:element name="keyId" type="xs:string" minOccurs="0"/>
+      <xs:element name="value" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="grant" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="info">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="expression" type="grantExpression" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="grantExpression" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="key" type="grantKey"/>
+      <xs:element name="value" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="role" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="grants">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grant" type="grant" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="grantReferences">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grantReference" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="https" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="enabled" type="xs:boolean"/>
+      <xs:element name="address" type="xs:string" minOccurs="0"/>
+      <xs:element name="port" type="xs:int"/>
+      <xs:element name="publicUrl" type="xs:string" minOccurs="0"/>
+      <xs:element name="identity" type="materialReference" minOccurs="0"/>
+      <xs:element name="serverIssuerTrustAnchor" type="materialReference" minOccurs="0"/>
+      <xs:element name="clientAuthentication" type="clientAuthentication" minOccurs="0"/>
+      <xs:element name="clientTrustAnchors" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="trustAnchor" type="materialReference" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="acme" type="acme" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="materialReference" final="extension restriction">
+    <xs:sequence/>
+    <xs:attribute name="alias" type="xs:string" use="required"/>
+    <xs:attribute name="version" type="xs:long" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="acme" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="enabled" type="xs:boolean"/>
+      <xs:element name="directoryUrl" type="xs:string" minOccurs="0"/>
+      <xs:element name="accountEmail" type="xs:string" minOccurs="0"/>
+      <xs:element name="domains" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="domain" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="organization" type="xs:string" minOccurs="0"/>
+      <xs:element name="accountMaterial" type="materialReference" minOccurs="0"/>
+      <xs:element name="authorizationTimeoutSeconds" type="xs:long"/>
+      <xs:element name="orderTimeoutSeconds" type="xs:long"/>
+      <xs:element name="agreeToTermsOfService" type="xs:boolean"/>
+      <xs:element name="allowRequestedDomains" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="organization" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="displayName" type="xs:string" minOccurs="0"/>
+      <xs:element name="users" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="user" type="organizationUser" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="grants" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grant" type="scopedGrant" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="roles" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="role" type="scopedRole" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="teams">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="team" type="team" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="organizationUser" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="first" type="xs:string" minOccurs="0"/>
+      <xs:element name="last" type="xs:string" minOccurs="0"/>
+      <xs:element name="email" type="xs:string" minOccurs="0"/>
+      <xs:element name="credentials" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="credential" type="organizationCredential" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="memberships" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="team" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="roles" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="role" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+    <xs:attribute name="enabled" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="organizationCredential" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="type" type="organizationCredentialType"/>
+      <xs:element name="keyId" type="xs:string" minOccurs="0"/>
+      <xs:element name="value" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="scopedGrant" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="expressions" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="expression" type="scopedGrantExpression" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+    <xs:attribute name="effect" type="scopedGrantEffect" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="scopedGrantExpression" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="key" type="grantKey"/>
+      <xs:element name="value" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="scopedRole" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="roleReferences" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="roleReference" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="grantReferences" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grantReference" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="team" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="displayName" type="xs:string" minOccurs="0"/>
+      <xs:element name="grants" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grant" type="scopedGrant" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="roles" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="role" type="scopedRole" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="repositories">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="repository" type="repository" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="repository" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="displayName" type="xs:string" minOccurs="0"/>
+      <xs:element name="defaultBranch" type="xs:string" minOccurs="0"/>
+      <xs:element name="policy" type="repositoryPolicy" minOccurs="0"/>
+      <xs:element name="remotes" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="remote" type="remote" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="grants" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="grant" type="scopedGrant" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="roles" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="role" type="scopedRole" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="repositoryPolicy" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="allowForcePushes" type="xs:boolean"/>
+      <xs:element name="allowBranchDeletes" type="xs:boolean"/>
+      <xs:element name="allowTagRewrites" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="remote" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="role" type="remoteRole"/>
+      <xs:element name="provider" type="remoteProvider"/>
+      <xs:element name="uri" type="xs:string"/>
+      <xs:element name="credential" type="secretReference"/>
+      <xs:element name="triggers">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="trigger" type="remoteTrigger" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="refMappings">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="refMapping" type="refMapping" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="updatePolicy" type="remoteUpdatePolicy"/>
+    </xs:sequence>
+    <xs:attribute name="alias" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="secretReference" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="scope" type="secretScope"/>
+      <xs:element name="reference" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="refMapping" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="source" type="xs:string"/>
+      <xs:element name="destination" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="remoteUpdatePolicy" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="allowForceUpdates" type="xs:boolean"/>
+      <xs:element name="allowDeletes" type="xs:boolean"/>
+      <xs:element name="allowTagRewrites" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="credentialType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="SHA1"/>
+      <xs:enumeration value="MD5"/>
+      <xs:enumeration value="PLAIN"/>
+      <xs:enumeration value="OPENSSH_PUBLIC_KEY"/>
+      <xs:enumeration value="SHA3_256"/>
+      <xs:enumeration value="ARGON2"/>
+      <xs:enumeration value="JWT_SIGNING_PUBLIC_KEY"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="grantKey">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="REPOSITORY"/>
+      <xs:enumeration value="BRANCH"/>
+      <xs:enumeration value="FORCE"/>
+      <xs:enumeration value="READ"/>
+      <xs:enumeration value="WRITE"/>
+      <xs:enumeration value="CREATE"/>
+      <xs:enumeration value="NETWORK_SOURCE"/>
+      <xs:enumeration value="NETWORK_PORT"/>
+      <xs:enumeration value="SHUTDOWN"/>
+      <xs:enumeration value="ADMIN"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="clientAuthentication">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="disabled"/>
+      <xs:enumeration value="want"/>
+      <xs:enumeration value="required"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="organizationCredentialType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ARGON2"/>
+      <xs:enumeration value="SHA1"/>
+      <xs:enumeration value="OPENSSH_PUBLIC_KEY"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="scopedGrantEffect">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ALLOW"/>
+      <xs:enumeration value="DENY"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="remoteRole">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="PRIMARY"/>
+      <xs:enumeration value="OUTBOUND_ONLY"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="remoteProvider">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="GENERIC"/>
+      <xs:enumeration value="GITHUB"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="secretScope">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ORGANIZATION"/>
+      <xs:enumeration value="REPOSITORY"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="remoteTrigger">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="STARTUP_RECONCILE"/>
+      <xs:enumeration value="LOCAL_REF_UPDATE"/>
+      <xs:enumeration value="PERIODIC_AUDIT"/>
+      <xs:enumeration value="MANUAL_RETRY"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="schemaVersion">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

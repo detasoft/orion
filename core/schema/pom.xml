@@ -28,4 +28,33 @@
             <scope>runtime</scope>
         </dependency>
     </dependencies>
+    <profiles>
+        <profile>
+            <id>xml-schema</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>export-orion-xml-schema</id>
+                                <phase>compile</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>pro.deta.orion.schema.orion.OrionXmlSchema</mainClass>
+                                    <arguments>
+                                        <argument>${maven.multiModuleProjectDirectory}/docs/schemas/orion-v2.xsd</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

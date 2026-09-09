@@ -9,7 +9,7 @@ TEST_JFR_MAVEN_ARGS ?=
 RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>'
 RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>'
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
-RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report \
+RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
 	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
@@ -31,13 +31,16 @@ RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
 endif
 endif
 
-.PHONY: dist test run-test test-jfr test-jfr-report
+.PHONY: dist test run-test test-jfr test-jfr-report xml-schema
 
 dist:
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
 test:
 	$(MAVEN) test -Pdev -T 4
+
+xml-schema:
+	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
 
 run-test:
 	@if [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -eq 0 ]; then \

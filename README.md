@@ -369,6 +369,40 @@ transport:
     port: 8022
 ```
 
+### Orion XML schema
+
+[orion-v2.xsd](docs/schemas/orion-v2.xsd) provides XML completion and structural
+validation for the current `orion.xml` format. It is generated from the same
+JAXB model used by Orion's reader. Associate it with your document in the XML
+editor, or add a schema hint (adjust the relative path for your file):
+
+```xml
+<orion schemaVersion="2"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:noNamespaceSchemaLocation="../docs/schemas/orion-v2.xsd">
+  <system>
+    <accessControl><users/><roles/><grants/></accessControl>
+  </system>
+  <organizations/>
+</orion>
+```
+
+The path above is relative to a document in `orion/`. For use outside this
+checkout, place the XSD beside your XML and use `orion-v2.xsd` as the location.
+The schema describes v2 (`<orion schemaVersion="2">`); legacy v1 documents
+with an `<AccessControl>` root require conversion to v2 before using it.
+
+Run `make xml-schema` after changing the JAXB wire model to regenerate the
+checked-in XSD. A running Orion also exposes its generated schema at
+`GET /schemas/orion-admin-acl.xsd` and
+accepts XML for structural validation at `POST /schemas/orion-admin-acl.xsd`.
+The POST response contains `valid` and, on failure, `message`.
+
+XSD checks XML structure, required fields and wire types. Semantic rules such
+as scoped role references, role cycles and HTTPS configuration constraints
+are checked separately by Orion when reading the document. Orion uses its own
+schema for validation and does not fetch the document's schema hint.
+
 HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
 
 ```xml
