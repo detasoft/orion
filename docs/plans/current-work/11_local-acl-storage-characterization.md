@@ -1,6 +1,9 @@
 # Restore Local Storage Characterization
 
-Status: todo
+Status: in progress
+
+- [ ] Restore focused coverage for supported Local ACL storage behavior.
+  - Owner: codex, session local-acl-characterization-a91e, started 2026-09-09 19:06 Europe/Amsterdam.
 
 Restore focused tests for the supported Local ACL storage behavior that was
 lost when the old monolithic storage/service suite was deleted.
