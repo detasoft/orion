@@ -325,28 +325,3 @@ Unbounded retries can mask real startup faults; retrying only known fixture bind
 risk. A retry limit must still report the final failure.
 
 **Confidence.** High on the race and port-0 restriction; collision frequency is environment-dependent.
-
-## 11. Git pack-URI setup retains an impossible null configuration branch
-
-**Problem.** OrionGitRoute rejects a null GitTransportConfig during construction but later treats that same
-final field as nullable when obtaining pack-URI configuration. The null alternative is unreachable.
-
-**Sources.** [Constructor invariant](src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java#L58),
-[dead alternative](src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java#L206), and
-[existing pack-URI behavior coverage](src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java#L93).
-
-**Documented behavior.** No external null-configuration contract was found. The production constructor
-explicitly defines the supported state.
-
-**Contract.** Preserve rejection of null GitTransportConfig and existing configured/unconfigured pack-URI
-behavior. The nullable nested pack-URI configuration is a separate state and must remain supported where the
-resolver supports it.
-
-**Minimal repair.** Read gitTransportConfig.getPackfileUri() directly, removing only the unreachable
-configuration-null alternative.
-
-**Alternatives and consequences.** Allowing a null constructor argument would weaken the established invariant
-and create a new configuration mode. The direct read removes one impossible branch without changing runtime,
-wire, persistence or API behavior.
-
-**Confidence.** High; the field is final and every construction passes through its non-null check.
