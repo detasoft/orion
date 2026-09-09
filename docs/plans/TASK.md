@@ -21,7 +21,10 @@ completion. The [dependency and coordination audit](2026-09-09-task-stream-order
 records cross-task gates; its snapshot labels are not a separate queue order.
 
 Use `orion-task-runner` for selection and planning. Every execution uses
-`orion-review-orchestrator` and an implementation worker applying `orion-minimal-implementation`.
+`orion-change-orchestrator` and an implementation worker applying `orion-minimal-implementation`.
+Task descriptions, ordering, composition, and dependency edits stay directly
+with the runner. Other repository changes use the change orchestrator even
+without a queued task; direct changes need no fabricated task or claim.
 Insert planned tasks by their intended local ordinal. Delete completed leaves
 and completed empty compositions after verification and review; retain these
 queue roots. Keep detailed designs and completion evidence in ordinary

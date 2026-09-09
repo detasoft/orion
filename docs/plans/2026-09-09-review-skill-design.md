@@ -5,9 +5,9 @@
 **Goal:** Add a repository skill that audits one or more modules into `MODULE_REVIEW.md` and then repairs the
 resulting findings interactively through the existing Orion review orchestrator.
 
-**Architecture:** Keep the workflow in one self-contained `.agents/skills/review/SKILL.md`. Audit modules in
+**Architecture:** Keep the workflow in one self-contained `.agents/skills/orion-review/SKILL.md`. Audit modules in
 parallel with one `gpt-6-astra`/`xhigh` worker per module, validate and write evidence-backed reports, then pass
-an ordered finding queue to `orion-review-orchestrator`. Require `orion-minimal-implementation` when ranking and
+an ordered finding queue to `orion-change-orchestrator`. Require `orion-minimal-implementation` when ranking and
 repairing every finding, and preserve the orchestrator's reviewed-commit user gate.
 
 **Tech stack:** Codex skills, Markdown, Orion task tree and review orchestrator.
@@ -18,7 +18,7 @@ repairing every finding, and preserve the orchestrator's reviewed-commit user ga
 
 **Files:**
 
-- Create: `.agents/skills/review/SKILL.md`
+- Create: `.agents/skills/orion-review/SKILL.md`
 
 1. Record baseline behavior without the skill for multi-module audit and interactive repair scenarios.
 2. Write the minimal skill covering module resolution, Astra/xhigh audit workers, stale-finding removal,

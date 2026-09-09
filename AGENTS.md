@@ -23,23 +23,26 @@
 - If post-commit Maven tests fail because of unrelated or pre-existing working tree changes, do not debug those changes unless the user explicitly asks; report the failure and finish the requested commit task.
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
 - Do not use `git merge` or create merge commits when integrating `origin/main` or other upstream branches. Use `git rebase` instead, unless the user explicitly asks for a merge commit.
-- When finishing task work in a dedicated Git worktree:
+- When finishing a requested change in a dedicated Git worktree:
   - After implementation, review fixes, and verification are complete, squash
     all commits unique to the task branch into one logical commit.
-  - Use the squashed commit subject template:
+  - For a direct change without a queued task, use a descriptive single-line
+    subject. Do not create a task, claim, task tag, or completion-deletion target
+    merely to execute the change.
+  - For queued task execution, use the squashed commit subject template:
     `<imperative summary> [task: <leaf-path-relative-to-its-queue-root>]`.
     Example:
     `Implement native protocol bootstrap [task: 05_native-session-host/01_contracts-and-build.md]`.
-  - The implementation worker retains the leaf and claim in its squash. The
-    primary `orion-review-orchestrator` coordinator owns completion cleanup
+  - For queued work, the implementation worker retains the leaf and claim in
+    its squash. The primary `orion-change-orchestrator` coordinator owns completion cleanup
     in the dedicated task worktree and amends that same commit, preserving its
     subject. This permits only completion metadata edits, never implementation
     code or tests; present the amended SHA at the integration gate.
-  - The coordinator deletes the completed numbered leaf file and removes
+  - For queued work, the coordinator deletes the completed numbered leaf file and removes
     completed empty composite ancestor directories in full only when their
     aggregate acceptance and scope are satisfied. Preserve parents with
     unfinished siblings, the queue roots, and root `TASK.md`. It removes the task's
-    outstanding-work entries from active plans and replace still-needed
+    outstanding-work entries from active plans and replaces still-needed
     dependency references with verified completion evidence. Do not retain
     completed task nodes or renumber remaining siblings to close gaps.
   - Transfer the squashed commit to `main` with `git cherry-pick`, never with a
@@ -92,10 +95,14 @@
   Keep task nodes short, update them when starting or finishing substantial
   work, and leave detailed designs and implementation steps in ordinary
   `docs/plans/` plan files.
-- Use `orion-task-runner` for task selection/planning and
-  `orion-review-orchestrator` for every task execution. The implementation
-  worker must apply `orion-minimal-implementation`. Plan insertion follows the intended local
-  numeric order; selection takes the first unclaimed, dependency-ready leaf.
+- Use `orion-task-runner` directly for creating or editing tasks, task
+  descriptions, ordering, composition, and dependencies, and for task selection.
+  Use `orion-change-orchestrator` for every other requested repository change,
+  including direct features, fixes, refactors, documentation, and skill edits
+  without a queued task. Review/status-only requests remain read-only. The
+  implementation worker must apply `orion-minimal-implementation`. Plan insertion
+  follows the intended local numeric order; queued execution selects the first
+  unclaimed, dependency-ready leaf.
 - Whenever you create a task, commit its task-tree changes immediately without
   waiting for a separate commit request. Treat this as a documentation-only
   commit and do not run tests afterward.

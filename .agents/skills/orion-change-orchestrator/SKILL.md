@@ -1,0 +1,221 @@
+---
+name: orion-change-orchestrator
+description: >-
+  Coordinate any requested Orion repository change through one implementation
+  worker and review gates, including features, fixes, refactors, docs, and skills,
+  whether queue-backed or direct. Exclude task-tree planning, task descriptions,
+  ordering, composition, and dependencies; orion-task-runner handles those.
+  Review and status requests alone remain read-only.
+---
+
+# Orion Change Orchestrator
+
+## Scope and Roles
+
+Use this workflow for requested repository changes, including a direct request
+with no queued task. Creating or editing tasks and their queue relationships
+belongs directly to [orion-task-runner](../orion-task-runner/SKILL.md), without
+launching an implementation worker. Review, audit, and status requests remain
+read-only unless the user asks to implement changes.
+
+Keep the primary agent in coordinator/reviewer mode. Give one bounded change
+at a time to a fresh implementation worker, route implementation findings back
+to that worker, and stop at the user gate before integration. Never have two
+implementation workers active at once.
+
+The coordinator owns selection, governing implementation plans, review, user
+communication, and queued-task completion metadata. Its only task-branch
+mutation is completion-metadata cleanup and amendment after clean review.
+It never edits implementation code, tests, or worker review fixes. The worker
+owns worktree setup, implementation, tests, commits, review fixes, final squash,
+and integration and worktree/branch cleanup after approval.
+
+## Resolve the Change
+
+Read `AGENTS.md`, `docs/reviews/RULES.md`, and
+[orion-minimal-implementation](../orion-minimal-implementation/SKILL.md). Inspect
+`git status --short` and `git worktree list --porcelain`. Preserve existing
+changes, branches, and worktrees belonging to others. Never stage, discard,
+or absorb unrelated state.
+
+Resolve the user's request into one of these scopes:
+
+- **Direct change:** the user request defines the bounded result and affected
+  area. No queue node, leaf path, claim, task-tagged subject, or task deletion
+  is required. Do not create a task merely to run this workflow. If the user
+  supplies several direct changes, preserve their explicit order and dependencies.
+- **Queued work:** a numbered leaf file, composite directory or `TASK.md`,
+  explicit task pool, or commit that introduced tasks. Apply the runner's task
+  model, numeric traversal, ownership, and dependencies in the coordinator role;
+  do not invoke this orchestrator recursively. Queue-backed selection uses
+  numeric filesystem order within the selected pool.
+
+For queued work, check the candidate leaf and ancestors in every relevant
+worktree and local branch, including unattached branches. Re-resolve moved or
+renumbered identities through Git history and content. An owner line anywhere
+counts as a claim. A leaf deleted by an unintegrated task branch remains occupied
+while completion awaits integration, even after squash removed its owner line.
+Use the branch diff/history and pending worktree to establish that identity.
+Do not infer release or completion from a missing file or an old timestamp.
+
+For a commit-defined task pool, inspect added numbered leaves and composite
+`TASK.md` files using rename detection. Include newly introduced leaves and
+descendants of newly introduced composites, not unrelated siblings of existing
+parents. Resolve their current identities; report ambiguity rather than
+broadening the pool. Composites are context, never implementation leaves.
+
+Select only an unclaimed, dependency-ready queued leaf. Honor explicit gates
+and sequential constraints. Numeric priority alone does not prohibit genuinely
+independent work when an earlier leaf is blocked; never skip a prerequisite to
+execute its dependent. If nothing is ready, report the exact blocker or that
+the pool is exhausted. Direct changes require only their actual prerequisites,
+not a fabricated leaf or queue dependency.
+
+## Prepare Governing Plans and Base
+
+Decide whether the change needs a new or updated governing implementation plan.
+The coordinator owns these inputs and any material scope correction. When
+needed, edit only the relevant plan on `main`, commit it separately with a
+one-line subject, and record the resulting exact committed base. Check for
+overlapping user-owned edits, staged unrelated files, or a Git operation first;
+report conflicts without changing them. Do not claim queued work on `main`.
+Documentation-only plan commits do not require tests.
+
+If no governing plan change is needed, record the exact committed `main` HEAD.
+Existing unstaged changes must remain outside the worker's isolated base;
+resolve any overlap with the requested work before proceeding. Recheck queued
+ownership before launch.
+
+A document that is itself the requested deliverable, including a design or
+plan file under `docs/plans/`, is a valid worker edit target. This differs from
+the governing plan supplied to implement another change. Pure task-description,
+queue, and dependency edits still belong directly to the runner.
+
+If the worker discovers a material gap in its governing plan, it reports it
+instead of revising that input. The coordinator updates and commits the plan on
+`main`, then asks the same worker to rebase onto that exact commit, recheck the
+worktree, and resume. Apply the same rule to substantive plan corrections found
+during review.
+
+## Launch One Worker
+
+Spawn a fresh worker with model `gpt-5.6-sol`, reasoning effort `high`, and
+`fork_turns="none"` or the smallest supported bounded fork. Supply only the
+explicit context needed for the selected change.
+
+The worker must:
+
+1. Read `AGENTS.md`, the bounded request, governing plans, and applicable rules.
+   For queued work, also read the leaf and ancestor `TASK.md` files. Apply
+   `orion-minimal-implementation` before and during implementation, including
+   behavioral slices, concept checks, and final self-review. Reading either
+   routing skill in this role never launches another implementation worker.
+2. Create a collision-free `codex/<change-slug>` branch and
+   `.worktrees/<change-slug>` from the exact committed base supplied by the
+   coordinator. Resume an existing branch/worktree only if this workflow owns it.
+3. For queued work only, claim the selected leaf in that worktree using the
+   runner's format and immediately commit the documentation-only claim. Include
+   any required upcoming-to-current queue move and mechanical task-path reference
+   updates, but no unrelated or substantive governing-plan edits. Do not run tests
+   for this claim commit. If the claim cannot be isolated, report the conflict.
+   Direct changes skip this step entirely.
+4. Until the integration gate, perform implementation commands and edits only
+   in that worktree. Preserve unrelated shared-workspace state. Treat governing
+   plan inputs as coordinator-owned; requested document deliverables remain
+   ordinary implementation targets.
+5. Implement production behavior and tests under `AGENTS.md`, run focused
+   checks and the required development verification. Use proportional document
+   or skill checks for documentation-only changes; do not run Maven for them.
+6. Commit the change and return its scope, any actual task path, worktree, branch,
+   base and head SHAs, and the required `orion-minimal-implementation` summary:
+   problem, solution, changed parts and specific changes, verification results,
+   risks, and remaining work. Do not transfer to `main` yet.
+
+## Review Loop
+
+Review the complete branch diff against its real base. Apply
+`docs/reviews/RULES.md`, relevant `@AiRule` comments, the requested behavior,
+repository conventions, and `orion-minimal-implementation` in read-only review mode.
+Check the actual implementation and verification, not only the worker summary.
+
+The worker owns implementation verification. Do not run Maven solely for review;
+send missing, inadequate, or failed checks back as findings. For each actionable
+finding, provide evidence and the required behavior, send it to the same worker,
+wait for fixes and verification, and review the complete resulting diff again.
+Never silently repair implementation from the coordinator thread. If progress
+requires a new user decision or authority, report the specific blocker.
+
+## Prepare the Reviewed Commit
+
+After clean implementation review, ask the worker to squash all change-unique
+commits into one logical commit and leave its worktree clean:
+
+- For queued work, use the task-tagged subject required by `AGENTS.md`, retaining
+  the task leaf and claim. The worker must not perform completion deletion.
+- For a direct change, use a descriptive single-line subject without a fabricated
+  task path or tag. No task-metadata cleanup applies.
+
+The worker returns the prepared SHA and leaves the branch/worktree in place.
+
+For queued work only, the primary coordinator confirms that SHA and clean
+state, waits until the worker is idle, then performs completion-only metadata
+edits in the dedicated task worktree:
+
+1. Delete the completed numbered leaf file.
+2. Remove completed empty composite ancestors in full, including `TASK.md`,
+   only when aggregate acceptance and remaining scope are satisfied. Preserve
+   parents with unfinished siblings, the queue roots, and root `docs/plans/TASK.md`.
+3. Remove the task's outstanding-work entries from active plans and replace
+   still-needed dependency references with verified completion evidence. Do not
+   maintain parent child lists or renumber remaining entries to close gaps.
+4. Check the metadata diff and affected references, stage only this cleanup,
+   and amend the same commit preserving its subject. Do not edit implementation
+   code, tests, substantive design, or implementation instructions.
+
+This is the narrow exception allowing coordinator task-branch mutations.
+Direct requests have no invented cleanup targets. Check documentation-only
+completion metadata without rerunning Maven.
+
+Review the complete final diff after preparation. Send new implementation
+findings to the same worker for fixes, amendment, and the verification required
+by `AGENTS.md`; the worker preserves coordinator cleanup. The coordinator owns
+completion-metadata corrections and re-reviews after every amendment. Present
+only the final clean, reviewed SHA, including any completion cleanup, at the gate.
+
+## Mandatory User Gate
+
+Once the final commit is reviewed without remaining findings, stop. Do not
+transfer it, remove the worktree/branch, or select the next change in the same turn.
+
+Report the direct scope or task pool and actual leaf path, final reviewed SHA,
+branch/worktree, verification results, clean review outcome, and any unrelated
+state that affects integration. Ask the user to authorize integration and
+continuation, or to transfer the commit themselves and confirm it. Broad requests
+such as "run all changes" or "run the whole pool" do not bypass this per-change gate.
+
+## Resume and Finish
+
+On the next user turn, verify the reviewed SHA and branch are unchanged and
+the dedicated worktree is clean. If integration is authorized, send the same
+worker the mechanical completion task under `AGENTS.md`: cherry-pick the reviewed
+commit to `main`, run required post-commit verification, handle change-caused
+failures with the same-subject fix-commit rule, and remove only the completed
+worktree and branch once transfer and the required clean-state checks succeed.
+Documentation-only commits do not require Maven.
+
+This permits the worker to operate on shared `main` after the gate, after
+checking its expected base, staged/working state, and absence of a conflicting
+Git operation. Never discard or absorb unrelated changes. If integration would
+conflict, the reviewed commit changed, unrelated test failures occur, or cleanup
+cannot meet `AGENTS.md`, report the exact blocker.
+
+If the user transferred the commit, verify the reviewed delta is present on
+`main`, delegate any required verification and remaining safe cleanup to the
+worker, and confirm the outcome rather than relying on the message alone.
+The coordinator does not edit implementation code or run its tests.
+
+Confirm transfer, verification, worktree removal, and branch deletion before
+reporting completion. For a continuing pool or explicit change list, select
+the next ready item automatically in its applicable order and launch a fresh
+Sol/high worker. Apply the same review and user gate to each item; a single
+direct change ends when its integration and cleanup are complete.

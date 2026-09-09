@@ -656,7 +656,7 @@ Expected: PASS and no whitespace errors.
 
 **Step 3: Finish the dedicated worktree according to repository rules**
 
-Use `orion-review-orchestrator` for final review and the user integration gate.
+Use `orion-change-orchestrator` for final review and the user integration gate.
 The implementation worker squashes all task-unique commits while retaining
 the task leaf and claim. The primary coordinator deletes the completed numbered
 leaf file, removes the task from active plans, and amends that same commit in

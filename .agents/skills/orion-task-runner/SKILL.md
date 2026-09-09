@@ -4,15 +4,18 @@ description: >-
   Select, plan, and track Orion work in the numbered filesystem task tree rooted
   at docs/plans/TASK.md. Use for requests to take, choose, continue, claim, run,
   or plan tasks, including "возьми задачу", "следующая задача", "продолжай по
-  задачам", and "pick a task". Route execution through orion-review-orchestrator.
+  задачам", and "pick a task". Handle task descriptions, ordering, composition,
+  and dependencies directly; route implementation through orion-change-orchestrator.
 ---
 
 # Orion Task Runner
 
 ## Roles and Startup
 
-Use this skill for selection, planning, and task tracking. Every task execution
-must use [orion-review-orchestrator](../orion-review-orchestrator/SKILL.md),
+Use this skill directly for selection, planning, task descriptions, ordering,
+composition, dependencies, and task tracking. These edits do not launch an
+implementation worker. Every task execution
+must use [orion-change-orchestrator](../orion-change-orchestrator/SKILL.md),
 which owns worker launch, review, and the integration gate. The implementation
 worker must apply [orion-minimal-implementation](../orion-minimal-implementation/SKILL.md).
 
@@ -20,7 +23,9 @@ When the orchestrator or its assigned worker reads this skill, apply the task
 model and the rules for that role; do not invoke the orchestrator recursively
 or spawn another implementation worker. The primary selects; the assigned
 worker claims and implements only its selected leaf. Status, triage, explanation,
-and planning alone do not start execution or claim work.
+and planning alone do not start execution or claim work. Direct repository
+changes without a queued task go to the change orchestrator with the user request
+as their scope; do not create or claim a task merely to execute them.
 
 Read `AGENTS.md`, `docs/plans/TASK.md`, relevant ancestor `TASK.md` files and
 candidate leaf files, and inspect `git status --short` before choosing work.
@@ -136,7 +141,7 @@ implementation, including its final self-review. Follow the orchestrator and
 
 After implementation, verification, and clean review, the worker squashes its
 work while retaining the task leaf and claim. The primary coordinator from
-`orion-review-orchestrator` then deletes the completed leaf file and amends the
+`orion-change-orchestrator` then deletes the completed leaf file and amends the
 same commit in the dedicated task worktree. Only the coordinator performs this
 completion cleanup; the worker does not delete the task from the queue or plans.
 

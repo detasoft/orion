@@ -1,9 +1,9 @@
 ---
-name: review
+name: orion-review
 description: Use when reviewing one or more Orion modules, creating or refreshing MODULE_REVIEW.md, or repairing findings from those reports interactively.
 ---
 
-# Module Review
+# Orion Review
 
 Audit the requested modules against the current repository, keep each
 `MODULE_REVIEW.md` current, and turn confirmed findings into an interactive
@@ -11,7 +11,7 @@ repair queue. Treat every existing finding as a hypothesis that must be checked
 again before implementation.
 
 **REQUIRED SUB-SKILLS:** Use `orion-minimal-implementation` for the audit, ordering,
-and every repair. Use `orion-review-orchestrator` for the repair queue and
+and every repair. Use `orion-change-orchestrator` for the repair queue and
 `orion-task-runner` for task-tree ownership.
 
 ## Resolve the modules
@@ -140,7 +140,7 @@ handoff. A finding card is evidence, not approval of an unresolved product
 choice. Do not repeat approval for a repair whose design the user already
 accepted.
 
-Invoke `orion-review-orchestrator` with the current task as its pool. Its code
+Invoke `orion-change-orchestrator` with the current task as its pool. Its code
 worker model and effort remain the values specified by that skill. The primary
 agent remains coordinator and reviewer; it does not implement branch fixes.
 Make report cleanup part of the task's definition of done: before final squash,

@@ -4,7 +4,7 @@
 
 **Goal:** Replace the Orion task tree with locally numbered composite directories and leaf Markdown files, and require orchestrated execution with `orion-minimal-implementation`.
 
-**Architecture:** The filesystem is the only child-order source: numbered directories contain composite `TASK.md` descriptions and numbered Markdown files are executable leaves. The task runner selects and plans work, while `orion-review-orchestrator` exclusively executes selected leaves through workers that apply `orion-minimal-implementation`.
+**Architecture:** The filesystem is the only child-order source: numbered directories contain composite `TASK.md` descriptions and numbered Markdown files are executable leaves. The task runner selects and plans work, while `orion-change-orchestrator` exclusively executes selected leaves through workers that apply `orion-minimal-implementation`.
 
 **Tech Stack:** Markdown task files, Git path history, Codex skills, repository link and skill validators.
 
@@ -15,7 +15,7 @@
 **Files:**
 
 - Read: `.agents/skills/orion-task-runner/SKILL.md`
-- Read: `.agents/skills/orion-review-orchestrator/SKILL.md`
+- Read: `.agents/skills/orion-change-orchestrator/SKILL.md`
 - Record evidence in the implementation session summary; do not add a permanent fixture.
 
 **Step 1: Define the pressure scenario**
@@ -29,7 +29,7 @@ the unmodified skills.
 
 Expected: the agent either ignores leaf Markdown files, expects every task to
 live in a `TASK.md`, duplicates order through parent checklists, or executes
-without making both `orion-review-orchestrator` and `orion-minimal-implementation` mandatory.
+without making both `orion-change-orchestrator` and `orion-minimal-implementation` mandatory.
 
 **Step 3: Preserve the exact failure modes**
 
@@ -114,7 +114,7 @@ Run `git status --short`, `git diff --stat`, `git diff --summary`, and
 **Files:**
 
 - Modify: `.agents/skills/orion-task-runner/SKILL.md`
-- Modify: `.agents/skills/orion-review-orchestrator/SKILL.md`
+- Modify: `.agents/skills/orion-change-orchestrator/SKILL.md`
 
 **Step 1: Define the task model once**
 
@@ -125,7 +125,7 @@ deletion on completion. Describe only the canonical model.
 
 **Step 2: Separate selection from execution**
 
-Make `orion-review-orchestrator` a required sub-skill for every leaf execution.
+Make `orion-change-orchestrator` a required sub-skill for every leaf execution.
 Keep status-only requests, triage, and task planning in the runner without
 starting execution.
 
@@ -148,7 +148,7 @@ migration or accept both layouts.
 **Files:**
 
 - Validate: `.agents/skills/orion-task-runner/`
-- Validate: `.agents/skills/orion-review-orchestrator/`
+- Validate: `.agents/skills/orion-change-orchestrator/`
 - Validate: `docs/plans/current-work/`
 - Validate: `docs/plans/upcoming-work/`
 
@@ -158,7 +158,7 @@ Run:
 
 ```bash
 python3 /Users/vi/work/.codex/deta/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/orion-task-runner
-python3 /Users/vi/work/.codex/deta/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/orion-review-orchestrator
+python3 /Users/vi/work/.codex/deta/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/orion-change-orchestrator
 ```
 
 Expected: both report valid skills.
@@ -181,7 +181,7 @@ Give a fresh independent agent the same hypothetical numbered tree and the
 updated skills.
 
 Expected: it selects the lowest-numbered ready leaf recursively, stores its
-claim in that leaf file, delegates execution to `orion-review-orchestrator`,
+claim in that leaf file, delegates execution to `orion-change-orchestrator`,
 requires the worker to apply `orion-minimal-implementation`, and deletes the leaf file only in
 the reviewed completion commit.
 
@@ -201,7 +201,7 @@ and one execution path.
 **Step 1: Stage the migration**
 
 Stage only `.agents/skills/orion-task-runner/SKILL.md`,
-`.agents/skills/orion-review-orchestrator/SKILL.md`, `AGENTS.md`, and the
+`.agents/skills/orion-change-orchestrator/SKILL.md`, `AGENTS.md`, and the
 intended `docs/` changes.
 
 **Step 2: Validate the staged diff**
