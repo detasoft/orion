@@ -556,12 +556,12 @@ git commit -m "Assemble AgentD local interactive terminal"
 
 **Step 1: Write a failing native end-to-end test**
 
-Add `session-host-native` as a test dependency:
+Add `session-host` as a test dependency:
 
 ```xml
 <dependency>
     <groupId>pro.deta.orion</groupId>
-    <artifactId>session-host-native</artifactId>
+    <artifactId>session-host</artifactId>
     <version>${revision}</version>
     <scope>test</scope>
 </dependency>

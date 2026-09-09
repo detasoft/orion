@@ -11,78 +11,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>session-host-native</artifactId>
+    <artifactId>session-host</artifactId>
     <packaging>jar</packaging>
-
-    <properties>
-        <session-host.toolchain.cache>${maven.multiModuleProjectDirectory}/.orion-cache/rust-toolchains</session-host.toolchain.cache>
-        <session-host.cargo.target>${maven.multiModuleProjectDirectory}/.orion-cache/session-host-cargo</session-host.cargo.target>
-        <session-host.native.resources>${project.build.directory}/native-resources</session-host.native.resources>
-        <session-host.binary.name>session-host</session-host.binary.name>
-    </properties>
 
     <build>
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>copy-native-session-host-resource</id>
-                        <phase>process-resources</phase>
-                        <goals>
-                            <goal>run</goal>
-                        </goals>
-                        <configuration>
-                            <target>
-                                <copy todir="${project.build.outputDirectory}">
-                                    <fileset dir="${session-host.native.resources}"/>
-                                </copy>
-                            </target>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.5.0</version>
-                <executions>
-                    <execution>
-                        <id>make-build-session-host</id>
-                        <phase>generate-resources</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>make</executable>
-                            <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
-                            <arguments>
-                                <argument>SESSION_HOST_TOOLCHAIN_CACHE=${session-host.toolchain.cache}</argument>
-                                <argument>SESSION_HOST_CARGO_TARGET=${session-host.cargo.target}</argument>
-                                <argument>SESSION_HOST_NATIVE_RESOURCES=${session-host.native.resources}</argument>
-                                <argument>session-host-build</argument>
-                            </arguments>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>make-test-session-host</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>make</executable>
-                            <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
-                            <arguments>
-                                <argument>SESSION_HOST_TOOLCHAIN_CACHE=${session-host.toolchain.cache}</argument>
-                                <argument>SESSION_HOST_CARGO_TARGET=${session-host.cargo.target}</argument>
-                                <argument>session-host-test</argument>
-                            </arguments>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
         </plugins>
     </build>
 </project>

@@ -33,7 +33,7 @@
 
             <dependency>
                 <groupId>pro.deta.orion</groupId>
-                <artifactId>session-host-native</artifactId>
+                <artifactId>session-host</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

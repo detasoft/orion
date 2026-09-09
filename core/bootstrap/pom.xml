@@ -20,7 +20,7 @@
     <dependencies>
         <dependency>
             <groupId>pro.deta.orion</groupId>
-            <artifactId>session-host-native</artifactId>
+            <artifactId>session-host</artifactId>
         </dependency>
         <dependency>
             <groupId>pro.deta.orion.net</groupId>

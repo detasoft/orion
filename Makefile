@@ -12,8 +12,7 @@ RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODU
 RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
 	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
-	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
-	session-host-build session-host-fixtures session-host-prepare session-host-test
+	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
 RUN_TEST_POSITIONAL_ARGUMENTS :=
 RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
 RUN_TEST_MODULE = $(value MODULE)

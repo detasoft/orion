@@ -70,7 +70,7 @@ mvn package -pl session-host
 
 Maven stores each native build below
 `session-host/target/native-resources/META-INF/orion/native/session-host/<target>`.
-The `session-host-native` carrier JAR and the bootstrap executable JAR include
+The `session-host` carrier JAR and the bootstrap executable JAR include
 every target directory present there. On macOS the executable is a native
 Mach-O binary for the host architecture. Release packaging targets x86_64 and
 arm64 independently on Linux, macOS, and Windows.

@@ -25,7 +25,7 @@
         </dependency>
         <dependency>
             <groupId>pro.deta.orion</groupId>
-            <artifactId>session-host-native</artifactId>
+            <artifactId>session-host</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
