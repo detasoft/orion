@@ -42,4 +42,4 @@ control behavior.
   which Windows architectures were exercised.
 - Enable Windows CI and describe Windows as supported only after bootstrap and
   ConPTY acceptance succeeds. Final six-target packaging and end-to-end release
-  acceptance remain in `10_release-and-acceptance.md`.
+  acceptance remain in `11_release-and-acceptance.md`.

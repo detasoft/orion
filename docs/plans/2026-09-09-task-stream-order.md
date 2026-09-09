@@ -86,7 +86,7 @@ control foundation before attaching replication and command routing to it.
 | J2 | [AgentD journal sync](current-work/04_agentd/02_journal-sync.md) | D3 + J1 for integrated delivery; settle ACK sequence allocation with command orchestration. |
 | J3 | [Remaining native contract alignment](current-work/04_agentd/03_session-host-contract-alignment.md) | Audit against integrated focused fixes before coding; finish with J2 and K2. Do not make the whole audit a prerequisite of those implementations. |
 | K1 | [Server command service](current-work/03_agent-session-server/03_command-service.md) | A5; recommend J1 first for durable command evidence. Agree retry/unknown-result semantics with K2. |
-| K2 | [AgentD command orchestration](current-work/04_agentd/04_command-orchestration.md) | **Paused/owned**; journal sync and current native start/control contracts first. Resolve shared sequence allocation with J2 before either is closed. |
+| K2 | [AgentD command orchestration](current-work/04_agentd/04_command-orchestration.md) | **Paused/owned**; journal sync, source-aware controls, and N6b recovery first. |
 | K3 | [Diagnostic secret redaction](current-work/04_agentd/05_diagnostic-secret-redaction.md) | K2; required before AgentD release. |
 | K4 | [Platform status/resilience](current-work/04_agentd/06_platform-status-and-resilience.md) | D3 + J2 + K2. |
 | E1 | [Historical/live event API](current-work/03_agent-session-server/04_live-event-api.md) | J1 and integrated storage; can advance beside command routing. |
@@ -118,10 +118,11 @@ Children of that occupied parent are also unavailable for a new generic claim.
 | N3 | [Explicit termination](current-work/05_native-session-host/04_termination-coordination.md) | N2a + N2b; keep policy outside the host. |
 | N4 | [Shutdown hardening](current-work/05_native-session-host/05_termination-shutdown-hardening.md) | N3 + N2; recommend before the final lifecycle simplification. |
 | N5 | [Lifecycle ownership simplification](current-work/05_native-session-host/06_simplify-session-lifecycle.md) | N2 + N3; audit remaining duplication after N4, do not reimplement PTY closure. |
-| N6 | [Source-aware controls](current-work/05_native-session-host/07_source-aware-controls.md) | Native-control baseline is integrated. Coordinate protocol/Java edits with N2 and K2; settle reconnect allocation first. |
-| N7 | [Harness event ingress](current-work/05_native-session-host/08_harness-events.md) | Existing journal/Unix baseline suffices; recommended after shared control changes to avoid competing protocol edits. |
-| N8 | [Windows host](current-work/05_native-session-host/09_windows-host.md) | Bootstrap work can start independently; finish parity against the settled common control/PTY/source contracts. |
-| N9 | [Native packaging/acceptance](current-work/05_native-session-host/10_release-and-acceptance.md) | All required native siblings, including Windows; do not silently narrow the release matrix. |
+| N6a | [Source-aware controls](current-work/05_native-session-host/07_source-aware-controls.md) | Native-control baseline is integrated. Add source identity and connection-scoped manual sequencing without taking ownership of AgentD recovery. |
+| N6b | [SERVER sequence recovery](current-work/05_native-session-host/08_server-operation-sequence-recovery.md) | N6a; establish one authoritative recovery rule before K2/J2 allocate server operations after reconnect. |
+| N7 | [Harness event ingress](current-work/05_native-session-host/09_harness-events.md) | Existing journal/Unix baseline suffices; recommended after shared control changes to avoid competing protocol edits. |
+| N8 | [Windows host](current-work/05_native-session-host/10_windows-host.md) | Bootstrap work can start independently; finish parity against the settled common control/PTY/source contracts. |
+| N9 | [Native packaging/acceptance](current-work/05_native-session-host/11_release-and-acceptance.md) | All required native siblings, including Windows; do not silently narrow the release matrix. |
 
 N3, N4, and N5 overlap in blocked input, termination, and lifecycle ownership.
 Their distinct outcomes are entry/signal delivery, finalization, and removal of
@@ -190,7 +191,7 @@ engine or duplicate the App/webhook task in two places.
 | T1 | [Terminal administration](current-work/08_interactive-ssh-shell/01_terminal-administration.md) | **Owned**; integrate terminal interaction/configuration work. |
 | T2 | [SSH PTY timeout](upcoming-work/12_ssh-pty-completion-timeout.md) | Recheck after T1; fix only a remaining reproducible failure. |
 | T3 | [Streaming monitoring](current-work/08_interactive-ssh-shell/02_streaming-monitoring.md) | Core/terminal baseline is integrated; recommend T1/T2 first because rendering and cancellation overlap. |
-| T4 | [AgentD local terminal](current-work/04_agentd/07_local-terminal.md) | J2 + K2 + N6; offline manual mode still uses the canonical control/journal path. |
+| T4 | [AgentD local terminal](current-work/04_agentd/07_local-terminal.md) | J2 + K2 + N6a; offline manual mode still uses the canonical control/journal path. |
 | T5a | [Web terminal](current-work/03_agent-session-server/05_web-terminal.md) | K1 + E1; end-to-end verification also needs K2/J2. |
 | T5b | [SSH session PTY gateway](current-work/08_interactive-ssh-shell/03_session-host-pty-gateway.md) | Server control + K1 + E1; terminal foundation integrated. Can advance beside T5a. |
 | T6 | [SSH security/acceptance](current-work/08_interactive-ssh-shell/04_security-and-acceptance.md) | Required shell siblings T1 + T3 + T5b, with T2 resolved or shown obsolete. |
