@@ -13,8 +13,9 @@ repair queue. Treat every existing finding as a hypothesis that must be checked
 again before implementation.
 
 **REQUIRED SUB-SKILLS:** Use `orion-minimal-implementation` for the audit, ordering,
-and every repair. Use `orion-change-orchestrator` for the repair queue and
-`orion-task-runner` for task-tree ownership.
+and every repair. Use `orion-change-orchestrator` only for repairs that do not
+qualify for the direct small-repair path below, and use `orion-task-runner` when
+task-tree ownership applies.
 
 Edit and commit `MODULE_REVIEW.md` files directly on `main`, never through the
 orchestrator, coordinator, implementation worker, dedicated worktree, or
@@ -140,14 +141,29 @@ choose the next-smallest repair.
 
 ## Interactive repair loop
 
-When repair was requested, search all existing task nodes, including claimed
-ones, before creating anything. A matching claimed node blocks duplicate work.
-Map each authorized repair to a suitable existing unclaimed node when possible;
-otherwise create the smallest coherent leaf needed to execute it, including a
-small repair. Group related small findings when they form one verifiable result,
-group changes that must be atomic, and separate independent outcomes. Follow the
-repository rule to commit newly created task-tree state immediately without
-tests. Do not create one task mechanically for every report bullet.
+When repair was requested, first classify each authorized repair. It qualifies
+for the direct small-repair path only when it is local to one existing module and
+concept, has a narrow and mechanically clear result, and changes no public,
+wire, persisted, lifecycle, concurrency, cross-module, dependency, build, or
+configuration contract. Verify real consumers before classifying a deletion as
+small; the verb `delete` alone does not qualify a repair.
+
+For a qualifying small repair, the primary agent may edit, test, review, and
+commit directly on `main` without `orion-change-orchestrator`, an implementation
+worker, a subagent, a branch, or a worktree. Do not create a task merely to route
+such a repair. Still apply `orion-minimal-implementation`, preserve unrelated
+workspace state, add or update tests when behavior changes, and run verification
+proportional to the change. Immediately revalidate and commit the corresponding
+report update separately after the repair lands.
+
+For every other repair, search all existing task nodes, including claimed ones,
+before creating anything. A matching claimed node blocks duplicate work. Map
+each authorized repair to a suitable existing unclaimed node when possible;
+otherwise create the smallest coherent leaf needed to execute it. Group related
+small findings when they form one verifiable result, group changes that must be
+atomic, and separate independent outcomes. Follow the repository rule to commit
+newly created task-tree state immediately without tests. Do not create one task
+mechanically for every report bullet.
 
 Before handing off each task, show a finding card containing:
 
@@ -164,22 +180,23 @@ handoff. A finding card is evidence, not approval of an unresolved product
 choice. Do not repeat approval for a repair whose design the user already
 accepted.
 
-Invoke `orion-change-orchestrator` with the current task as its pool. Its code
-worker model and effort remain the values specified by that skill. The primary
-agent remains coordinator and reviewer; it does not implement branch fixes.
-The implementation worker never edits `MODULE_REVIEW.md`. After the reviewed
-fix lands on `main`, the primary agent immediately revalidates the issue, removes
-or updates every resolved or invalidated item and dependent prose, and commits
-only that report change directly on `main` as documentation-only work.
+For a repair outside the direct small-repair path, invoke
+`orion-change-orchestrator` with the current task as its pool. Its code worker
+model and effort remain the values specified by that skill. The primary agent
+remains coordinator and reviewer; it does not implement branch fixes. The
+implementation worker never edits `MODULE_REVIEW.md`. After the reviewed fix
+lands on `main`, the primary agent immediately revalidates the issue, removes or
+updates every resolved or invalidated item and dependent prose, and commits only
+that report change directly on `main` as documentation-only work.
 
-Keep the orchestrator's mandatory reviewed-commit user gate. After the user
-authorizes or confirms integration, complete tests and cleanup, then update and
-commit the integrated report directly on `main` before continuing. If broader
-revalidation is needed, use a fresh Astra/xhigh analysis worker with the
-read-only audit restrictions above; the primary agent still makes and commits
-the report change. Confirm that unrelated state is preserved, rebuild the queue,
-and automatically present and start the next ready task without asking the user
-to select it again.
+For orchestrated repairs, keep the orchestrator's mandatory reviewed-commit user
+gate. After the user authorizes or confirms integration, complete tests and
+cleanup, then update and commit the integrated report directly on `main` before
+continuing. If broader revalidation is needed, use a fresh Astra/xhigh analysis
+worker with the read-only audit restrictions above; the primary agent still
+makes and commits the report change. Confirm that unrelated state is preserved,
+rebuild the queue, and automatically present and start the next ready task
+without asking the user to select it again.
 
 Rebuild the queue after each repair because one implementation may resolve or
 invalidate several findings. Before starting the next orchestrator instance,
@@ -209,6 +226,7 @@ A module review is current when every retained finding is supported by the
 present code and its real consumers, resolved findings and dependent prose are
 gone, report links resolve, and uncertainties are explicit. The repair pool is
 complete only when every finding is either resolved by a verified integrated
-change or proved no longer applicable, every executed task has passed
-orchestrator review, integration verification and cleanup, no required task
-remains, and the affected `MODULE_REVIEW.md` files contain no resolved finding.
+change or proved no longer applicable, every direct repair has passed its
+required verification, every orchestrated task has passed review, integration
+verification and cleanup, no required task remains, and the affected
+`MODULE_REVIEW.md` files contain no resolved finding.

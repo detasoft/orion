@@ -56,6 +56,7 @@ administration with their active owners.
 | M2 | [JWT rotation and refresh](current-work/01_unified-key-material-bootstrap/02_short-lived-jwt-rotation-and-refresh.md) | Identity foundation is integrated; may run beside M1 if consumers do not overlap. |
 | M3 | [Rotation/recovery acceptance](current-work/01_unified-key-material-bootstrap/03_rotation-recovery-and-acceptance.md) | M1 + M2; encrypted configuration foundation is integrated. |
 | C1 | [Local ACL characterization](upcoming-work/01_acl-storage-hardening/01_local-storage-characterization.md) | Capture retained behavior before changing storage contracts. |
+| C1b | [Resolved ACL repository identity](upcoming-work/01_acl-storage-hardening/02_resolved-acl-repository-identity.md) | Independent of Local characterization; remove the second identity decode before broader normalization. |
 | C2 | [Canonical repository names](upcoming-work/01_acl-storage-hardening/03_canonical-repository-names.md) | Coordinate with Git parser/storage boundary; one storage-neutral identity. |
 | C3 | [Local path containment](upcoming-work/01_acl-storage-hardening/04_local-path-containment.md) | After characterization and canonical path decisions. |
 | C4 | [Exact snapshot save](upcoming-work/01_acl-storage-hardening/05_exact-snapshot-save.md) | Preserve the established path boundary and publication semantics. |

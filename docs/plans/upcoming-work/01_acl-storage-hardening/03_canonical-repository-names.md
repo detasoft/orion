@@ -20,9 +20,10 @@ connector- and transport-specific string checks.
 - Normalize separators before validation and reject empty names, NUL,
   absolute paths, and `.` or `..` path segments consistently, including
   percent-decoded backslashes.
-- Replace `NativeGitAccessControlStorage.repositoryName`,
-  `GitWireBootstrap.normalizeRepositoryPath`, and provider-local name checks
-  with the shared contract.
+- Build on the resolved ACL identity path established by
+  [`Use the Resolved ACL Repository Identity`](02_resolved-acl-repository-identity.md),
+  then replace `GitWireBootstrap.normalizeRepositoryPath` and provider-local
+  name checks with the shared contract. Do not restore connector-local parsing.
 
 ## Completion Criteria
 
@@ -36,4 +37,5 @@ connector- and transport-specific string checks.
 
 ## Coordination
 
+- [Resolved ACL repository identity](02_resolved-acl-repository-identity.md)
 - [Parser/storage boundary](../02_git-wire-architecture-simplification/03_parser-storage-boundary.md)
