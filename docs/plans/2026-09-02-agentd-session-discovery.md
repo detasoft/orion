@@ -42,7 +42,7 @@
 - Create: `agentd/src/main/java/pro/deta/orion/agentd/session/SessionDiscovery.java`
 - Test: `agentd/src/test/java/pro/deta/orion/agentd/session/SessionDiscoveryTest.java`
 
-1. Write tests for empty/populated startup, live and dead probes, and shallow legacy/CBOR journal presence.
+1. Write tests for empty/populated startup, live and dead probes, and shallow CBOR journal presence.
 2. Run the focused test and confirm the missing discovery API is the failure.
 3. Implement immutable observations, sessions, issues, snapshots, and atomic registry replacement.
 4. Implement a sorted, no-follow full scan that isolates per-directory failures.

@@ -82,7 +82,8 @@ all local paths from it:
         <session-id>/
             metadata
             control endpoint or descriptor
-            journal-*.seg
+            00000001.cbor.zst
+            00000002.cbor
 ```
 
 AgentD opens `<stateDir>/agentd.lock` without following symbolic links and

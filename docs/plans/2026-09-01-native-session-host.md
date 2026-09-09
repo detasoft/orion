@@ -86,8 +86,8 @@ Each session uses one directory:
 sessions/<session-id>/
     metadata
     control endpoint or endpoint descriptor
-    journal-000001.seg
-    journal-000002.seg
+    00000001.cbor.zst
+    00000002.cbor
     ...
 ```
 

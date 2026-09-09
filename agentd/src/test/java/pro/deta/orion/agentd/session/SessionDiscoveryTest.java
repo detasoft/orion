@@ -40,7 +40,7 @@ class SessionDiscoveryTest {
     @Test
     void classifiesDeadHostsAndIsolatesUnreadableJournals() throws Exception {
         Path sessions = Files.createDirectories(temporaryDirectory.resolve("sessions"));
-        createSession(sessions, "lost-session", "journal-000001.seg");
+        createSession(sessions, "lost-session", "00000001.cbor");
         createSession(sessions, "degraded-session", "00000001.cbor");
         createSession(sessions, "healthy-session", "00000001.cbor.zst");
         TestHostProbe hosts = new TestHostProbe();
