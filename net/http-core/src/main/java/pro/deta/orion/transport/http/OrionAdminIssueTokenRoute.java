@@ -22,7 +22,7 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
 
     @Inject
     public OrionAdminIssueTokenRoute(OrionAccessControlService accessControlService, ObjectMapper objectMapper) {
-        super(OrionAdminPaths.TOKEN, "POST");
+        super(OrionAdminPaths.TOKEN, OrionHttpRouteDefinition.Method.POST);
         this.accessControlService = accessControlService;
         this.objectMapper = objectMapper;
     }

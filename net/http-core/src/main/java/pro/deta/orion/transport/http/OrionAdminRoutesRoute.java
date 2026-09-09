@@ -11,7 +11,7 @@ public class OrionAdminRoutesRoute extends BaseAdminRoute {
 
     @Inject
     public OrionAdminRoutesRoute(Provider<OrionHttpRouteRegistry> routeRegistry) {
-        super(OrionAdminPaths.ROUTES, "GET");
+        super(OrionAdminPaths.ROUTES, OrionHttpRouteDefinition.Method.GET);
         this.routeRegistry = routeRegistry;
     }
 

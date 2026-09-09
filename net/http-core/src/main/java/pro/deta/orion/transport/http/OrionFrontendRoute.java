@@ -33,7 +33,10 @@ public final class OrionFrontendRoute extends AbstractOrionHttpRoute {
 
     @Inject
     public OrionFrontendRoute() {
-        super(URL_PATTERN, "GET", "HEAD");
+        super(
+                URL_PATTERN,
+                OrionHttpRouteDefinition.Method.GET,
+                OrionHttpRouteDefinition.Method.HEAD);
     }
 
     @Override

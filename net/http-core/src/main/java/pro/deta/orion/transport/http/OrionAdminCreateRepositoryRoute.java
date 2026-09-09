@@ -20,7 +20,10 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
     public OrionAdminCreateRepositoryRoute(
             NativeGitRepositoryProvider gitRepositoryProvider,
             ObjectMapper objectMapper) {
-        super(OrionAdminPaths.REPOSITORIES, "GET", "POST");
+        super(
+                OrionAdminPaths.REPOSITORIES,
+                OrionHttpRouteDefinition.Method.GET,
+                OrionHttpRouteDefinition.Method.POST);
         this.gitRepositoryProvider = gitRepositoryProvider;
         this.objectMapper = objectMapper;
     }

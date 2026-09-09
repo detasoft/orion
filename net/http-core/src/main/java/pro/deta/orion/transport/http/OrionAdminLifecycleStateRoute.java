@@ -13,7 +13,7 @@ public class OrionAdminLifecycleStateRoute extends BaseAdminRoute {
 
     @Inject
     public OrionAdminLifecycleStateRoute(@Named("runtime") AggregateStateMachine runtimeStateMachine) {
-        super(OrionAdminPaths.LIFECYCLE_STATE, "GET");
+        super(OrionAdminPaths.LIFECYCLE_STATE, OrionHttpRouteDefinition.Method.GET);
         this.runtimeStateMachine = runtimeStateMachine;
     }
 

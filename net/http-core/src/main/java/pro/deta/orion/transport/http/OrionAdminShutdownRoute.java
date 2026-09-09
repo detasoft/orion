@@ -1,9 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.ApplicationShutdownRequestedEvent;
 
@@ -17,21 +15,15 @@ public class OrionAdminShutdownRoute extends BaseAdminRoute {
 
     @Inject
     public OrionAdminShutdownRoute(OrionEventManager eventManager) {
-        super(OrionAdminPaths.SHUTDOWN, "POST");
+        super(OrionAdminPaths.SHUTDOWN, OrionHttpRouteDefinition.Method.POST);
         this.eventManager = eventManager;
     }
 
     @Override
-    public void handle(
-            HttpServletRequest req,
-            HttpServletResponse resp,
-            OrionHttpResponseWriter responseWriter) throws IOException, ServletException {
-        OrionHttpResponse response = service(req);
-        responseWriter.write(resp, response);
-        if (response.status() == SC_ACCEPTED) {
-            resp.flushBuffer();
-            eventManager.publish(new ApplicationShutdownRequestedEvent(SOURCE));
-        }
+    public void handle(OrionHttpExchange exchange) throws IOException {
+        exchange.sendAfterFlush(
+                doPost(exchange.request()),
+                () -> eventManager.publish(new ApplicationShutdownRequestedEvent(SOURCE)));
     }
 
     @Override

@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.GZIPOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,7 +64,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "GET",
                         "/r/team/project.git/info/refs",
@@ -73,8 +75,7 @@ class OrionGitRouteNativeTest {
                                 "Git-Protocol", "version=2"),
                         new byte[0],
                         repositorySecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         String body = response.body();
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
@@ -99,7 +100,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "POST",
                         "/r/team/project.git/git-upload-pack",
@@ -110,8 +111,7 @@ class OrionGitRouteNativeTest {
                                 "Git-Protocol", "version=2"),
                         fetchRequest(fixture.objectId()),
                         repositorySecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         String body = response.body();
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
@@ -135,7 +135,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "POST",
                         "/r/team/project.git/git-upload-pack",
@@ -146,8 +146,7 @@ class OrionGitRouteNativeTest {
                                 "Git-Protocol", "version=2"),
                         gzip(fetchRequest(fixture.objectId())),
                         repositorySecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType)
@@ -169,7 +168,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "POST",
                         "/r/team/project.git/git-receive-pack",
@@ -178,8 +177,7 @@ class OrionGitRouteNativeTest {
                         Map.of("Content-Encoding", "gzip"),
                         gzip(receiveRequest(objectId, pack(objectId, data))),
                         repositoryWriteSecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType)
@@ -199,7 +197,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "POST",
                         "/r/team/project.git/git-upload-pack",
@@ -208,8 +206,7 @@ class OrionGitRouteNativeTest {
                         Map.of("Content-Encoding", "br"),
                         new byte[0],
                         repositorySecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status)
                 .isEqualTo(HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE);
@@ -223,7 +220,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "POST",
                         "/r/team/project.git/git-upload-pack",
@@ -232,8 +229,7 @@ class OrionGitRouteNativeTest {
                         Map.of("Content-Encoding", "gzip"),
                         new byte[]{0x1f, (byte) 0x8b},
                         repositorySecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
         assertNoCacheHeaders(response);
@@ -249,7 +245,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "POST",
                         "/r/team/project.git/git-upload-pack",
@@ -260,8 +256,7 @@ class OrionGitRouteNativeTest {
                                 "Git-Protocol", "version=2"),
                         fetchRequest(GitObjectId.of("1".repeat(40))),
                         repositorySecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status)
                 .isEqualTo(HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE);
@@ -281,7 +276,7 @@ class OrionGitRouteNativeTest {
                 "Application/X-Git-Upload-Pack-Request")) {
             ResponseRecorder response = new ResponseRecorder();
 
-            route.handle(
+            service(route,
                     request(
                             "POST",
                             "/r/team/project.git/git-upload-pack",
@@ -290,8 +285,7 @@ class OrionGitRouteNativeTest {
                             Map.of("Host", "git.example"),
                             new byte[0],
                             repositorySecurityContext()),
-                    response.proxy(),
-                    null);
+                    response.proxy());
 
             assertThat(response.status)
                     .isEqualTo(HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE);
@@ -308,7 +302,7 @@ class OrionGitRouteNativeTest {
                 autoPackfileUriConfig());
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "HEAD",
                         "/r/team/project.git/info/refs",
@@ -317,13 +311,13 @@ class OrionGitRouteNativeTest {
                         Map.of("Host", "git.example"),
                         new byte[0],
                         repositorySecurityContext()),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType)
                 .isEqualTo("application/x-git-upload-pack-advertisement");
         assertNoCacheHeaders(response);
+        assertThat(response.body()).isEmpty();
     }
 
     @Test
@@ -335,7 +329,7 @@ class OrionGitRouteNativeTest {
         ResponseRecorder getRpcResponse = new ResponseRecorder();
         ResponseRecorder postDiscoveryResponse = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "GET",
                         "/r/team/project.git/git-upload-pack",
@@ -344,9 +338,8 @@ class OrionGitRouteNativeTest {
                         Map.of(),
                         new byte[0],
                         repositorySecurityContext()),
-                getRpcResponse.proxy(),
-                null);
-        route.handle(
+                getRpcResponse.proxy());
+        service(route,
                 request(
                         "POST",
                         "/r/team/project.git/info/refs",
@@ -355,8 +348,7 @@ class OrionGitRouteNativeTest {
                         Map.of(),
                         new byte[0],
                         repositorySecurityContext()),
-                postDiscoveryResponse.proxy(),
-                null);
+                postDiscoveryResponse.proxy());
 
         assertThat(getRpcResponse.status)
                 .isEqualTo(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
@@ -376,6 +368,16 @@ class OrionGitRouteNativeTest {
                 .containsEntry(
                         "Cache-Control",
                         "no-cache, max-age=0, must-revalidate");
+    }
+
+    private static void service(
+            OrionHttpRoute route,
+            HttpServletRequest request,
+            HttpServletResponse response) throws Exception {
+        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(route)),
+                new OrionHttpResponseWriter(new ObjectMapper()));
+        servlet.service(request, response);
     }
 
     private FileNativeGitRepositoryProvider provider() {

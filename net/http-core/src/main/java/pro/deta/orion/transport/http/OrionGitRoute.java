@@ -1,9 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import lombok.NonNull;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.schema.config.GitPackfileUriConfig;
@@ -25,20 +23,22 @@ import pro.deta.orion.transport.git.auth.AuthenticatedRepositoryAccessHook;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
 import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
-import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static jakarta.servlet.http.HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.GIT;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.HEAD;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST;
 
 public class OrionGitRoute implements OrionHttpRoute {
     public static final String URL_PATTERN = "/r/*";
-    private static final List<String> ALLOWED_METHODS = List.of("GET", "HEAD", "POST");
     private static final String CACHE_CONTROL = "Cache-Control";
     private static final String NO_CACHE = "no-cache, max-age=0, must-revalidate";
     private static final String EXPIRES = "Expires";
@@ -51,6 +51,17 @@ public class OrionGitRoute implements OrionHttpRoute {
     private static final String RECEIVE_REQUEST_TYPE = "application/x-git-receive-pack-request";
     private static final String UPLOAD_RESULT_TYPE = "application/x-git-upload-pack-result";
     private static final String RECEIVE_RESULT_TYPE = "application/x-git-receive-pack-result";
+    private static final List<OrionHttpRouteDefinition.Method> ALLOWED_METHODS = List.of(GET, HEAD, POST);
+    private static final Map<String, String> METHOD_REJECTION_HEADERS = Map.of(
+            EXPIRES, NO_CACHE_EXPIRES,
+            PRAGMA, "no-cache",
+            CACHE_CONTROL, NO_CACHE);
+    private static final OrionHttpRouteDefinition DEFINITION = new OrionHttpRouteDefinition(
+            URL_PATTERN,
+            GIT,
+            ALLOWED_METHODS,
+            OrionGitRoute::allowedMethods,
+            METHOD_REJECTION_HEADERS);
 
     private final GitNativeRepositoryService repositoryService;
     private final GitTransportConfig gitTransportConfig;
@@ -66,65 +77,42 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     @Override
-    public String urlPattern() {
-        return URL_PATTERN;
+    public OrionHttpRouteDefinition definition() {
+        return DEFINITION;
     }
 
     @Override
-    public String authorization() {
-        return "git";
+    public void handle(OrionHttpExchange exchange) throws IOException {
+        handleNative(exchange);
     }
 
-    @Override
-    public List<String> allowedMethods() {
-        return ALLOWED_METHODS;
-    }
-
-    @Override
-    public void handle(HttpServletRequest req, HttpServletResponse resp, OrionHttpResponseWriter responseWriter) throws IOException, ServletException {
-        String method = req.getMethod().toUpperCase(Locale.ROOT);
-        String endpointAllow = endpointAllow(stripRoutePrefix(routePath(req)));
-        if (endpointAllow != null && !endpointAllows(endpointAllow, method)) {
-            resp.setHeader("Allow", endpointAllow);
-            setNoCacheHeaders(resp);
-            resp.setStatus(SC_METHOD_NOT_ALLOWED);
-            return;
-        }
-        if (!ALLOWED_METHODS.contains(method)) {
-            resp.setHeader("Allow", String.join(", ", ALLOWED_METHODS));
-            setNoCacheHeaders(resp);
-            resp.setStatus(SC_METHOD_NOT_ALLOWED);
-            return;
-        }
-        handleNative(req, resp);
-    }
-
-    private void handleNative(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        Optional<NativeHttpRequest> nativeRequest = nativeRequest(req);
+    private void handleNative(OrionHttpExchange exchange) throws IOException {
+        HttpServletRequest req = exchange.request();
+        Optional<NativeHttpRequest> nativeRequest = nativeRequest(req, exchange.method());
         if (nativeRequest.isEmpty()) {
-            resp.sendError(SC_BAD_REQUEST);
+            exchange.sendError(SC_BAD_REQUEST);
             return;
         }
         NativeHttpRequest request = nativeRequest.get();
         try {
             if (request.discovery()) {
-                handleNativeDiscovery(req, resp, request);
+                handleNativeDiscovery(exchange, request);
             } else {
-                handleNativePost(req, resp, request);
+                handleNativePost(exchange, request);
             }
         } catch (UnsupportedContentEncodingException error) {
-            resp.sendError(SC_UNSUPPORTED_MEDIA_TYPE);
+            exchange.sendError(SC_UNSUPPORTED_MEDIA_TYPE, METHOD_REJECTION_HEADERS);
         } catch (GitNativeRepositoryAccessHook.AccessDeniedException error) {
-            resp.sendError(SC_FORBIDDEN);
+            exchange.sendError(SC_FORBIDDEN);
         } catch (IllegalArgumentException error) {
-            resp.sendError(SC_BAD_REQUEST, error.getMessage());
+            exchange.sendError(SC_BAD_REQUEST, error.getMessage());
         } catch (IOException error) {
             if (causedByAccessDenied(error)) {
-                resp.sendError(SC_FORBIDDEN);
+                exchange.sendError(SC_FORBIDDEN);
             } else if (causedByInvalidContentEncoding(error)) {
-                resp.sendError(SC_BAD_REQUEST);
+                exchange.sendError(SC_BAD_REQUEST, METHOD_REJECTION_HEADERS);
             } else if (missingRepository(error)) {
-                resp.sendError(SC_NOT_FOUND);
+                exchange.sendError(SC_NOT_FOUND);
             } else {
                 throw error;
             }
@@ -132,15 +120,15 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     private void handleNativeDiscovery(
-            HttpServletRequest req,
-            HttpServletResponse resp,
+            OrionHttpExchange exchange,
             NativeHttpRequest request) throws IOException {
-        resp.setStatus(SC_OK);
-        resp.setContentType(advertisementContentType(request.service()));
-        setNoCacheHeaders(resp);
+        HttpServletRequest req = exchange.request();
+        OrionHttpResponse metadata = noCache(
+                OrionHttpResponse.stream(SC_OK, advertisementContentType(request.service())));
         try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(req.getInputStream())) {
-            OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(resp.getOutputStream());
-            GitWireBootstrap bootstrap = getGitWireBootstrap(req, request, input, output);
+            OutputStreamBufferedByteOutput output =
+                    new OutputStreamBufferedByteOutput(exchange.openResponseBody(metadata));
+            GitWireBootstrap bootstrap = gitWireBootstrap(req, request, input, output);
             NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
             if (bootstrap.data()
                     .getProtocolVersion()
@@ -154,23 +142,22 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     private void handleNativePost(
-            HttpServletRequest req,
-            HttpServletResponse resp,
+            OrionHttpExchange exchange,
             NativeHttpRequest request) throws IOException {
+        HttpServletRequest req = exchange.request();
         if (!contentTypeMatches(req.getContentType(), requestContentType(request.service()))) {
-            setNoCacheHeaders(resp);
-            resp.sendError(SC_UNSUPPORTED_MEDIA_TYPE);
+            exchange.sendError(SC_UNSUPPORTED_MEDIA_TYPE, METHOD_REJECTION_HEADERS);
             return;
         }
-        resp.setStatus(SC_OK);
-        resp.setContentType(resultContentType(request.service()));
-        setNoCacheHeaders(resp);
+        OrionHttpResponse metadata = noCache(
+                OrionHttpResponse.stream(SC_OK, resultContentType(request.service())));
         try (InputStreamBufferedByteInput input = new InputStreamBufferedByteInput(
                 GitHttpRequestBody.decode(
                         req.getInputStream(),
                         req.getHeader("Content-Encoding")))) {
-            OutputStreamBufferedByteOutput output = new OutputStreamBufferedByteOutput(resp.getOutputStream());
-            GitWireBootstrap bootstrap = getGitWireBootstrap(req, request, input, output);
+            OutputStreamBufferedByteOutput output =
+                    new OutputStreamBufferedByteOutput(exchange.openResponseBody(metadata));
+            GitWireBootstrap bootstrap = gitWireBootstrap(req, request, input, output);
             NativePackfileUriSourceFactory packfileUriSourceFactory = packfileUriSourceFactory(req);
             SecurityContext securityContext = securityContextFrom(req);
             session(securityContext, packfileUriSourceFactory, bootstrap.wire())
@@ -178,15 +165,18 @@ public class OrionGitRoute implements OrionHttpRoute {
         }
     }
 
-    private static @NonNull GitWireBootstrap getGitWireBootstrap(HttpServletRequest req, NativeHttpRequest request, InputStreamBufferedByteInput input, OutputStreamBufferedByteOutput output) {
-        GitWireBootstrap bootstrap = GitWireBootstrap.smartHttp(
+    private static @NonNull GitWireBootstrap gitWireBootstrap(
+            HttpServletRequest req,
+            NativeHttpRequest request,
+            InputStreamBufferedByteInput input,
+            OutputStreamBufferedByteOutput output) {
+        return GitWireBootstrap.smartHttp(
                 input,
                 output,
                 request.service(),
                 request.repositoryPath(),
                 requestHost(req),
                 req.getHeader(GIT_PROTOCOL_HEADER));
-        return bootstrap;
     }
 
     private GitBlockingWireSession session(
@@ -217,13 +207,12 @@ public class OrionGitRoute implements OrionHttpRoute {
                         packId));
     }
 
-    private Optional<NativeHttpRequest> nativeRequest(HttpServletRequest request) {
-        String method = request.getMethod().toUpperCase(Locale.ROOT);
-        if ("HEAD".equals(method)) {
-            method = "GET";
-        }
+    private Optional<NativeHttpRequest> nativeRequest(
+            HttpServletRequest request,
+            OrionHttpRouteDefinition.Method method) {
+        OrionHttpRouteDefinition.Method endpointMethod = method == HEAD ? GET : method;
         String path = stripRoutePrefix(routePath(request));
-        if ("GET".equals(method) && path.endsWith("/info/refs")) {
+        if (endpointMethod == GET && path.endsWith("/info/refs")) {
             InitialRequestService service = serviceParameter(request);
             if (service == null) {
                 return Optional.empty();
@@ -231,11 +220,11 @@ public class OrionGitRoute implements OrionHttpRoute {
             String repositoryPath = path.substring(0, path.length() - "/info/refs".length());
             return Optional.of(NativeHttpRequest.discovery(service, repositoryPath));
         }
-        if ("POST".equals(method) && path.endsWith("/git-upload-pack")) {
+        if (endpointMethod == POST && path.endsWith("/git-upload-pack")) {
             String repositoryPath = path.substring(0, path.length() - "/git-upload-pack".length());
             return Optional.of(NativeHttpRequest.post(InitialRequestService.UPLOAD_PACK, repositoryPath));
         }
-        if ("POST".equals(method) && path.endsWith("/git-receive-pack")) {
+        if (endpointMethod == POST && path.endsWith("/git-receive-pack")) {
             String repositoryPath = path.substring(0, path.length() - "/git-receive-pack".length());
             return Optional.of(NativeHttpRequest.post(InitialRequestService.RECEIVE_PACK, repositoryPath));
         }
@@ -270,7 +259,9 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     private static String advertisementContentType(InitialRequestService service) {
-        return service == InitialRequestService.UPLOAD_PACK ? UPLOAD_ADVERTISEMENT_TYPE : RECEIVE_ADVERTISEMENT_TYPE;
+        return service == InitialRequestService.UPLOAD_PACK
+                ? UPLOAD_ADVERTISEMENT_TYPE
+                : RECEIVE_ADVERTISEMENT_TYPE;
     }
 
     private static String requestContentType(InitialRequestService service) {
@@ -285,28 +276,24 @@ public class OrionGitRoute implements OrionHttpRoute {
         return expected.equals(actual);
     }
 
-    private static void setNoCacheHeaders(HttpServletResponse response) {
-        response.setHeader(EXPIRES, NO_CACHE_EXPIRES);
-        response.setHeader(PRAGMA, "no-cache");
-        response.setHeader(CACHE_CONTROL, NO_CACHE);
+    private static OrionHttpResponse noCache(OrionHttpResponse response) {
+        OrionHttpResponse result = response;
+        for (Map.Entry<String, String> header : METHOD_REJECTION_HEADERS.entrySet()) {
+            result = result.withHeader(header.getKey(), header.getValue());
+        }
+        return result;
     }
 
-    private static String endpointAllow(String path) {
+    private static List<OrionHttpRouteDefinition.Method> allowedMethods(HttpServletRequest request) {
+        String path = stripRoutePrefix(routePath(request));
         if (path.endsWith("/info/refs")) {
-            return "GET, HEAD";
+            return List.of(GET, HEAD);
         }
         if (path.endsWith("/git-upload-pack")
                 || path.endsWith("/git-receive-pack")) {
-            return "POST";
+            return List.of(POST);
         }
-        return null;
-    }
-
-    private static boolean endpointAllows(String allow, String method) {
-        if ("POST".equals(allow)) {
-            return "POST".equals(method);
-        }
-        return "GET".equals(method) || "HEAD".equals(method);
+        return ALLOWED_METHODS;
     }
 
     private static boolean causedByAccessDenied(Throwable error) {

@@ -30,7 +30,7 @@ public final class OrionHttpRouteRegistry {
             return route;
         }
         for (OrionHttpRoute patternRoute : patternRoutes) {
-            if (WildcardMatcher.matches(patternRoute.urlPattern(), url)) {
+            if (WildcardMatcher.matches(patternRoute.definition().urlPattern(), url)) {
                 return patternRoute;
             }
         }
@@ -46,24 +46,26 @@ public final class OrionHttpRouteRegistry {
         List<OrionHttpRoute> patternRoutes = new ArrayList<>();
         List<RouteDescriptor> routeTable = new ArrayList<>();
         for (OrionHttpRoute route : routes) {
-            if (result.put(route.urlPattern(), route) != null) {
-                throw new IllegalStateException("Duplicate HTTP route: " + route.urlPattern());
+            OrionHttpRouteDefinition definition = route.definition();
+            if (result.put(definition.urlPattern(), route) != null) {
+                throw new IllegalStateException("Duplicate HTTP route: " + definition.urlPattern());
             }
-            boolean pattern = route.urlPattern().contains("*");
+            boolean pattern = definition.urlPattern().contains("*");
             if (pattern) {
                 patternRoutes.add(route);
             }
             routeTable.add(new RouteDescriptor(
-                    route.urlPattern(),
-                    route.authorization(),
-                    route.allowedMethods(),
+                    definition.urlPattern(),
+                    definition.authorization().description(),
+                    definition.methodNames(),
                     route.getClass().getSimpleName(),
                     pattern));
         }
         patternRoutes.sort(Comparator
-                .comparingInt((OrionHttpRoute route) -> route.urlPattern().replace("*", "").length())
+                .comparingInt((OrionHttpRoute route) ->
+                        route.definition().urlPattern().replace("*", "").length())
                 .reversed()
-                .thenComparing(OrionHttpRoute::urlPattern));
+                .thenComparing(route -> route.definition().urlPattern()));
         routeTable.sort(Comparator.comparing(RouteDescriptor::urlPattern));
         return new RouteRegistry(Map.copyOf(result), List.copyOf(patternRoutes), List.copyOf(routeTable));
     }

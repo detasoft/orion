@@ -14,6 +14,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -78,10 +79,10 @@ class OrionFrontendRouteTest {
 
     private ResponseRecorder handle(String method, String path) throws Exception {
         ResponseRecorder response = new ResponseRecorder();
-        route.handle(
-                request(method, path),
-                response.proxy(),
+        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(route)),
                 new OrionHttpResponseWriter(new ObjectMapper()));
+        servlet.service(request(method, path), response.proxy());
         return response;
     }
 

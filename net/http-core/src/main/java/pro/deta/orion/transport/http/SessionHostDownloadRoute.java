@@ -1,23 +1,20 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
-import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
 import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.ANONYMOUS;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 /**
  * Publishes the session-host binaries packaged in the Orion application resources.
@@ -26,10 +23,9 @@ public final class SessionHostDownloadRoute implements OrionHttpRoute {
     public static final String URL_PATTERN = "/session-host*";
     public static final String URL = "/session-host";
     public static final String CONTENT_TYPE = "application/octet-stream";
-    private static final String HTML_CONTENT_TYPE = "text/html; charset=utf-8";
-
     private static final String RESOURCE_PREFIX = "META-INF/orion/native/session-host/";
-    private static final List<String> ALLOWED_METHODS = List.of("GET");
+    private static final OrionHttpRouteDefinition DEFINITION =
+            new OrionHttpRouteDefinition(URL_PATTERN, ANONYMOUS, GET);
     private static final Map<String, Platform> PLATFORMS = Map.of(
             "x86_64-apple-darwin", new Platform("Darwin", "x86_64"),
             "aarch64-apple-darwin", new Platform("Darwin", "aarch64"),
@@ -50,47 +46,33 @@ public final class SessionHostDownloadRoute implements OrionHttpRoute {
     }
 
     @Override
-    public String urlPattern() {
-        return URL_PATTERN;
-    }
-
-    @Override
-    public String authorization() {
-        return "anonymous";
-    }
-
-    @Override
-    public List<String> allowedMethods() {
-        return ALLOWED_METHODS;
+    public OrionHttpRouteDefinition definition() {
+        return DEFINITION;
     }
 
     @Override
     public void handle(
-            HttpServletRequest req,
-            HttpServletResponse resp,
-            OrionHttpResponseWriter responseWriter) throws IOException, ServletException {
-        if (!"GET".equals(req.getMethod().toUpperCase(Locale.ROOT))) {
-            resp.setHeader("Allow", "GET");
-            resp.setStatus(SC_METHOD_NOT_ALLOWED);
-            return;
-        }
+            OrionHttpExchange exchange) throws IOException {
+        HttpServletRequest req = exchange.request();
         Optional<DownloadRequest> download = requestedDownload(req);
         if (download.isEmpty()) {
             List<DownloadTarget> targets = availableTargets();
-            resp.setHeader("Vary", "Accept");
             if (acceptsHtml(req)) {
-                writeHtmlIndex(resp, targets);
+                exchange.send(OrionHttpResponse
+                        .html(SC_OK, htmlIndex(targets))
+                        .withHeader("Vary", "Accept"));
             } else {
-                responseWriter.write(resp, OrionHttpResponse.ok(new DownloadIndex(targets)));
+                exchange.send(OrionHttpResponse.ok(new DownloadIndex(targets))
+                        .withHeader("Vary", "Accept"));
             }
             return;
         }
         String fileName = requestedFileName(req, download.get());
         if (fileName == null) {
-            resp.sendError(SC_BAD_REQUEST, "Invalid filename");
+            exchange.sendError(SC_BAD_REQUEST, "Invalid filename");
             return;
         }
-        sendTarget(resp, download.get().target(), fileName);
+        sendTarget(exchange, download.get().target(), fileName);
     }
 
     private Optional<DownloadRequest> requestedDownload(HttpServletRequest req) {
@@ -109,22 +91,21 @@ public final class SessionHostDownloadRoute implements OrionHttpRoute {
         return Optional.of(new DownloadRequest(targetForUname(uname).orElse(""), true));
     }
 
-    private void sendTarget(HttpServletResponse resp, String target, String fileName) throws IOException {
+    private void sendTarget(OrionHttpExchange exchange, String target, String fileName) throws IOException {
         if (!PLATFORMS.containsKey(target)) {
-            resp.sendError(SC_NOT_FOUND);
+            exchange.sendError(SC_NOT_FOUND);
             return;
         }
         String resource = resourceFor(target);
         try (InputStream input = classLoader.getResourceAsStream(resource)) {
             if (input == null) {
-                resp.sendError(SC_NOT_FOUND);
+                exchange.sendError(SC_NOT_FOUND);
                 return;
             }
-            resp.setStatus(SC_OK);
-            resp.setContentType(CONTENT_TYPE);
-            resp.setHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"");
-            resp.setHeader("Cache-Control", "no-cache");
-            input.transferTo(resp.getOutputStream());
+            OrionHttpResponse metadata = OrionHttpResponse.stream(SC_OK, CONTENT_TYPE)
+                    .withHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"")
+                    .withHeader("Cache-Control", "no-cache");
+            input.transferTo(exchange.openResponseBody(metadata));
         }
     }
 
@@ -184,11 +165,7 @@ public final class SessionHostDownloadRoute implements OrionHttpRoute {
         }
     }
 
-    private static void writeHtmlIndex(
-            HttpServletResponse resp,
-            List<DownloadTarget> targets) throws IOException {
-        resp.setStatus(SC_OK);
-        resp.setContentType(HTML_CONTENT_TYPE);
+    private static String htmlIndex(List<DownloadTarget> targets) {
         StringBuilder page = new StringBuilder(
                 "<!doctype html><html><head><title>Session hosts</title></head>");
         page.append("<body><h1>Available session hosts</h1><ul>");
@@ -206,9 +183,7 @@ public final class SessionHostDownloadRoute implements OrionHttpRoute {
                     .append(")</li>");
         }
         page.append("</ul></body></html>");
-        PrintWriter writer = resp.getWriter();
-        writer.write(page.toString());
-        writer.flush();
+        return page.toString();
     }
 
     private static String requestedFileName(HttpServletRequest req, DownloadRequest download) {

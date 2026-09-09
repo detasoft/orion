@@ -12,7 +12,7 @@ public class OrionConfigurationSchemaRoute extends AbstractOrionHttpRoute {
 
     @Inject
     public OrionConfigurationSchemaRoute(OrionConfigurationJsonSchema schema) {
-        super(URL_PATTERN, "GET");
+        super(URL_PATTERN, OrionHttpRouteDefinition.Method.GET);
         this.schema = schema;
     }
 

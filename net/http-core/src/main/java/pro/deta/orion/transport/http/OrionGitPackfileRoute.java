@@ -1,9 +1,7 @@
 package pro.deta.orion.transport.http;
 
 import jakarta.inject.Inject;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.check.OrionSecurityException;
 import pro.deta.orion.auth.check.resource.RepositoryResource;
@@ -16,24 +14,25 @@ import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
 import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
-import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.GIT;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 public final class OrionGitPackfileRoute implements OrionHttpRoute {
     public static final String URL_PATTERN = "/r/*/objects/pack/*.pack";
     public static final String PACK_CONTENT_TYPE =
             "application/x-git-packed-objects";
 
-    private static final List<String> ALLOWED_METHODS = List.of("GET");
+    private static final OrionHttpRouteDefinition DEFINITION =
+            new OrionHttpRouteDefinition(URL_PATTERN, GIT, GET);
     private static final String ROUTE_PREFIX = "/r/";
     private static final String PACK_PATH = "/objects/pack/";
     private static final String PACK_SUFFIX = ".pack";
@@ -49,58 +48,40 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
     }
 
     @Override
-    public String urlPattern() {
-        return URL_PATTERN;
-    }
-
-    @Override
-    public String authorization() {
-        return "git";
-    }
-
-    @Override
-    public List<String> allowedMethods() {
-        return ALLOWED_METHODS;
+    public OrionHttpRouteDefinition definition() {
+        return DEFINITION;
     }
 
     @Override
     public void handle(
-            HttpServletRequest req,
-            HttpServletResponse resp,
-            OrionHttpResponseWriter responseWriter)
-            throws IOException, ServletException {
-        if (!"GET".equals(req.getMethod().toUpperCase(Locale.ROOT))) {
-            resp.setHeader("Allow", String.join(", ", ALLOWED_METHODS));
-            resp.setStatus(SC_METHOD_NOT_ALLOWED);
-            return;
-        }
+            OrionHttpExchange exchange) throws IOException {
+        HttpServletRequest req = exchange.request();
         Optional<RouteMatch> match = match(routePath(req));
         if (match.isEmpty()) {
-            resp.sendError(SC_BAD_REQUEST);
+            exchange.sendError(SC_BAD_REQUEST);
             return;
         }
         if (!canRead(req, match.get().repositoryName())) {
-            resp.sendError(SC_FORBIDDEN);
+            exchange.sendError(SC_FORBIDDEN);
             return;
         }
         Optional<NativeGitRepository> repository =
                 repository(match.get().repositoryName());
         if (repository.isEmpty()) {
-            resp.sendError(SC_NOT_FOUND);
+            exchange.sendError(SC_NOT_FOUND);
             return;
         }
         Optional<PublishedPackContent> pack =
                 repository.get().openPublishedPack(match.get().packId());
         if (pack.isEmpty()) {
-            resp.sendError(SC_NOT_FOUND);
+            exchange.sendError(SC_NOT_FOUND);
             return;
         }
         try (PublishedPackContent content = pack.get()) {
-            resp.setStatus(SC_OK);
-            resp.setContentType(PACK_CONTENT_TYPE);
-            resp.setHeader("Cache-Control", "no-cache");
-            resp.setContentLengthLong(content.manifest().packBytes());
-            content.input().transferTo(resp.getOutputStream());
+            OrionHttpResponse metadata = OrionHttpResponse.stream(SC_OK, PACK_CONTENT_TYPE)
+                    .withHeader("Cache-Control", "no-cache")
+                    .withContentLength(content.manifest().packBytes());
+            content.input().transferTo(exchange.openResponseBody(metadata));
         }
     }
 

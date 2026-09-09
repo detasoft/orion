@@ -18,7 +18,10 @@ public class OrionAccessControlSchemaRoute extends AbstractOrionHttpRoute {
 
     @Inject
     public OrionAccessControlSchemaRoute() {
-        super(URL_PATTERN, "GET", "POST");
+        super(
+                URL_PATTERN,
+                OrionHttpRouteDefinition.Method.GET,
+                OrionHttpRouteDefinition.Method.POST);
         orionXmlSchema = new OrionXmlSchema();
         schema = orionXmlSchema.document();
     }

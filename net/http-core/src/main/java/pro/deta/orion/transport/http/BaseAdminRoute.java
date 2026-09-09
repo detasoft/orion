@@ -1,20 +1,11 @@
 package pro.deta.orion.transport.http;
 
-import jakarta.servlet.http.HttpServletRequest;
-import pro.deta.orion.auth.check.OrionSecurityException;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.APPLICATION_ADMIN;
 
 public abstract class BaseAdminRoute extends AbstractOrionHttpRoute {
-    protected BaseAdminRoute(String urlPattern, String... allowedMethods) {
-        super(urlPattern, allowedMethods);
-    }
-
-    @Override
-    public String authorization() {
-        return "application-admin";
-    }
-
-    @Override
-    protected void authorize(HttpServletRequest req) throws OrionSecurityException {
-        requireApplicationAdmin(req);
+    protected BaseAdminRoute(
+            String urlPattern,
+            OrionHttpRouteDefinition.Method... allowedMethods) {
+        super(urlPattern, APPLICATION_ADMIN, allowedMethods);
     }
 }

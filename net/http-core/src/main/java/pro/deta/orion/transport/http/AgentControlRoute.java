@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.ArrayDeque;
-import java.util.List;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
@@ -34,8 +33,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static jakarta.servlet.http.HttpServletResponse.SC_HTTP_VERSION_NOT_SUPPORTED;
-import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.AGENT_HANDSHAKE;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST;
 
 @Singleton
 public final class AgentControlRoute implements OrionHttpRoute {
@@ -44,6 +44,8 @@ public final class AgentControlRoute implements OrionHttpRoute {
     private static final int MAX_PENDING_MESSAGES = 64;
     private static final int MAX_PENDING_OUTPUT_BYTES = 16 * 1024 * 1024;
     private static final Duration HANDSHAKE_TIMEOUT = Duration.ofSeconds(30);
+    private static final OrionHttpRouteDefinition DEFINITION =
+            new OrionHttpRouteDefinition(PATH, AGENT_HANDSHAKE, POST);
 
     private final AgentControlHandler handler;
     private final AgentProtocolLimits limits;
@@ -73,30 +75,16 @@ public final class AgentControlRoute implements OrionHttpRoute {
     }
 
     @Override
-    public String urlPattern() {
-        return PATH;
+    public OrionHttpRouteDefinition definition() {
+        return DEFINITION;
     }
 
     @Override
-    public String authorization() {
-        return "agent handshake";
-    }
-
-    @Override
-    public List<String> allowedMethods() {
-        return List.of("POST");
-    }
-
-    @Override
-    public void handle(HttpServletRequest request, HttpServletResponse response,
-                       OrionHttpResponseWriter responseWriter) throws IOException {
-        if (!"POST".equalsIgnoreCase(request.getMethod())) {
-            response.setHeader("Allow", "POST");
-            response.sendError(SC_METHOD_NOT_ALLOWED);
-            return;
-        }
+    public void handle(OrionHttpExchange exchange) throws IOException {
+        HttpServletRequest request = exchange.request();
+        HttpServletResponse response = exchange.servletResponse();
         if (!"HTTP/2.0".equals(request.getProtocol()) || !request.isSecure()) {
-            response.sendError(SC_HTTP_VERSION_NOT_SUPPORTED);
+            exchange.sendError(SC_HTTP_VERSION_NOT_SUPPORTED);
             return;
         }
 

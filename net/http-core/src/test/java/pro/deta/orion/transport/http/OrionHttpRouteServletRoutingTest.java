@@ -6,7 +6,6 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
-import pro.deta.orion.auth.check.OrionSecurityException;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -20,6 +19,8 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.AUTHENTICATED;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.GET;
 
 class OrionHttpRouteServletRoutingTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -86,7 +87,7 @@ class OrionHttpRouteServletRoutingTest {
     }
 
     @Test
-    void letsRouteRejectRequestUsingItsOwnAuthorizationLogic() throws Exception {
+    void rejectsRequestUsingTheRouteDefinitionAuthorizationPolicy() throws Exception {
         OrionHttpRouteServlet servlet = servlet(new DeniedRoute("/api/items/*"));
         ResponseRecorder response = new ResponseRecorder();
 
@@ -107,6 +108,7 @@ class OrionHttpRouteServletRoutingTest {
             case "getMethod" -> method;
             case "getPathInfo" -> pathInfo;
             case "getInputStream" -> new ByteArrayServletInputStream(new byte[0]);
+            case "getAttribute" -> null;
             case "toString" -> "HttpServletRequest[pathInfo=" + pathInfo + "]";
             case "hashCode" -> System.identityHashCode(proxy);
             case "equals" -> proxy == args[0];
@@ -122,7 +124,7 @@ class OrionHttpRouteServletRoutingTest {
         private final String name;
 
         private TestRoute(String urlPattern, String name) {
-            super(urlPattern, "GET");
+            super(urlPattern, GET);
             this.name = name;
         }
 
@@ -134,12 +136,7 @@ class OrionHttpRouteServletRoutingTest {
 
     private static final class DeniedRoute extends AbstractOrionHttpRoute {
         private DeniedRoute(String urlPattern) {
-            super(urlPattern, "GET");
-        }
-
-        @Override
-        protected void authorize(HttpServletRequest req) throws OrionSecurityException {
-            throw new OrionSecurityException("denied by route");
+            super(urlPattern, AUTHENTICATED, GET);
         }
 
         @Override

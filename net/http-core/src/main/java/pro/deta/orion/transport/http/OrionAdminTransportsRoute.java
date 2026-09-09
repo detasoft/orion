@@ -28,7 +28,7 @@ public class OrionAdminTransportsRoute extends BaseAdminRoute {
             Provider<JettyHTTPServer> httpServer,
             Provider<GitSshTransportService> sshServer,
             Provider<GitNativeTransportService> nativeGitServer) {
-        super(OrionAdminPaths.TRANSPORTS, "GET");
+        super(OrionAdminPaths.TRANSPORTS, OrionHttpRouteDefinition.Method.GET);
         this.configuration = configuration;
         this.desiredState = desiredState;
         this.httpServer = httpServer;

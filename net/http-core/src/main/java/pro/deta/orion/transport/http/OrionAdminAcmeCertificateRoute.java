@@ -23,7 +23,10 @@ public class OrionAdminAcmeCertificateRoute extends BaseAdminRoute {
     public OrionAdminAcmeCertificateRoute(
             AcmeCertificateService certificateService,
             ObjectMapper objectMapper) {
-        super(OrionAdminPaths.ACME_CERTIFICATE, "GET", "POST");
+        super(
+                OrionAdminPaths.ACME_CERTIFICATE,
+                OrionHttpRouteDefinition.Method.GET,
+                OrionHttpRouteDefinition.Method.POST);
         this.certificateService = certificateService;
         this.objectMapper = objectMapper;
     }

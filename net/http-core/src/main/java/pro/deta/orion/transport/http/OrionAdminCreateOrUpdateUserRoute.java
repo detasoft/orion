@@ -20,7 +20,7 @@ public class OrionAdminCreateOrUpdateUserRoute extends BaseAdminRoute {
 
     @Inject
     public OrionAdminCreateOrUpdateUserRoute(OrionAccessControlService accessControlService, ObjectMapper objectMapper) {
-        super(OrionAdminPaths.USERS, "POST");
+        super(OrionAdminPaths.USERS, OrionHttpRouteDefinition.Method.POST);
         this.accessControlService = accessControlService;
         this.objectMapper = objectMapper;
     }

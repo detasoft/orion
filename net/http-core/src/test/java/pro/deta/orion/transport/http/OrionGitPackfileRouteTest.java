@@ -1,5 +1,6 @@
 package pro.deta.orion.transport.http;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
@@ -37,6 +38,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -58,15 +60,14 @@ class OrionGitPackfileRouteTest {
         OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "GET",
                         "/r/team/project.git/objects/pack/"
                                 + pack.publishedPack().packId()
                                 + ".pack",
                         repositorySecurityContext("team/project")),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_OK);
         assertThat(response.contentType)
@@ -83,13 +84,12 @@ class OrionGitPackfileRouteTest {
                 new FileNativeGitRepositoryProvider(tempDir));
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "GET",
                         "/r/team/project.git/objects/pack/not-hex.pack",
                         repositorySecurityContext("team/project")),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status)
                 .isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
@@ -103,15 +103,14 @@ class OrionGitPackfileRouteTest {
         OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "GET",
                         "/r/team/project.git/objects/pack/"
                                 + "a".repeat(40)
                                 + ".pack",
                         repositorySecurityContext("team/project")),
-                response.proxy(),
-                null);
+                response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_NOT_FOUND);
     }
@@ -126,15 +125,14 @@ class OrionGitPackfileRouteTest {
         OrionGitPackfileRoute route = new OrionGitPackfileRoute(provider);
         ResponseRecorder response = new ResponseRecorder();
 
-        route.handle(
+        service(route,
                 request(
                         "GET",
                         "/r/team/project.git/objects/pack/"
                                 + pack.publishedPack().packId()
                                 + ".pack",
-                        SecurityContext.createContext()),
-                response.proxy(),
-                null);
+                        authenticatedContext()),
+                response.proxy());
 
         assertThat(response.status).isEqualTo(HttpServletResponse.SC_FORBIDDEN);
     }
@@ -164,6 +162,16 @@ class OrionGitPackfileRouteTest {
         } finally {
             input.release();
         }
+    }
+
+    private static void service(
+            OrionHttpRoute route,
+            HttpServletRequest request,
+            HttpServletResponse response) throws Exception {
+        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(route)),
+                new OrionHttpResponseWriter(new ObjectMapper()));
+        servlet.service(request, response);
     }
 
     private static byte[] produce(NativePackProducer producer) {
@@ -214,6 +222,11 @@ class OrionGitPackfileRouteTest {
                 .withUserIdentity(new InternalUserImpl(
                         "git-user",
                         List.of(grant)));
+    }
+
+    private static SecurityContext authenticatedContext() {
+        return SecurityContext.createContext()
+                .withUserIdentity(new InternalUserImpl("git-user", List.of()));
     }
 
     private static <T> T stub(Class<T> type, InvocationHandler handler) {

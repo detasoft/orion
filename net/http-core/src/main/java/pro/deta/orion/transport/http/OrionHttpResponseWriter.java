@@ -29,16 +29,21 @@ public final class OrionHttpResponseWriter {
         for (Map.Entry<String, String> header : response.headers().entrySet()) {
             resp.setHeader(header.getKey(), header.getValue());
         }
+        String contentType = response.contentType();
+        if (contentType != null) {
+            resp.setContentType(contentType);
+        }
+        if (response.contentLength() != null) {
+            resp.setContentLengthLong(response.contentLength());
+        }
         Object body = response.body();
         if (body == null) {
             return;
         }
-        String contentType = response.contentType();
         if (body instanceof byte[] bytes) {
-            if (contentType != null) {
-                resp.setContentType(contentType);
+            if (response.contentLength() == null) {
+                resp.setContentLength(bytes.length);
             }
-            resp.setContentLength(bytes.length);
             if (!headersOnly) {
                 resp.getOutputStream().write(bytes);
             }

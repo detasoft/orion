@@ -16,6 +16,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -132,10 +133,10 @@ class SessionHostDownloadRouteTest {
             String accept,
             String fileName) throws Exception {
         ResponseRecorder response = new ResponseRecorder();
-        route.handle(
-                request(path, uname, accept, fileName),
-                response.proxy(),
+        OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
+                new OrionHttpRouteRegistry(Set.of(route)),
                 new OrionHttpResponseWriter(new ObjectMapper()));
+        servlet.service(request(path, uname, accept, fileName), response.proxy());
         return response;
     }
 
@@ -165,6 +166,9 @@ class SessionHostDownloadRouteTest {
         private String contentType;
         private final Map<String, String> headers = new LinkedHashMap<>();
         private final ByteArrayOutputStream body = new ByteArrayOutputStream();
+        private final PrintWriter writer = new PrintWriter(
+                new OutputStreamWriter(body, StandardCharsets.UTF_8),
+                true);
 
         private HttpServletResponse proxy() {
             return stub(HttpServletResponse.class, (proxy, method, args) -> switch (method.getName()) {
@@ -185,7 +189,7 @@ class SessionHostDownloadRouteTest {
                     yield null;
                 }
                 case "getOutputStream" -> new RecordingServletOutputStream(body);
-                case "getWriter" -> new PrintWriter(new OutputStreamWriter(body, StandardCharsets.UTF_8), true);
+                case "getWriter" -> writer;
                 case "toString" -> "HttpServletResponseRecorder";
                 case "hashCode" -> System.identityHashCode(proxy);
                 case "equals" -> proxy == args[0];
@@ -194,6 +198,7 @@ class SessionHostDownloadRouteTest {
         }
 
         private String bodyAsString() {
+            writer.flush();
             return body.toString(StandardCharsets.UTF_8);
         }
     }

@@ -888,7 +888,7 @@ class JettyHTTPServerTest {
 
     private static final class OkRoute extends AbstractOrionHttpRoute {
         private OkRoute() {
-            super("/ok", "GET");
+            super("/ok", OrionHttpRouteDefinition.Method.GET);
         }
 
         @Override
@@ -899,7 +899,7 @@ class JettyHTTPServerTest {
 
     private static final class JavascriptRoute extends AbstractOrionHttpRoute {
         private JavascriptRoute() {
-            super("/app.js", "GET");
+            super("/app.js", OrionHttpRouteDefinition.Method.GET);
         }
 
         @Override
@@ -917,7 +917,7 @@ class JettyHTTPServerTest {
         private final CountDownLatch release = new CountDownLatch(1);
 
         private BlockingRoute() {
-            super("/block", "GET");
+            super("/block", OrionHttpRouteDefinition.Method.GET);
         }
 
         @Override

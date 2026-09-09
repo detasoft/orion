@@ -199,7 +199,7 @@ public class ACMECertificateChallengeTest {
 
     private static final class OkRoute extends AbstractOrionHttpRoute {
         private OkRoute() {
-            super("/ok", "GET");
+            super("/ok", OrionHttpRouteDefinition.Method.GET);
         }
 
         @Override
@@ -236,7 +236,12 @@ public class ACMECertificateChallengeTest {
         }
 
         @Override
-        protected void authorize(jakarta.servlet.http.HttpServletRequest req) {
+        public OrionHttpRouteDefinition definition() {
+            return new OrionHttpRouteDefinition(
+                    OrionAdminPaths.ACME_CERTIFICATE,
+                    OrionHttpRouteDefinition.Authorization.ANONYMOUS,
+                    OrionHttpRouteDefinition.Method.GET,
+                    OrionHttpRouteDefinition.Method.POST);
         }
     }
 

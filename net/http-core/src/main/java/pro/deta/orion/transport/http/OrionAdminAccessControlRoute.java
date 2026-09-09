@@ -15,7 +15,10 @@ public class OrionAdminAccessControlRoute extends BaseAdminRoute {
 
     @Inject
     public OrionAdminAccessControlRoute(OrionAccessControlService accessControlService) {
-        super(OrionAdminPaths.ACCESS_CONTROL, "GET", "POST");
+        super(
+                OrionAdminPaths.ACCESS_CONTROL,
+                OrionHttpRouteDefinition.Method.GET,
+                OrionHttpRouteDefinition.Method.POST);
         this.accessControlService = accessControlService;
     }
 

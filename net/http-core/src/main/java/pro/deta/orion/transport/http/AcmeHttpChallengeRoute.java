@@ -14,7 +14,7 @@ public class AcmeHttpChallengeRoute extends AbstractOrionHttpRoute {
 
     @Inject
     public AcmeHttpChallengeRoute(AcmeHttpChallengeService challengeService) {
-        super(URL_PATTERN, "GET");
+        super(URL_PATTERN, OrionHttpRouteDefinition.Method.GET);
         this.challengeService = challengeService;
     }
 

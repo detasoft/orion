@@ -2,64 +2,45 @@ package pro.deta.orion.transport.http;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.ServletException;
-import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.auth.check.OrionSecurityException;
-import pro.deta.orion.auth.check.resource.ApplicationAdminResource;
-import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
-import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 
-import static jakarta.servlet.http.HttpServletResponse.SC_FORBIDDEN;
 import static jakarta.servlet.http.HttpServletResponse.SC_METHOD_NOT_ALLOWED;
-import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
+import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Authorization.ANONYMOUS;
 
 public abstract class AbstractOrionHttpRoute implements OrionHttpRoute {
-    private final String urlPattern;
-    private final List<String> allowedMethods;
+    private final OrionHttpRouteDefinition definition;
 
-    protected AbstractOrionHttpRoute(String urlPattern, String... allowedMethods) {
-        this.urlPattern = urlPattern;
-        this.allowedMethods = normalizeMethods(allowedMethods);
+    protected AbstractOrionHttpRoute(
+            String urlPattern,
+            OrionHttpRouteDefinition.Method... allowedMethods) {
+        this(urlPattern, ANONYMOUS, allowedMethods);
+    }
+
+    protected AbstractOrionHttpRoute(
+            String urlPattern,
+            OrionHttpRouteDefinition.Authorization authorization,
+            OrionHttpRouteDefinition.Method... allowedMethods) {
+        definition = new OrionHttpRouteDefinition(urlPattern, authorization, allowedMethods);
     }
 
     @Override
-    public String urlPattern() {
-        return urlPattern;
+    public OrionHttpRouteDefinition definition() {
+        return definition;
     }
 
     @Override
-    public String authorization() {
-        return "anonymous";
-    }
-
-    @Override
-    public List<String> allowedMethods() {
-        return allowedMethods;
-    }
-
-    @Override
-    public final OrionHttpResponse service(HttpServletRequest req) throws IOException, ServletException {
-        OrionHttpResponse accessDenied = accessDenied(req);
-        if (accessDenied != null) {
-            return accessDenied;
-        }
-        String method = req.getMethod().toUpperCase(Locale.ROOT);
-        if (!allowedMethods.contains(method)) {
-            return methodNotAllowed();
-        }
-        return switch (method) {
-            case "GET" -> doGet(req);
-            case "HEAD" -> doHead(req);
-            case "POST" -> doPost(req);
-            case "PUT" -> doPut(req);
-            case "DELETE" -> doDelete(req);
-            case "PATCH" -> doPatch(req);
-            default -> methodNotAllowed();
+    public void handle(OrionHttpExchange exchange) throws IOException, ServletException {
+        HttpServletRequest request = exchange.request();
+        OrionHttpResponse response = switch (exchange.method()) {
+            case GET -> doGet(request);
+            case HEAD -> doHead(request);
+            case POST -> doPost(request);
+            case PUT -> doPut(request);
+            case DELETE -> doDelete(request);
+            case PATCH -> doPatch(request);
         };
+        exchange.send(response);
     }
 
     protected OrionHttpResponse doGet(HttpServletRequest req) throws IOException {
@@ -86,49 +67,7 @@ public abstract class AbstractOrionHttpRoute implements OrionHttpRoute {
         return methodNotAllowed();
     }
 
-    protected void authorize(HttpServletRequest req) throws OrionSecurityException {
-    }
-
-    protected final void requireAuthenticated(HttpServletRequest req) throws OrionSecurityException {
-        accessEnforcer().require(securityContextFrom(req), SubjectAccessRules.authenticated());
-    }
-
-    protected final void requireApplicationAdmin(HttpServletRequest req) throws OrionSecurityException {
-        SecurityContext securityContext = securityContextFrom(req);
-        accessEnforcer().require(securityContext, SubjectAccessRules.authenticated());
-        accessEnforcer().require(securityContext, ApplicationAdminResource.applicationAdmin(), ApplicationAccessRules.admin());
-    }
-
-    private OrionHttpResponse methodNotAllowed() {
-        return OrionHttpResponse.empty(SC_METHOD_NOT_ALLOWED)
-                .withHeader("Allow", String.join(", ", allowedMethods));
-    }
-
-    private OrionHttpResponse accessDenied(HttpServletRequest req) {
-        try {
-            authorize(req);
-            return null;
-        } catch (OrionSecurityException e) {
-            return OrionHttpResponse.empty(SC_FORBIDDEN);
-        }
-    }
-
-    private static SecurityContext securityContextFrom(HttpServletRequest req) {
-        Object attribute = req.getAttribute(OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE);
-        if (attribute instanceof SecurityContext securityContext) {
-            return securityContext;
-        }
-        return SecurityContext.createContext().withRequestId(req.toString());
-    }
-
-    private static List<String> normalizeMethods(String... methods) {
-        List<String> result = new ArrayList<>();
-        for (String method : methods) {
-            String normalized = method.toUpperCase(Locale.ROOT);
-            if (!result.contains(normalized)) {
-                result.add(normalized);
-            }
-        }
-        return List.copyOf(result);
+    private static OrionHttpResponse methodNotAllowed() {
+        return OrionHttpResponse.empty(SC_METHOD_NOT_ALLOWED);
     }
 }
