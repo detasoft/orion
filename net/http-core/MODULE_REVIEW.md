@@ -354,6 +354,16 @@ concurrency.
 - HTTP and HTTPS connector setup ignores the configured `backlog` value. The hard-coded Jetty thread pool also
   has no visible relationship to configuration, so exposed capacity settings and actual HTTP capacity can
   drift.
+- `JettyHTTPServerTest` selects an HTTPS port with `NetworkUtils.findAvailablePort()` at line 673 and releases
+  it before `server.onStart()` binds the connector. A full `make test` run on 2026-09-09 failed in
+  `rejectsOversizeAndInvalidTransportRequests` at line 390 with `BindException: Address already in use` for the
+  selected port. This free-port lookup has a time-of-check/time-of-use race; the fixture should request port `0`
+  and use `boundHttpsPort()` after startup.
+- `JettyHTTPServerTest.cleansUpPeerResetAndServerShutdownAcrossSlowStreams` repeatedly fails at line 498 because
+  `closed.poll(5, TimeUnit.SECONDS)` returns null for at least one connection after `server.onStop()`. The current
+  test does not establish whether shutdown returns before all `AgentControlRoute` close callbacks complete or a
+  connection never delivers its callback. The shutdown contract needs an explicit completion boundary and a
+  deterministic test for every accepted connection.
 - `OrionGitRoute` rejects a null `GitTransportConfig` in its constructor but still checks it for null at line
   207. The branch is unreachable and obscures which configuration states are supported.
 - Failed or malformed Bearer credentials are silently converted to an anonymous context by
