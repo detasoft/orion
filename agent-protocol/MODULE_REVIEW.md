@@ -1,269 +1,175 @@
 # Module Review: `agent-protocol`
 
-Date: 2026-09-03  
-Status: reviewed in isolation
+### 6. Fragmented indefinite-length CBOR strings can spin forever
 
-## Scope and coverage
+**Problem.** `CborItemScanner.scan` repeatedly calls `scanStringChunk` while an indefinite-length byte or
+text string is open. If the current chunk header or body is incomplete, `scanStringChunk` returns `INCOMPLETE`
+without advancing `position`, but `scan` immediately continues the same loop instead of returning to its
+caller. For example, the valid unknown control item `82 18 63 5f 42 01 02 ff` hangs when its first fragment is
+`82 18 63 5f 42 01`. The same no-progress loop can occur when an item crosses the parser's internal buffer
+boundary, trapping a transport or journal reader thread rather than waiting for more bytes.
 
-This review covers the module's Maven definition, public Java model, control and journal codecs, incremental
-CBOR Sequence decoders, private CBOR implementation, protocol specification, compatibility fixtures, tests,
-and module-specific history. It deliberately does not inspect callers or implementations in other modules.
+**Sources.** The loop is in
+[`CborItemScanner.scan`](src/main/java/pro/deta/orion/agent/protocol/CborItemScanner.java#L52); the two
+no-progress returns are in
+[`scanStringChunk`](src/main/java/pro/deta/orion/agent/protocol/CborItemScanner.java#L146). The scanner is fed
+through the 8 KiB incremental buffer in
+[`CborSequenceParser`](src/main/java/pro/deta/orion/agent/protocol/CborSequenceParser.java#L10). Real callers
+run it on the server control ingress in
+[`AgentControlRoute`](../net/http-core/src/main/java/pro/deta/orion/transport/http/AgentControlRoute.java#L125),
+the AgentD HTTP/2 receive path in
+[`JettyHttp2Transport`](../agentd/src/main/java/pro/deta/orion/agentd/transport/JettyHttp2Transport.java#L442),
+the AgentD journal reader in
+[`FileSystemSessionJournalReader`](../agentd/src/main/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReader.java#L385),
+and server journal recovery in
+[`SegmentReader`](../agent-session-server/src/main/java/pro/deta/orion/agent/server/journal/SegmentReader.java#L817).
+Existing fragmentation coverage uses ordinary definite-length values and misses this state in
+[`AgentProtocolDecoderTest`](src/test/java/pro/deta/orion/agent/protocol/AgentProtocolDecoderTest.java#L91).
 
-The review is static and read-only apart from this report. Maven verification was not run because repository
-review rules assign verification to implementation work rather than to a documentation-only architecture
-review.
+**Documented behavior.** The [protocol specification](protocol/README.md#L3) permits a DATA frame to split an
+item at any byte and permits valid indefinite containers. The
+[stream-decoding design](../docs/plans/2026-09-03-typed-agent-protocol-stream-decoding-design.md#L156) preserves
+those forms and requires incomplete input to wait for later data.
 
-## Current conceptual model
+**Contract.** Fragmentation must not affect decoding. A valid but incomplete CBOR item remains pending without
+busy-waiting, while the same item must decode once its remaining bytes arrive. Existing byte, collection,
+string, binary, nesting, opaque-preservation, and terminal structural-failure behavior remains unchanged.
 
-`agent-protocol` is a dependency-free shared wire-contract artifact with four responsibilities:
+**Minimal repair.** Make the indefinite-string branch return `INCOMPLETE` whenever `scanStringChunk` neither
+completes the outer item nor advances the scanner. Keep all state in the existing scanner and parser. Add
+regressions for partial byte- and text-string chunk headers and bodies, nested containers, repeated fragments,
+buffer growth, completion, truncation, malformed chunks, and splits at every byte boundary.
 
-1. Model AgentD/server control messages as a sealed `AgentMessage` hierarchy.
-2. Model session journal records while preserving unknown payloads and future fields byte-for-byte.
-3. Encode and decode both contracts as CBOR items.
-4. Split arbitrarily chunked CBOR Sequences into complete control messages or journal records.
+**Alternatives and consequences.** Rejecting indefinite strings would narrow the documented wire contract.
+Adding timeouts or extra threads would only mask a deterministic parser loop. A new outer frame or parser
+abstraction is unnecessary; the defect is a missing no-progress distinction in the current state machine.
 
-The module deliberately separates message shape from connection policy. `AgentProtocolCodec` accepts messages
-from both directions, unauthenticated legacy `HELLO`, and any message order. Direction, handshake ordering, and
-the requirement to authenticate a server-facing connection remain obligations described in prose rather than
-in the decoder.
+**Confidence.** High. The loop follows directly from the two branches that return without changing
+`position`; runtime verification has not yet been run.
 
-The CBOR path has three representations of the same input. `CborItemScanner` finds boundaries,
-`CborArrayItems` finds top-level fields, and `CborReader` builds values for selected fields. Opaque control
-messages and journal records additionally retain encoded bytes for forwarding.
+### 4. Raw journal preservation duplicates payload storage and CBOR traversal
 
-## Highest-value findings
+**Problem.** A decoded journal record owns separate copies of both `encodedPayload` and the complete
+`encodedRecord`, even though the payload is already a byte range inside the record. Decoding first scans the
+whole item, scans its array fields again, and parses selected fields; typed payload access copies and parses the
+payload yet again. Server storage then copies the record and decodes it once more because the public record can
+carry metadata inconsistent with its encoded bytes. Large PTY records therefore pay avoidable allocation and
+parsing costs on live replication and persistence paths.
 
-### 1. A decoder error makes protocol behavior depend on transport chunk boundaries
+**Sources.** The repeated passes and copies are visible in
+[`SessionEventCodec.decode`](src/main/java/pro/deta/orion/agent/protocol/SessionEventCodec.java#L82),
+[`CborArrayItems.addItem`](src/main/java/pro/deta/orion/agent/protocol/CborArrayItems.java#L48), and
+[`SessionEventCodec.payload`](src/main/java/pro/deta/orion/agent/protocol/SessionEventCodec.java#L144).
+[`SessionEventRecord`](src/main/java/pro/deta/orion/agent/protocol/SessionEventRecord.java#L5) publicly stores
+both byte values, and [`ProtocolBytes`](src/main/java/pro/deta/orion/agent/protocol/ProtocolBytes.java#L13)
+defensively copies at its boundaries. Server append validation copies and decodes the complete record in
+[`SessionJournal.validateRecords`](../agent-session-server/src/main/java/pro/deta/orion/agent/server/journal/SessionJournal.java#L487).
+Exact opaque preservation and maximum-payload behavior are covered by
+[`SessionEventCodecTest`](src/test/java/pro/deta/orion/agent/protocol/SessionEventCodecTest.java#L40) and its
+[large-payload case](src/test/java/pro/deta/orion/agent/protocol/SessionEventCodecTest.java#L123).
 
-**Finding.** A valid item immediately before an invalid item is delivered or silently consumed depending only
-on whether the two items arrived in separate `accept` calls. That contradicts the documented rule that HTTP/2
-DATA boundaries have no protocol meaning.
+**Documented behavior.** The [protocol specification](protocol/README.md#L101) requires the encoded payload,
+unknown event types, and future record tails to survive byte-for-byte. The
+[stream-decoding design](../docs/plans/2026-09-03-typed-agent-protocol-stream-decoding-design.md#L137) also keeps
+journal delivery byte-oriented; it does not require separate backing arrays or repeated parsing.
 
-**Evidence.** `CborSequenceBuffer.accept` extracts every complete item from the supplied bytes and advances its
-pending buffer before semantic decoding begins. `AgentProtocolDecoder.accept` and `SessionEventDecoder.accept`
-then decode the returned list into a local list. If item N fails, the method throws, items 0 through N-1 are not
-returned, and those bytes have already left the sequence buffer. A structural error found while scanning a
-later item likewise prevents the valid prefix from being returned. Tests cover arbitrary chunking of valid
-sequences and an invalid item by itself, but not a valid prefix followed by an invalid item in the same chunk.
+**Contract.** Preserve immutable public byte ownership, exact complete-record and opaque-payload bytes, EventId
+and event-type metadata, future tails, unsigned EventId behavior, and the current separation between structural
+and known-field limits. Storage must continue rejecting a caller-constructed record whose metadata disagrees
+with its encoded bytes while that inconsistent public construction remains possible.
 
-**Why it likely exists.** Framing and semantic decoding were separated into convenient batch operations, but
-the public all-items-or-exception return type cannot represent both a successfully decoded prefix and a later
-terminal error.
+**Minimal repair.** First make a decoded record own one encoded-record backing array plus a private payload
+range, while public byte access remains defensive. Only then consider deriving metadata from that canonical
+representation so storage can avoid re-decoding, and consolidate scanner/array/reader passes where the same
+range information can be reused. Each step should independently preserve all fixtures and limit behavior.
 
-**Simpler model.** Consume and decode one complete item at a time. Return an explicit decode result containing
-the ordered valid prefix and an optional terminal failure, or deliver items to a caller callback before
-reporting the failure. Once a terminal failure is observed, poison or close the decoder explicitly rather than
-leaving recovery implicit.
+**Alternatives and consequences.** Keeping two public byte values preserves the simplest record shape but
+retains peak-memory duplication. Removing storage validation before record consistency is guaranteed would
+permit corrupt persisted records. A general CBOR DOM or new shared parsing framework would add a broader
+abstraction than the current requirement justifies.
 
-**Contract change.** A call may expose valid messages preceding a malformed message and then report a terminal
-error. Today the same prefix is exposed only when the transport happened to split it into an earlier call.
+**Confidence.** High on duplicate ownership and traversal; no allocation or throughput benchmark has yet
+measured their absolute production cost.
 
-**Consequences.** Processing becomes invariant under arbitrary DATA/chunk boundaries, and callers receive an
-unambiguous consumption contract. The current convenient `List<T>` plus checked exception API must change.
+### 3. Typed `PTY_INPUT` assigns the native input UUID the wrong identity
 
-**Confidence.** High.
+**Problem.** The server command contains both a server `CommandId` and a distinct input UUID. AgentD sends the
+UUID to the native host, and the native journal writes its textual UUID into `PTY_INPUT`. The Java journal model
+and shared protocol table instead call that text a `CommandId`. A server command such as `command-1` with a
+different input UUID is therefore journaled under the UUID, while the typed Java API reports that value as the
+server command ID. The compatibility fixture hides the mismatch by wrapping UUID text in `CommandId`.
 
-### 2. `SessionState` combines lifecycle with observation and journal health
+**Sources.** The two source identities are declared by
+[`AgentMessage.Input`](src/main/java/pro/deta/orion/agent/protocol/AgentMessage.java#L210), while
+[`SessionEventPayload.PtyInput`](src/main/java/pro/deta/orion/agent/protocol/SessionEventPayload.java#L14) and
+[`SessionEventCodec.decodePtyInput`](src/main/java/pro/deta/orion/agent/protocol/SessionEventCodec.java#L122)
+label the journal field as `CommandId`. AgentD serializes the UUID in
+[`NativeControlCodec`](../agentd/src/main/java/pro/deta/orion/agentd/session/NativeControlCodec.java#L20); the
+host appends those 16 bytes in
+[`apply_input`](../session-host/src/platform/unix.rs#L1190) and writes their textual form in
+[`encode_event`](../session-host/src/journal.rs#L850). The shared fixture constructs the misleading wrapper in
+[`AgentProtocolFixtureTest`](src/test/java/pro/deta/orion/agent/protocol/AgentProtocolFixtureTest.java#L41),
+while the [native live-peer test](../agentd/src/test/java/pro/deta/orion/agentd/session/NativeControlLivePeerTest.java#L42)
+exercises a real input UUID.
 
-**Finding.** One mutually exclusive enum represents several independent dimensions. `STARTING`, `RUNNING`,
-`EXITED`, and `FAILED` describe execution lifecycle; `JOURNAL_GAP` describes replication availability;
-`LOST` describes an observer's knowledge; and `DEGRADED` is an unspecified health summary.
+**Documented behavior.** The [shared protocol table](protocol/README.md#L90) currently calls the field a
+`CommandId`. The [native protocol](../session-host/protocol/README.md#L93) says it preserves the input identity
+and explicitly assigns replay protection to `operationSequence`, not to this field. No production caller of
+`decodeKnownPayload` was found.
 
-**Evidence.** `AgentMessage.SessionState` contains all seven values. Both `SessionDescriptor` and
-`AgentMessage.SessionOpen` allow exactly one of them while also carrying first/last available event IDs. The
-specification allocates numeric values but defines neither transitions nor precedence. It cannot represent a
-running or exited session that simultaneously has a journal gap.
+**Contract.** Preserve the version-1 journal's existing text bytes and byte-for-byte fixtures. Distinguish the
+server command correlation ID, the input identity carried into `PTY_INPUT`, and the native operation sequence
+used for admission/replay. This finding does not establish a new deduplication or journal-confirmation policy.
 
-**Why it likely exists.** A compact status field accumulated states needed by discovery, lifecycle, and journal
-replication without first deciding which component owns each fact.
+**Minimal repair.** Correct the shared documentation and typed Java payload name/meaning to input identity while
+preserving the existing text wire representation and permissive version-1 decoding. Update fixtures and tests
+to use different command and input identities so they can no longer mask the boundary.
 
-**Simpler model.** Keep one execution lifecycle (`STARTING`, `RUNNING`, `EXITED`, `FAILED`). Derive a journal
-gap from the requested cursor and advertised available range. Represent loss as absence or an observation
-result, and report concrete diagnostics instead of a generic `DEGRADED` lifecycle value.
+**Alternatives and consequences.** Changing the persisted field to raw UUID bytes or adding an operation
+sequence is a versioned wire change and is not needed to fix the semantic label. A new wrapper type would state
+the domain more strongly but adds a public concept without a current production typed-payload consumer.
+Documentation-only correction would leave the Java API actively misleading.
 
-**Contract change.** Future messages would no longer encode every condition as one state number. Existing v1
-codes can remain readable during migration but should stop being emitted once their replacement is available.
+**Confidence.** High on the native producer path; medium on the best Java representation because the typed
+payload API currently has no production consumer.
 
-**Consequences.** State combinations no longer require undocumented precedence, and the event range becomes
-the source of truth for replication availability. A versioned migration is required if these states are
-already persisted or exchanged.
+### 7. Unsupported handshake versions are discarded before negotiation policy sees them
 
-**Confidence.** High that the axes are mixed; medium on compatibility because external use was out of scope.
+**Problem.** `AgentProtocolCodec` rejects an unsupported `HELLO` or `WELCOME` version as a semantic error. The
+sequence parser classifies every semantic decode error as recoverable, and AgentD's HTTP/2 transport logs and
+discards recoverable control items. `AgentControlService` therefore never sees the unsupported `WELCOME` that
+should fail negotiation. An unsupported `WELCOME` followed by a supported one can complete the handshake,
+contrary to the documented negotiation failure policy.
 
-### 3. Input retry identity is split between two identifiers and changes at the journal boundary
+**Sources.** Version rejection occurs in
+[`AgentProtocolCodec.requireCurrent`](src/main/java/pro/deta/orion/agent/protocol/AgentProtocolCodec.java#L502)
+and is converted to a recoverable outcome by
+[`CborSequenceParser.decodeAvailable`](src/main/java/pro/deta/orion/agent/protocol/CborSequenceParser.java#L77).
+[`JettyHttp2Transport.deliverControl`](../agentd/src/main/java/pro/deta/orion/agentd/transport/JettyHttp2Transport.java#L481)
+only logs that outcome; [`AgentControlService.receiveControl`](../agentd/src/main/java/pro/deta/orion/agentd/core/AgentControlService.java#L121)
+receives decoded messages only. [`AgentHandshake.accept`](../agentd/src/main/java/pro/deta/orion/agentd/core/AgentHandshake.java#L44)
+does reject a typed unsupported `WELCOME`, and
+[`AgentHandshakeTest`](../agentd/src/test/java/pro/deta/orion/agentd/core/AgentHandshakeTest.java#L50) covers that
+unit path, but it bypasses production decoding and transport delivery.
 
-**Finding.** The protocol has no single identity that can prove a retried input became a journaled operation.
-`INPUT` carries both `CommandId` and an input UUID, while the corresponding `PTY_INPUT` event retains only the
-`CommandId`.
+**Documented behavior.** The [protocol specification](protocol/README.md#L32) says unsupported versions fail
+negotiation and distinguishes that policy from recoverable semantic decoding. The handshake exchange is
+defined at [the same specification](protocol/README.md#L68).
 
-**Evidence.** `AgentMessage.Input` is `[CommandId, SessionId, inputId, bytes]`. `SessionEventPayload.PtyInput`
-and the documented event allocation are `[CommandId, bytes]`. The specification calls `CommandId` a stable
-logical identity but does not define the input UUID's scope or lifetime. `CommandOutcome.DUPLICATE` exists, but
-the contract does not say which identifier establishes duplication or how it relates to a journal record.
+**Contract.** The generic sequence decoder may continue recovering from semantic failures, and version 1
+remains the only supported wire version. During the initial control handshake, however, an unsupported peer
+version must produce an application-level handshake failure without changing local sessions. Ordering must be
+preserved so a later valid item cannot erase the earlier negotiation failure.
 
-**Why it likely exists.** Command/result correlation and idempotent input delivery were added as separate
-concerns, then represented by adjacent identifiers instead of one explicit operation contract.
+**Minimal repair.** Carry the existing `UNSUPPORTED_VERSION` rejection through the control transport boundary
+to the handshake owner, using the existing ordered receive/failure flow rather than changing all semantic
+decode failures into terminal structural errors. Add production-path tests for an unsupported `WELCOME` alone
+and unsupported-then-supported messages across multiple chunkings.
 
-**Simpler model.** Separate opaque client correlation data from one per-session operation identity. For
-retryable effects, carry a monotonic operation sequence unchanged into the resulting journal record and
-acknowledge a contiguous high-watermark. If that guarantee is not required, choose either `CommandId` or the
-input UUID as the sole idempotency key and delete the other.
+**Alternatives and consequences.** A version-aware typed envelope could expose both decoded values and rejects
+uniformly, but broadens the transport API. Making every semantic failure terminal would discard the deliberate
+recovery contract. Allowing the next supported `WELCOME` would require changing the documented product policy,
+not merely the implementation.
 
-**Contract change.** The control-message and journal-record fields change, and duplicate detection gains an
-explicit scope and retention rule. Existing v1 journal records need transitional decoding if already durable.
-
-**Consequences.** Retry, deduplication, journal confirmation, and cache eviction share one identity instead of
-requiring an undocumented mapping. This gives up treating every command as a completely standalone request.
-
-**Confidence.** High that the current mapping is incomplete; medium on which identifier should survive.
-
-### 4. Raw preservation causes repeated parsing and copies of the same CBOR bytes
-
-**Finding.** Forward compatibility is valuable, but its implementation currently requires several independent
-CBOR traversals and duplicate byte ownership rather than one span-aware representation.
-
-**Evidence.** A control item is scanned by `CborItemScanner`, split again by `CborArrayItems`, and its known
-fields are copied into separate arrays and parsed by `CborReader`. `SessionEventCodec` follows the same path.
-For every journal record it stores both a copied `encodedPayload` and a copied `encodedRecord`; known-payload
-decoding copies those bytes again. The scanner, array splitter, and reader each implement their own container,
-depth, and length handling.
-
-The limit contract already differs among those paths. `CborItemScanner` applies item, collection, and nesting
-limits but deliberately does not apply `maxStringBytes` or `maxBinaryBytes` to opaque fields. Tests require
-unknown messages and known-message tails to bypass those field limits, while the protocol README broadly says
-that decoders enforce configured string and binary limits.
-
-**Why it likely exists.** A generic value reader was combined with a raw-byte forwarding requirement without
-introducing byte spans as the shared internal representation.
-
-**Simpler model.** Use one cursor that validates structure, exposes top-level and nested spans, and decodes only
-the fields whose v1 semantics are known. Let a journal record own one encoded byte array plus payload offsets;
-retain defensive copies only at the public boundary. Explicitly distinguish structural item limits from
-semantic limits on known fields.
-
-**Contract change.** No wire change is required. The documented treatment of oversized opaque strings and
-byte strings must be made explicit; choosing to enforce limits on them would narrow forward compatibility.
-
-**Consequences.** The module can remove at least one CBOR traversal/representation, reduce peak memory for
-large PTY output records, and eliminate limit drift. A span-based internal API is less general than the current
-full CBOR value tree, but the module does not expose that tree publicly.
-
-**Confidence.** High.
-
-### 5. Connection facts are repeated as independent snapshots with no consistency owner
-
-**Finding.** The wire model repeats identity and mostly static facts in several messages, but this module does
-not define whether or how they must agree during one connection.
-
-**Evidence.** `HELLO` carries agent ID, instance ID, agent version, machine, and capabilities. `HEARTBEAT`
-repeats both IDs. `AGENT_STATUS` repeats both IDs, version, machine, and capabilities, and adds an
-`activeSessions` count even though `SESSION_LIST` carries the sessions themselves. The item codec is stateless,
-so it accepts contradictory snapshots. Tests verify each shape independently, not cross-message invariants.
-
-**Why it likely exists.** Self-contained messages are easy to route across independent logical streams, while
-the protocol description also implies a connection established by `HELLO`/`WELCOME`. The intended routing
-unit is not defined inside this module.
-
-**Simpler model.** If messages belong to one authenticated connection, bind immutable agent identity and
-capabilities at `HELLO`; make heartbeat carry only liveness data, make status carry only mutable metrics, and
-derive the active count from the session inventory. If messages must be independently routable, state that
-requirement and make snapshot consistency explicitly best-effort rather than implied.
-
-**Contract change.** Removing repeated fields requires a later protocol version. Enforcing consistency in v1
-would cause previously accepted contradictory sequences to fail.
-
-**Consequences.** Connection-scoped identity removes several sources of disagreement and smaller messages, but
-loses self-contained routing. This recommendation depends on transport ownership that was intentionally not
-inspected outside the module.
-
-**Confidence.** Medium.
-
-## Smaller contract inconsistencies
-
-- `AgentProtocolLimits` still publishes `DEFAULT_MAX_FRAME_BYTES`, `withMaxFrameBytes`, and `maxFrameBytes`,
-  even though the specification explicitly says the protocol has no frame header or protocol-level frames.
-  These aliases have no use inside the module and preserve obsolete vocabulary.
-- The README calls map encoding canonical but defines Java `String` order rather than a language-neutral CBOR
-  deterministic-order rule. Unless encoded map bytes are signed or hashed, map order is not a useful wire
-  guarantee and should not be frozen as protocol semantics.
-- `HELLO`/`WELCOME` are described as negotiating versions, but the messages carry one version each and
-  `AgentProtocolCodec.requireCurrent` rejects every value except the local `CURRENT` constants. The implemented
-  behavior is a two-field compatibility assertion, not multi-version selection.
-- `AgentMessageType.Direction` is declarative metadata only. The decoder accepts either direction, and the
-  generic `HELLO` model permits absent authentication while prose delegates rejection to an endpoint. That may
-  be an intentional codec/policy split, but the public package description currently calls the whole artifact
-  a shared contract without naming this boundary.
-- Strong wrapper types exist for most identities, but the input UUID remains a raw `UUID`. This makes its role
-  look incidental despite being the only input-specific identity.
-
-## Things to try deleting
-
-- The all-items-or-exception batch contract in both incremental decoders.
-- `DEGRADED`, `JOURNAL_GAP`, and `LOST` as lifecycle states once their facts are derived or represented at the
-  correct boundary.
-- One of the two input identities, unless client correlation and operation identity are explicitly separated.
-- The copied `encodedPayload` stored beside the complete encoded record; retain payload offsets instead.
-- One of the overlapping CBOR structural passes and the generic value types not needed for known fields.
-- Repeated agent identity/static fields and the derived active-session count if the connection owns those
-  facts.
-- The three legacy `frame` limit aliases.
-- The Java-specific canonical map-order guarantee if no byte-level signature or hash depends on it.
-
-## Proposed conceptual model
-
-- One v1 item codec with one span-aware CBOR structural parser.
-- One incremental sequence contract whose observable results do not depend on transport chunk boundaries.
-- One authenticated connection identity established at `HELLO`, if control messages are connection-scoped.
-- One session execution lifecycle; journal availability is derived from event ranges and sync cursors.
-- One operation identity for retryable effects, carried unchanged from command acceptance to journal record;
-  client correlation fields remain opaque and separate.
-- Unknown messages, payloads, and future tails remain raw bytes and do not require semantic understanding.
-- Structural resource limits and known-field validation are named and enforced as different policies.
-
-## Incremental migration path
-
-1. Add regression cases for `valid item + invalid item` in one chunk and in two chunks for both incremental
-   decoders. Define one identical externally visible result for both chunkings.
-2. Change incremental decoding to expose a valid prefix and terminal failure explicitly, then poison the
-   decoder after that failure.
-3. Introduce internal byte spans and make `SessionEventRecord` own one encoded record. Preserve all current
-   fixtures and byte-for-byte opaque forwarding while collapsing the redundant CBOR passes.
-4. Clarify structural versus known-field limits and remove the obsolete frame aliases.
-5. Define command correlation, operation deduplication, and journal confirmation as separate concepts. Add a
-   versioned operation identity before changing the persisted `PTY_INPUT` shape.
-6. Stop producing mixed-axis session states after readers can derive journal gaps and carry execution lifecycle
-   separately.
-7. Decide whether control messages are connection-scoped. Only then remove repeated snapshots in a later
-   protocol version or document why self-contained routing is required.
-8. Inventory concrete capability, configuration, and metric keys before treating the generic string maps as a
-   stable extension protocol.
-
-Each wire change should keep the checked-in v1 fixtures readable and introduce new fixtures for the new
-version rather than silently changing existing bytes.
-
-## Do not change
-
-- Preserve byte-for-byte forwarding of unknown control items and complete journal records with unknown payloads
-  or future tails. This is a verified compatibility boundary.
-- Preserve strict UTF-8 decoding, duplicate map-key rejection, bounded nesting/collection sizes, and the hard
-  per-item byte cap.
-- Preserve full unsigned 64-bit `EventId` ordering and conversion; Java's signed `long` representation is
-  deliberately hidden by the value type.
-- Preserve separate Agent protocol and journal format version fields. The two contracts can evolve
-  independently even though only version 1 is currently accepted.
-- Preserve defensive byte ownership at public API boundaries and credential length validation.
-- Preserve definite-length output and permissive reading of valid indefinite-length CBOR containers unless a
-  cross-language compatibility decision explicitly narrows the accepted format.
-
-## Open questions
-
-- Are valid messages before a malformed item expected to take effect before the connection is closed?
-- Is one authenticated HTTP/2 connection the owner of agent identity, or must every logical stream be routable
-  without connection context?
-- Which identifier currently owns command deduplication, and for how long must that decision survive?
-- Have v1 journal records already been persisted such that changing `PTY_INPUT` requires permanent legacy
-  decoding?
-- Can a session be running or exited while its journal has a gap, and which condition should a user see?
-- Are capability/configuration map bytes signed or hashed, or is their current ordering only for deterministic
-  fixtures?
-- Which capability, configuration, and metric keys are part of the actual v1 contract?
+**Confidence.** High on the current loss path; medium on whether immediate handshake failure remains the desired
+product behavior despite the current authoritative specification.
