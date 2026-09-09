@@ -41,6 +41,10 @@ the UI.
 **Confidence.** High on duplicated invocation and policy ownership; route-specific behavior must be
 characterized before consolidation.
 
+**Priority signals.** Importance: high, because the split contract spans every route and permits policy and
+method metadata to drift from execution. Repair ease: low, because buffered, streaming, shutdown and
+asynchronous Agent lifetimes must converge without weakening their distinct runtime guarantees.
+
 ## 4. Repository spelling can select one storage identity under another ACL identity
 
 **Problem.** Published-pack requests authorize a normalized repository name but pass the original spelling to
@@ -83,6 +87,10 @@ with different grants.
 **Confidence.** High on current identity divergence and its authorization consequence; deployment migration
 requirements remain unknown.
 
+**Priority signals.** Importance: high, because a concrete spelling can authorize one repository identity
+while opening another. Repair ease: low, because all HTTP and SSH consumers must change atomically and existing
+persisted suffix-bearing names require an inventory before canonicalization.
+
 ## 3. Route selection discards path structure and handlers interpret it again
 
 **Problem.** The registry selects handlers with unrestricted character wildcards, then handlers independently
@@ -117,6 +125,10 @@ rejection at one boundary, and test the production route set rather than inferri
 patterns alone.
 
 **Confidence.** High on duplicated interpretation and current prefix capture.
+
+**Priority signals.** Importance: medium, because the current overmatch is concrete but the demonstrated
+/session-hostile case still ends in 404. Repair ease: low, because the safe replacement depends on unified
+invocation and must preserve overlapping Git, fallback and authorization behavior across several handlers.
 
 ## 5. HTTP failure classification loses domain meaning and response commitment
 
@@ -163,6 +175,11 @@ after actual response commitment.
 **Confidence.** High on current misclassification; the exact typed replacement should follow existing service
 boundaries.
 
+**Priority signals.** Importance: high, because backend and persisted-state failures can be exposed as client
+errors with incidental messages, and streaming failure behavior is ambiguous after commitment. Repair ease:
+low, because absence and typed failures cross Git service, storage and HTTP boundaries and need pre- and
+post-commit verification.
+
 ## 6. The public configuration schema rejects a supported object collection
 
 **Problem.** Schema generation drops generic field types and describes every collection as strings.
@@ -197,6 +214,11 @@ Do not add a general schema framework solely for this object list.
 
 **Confidence.** High on the current collection mismatch; broader serialization-property conformance needs
 focused verification.
+
+**Priority signals.** Importance: medium, because the published schema rejects a supported configuration but
+no in-repository validation consumer was found. Repair ease: medium, because the mismatch is local to the
+existing generator and its tests, while the public schema contract still requires representative loader
+conformance.
 
 ## 7. Concurrent ACME issuance can exhaust workers needed for HTTP-01 callbacks
 
@@ -234,6 +256,11 @@ but does not need a new service or persistence model. Increasing the thread pool
 **Confidence.** High on shared workers and missing admission control; expected production concurrency was not
 measured.
 
+**Priority signals.** Importance: medium, because the starvation trigger is concrete but requires concurrent
+privileged issuance and expected production concurrency is unknown. Repair ease: medium, because a local
+single-flight guard can preserve synchronous success, but it introduces a retryable busy outcome and needs
+concurrency and callback-capacity coverage.
+
 ## 10. Agent stream shutdown has an unresolved cleanup verification gap
 
 **Problem.** Jetty stop and per-stream application cleanup have no explicit shared completion boundary.
@@ -269,3 +296,7 @@ completion of arbitrary application work could make shutdown unbounded and is a 
 
 **Confidence.** Medium: the current ownership and test ambiguity are verified; the runtime cause of the
 recorded missing callback remains unresolved.
+
+**Priority signals.** Importance: unknown until deterministic per-stream evidence establishes whether shutdown
+can leak admitted transport work. Repair ease: unknown because the result may require only test
+synchronization, or may demonstrate a missing production lifecycle link.
