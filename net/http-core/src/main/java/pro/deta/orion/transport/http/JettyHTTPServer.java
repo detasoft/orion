@@ -190,6 +190,7 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             httpConnector.setName("http");
             httpConnector.setHost(httpTransportConfig.getAddress());
             httpConnector.setPort(httpTransportConfig.getPort());
+            httpConnector.setAcceptQueueSize(httpTransportConfig.getBacklog());
             server.addConnector(httpConnector);
         }
     }

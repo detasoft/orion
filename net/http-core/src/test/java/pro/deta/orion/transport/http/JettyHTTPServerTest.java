@@ -72,6 +72,7 @@ import org.eclipse.jetty.http2.client.HTTP2Client;
 import org.eclipse.jetty.http2.frames.DataFrame;
 import org.eclipse.jetty.http2.frames.HeadersFrame;
 import org.eclipse.jetty.http2.frames.ResetFrame;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 
@@ -176,6 +177,24 @@ class JettyHTTPServerTest {
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Cannot start Jetty HTTP server");
             assertThat(server.isRunning()).isFalse();
+        }
+    }
+
+    @Test
+    void appliesConfiguredHttpBacklog() {
+        OrionConfiguration bootstrap = httpConfiguration(true);
+        bootstrap.getTransport().getHttp().setBacklog(37);
+        JettyHTTPServer server = server(
+                bootstrap, desiredStateWithoutHttps(), TlsCapability.unavailable(), new OkRoute());
+        server.onStart();
+
+        try {
+            assertThat(server.getJettyServer().get().getConnectors()).hasSize(1);
+            ServerConnector connector =
+                    (ServerConnector) server.getJettyServer().get().getConnectors()[0];
+            assertThat(connector.getAcceptQueueSize()).isEqualTo(37);
+        } finally {
+            server.onStop();
         }
     }
 
