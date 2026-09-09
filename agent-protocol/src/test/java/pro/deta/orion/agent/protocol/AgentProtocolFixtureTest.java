@@ -40,6 +40,11 @@ class AgentProtocolFixtureTest {
 
     @Test
     void requiredJournalEventsMatchSharedVersionOneFixture() throws Exception {
+        AgentMessage.Input inputCommand = new AgentMessage.Input(
+                new CommandId("server-command-3"),
+                new SessionId("session-1"),
+                UUID.fromString("00010203-0405-0607-0809-0a0b0c0d0e0f"),
+                ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff}));
         List<byte[]> records = List.of(
                 EVENT_CODEC.encode(
                         new EventId(1),
@@ -51,16 +56,30 @@ class AgentProtocolFixtureTest {
                 EVENT_CODEC.encode(
                         new EventId(3),
                         new SessionEventPayload.PtyInput(
-                                new CommandId("00010203-0405-0607-0809-0a0b0c0d0e0f"),
-                                ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff}))),
+                                inputCommand.inputId().toString(),
+                                inputCommand.bytes())),
                 EVENT_CODEC.encode(
                         new EventId(4),
                         new SessionEventPayload.ProcessExited(0)));
         byte[] fixture = fixture("session-events-v1.hex");
 
+        assertThat(inputCommand.inputId().toString()).isNotEqualTo(inputCommand.commandId().value());
         assertThat(concatenate(records)).containsExactly(fixture);
         SessionEventDecoder decoder = new SessionEventDecoder(LIMITS);
-        assertThat(decoder.accept(ByteBuffer.wrap(fixture)).outcomes()).hasSize(4);
+        SequenceDecodeResult<SessionEventRecord> decoded = decoder.accept(ByteBuffer.wrap(fixture));
+        List<byte[]> reencoded = new ArrayList<>();
+        for (SequenceDecodeResult.Outcome<SessionEventRecord> outcome : decoded.outcomes()) {
+            if (!(outcome instanceof SequenceDecodeResult.Decoded<SessionEventRecord> event)) {
+                throw new AssertionError("version-one fixture contains an undecodable record");
+            }
+            SessionEventRecord record = event.value();
+            reencoded.add(EVENT_CODEC.encode(
+                    record.eventId(),
+                    EVENT_CODEC.decodeKnownPayload(record).orElseThrow()));
+        }
+
+        assertThat(reencoded).hasSize(4);
+        assertThat(concatenate(reencoded)).containsExactly(fixture);
     }
 
     @Test

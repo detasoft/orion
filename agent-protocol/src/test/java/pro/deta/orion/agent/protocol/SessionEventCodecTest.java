@@ -21,7 +21,7 @@ class SessionEventCodecTest {
         List<SessionEventPayload> payloads = List.of(
                 new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{0x1b, 0, (byte) 0xff})),
                 new SessionEventPayload.PtyInput(
-                        new CommandId("command-1"),
+                        "pty-input:session-1",
                         ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff})),
                 new SessionEventPayload.PtyResize(180, 50),
                 new SessionEventPayload.ProcessExited(-17));
@@ -34,6 +34,24 @@ class SessionEventCodecTest {
             assertThat(CODEC.decodeKnownPayload(record)).contains(expected);
             assertThat(record.trailingFieldCount()).isZero();
         }
+    }
+
+    @Test
+    void rejectsBlankPtyInputId() {
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> new SessionEventPayload.PtyInput(
+                        " \t",
+                        ProtocolBytes.copyOf(new byte[]{1})))
+                .withMessage("ptyInputId must be 1-128 safe ASCII characters");
+    }
+
+    @Test
+    void rejectsUnsafePtyInputId() {
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> new SessionEventPayload.PtyInput(
+                        "input identity",
+                        ProtocolBytes.copyOf(new byte[]{1})))
+                .withMessage("ptyInputId must be 1-128 safe ASCII characters");
     }
 
     @Test
@@ -321,6 +339,15 @@ class SessionEventCodecTest {
                 .isThrownBy(() -> CODEC.decode(Hex.parse("83011a0001000000")))
                 .extracting(AgentProtocolException::reason)
                 .isEqualTo(AgentProtocolException.Reason.INVALID_FIELD);
+    }
+
+    @Test
+    void labelsInvalidPtyInputIdentity() throws Exception {
+        SessionEventRecord invalidInput = CODEC.decode(Hex.parse("8301190101820140"));
+
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(() -> CODEC.decodeKnownPayload(invalidInput))
+                .withMessage("PTY_INPUT ptyInputId must be a CBOR text string");
     }
 
     @Test

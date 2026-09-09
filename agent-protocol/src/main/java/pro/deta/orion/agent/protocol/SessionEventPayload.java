@@ -11,9 +11,9 @@ public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutpu
         }
     }
 
-    record PtyInput(CommandId commandId, ProtocolBytes bytes) implements SessionEventPayload {
+    record PtyInput(String ptyInputId, ProtocolBytes bytes) implements SessionEventPayload {
         public PtyInput {
-            Objects.requireNonNull(commandId, "commandId");
+            ptyInputId = ProtocolValidation.identifier(ptyInputId, "ptyInputId");
             Objects.requireNonNull(bytes, "bytes");
         }
     }

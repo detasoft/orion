@@ -33,7 +33,7 @@ public final class SessionEventCodec {
             case SessionEventPayload.PtyInput value -> {
                 writer.unsigned(SessionEventType.PTY_INPUT);
                 writer.array(2);
-                writer.text(value.commandId().value());
+                writer.text(value.ptyInputId());
                 writer.bytes(value.bytes());
             }
             case SessionEventPayload.PtyResize value -> {
@@ -123,7 +123,7 @@ public final class SessionEventCodec {
             throws AgentProtocolException {
         requireFields(fields, 2, "PTY_INPUT");
         return new SessionEventPayload.PtyInput(
-                new CommandId(text(fields.get(0), "PTY_INPUT commandId")),
+                text(fields.get(0), "PTY_INPUT ptyInputId"),
                 ProtocolBytes.copyOf(bytes(fields.get(1), "PTY_INPUT bytes")));
     }
 
