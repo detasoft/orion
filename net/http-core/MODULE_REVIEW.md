@@ -269,33 +269,3 @@ completion of arbitrary application work could make shutdown unbounded and is a 
 
 **Confidence.** Medium: the current ownership and test ambiguity are verified; the runtime cause of the
 recorded missing callback remains unresolved.
-
-## 9. HTTPS tests release their port before Jetty binds it
-
-**Problem.** The HTTPS fixture selects an ephemeral port with a temporary ServerSocket, closes it, and later
-starts Jetty on that number. Another process or concurrent test can acquire the port in between, making an
-unrelated behavior test fail at server startup.
-
-**Sources.** [Fixture port selection](src/test/java/pro/deta/orion/transport/http/JettyHTTPServerTest.java#L663),
-[temporary reservation](../../core/common/src/main/java/pro/deta/orion/util/NetworkUtils.java#L25),
-[affected startup](src/test/java/pro/deta/orion/transport/http/JettyHTTPServerTest.java#L390),
-[HTTPS port validation](../../core/schema/src/main/java/pro/deta/orion/schema/orion/OrionHttpsConfiguration.java#L20), and
-[failed-start cleanup](src/main/java/pro/deta/orion/transport/http/JettyHTTPServer.java#L210).
-
-**Documented behavior.** The
-[HTTP/2 validation plan](../../docs/plans/2026-09-08-agent-server-http2-control-transport.md#L101)
-requires live endpoint verification. The HTTPS domain model currently permits ports 1 through 65535.
-
-**Contract.** Behavioral tests must not depend on an unreserved port remaining free. Existing HTTPS desired
-state rejects port 0; replacing the fixture value with 0 alone violates that contract.
-
-**Minimal repair.** Preserve production port validation and make fixture startup retry a fresh selection only
-for a confirmed bind collision, with a small explicit bound and complete failed-server cleanup. Keep the test
-that intentionally occupies a configured port outside that helper.
-
-**Alternatives and consequences.** Allowing port 0 and using boundHttpsPort removes the reservation gap
-completely, but changes HTTPS domain/schema validation and needs coordinated tests and operator semantics.
-Unbounded retries can mask real startup faults; retrying only known fixture bind collisions contains that
-risk. A retry limit must still report the final failure.
-
-**Confidence.** High on the race and port-0 restriction; collision frequency is environment-dependent.
