@@ -1,6 +1,9 @@
 # Use the Resolved ACL Repository Identity
 
-Status: todo
+Status: in progress
+
+- [ ] Make ACL storage use the repository identity already selected by bootstrap.
+  - Owner: codex, session acl-resolved-identity-4c2a, started 2026-09-09 18:42 Europe/Amsterdam.
 
 Make ACL storage consume the repository identity already selected by bootstrap,
 without reconstructing and reparsing a repository locator.
