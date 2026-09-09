@@ -12,7 +12,8 @@ RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODU
 RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
 	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
-	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create
+	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
+	cargo-init rust-install session-host
 RUN_TEST_POSITIONAL_ARGUMENTS :=
 RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
 RUN_TEST_MODULE = $(value MODULE)
@@ -30,7 +31,7 @@ RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
 endif
 endif
 
-.PHONY: dist test run-test test-jfr test-jfr-report xml-schema
+.PHONY: dist test run-test test-jfr test-jfr-report xml-schema cargo-init rust-install session-host
 
 dist:
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
@@ -40,6 +41,18 @@ test:
 
 xml-schema:
 	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
+
+cargo-init:
+	@if [ ! -x "$(HOME)/.cargo/bin/cargo" ]; then \
+		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+			| sh -s -- -y --profile minimal --no-modify-path --default-toolchain none; \
+	fi
+
+rust-install: cargo-init
+	$(HOME)/.cargo/bin/rustup toolchain install 1.97.0 --profile minimal
+
+session-host: rust-install
+	cd session-host && $(HOME)/.cargo/bin/cargo build --release
 
 run-test:
 	@if [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -eq 0 ]; then \
@@ -83,4 +96,3 @@ test-jfr-report:
 		-Dexec.args="$(TEST_ANALYTICS_REPORT_ARGS)"
 
 include make/server.mk
-include session-host/Makefile
