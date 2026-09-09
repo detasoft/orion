@@ -19,11 +19,19 @@ and credentials, and connect it to this existing production proxy path. A reposi
 remote is a different resource and must not be presented as a transparent proxy.
 
 `OrionKeyMaterial` owns the protected key store and exposes narrow capabilities. Reuse its ownership and
-`ConfigurationCipherCapability`: private keys remain purpose/scoped material; passwords remain encrypted
+`ConfigurationCipherCapability`: private keys remain purpose/scoped material; secret values remain encrypted
 configuration values. SSH code must not receive unrestricted `KeyMaterialService` or private-key export.
 New confidential-input support and a narrow material administration capability are justified by importing
 secrets over the terminal. New proxy configuration is justified by persistent proxy CRUD. Avoid new
 services, modules, general workflow abstractions, and unrelated configuration changes.
+
+Use `secrets` as the common configuration and terminal vocabulary. Reuse `ConfigurationSecretReference`
+for scoped references to encrypted values and SSH private keys; extend its existing scope model only as
+needed. Passwords and bearer tokens are uses of an encrypted secret value, not separate reference models.
+Private-key references resolve to purpose/scoped material owned by `OrionKeyMaterial`; do not add a second
+persisted key registry in XML. Safe terminal metadata identifies each secret's scope, ID and supported
+kind. Keep HTTPS transport settings separate while TLS, configuration encryption and SSH client keys use
+the same material owner through narrow purpose-specific capabilities.
 
 ## Required behavior
 
@@ -58,10 +66,12 @@ services, modules, general workflow abstractions, and unrelated configuration ch
   until a relevant narrower production rule exists. Preserve existing ACL filtering of domain reads,
   help and completion. Do not invent a permissive organization authorization model.
 
-### Material import and passwords
+### Secret references and material import
 
-- Expose discoverable terminal commands to list safe metadata and import private keys and passwords.
-  Accept multiline private-key input and hidden password input; document supported key formats.
+- Expose discoverable terminal secret commands to list safe metadata and import private keys and opaque
+  values used as passwords or tokens. Accept multiline private-key input and hidden secret-value input;
+  document supported key formats. Resolve references with scope and required-use checks; do not add
+  unsupported secret kinds or a general resolver framework for hypothetical future consumers.
 - Enter confidential input only after command validation and authorization. Never echo secret bytes,
   add them to editor history, complete them, or include them in command/audit/error logs. Reject secret
   values supplied as ordinary named/positional command arguments. Bound input size and terminate input
@@ -72,9 +82,10 @@ services, modules, general workflow abstractions, and unrelated configuration ch
 - Validate keys before storing; import through a narrow owner capability, with safe alias/purpose/scope
   checks. Support explicit replacement of user-managed material, preserving required server identity,
   TLS and bootstrap material. Do not silently overwrite an existing alias.
-- Passwords are encrypted using the existing authenticated configuration envelope and referenced by
-  proxy credentials. Preserve the repository contract of keys in the material store and encrypted
-  passwords in `orion.xml`; expose both through the terminal material commands without plaintext reads.
+- Secret values are encrypted using the existing authenticated configuration envelope and stored in the
+  owning `secrets` collection in `orion.xml`. Proxy credentials use the common scoped secret reference
+  for both encrypted values and private keys. Preserve keys in the material store and expose both kinds
+  through terminal secret metadata without plaintext reads or duplicated key registration.
 - Report persistence conflicts/failures through structured command results. Never claim successful
   import when the protected store or encrypted configuration was not durably saved. Ensure failed
   mutations cannot leak into a later unrelated successful save.
