@@ -7,7 +7,8 @@ Blocks: [SERVER sequence recovery](08_server-operation-sequence-recovery.md) and
 Related: [server command orchestration](../04_agentd/04_command-orchestration.md)
 Plan: ../../2026-09-09-source-aware-session-controls.md
 
-- Owner: codex, session source-aware-controls-701c, started 2026-09-09 19:10 Europe/Amsterdam.
+- Owner: codex, session source-aware-controls-701c, branch `codex/source-aware-controls-701c`, worktree
+  `.worktrees/source-aware-controls-701c`, resumed 2026-09-09 23:24 Europe/Amsterdam.
 
 Allow AgentD and a manual client to control the same live session concurrently,
 including direct manual access while AgentD is unavailable. Mark every command
