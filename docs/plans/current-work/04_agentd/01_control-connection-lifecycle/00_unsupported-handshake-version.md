@@ -5,6 +5,9 @@ Parent: TASK.md
 Finding: ../../../../../agent-protocol/MODULE_REVIEW.md
 Depends on: completed AgentD launch identity and HTTP/2 transport.
 
+- [ ] Preserve unsupported handshake version failures.
+  - Owner: codex, session agent-protocol-handshake-version-7c2d, started 2026-09-09 21:15 Europe/Amsterdam.
+
 Deliver the existing `UNSUPPORTED_VERSION` decode result through the ordered
 control receive flow so the handshake owner rejects that connection attempt.
 
