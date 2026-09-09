@@ -17,8 +17,10 @@ and every repair. Use `orion-change-orchestrator` only for repairs that do not
 qualify for the direct small-repair path below, and use `orion-task-runner` when
 task-tree ownership applies.
 
-Edit and commit `MODULE_REVIEW.md` files directly on `main`, never through the
-orchestrator, coordinator, implementation worker, dedicated worktree, or
+`MODULE_REVIEW.md` files belong to the repository
+[workflow-control scope](../../../docs/definitions.md#workflow-control-scope).
+Apply its shared rules: edit and commit reports directly on `main`, never through
+the orchestrator, coordinator, implementation worker, dedicated worktree, or
 subagent. Record review state as early as it becomes accurate: commit newly
 confirmed issues before starting their repairs, and immediately after a fix
 lands on `main`, revalidate the affected issue and commit its removal or update

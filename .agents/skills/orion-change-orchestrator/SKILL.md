@@ -3,8 +3,7 @@ name: orion-change-orchestrator
 description: >-
   Use when an Orion source, build, or configuration change requires an
   implementation worker and review gates, whether queue-backed or direct.
-  Exclude documentation-only changes, MODULE_REVIEW.md, skills, task-tree
-  planning, task descriptions, ordering, composition, and dependencies.
+  Exclude documentation-only and repository workflow-control changes.
 ---
 
 # Orion Change Orchestrator
@@ -12,14 +11,13 @@ description: >-
 ## Scope and Roles
 
 Use this workflow for requested source, build, and configuration changes,
-including a direct request with no queued task. Documentation-only changes, all
-`MODULE_REVIEW.md` changes, and skill edits are made and committed directly on
-`main` outside this workflow, except for the queued-execution task-tree state
-owned explicitly below; never delegate documentation edits to an implementation
-worker, dedicated worktree, or subagent. When a request mixes implementation
-with those edits, separate the scopes and use this workflow only for the
-implementation portion. Creating or editing tasks and their queue relationships
-belongs directly to
+including a direct request with no queued task. Files in the repository
+[workflow-control scope](../../../docs/definitions.md#workflow-control-scope)
+follow its shared rules and stay outside the implementation worker/worktree,
+except for queued task-tree state owned by this orchestrator as specified below.
+When a request mixes implementation with workflow-control or other documentation
+changes, separate the scopes and use this workflow only for the implementation
+portion. Creating or editing tasks and their queue relationships belongs directly to
 [orion-task-runner](../orion-task-runner/SKILL.md), without launching an
 implementation worker. During queued execution, this orchestrator applies the
 runner itself for claims, queue moves, pause state, and completion metadata,
@@ -101,9 +99,9 @@ Direct changes skip the claim and use the current committed `main` HEAD. Existin
 unstaged changes must remain outside the worker's isolated base; resolve any
 overlap with the requested work before proceeding.
 
-A document or skill is never a worker edit target. Pure task-description, queue,
-and dependency edits belong directly to the runner; other documentation and
-skill edits belong directly to the primary agent on `main`.
+Files in the workflow-control scope are never worker edit targets. Standalone
+task-description, queue, and dependency edits belong directly to the runner;
+other documentation belongs directly to the primary agent on `main`.
 
 If the worker discovers a material gap in its governing plan, it reports it
 instead of revising that input. The primary agent pauses this workflow, updates
@@ -133,8 +131,8 @@ The worker must:
    have no task-tree state.
 4. Until the integration gate, perform implementation commands and edits only
    in that worktree. Preserve unrelated shared-workspace state. Treat governing
-   plans, documentation, `MODULE_REVIEW.md`, and skills as primary-owned inputs,
-   never worker edit targets.
+   plans, other documentation, and the workflow-control scope as primary-owned
+   inputs, never worker edit targets.
 5. Implement production behavior and tests under `AGENTS.md`, run focused
    checks and the required development verification.
 6. Commit the change and return its scope, any actual task path, worktree, branch,

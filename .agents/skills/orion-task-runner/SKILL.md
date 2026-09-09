@@ -18,6 +18,9 @@ implementation worker. Every task execution
 must use [orion-change-orchestrator](../orion-change-orchestrator/SKILL.md),
 which owns worker launch, review, and the integration gate. The implementation
 worker must apply [orion-minimal-implementation](../orion-minimal-implementation/SKILL.md).
+The task tree belongs to the repository
+[workflow-control scope](../../../docs/definitions.md#workflow-control-scope);
+apply its shared ownership, commit, and test rules to every task-tree change.
 
 When the orchestrator or its assigned worker reads this skill, apply the task
 model and the rules for that role; do not invoke the orchestrator recursively
@@ -103,14 +106,15 @@ Use a leaf file for a bounded executable task and a numbered directory with
 in numbered children and keep the aggregate description in the composite.
 Do not duplicate the work as an executable parent and executable descendants.
 
-Commit every task-tree state change directly on `main` as soon as it becomes
-accurate, using the smallest atomic documentation-only commit. Do not claim
-planned work. When queued execution starts, the orchestrator moves only the
-selected leaf to the appropriate current queue/composite, chooses a free local
-prefix, records the claim, and updates affected references in the same isolated
-commit on `main` before launching the worker. Preserve required aggregate
-context and dependencies in the moved leaf. Remove an emptied source composite
-only when its remaining scope is accounted for.
+Under the workflow-control scope rules, commit every task-tree state change
+directly on `main` as soon as it becomes accurate, using the smallest atomic
+documentation-only commit. Do not claim planned work. When queued execution
+starts, the orchestrator moves only the selected leaf to the appropriate current
+queue/composite, chooses a free local prefix, records the claim, and updates
+affected references in the same isolated commit on `main` before launching the
+worker. Preserve required aggregate context and dependencies in the moved leaf.
+Remove an emptied source composite only when its remaining scope is accounted
+for.
 
 Plan replacements around one canonical production path: update every real
 in-repository consumer and remove replaced internal APIs, state, configuration,

@@ -22,10 +22,11 @@
 - If the Maven test command fails and cannot be fixed in the current turn, report the failure and the relevant error output.
 - If post-commit Maven tests fail because of unrelated or pre-existing working tree changes, do not debug those changes unless the user explicitly asks; report the failure and finish the requested commit task.
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
-- Task-tree and skill changes made in the same requested work do not need
-  separate commits from each other. They may be committed together in one
-  documentation-only commit; do not modify or temporarily remove them solely to
-  isolate their commits.
+- Changes within the
+  [workflow-control scope](docs/definitions.md#workflow-control-scope) that are
+  made in the same requested work do not need separate commits from each other.
+  They may be committed together in one documentation-only commit; do not modify
+  or temporarily remove them solely to isolate their commits.
 - Do not use `git merge` or create merge commits when integrating `origin/main` or other upstream branches. Use `git rebase` instead, unless the user explicitly asks for a merge commit.
 - When finishing a requested change in a dedicated Git worktree:
   - After implementation, review fixes, and verification are complete, squash
@@ -89,9 +90,10 @@
   [`docs/reviews/RULES.md`](docs/reviews/RULES.md). Do not approve a change that
   violates a blocking review rule.
 - Commit messages must be a single line. Do not add a body, bullet points, or multi-line descriptions — the entire meaning goes in the subject line.
-- Use the filesystem task tree rooted at `docs/plans/TASK.md` to track current
-  high-level implementation work and upcoming tasks. `current-work/` and
-  `upcoming-work/` are unnumbered queue roots. Below them, `NN_slug/` directories
+- Use the filesystem task tree in the
+  [workflow-control scope](docs/definitions.md#workflow-control-scope) to track
+  current high-level implementation work and upcoming tasks. `current-work/`
+  and `upcoming-work/` are unnumbered queue roots. Below them, `NN_slug/` directories
   describe composite tasks in `TASK.md`, and `NN_slug.md` files are executable
   leaves. Nest composites to any depth. Numeric prefixes are local, may have
   gaps, and must be unique across sibling files and directories. Filesystem
@@ -110,20 +112,21 @@
   worktree, a task branch, or a subagent. Commit each task-tree state transition
   as soon as it becomes accurate, without waiting for a separate commit request
   or batching it with later implementation, review, or cleanup. Keep each commit
-  as small and atomic as possible. Include only the task-tree files, requested
-  skill files, and directly required plan-reference updates for that transition;
-  treat it as documentation-only and do not run tests afterward. In particular,
-  the orchestrator commits a queued task's claim and any required queue move on
+  as small and atomic as possible. Include only files in the workflow-control
+  scope and directly required plan-reference updates for that transition; treat
+  it as documentation-only and do not run tests afterward. In particular, the
+  orchestrator commits a queued task's claim and any required queue move on
   `main` before launching the implementation worker, and commits its completion
   cleanup on `main` immediately after the implementation is integrated and
   verified.
-- Make other documentation-only changes, all `MODULE_REVIEW.md` changes, and
-  skill edits directly on `main`; do not route them through the orchestrator or
-  its worker/worktree workflow. Use `orion-change-orchestrator` for requested
-  source, build, and configuration changes, whether direct or queued. If one
-  request mixes those changes with documentation or skill edits, keep the
-  documentation and skill portion on `main` and orchestrate only the
-  implementation portion. Review/status-only requests remain read-only. The
+- Apply the shared ownership, commit, and test rules from the
+  [workflow-control scope](docs/definitions.md#workflow-control-scope) to every
+  in-scope change. Make other documentation-only changes directly on `main` and
+  outside the implementation worker/worktree workflow. Use
+  `orion-change-orchestrator` for requested source, build, and configuration
+  changes, whether direct or queued. If one request mixes those changes with
+  documentation, keep the documentation portion on `main` and orchestrate only
+  the implementation portion. Review/status-only requests remain read-only. The
   implementation worker must apply `orion-minimal-implementation`. Plan
   insertion follows the intended local numeric order; queued execution selects
   the first unclaimed, dependency-ready leaf.
