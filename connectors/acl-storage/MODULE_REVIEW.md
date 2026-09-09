@@ -1,58 +1,5 @@
 # Module Review: `connectors/acl-storage`
 
-## 1. A resolved repository identity is reparsed into a different identity
-
-**Problem.** A local repository name containing a percent escape can resolve and provision successfully, then make
-ACL startup open a different repository. For example, `local:team%2Frepo` is normalized by bootstrap as the literal
-repository name `team%2Frepo`. The ACL resolver reconstructs `local:team%2Frepo`, and the connector parses it as a
-URI whose scheme-specific part is decoded to `team/repo`. Startup then fails after successful bootstrap, or reads
-and writes the wrong repository if both identities exist.
-
-**Sources.** Bootstrap preserves the literal substring in
-[`ProxyAwareNativeGitRepositoryProvider.prepareLocal`](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L196)
-and its
-[`repositoryName` normalization](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L335).
-The resolved identity is stored by
-[`ResolvedBootstrapSource`](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ResolvedBootstrapSource.java#L7),
-then converted back to a locator by
-[`AccessControlStorageResolver.resolve`](src/main/java/pro/deta/orion/acl/storage/AccessControlStorageResolver.java#L17)
-and reparsed by
-[`NativeGitAccessControlStorage.repositoryName`](src/main/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorage.java#L148).
-[`ResourceLocation.normalizedRelativePath`](../../core/schema/src/main/java/pro/deta/orion/util/ResourceLocation.java#L74)
-uses decoded URI accessors. The existing
-[`resolverProjectsRepositoryBackedSourceToLocalAlias`](src/test/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorageTest.java#L39)
-test covers an ordinary alias but not an encoded identity.
-
-**Documented behavior.** The bootstrap proxy plan requires ACL to consume the resolved configuration handle and
-the exact provider instance in
-[`Make ACL consume only the resolved configuration source`](../../docs/plans/2026-09-02-bootstrap-proxy-runtime-implementation.md#L151).
-The queued
-[`canonical repository names`](../../docs/plans/upcoming-work/01_acl-storage-hardening/03_canonical-repository-names.md)
-task separately requires one repository identity at every raw ingress.
-
-**Contract.** `ResolvedBootstrapSource.repositoryName()` is the identity already selected by the provider. ACL
-reads and writes must use that value verbatim, including for proxy aliases. Raw-locator decoding belongs before
-resolution; a later connector may not reinterpret the resolved identity. This is an internal cross-module identity
-guarantee, not a demonstrated filesystem escape: the file provider hashes the exact repository name.
-
-**Minimal repair.** Construct native ACL storage directly from the resolved repository name, ref, paths, and
-creation flag. Delete the name-to-URI round trip and the connector's second repository-name parser. Update direct
-constructor tests to use the production resolved-source path; do not add a compatibility constructor or another
-identity type. Preserve provider-mediated reads and writes.
-
-**Alternatives and consequences.** The broader canonical-name task can replace every raw ingress parser, but it
-affects more modules and needs a compatibility decision for existing persisted names. Rejecting percent escapes
-before provisioning contains this trigger but removes currently accepted names. Adjusting only the second parser
-retains two owners that can diverge again. Directly consuming the resolved identity changes only an internal
-construction path and does not rewrite Git data or external locator syntax.
-
-**Confidence.** High. The mismatch follows the complete production path and standard decoded `URI` accessors;
-the trigger has not yet been exercised by a runtime regression test.
-
-**Priority signals.** Importance: high, because one accepted locator can provision one repository and make ACL
-operate on another. Repair ease: medium, because the fix can reuse the resolved source but changes an internal
-construction path and its direct tests across the bootstrap/connector boundary.
-
 ## 2. Local save can persist a credential update that reports failure
 
 **Problem.** A credential update passes every loaded ACL document to storage even when only one document changed.
