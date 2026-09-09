@@ -5,6 +5,9 @@ Parent: TASK.md
 Finding: ../../../../../agent-protocol/MODULE_REVIEW.md
 Current contract: ../../../2026-09-03-native-control-journal-idempotency-design.md
 
+- [ ] Correct the typed PTY input identity.
+  - Owner: codex, session agent-protocol-pty-input-id-6b7c, started 2026-09-09 19:02 Europe/Amsterdam.
+
 Align the shared Java journal payload model with the native producer without
 changing the version-1 journal bytes.
 
