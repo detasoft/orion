@@ -14,7 +14,7 @@ separate transient delivery results from durable journal confirmation.
   at-least-once delivery and AgentD/session-host deduplication prevents repeats.
 - Process transient command results for responsive clients without treating
   acceptance as durable session history.
-- Correlate journal evidence such as `PTY_INPUT`, resize, and process events
-  with commands where the event schema provides a command ID.
+- Correlate only journal evidence whose schema carries the required command
+  identity; do not treat `PTY_INPUT`'s input ID as a `CommandId`.
 - Test active-connection routing, takeover races, retry after disconnect,
   duplicate results, invalid or exited sessions, and journal confirmation.

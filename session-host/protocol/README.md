@@ -76,7 +76,7 @@ Version 1 assigns:
 | ---: | --- | --- |
 | `0x0002` | `COMMAND_RESULT` | `[operationSequence, exactCommandEnvelope, outcome, detail]` |
 | `0x0100` | `PTY_OUTPUT` | byte string |
-| `0x0101` | `PTY_INPUT` | `[commandId, byte-string]` |
+| `0x0101` | `PTY_INPUT` | `[inputId, byte-string]` |
 | `0x0102` | `PTY_RESIZE` | `[columns, rows]` |
 | `0x0200` | `PROCESS_STARTED` | `[processId]` |
 | `0x0201` | `PROCESS_EXITED` | `[exitCode]` |
