@@ -126,21 +126,32 @@ and hypothetical consumers do not justify a second production path.
 
 Before launching the implementation worker, the orchestrator updates only the
 selected unclaimed leaf and any mechanical task-path references required by its
-authorized queue move directly on `main`. Store the claim in the leaf:
+authorized queue move directly on `main`. Before committing the claim, choose
+collision-free task branch and worktree names and verify that neither already
+exists. Store those exact names in the leaf claim:
 
 ```markdown
 - [ ] Task title and short context.
-  - Owner: codex, session SESSION_ID, started YYYY-MM-DD HH:MM Europe/Amsterdam.
+  - Owner: codex, session SESSION_ID, branch `codex/CHANGE_SLUG`, worktree
+    `.worktrees/CHANGE_SLUG`, started YYYY-MM-DD HH:MM Europe/Amsterdam.
 ```
 
 Use the current local time and a stable session identifier. Use the actual
 session ID when available; otherwise generate a short unique ID once and reuse
-it. The orchestrator immediately commits the isolated claim and any required
-queue move on `main`, then supplies that exact committed HEAD as the worker's
-base. Stage only changes made to start that task; do not run tests for the
-documentation-only claim commit. If the claim cannot be isolated, report the
-conflict without starting implementation. The worker never changes the claim,
-task path, or any other task-tree state in its branch or worktree.
+it. Commit the isolated claim and any required queue move with this single-line
+subject, using the exact branch and worktree names recorded in the leaf:
+
+```text
+Claim TASK [branch: codex/CHANGE_SLUG] [worktree: .worktrees/CHANGE_SLUG]
+```
+
+The orchestrator then supplies that exact committed HEAD as the worker's base.
+The worker must create and use the branch and worktree names recorded by the
+claim. Stage only changes made to start that task; do not run tests for the
+documentation-only claim commit. If the claim cannot be isolated or either name
+is no longer available, report the conflict without starting implementation.
+The worker never changes the claim, task path, or any other task-tree state in
+its branch or worktree.
 
 Read the referenced plans and apply `orion-minimal-implementation` before and during
 implementation, including its final self-review. Follow the orchestrator and
@@ -170,7 +181,8 @@ the task tree. The orchestrator records that state directly on `main` in the
 existing claim using the same session identity and immediately commits it:
 
 ```markdown
-  - Owner: codex, session SESSION_ID, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
+  - Owner: codex, session SESSION_ID, branch `codex/CHANGE_SLUG`, worktree
+    `.worktrees/CHANGE_SLUG`, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
 ```
 
 Report the task name and leaf-file path explicitly. Provide the required
