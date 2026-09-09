@@ -1,50 +1,5 @@
 # Module Review: net/http-core
 
-## 2. Route invocation and policy have parallel production paths
-
-**Problem.** OrionHttpRoute publicly exposes both a returned-response operation and a direct servlet operation.
-The returned-response default throws for direct handlers. Buffered, streaming, shutdown and asynchronous Agent
-routes independently own method dispatch, policy checks and response lifetime. Adding a route requires knowing
-which invocation protocol applies, while the route table copies separate descriptive values.
-
-**Sources.** [Invocation defaults](src/main/java/pro/deta/orion/transport/http/OrionHttpRoute.java#L17),
-[buffered dispatch](src/main/java/pro/deta/orion/transport/http/AbstractOrionHttpRoute.java#L44),
-[metadata construction](src/main/java/pro/deta/orion/transport/http/OrionHttpRouteRegistry.java#L56),
-[Git method dispatch](src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java#L83),
-[shutdown ordering](src/main/java/pro/deta/orion/transport/http/OrionAdminShutdownRoute.java#L24),
-[asynchronous Agent route](src/main/java/pro/deta/orion/transport/http/AgentControlRoute.java#L91),
-[route-table consumer](../frontend/ui/src/App.vue#L428), and
-[production route-contract coverage](../../tests/integration-test/src/integration-test/java/pro/deta/orion/test/RuntimeHttpAdminApiIT.java#L26).
-
-**Documented behavior.** The
-[unified-invocation task](../../docs/plans/upcoming-work/11_http-core-hardening/01_unified-route-invocation.md)
-requires one invocation and policy boundary. The
-[Agent transport plan](../../docs/plans/2026-09-08-agent-server-http2-control-transport.md#L68)
-requires asynchronous full-duplex operation and protocol-owned authentication.
-
-**Contract.** Preserve method-specific Allow, fail-closed admin and repository checks, streaming and
-backpressure, Agent handshake ownership, and shutdown's flush-before-publish ordering. Route metadata is
-currently consumed as descriptive UI data; no current admin-policy bypass was demonstrated. Different route
-method sets are not themselves a defect.
-
-**Minimal repair.** Make handle the sole public route invocation, keeping buffered response construction an
-implementation detail. Consolidate method and executable coarse-policy dispatch at the existing servlet
-boundary, deriving descriptive metadata from it. Add only the exchange capabilities required by current
-buffered, streaming and asynchronous callers; preserve feature-owned repository and Agent checks.
-
-**Alternatives and consequences.** Removing only the public throwing service default is a smaller first
-slice, but leaves policy duplication and does not complete the existing task. A generalized web framework or
-new operation lifecycle is unnecessary. An exchange that assumes synchronous completion would break Agent
-control; forced buffering would break Git and downloads. Preserve the existing route-table JSON fields used by
-the UI.
-
-**Confidence.** High on duplicated invocation and policy ownership; route-specific behavior must be
-characterized before consolidation.
-
-**Priority signals.** Importance: high, because the split contract spans every route and permits policy and
-method metadata to drift from execution. Repair ease: low, because buffered, streaming, shutdown and
-asynchronous Agent lifetimes must converge without weakening their distinct runtime guarantees.
-
 ## 4. Repository spelling can select one storage identity under another ACL identity
 
 **Problem.** Published-pack requests authorize a normalized repository name but pass the original spelling to
