@@ -21,11 +21,13 @@ worker must apply [orion-minimal-implementation](../orion-minimal-implementation
 
 When the orchestrator or its assigned worker reads this skill, apply the task
 model and the rules for that role; do not invoke the orchestrator recursively
-or spawn another implementation worker. The primary selects; the assigned
-worker claims and implements only its selected leaf. Status, triage, explanation,
-and planning alone do not start execution or claim work. Direct repository
-changes without a queued task go to the change orchestrator with the user request
-as their scope; do not create or claim a task merely to execute them.
+or spawn another implementation worker. During queued execution, the primary
+agent running the orchestrator owns every task-tree edit and commits it directly
+on `main`; the assigned worker implements only the selected leaf and never edits
+task-tree state. Status, triage, explanation, and planning alone do not start
+execution or claim work. Direct repository changes without a queued task go to
+the change orchestrator with the user request as their scope; do not create or
+claim a task merely to execute them.
 
 Read `AGENTS.md`, `docs/plans/TASK.md`, relevant ancestor `TASK.md` files and
 candidate leaf files, and inspect `git status --short` before choosing work.
@@ -101,13 +103,14 @@ Use a leaf file for a bounded executable task and a numbered directory with
 in numbered children and keep the aggregate description in the composite.
 Do not duplicate the work as an executable parent and executable descendants.
 
-Commit newly created task-tree changes immediately as a documentation-only
-commit, as required by `AGENTS.md`. Do not claim planned work. When a worker
-starts upcoming work, move only its selected leaf to the appropriate current
-queue/composite, choose a free local prefix, and update affected references in
-the same isolated claim change. Preserve required aggregate context and
-dependencies in the moved leaf. Remove an emptied source composite only when
-its remaining scope is accounted for.
+Commit every task-tree state change directly on `main` as soon as it becomes
+accurate, using the smallest atomic documentation-only commit. Do not claim
+planned work. When queued execution starts, the orchestrator moves only the
+selected leaf to the appropriate current queue/composite, chooses a free local
+prefix, records the claim, and updates affected references in the same isolated
+commit on `main` before launching the worker. Preserve required aggregate
+context and dependencies in the moved leaf. Remove an emptied source composite
+only when its remaining scope is accounted for.
 
 Plan replacements around one canonical production path: update every real
 in-repository consumer and remove replaced internal APIs, state, configuration,
@@ -115,11 +118,11 @@ and branches in the same task. Preserve required runtime behavior and explicit
 wire/persisted contracts. Apply `AGENTS.md` to legacy-only test removal; tests
 and hypothetical consumers do not justify a second production path.
 
-## Worker Claim and Execution
+## Orchestrator Claim and Worker Execution
 
-Before substantial edits, the assigned worker updates only the selected
-unclaimed leaf file and any mechanical task-path references required by its
-authorized queue move in its dedicated worktree. Store the claim in the leaf:
+Before launching the implementation worker, the orchestrator updates only the
+selected unclaimed leaf and any mechanical task-path references required by its
+authorized queue move directly on `main`. Store the claim in the leaf:
 
 ```markdown
 - [ ] Task title and short context.
@@ -128,10 +131,12 @@ authorized queue move in its dedicated worktree. Store the claim in the leaf:
 
 Use the current local time and a stable session identifier. Use the actual
 session ID when available; otherwise generate a short unique ID once and reuse
-it. Immediately commit the isolated claim and any required queue move before
-implementation. Stage only changes made to start that task; do not run tests
-for the documentation-only claim commit. If the claim cannot be isolated,
-report the conflict without starting implementation.
+it. The orchestrator immediately commits the isolated claim and any required
+queue move on `main`, then supplies that exact committed HEAD as the worker's
+base. Stage only changes made to start that task; do not run tests for the
+documentation-only claim commit. If the claim cannot be isolated, report the
+conflict without starting implementation. The worker never changes the claim,
+task path, or any other task-tree state in its branch or worktree.
 
 Read the referenced plans and apply `orion-minimal-implementation` before and during
 implementation, including its final self-review. Follow the orchestrator and
@@ -139,28 +144,26 @@ implementation, including its final self-review. Follow the orchestrator and
 
 ## Completion and Pause
 
-After implementation, verification, and clean review, the worker squashes its
-work while retaining the task leaf and claim. The primary coordinator from
-`orion-change-orchestrator` then deletes the completed leaf file and amends the
-same commit in the dedicated task worktree. Only the coordinator performs this
-completion cleanup; the worker does not delete the task from the queue or plans.
-
-The coordinator walks upward and removes completed
-empty composite directories in full, including their `TASK.md`, only when
-aggregate acceptance and remaining scope are satisfied. Preserve a parent
-with unfinished siblings, both queue roots, and the root `docs/plans/TASK.md`.
-The coordinator removes the task's outstanding-work entries from active plans. Replace
-still-needed dependency references with verified completion evidence so plans
-do not retain dangling links or continue scheduling completed work. Retain useful
-completion evidence in ordinary plans or reviews.
-Do not keep completed task nodes or renumber remaining siblings to close gaps.
+After implementation is integrated and verified on `main`, the orchestrator
+immediately performs completion cleanup there and commits it as a separate,
+atomic documentation-only commit. Never amend completion metadata into the
+implementation commit. The orchestrator deletes the completed leaf, walks
+upward, and removes completed empty composite directories in full, including
+their `TASK.md`, only when aggregate acceptance and remaining scope are
+satisfied. Preserve a parent with unfinished siblings, both queue roots, and the
+root `docs/plans/TASK.md`. Remove the task's outstanding-work entries from active
+plans and replace still-needed dependency references with verified completion
+evidence so plans do not retain dangling links or continue scheduling completed
+work. Retain useful completion evidence in ordinary plans or reviews. Do not
+keep completed task nodes or renumber remaining siblings to close gaps.
 
 Follow the orchestrator's final review and user integration gate. A prepared
 branch is awaiting integration, not a completed task; `AGENTS.md` governs
 transfer, required verification, and worktree/branch cleanup.
 
-When pausing incomplete work, retain the leaf and record the next step in its
-existing claim using the same session identity:
+When the worker pauses incomplete work, it reports the next step without editing
+the task tree. The orchestrator records that state directly on `main` in the
+existing claim using the same session identity and immediately commits it:
 
 ```markdown
   - Owner: codex, session SESSION_ID, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.

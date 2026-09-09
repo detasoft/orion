@@ -94,6 +94,11 @@ Each active issue must include:
 6. **Alternatives and consequences** — include only real alternatives, naming
    compatibility, newly possible failures, lost capability, and containment.
 7. **Confidence** — high, medium, or low, with the main uncertainty.
+8. **Priority signals** — importance and repair ease, each rated high, medium,
+   or low with a short evidence-based reason. Importance reflects present impact
+   and affected behavior; repair ease reflects the smallest safe architectural
+   delta and required verification, not raw line count. Use unknown and name the
+   missing evidence when either rating cannot yet be supported.
 
 Treat finding numbers as stable identifiers. Never renumber existing findings
 when adding, updating, removing, or reordering them. Number each new finding one
@@ -108,8 +113,9 @@ clickable source and documentation links, contract, and repair options. After
 all workers finish, recheck cross-module conclusions and finalize the overall
 repair queue. Also present removed stale findings, important coverage limits,
 and a detailed card for the first repair. Keep report findings ranked by
-structural value; order the separate repair queue by the smallest safe change as
-described below.
+structural value and importance, using repair ease to distinguish otherwise
+comparable findings. Order the separate repair queue by the smallest safe change
+as described below.
 
 ## Order by the smallest safe repair
 
@@ -131,6 +137,11 @@ Dependencies and the need to keep every checkpoint working constrain this
 order. Report blocking correctness or security findings immediately even when
 they are not the first repair. Never call contract weakening trivial merely
 because it deletes code.
+
+Use the recorded importance and repair-ease ratings as prioritization evidence,
+not as a mechanical score. A high-importance finding remains visible even when
+its repair is hard; an easy low-impact cleanup must not hide or delay a blocking
+issue.
 
 Before selecting any repair, `orion-minimal-implementation` must establish the
 required result, current owner and production path, real consumers, preserved
@@ -172,6 +183,7 @@ Before handing off each task, show a finding card containing:
 - documented behavior link, if any;
 - contract to preserve or change;
 - recommended minimal repair and viable alternatives;
+- importance, repair ease, and the evidence for both;
 - expected tests, consequences, and known uncertainty.
 
 If the report leaves a material behavior or contract choice unresolved, or the

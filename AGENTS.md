@@ -22,6 +22,10 @@
 - If the Maven test command fails and cannot be fixed in the current turn, report the failure and the relevant error output.
 - If post-commit Maven tests fail because of unrelated or pre-existing working tree changes, do not debug those changes unless the user explicitly asks; report the failure and finish the requested commit task.
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
+- Task-tree and skill changes made in the same requested work do not need
+  separate commits from each other. They may be committed together in one
+  documentation-only commit; do not modify or temporarily remove them solely to
+  isolate their commits.
 - Do not use `git merge` or create merge commits when integrating `origin/main` or other upstream branches. Use `git rebase` instead, unless the user explicitly asks for a merge commit.
 - When finishing a requested change in a dedicated Git worktree:
   - After implementation, review fixes, and verification are complete, squash
@@ -33,22 +37,23 @@
     `<imperative summary> [task: <leaf-path-relative-to-its-queue-root>]`.
     Example:
     `Implement native protocol bootstrap [task: 05_native-session-host/01_contracts-and-build.md]`.
-  - For queued work, the implementation worker retains the leaf and claim in
-    its squash. The primary `orion-change-orchestrator` coordinator owns completion cleanup
-    in the dedicated task worktree and amends that same commit, preserving its
-    subject. This permits only completion metadata edits, never implementation
-    code or tests; present the amended SHA at the integration gate.
-  - For queued work, the coordinator deletes the completed numbered leaf file and removes
-    completed empty composite ancestor directories in full only when their
-    aggregate acceptance and scope are satisfied. Preserve parents with
-    unfinished siblings, the queue roots, and root `TASK.md`. It removes the task's
-    outstanding-work entries from active plans and replaces still-needed
-    dependency references with verified completion evidence. Do not retain
-    completed task nodes or renumber remaining siblings to close gaps.
+  - For queued work, task-tree state is a committed `main` input. The
+    implementation worker and task branch do not modify task-tree files or
+    include task-tree changes in branch commits, squashes, or amendments.
   - Transfer the squashed commit to `main` with `git cherry-pick`, never with a
     merge commit. Run the required post-commit tests on `main`, then remove the
     completed worktree and its branch only after confirming the transfer and a
     clean worktree.
+  - After queued work is transferred and verified, the active
+    `orion-change-orchestrator` applies `orion-task-runner` directly on `main`
+    and immediately commits completion cleanup separately.
+    Delete the completed numbered leaf and remove completed empty composite
+    ancestor directories in full only when their aggregate acceptance and scope
+    are satisfied. Preserve parents with unfinished siblings, the queue roots,
+    and root `TASK.md`. Remove the task's outstanding-work entries from active
+    plans and replace still-needed dependency references with verified
+    completion evidence. Do not retain completed task nodes or renumber
+    remaining siblings to close gaps.
   - Do not report the task complete until `git worktree list` no longer shows
     the completed worktree and its task branch has been deleted.
 - When adding or changing functionality, add or extend tests in the same change. Cover the straightforward happy path and at least one meaningful non-trivial scenario, such as overwrite/update behavior, missing or invalid state, reloads, multiple backends, or other edge cases relevant to the feature.
@@ -95,24 +100,33 @@
   Keep task nodes short, update them when starting or finishing substantial
   work, and leave detailed designs and implementation steps in ordinary
   `docs/plans/` plan files.
-- Use `orion-task-runner` directly for creating or editing tasks, task
-  descriptions, ordering, composition, and dependencies, and for task selection.
-  Make documentation-only changes, all `MODULE_REVIEW.md` changes, and skill
-  edits directly on `main`: do not route them through
-  `orion-change-orchestrator`, a coordinator, an implementation worker, a
-  dedicated worktree, or a subagent. This exception does not change the
-  task-runner and queued-execution ownership rules for task claims and completion
-  metadata. Use `orion-change-orchestrator` for requested source, build, and
-  configuration changes, whether direct or queued. If one request mixes those
-  changes with documentation or skill edits, keep the documentation and skill
-  portion on `main` and orchestrate only the implementation portion.
-  Review/status-only requests remain read-only. The implementation worker must
-  apply `orion-minimal-implementation`. Plan insertion follows the intended local
-  numeric order; queued execution selects the first unclaimed, dependency-ready
-  leaf.
-- Whenever you create a task, commit its task-tree changes immediately without
-  waiting for a separate commit request. Treat this as a documentation-only
-  commit and do not run tests afterward.
+- Use `orion-task-runner` directly for task selection and for every change to
+  the filesystem task tree, including task creation and editing, descriptions,
+  ordering, composition, dependencies, claims, queue moves, pause markers,
+  completion deletion, and completion evidence. When queued execution is
+  active, the primary agent running `orion-change-orchestrator` owns every such
+  edit and commit. Make all task-tree edits directly on `main`; never delegate
+  them to a separate coordinator, an implementation worker, a dedicated
+  worktree, a task branch, or a subagent. Commit each task-tree state transition
+  as soon as it becomes accurate, without waiting for a separate commit request
+  or batching it with later implementation, review, or cleanup. Keep each commit
+  as small and atomic as possible. Include only the task-tree files, requested
+  skill files, and directly required plan-reference updates for that transition;
+  treat it as documentation-only and do not run tests afterward. In particular,
+  the orchestrator commits a queued task's claim and any required queue move on
+  `main` before launching the implementation worker, and commits its completion
+  cleanup on `main` immediately after the implementation is integrated and
+  verified.
+- Make other documentation-only changes, all `MODULE_REVIEW.md` changes, and
+  skill edits directly on `main`; do not route them through the orchestrator or
+  its worker/worktree workflow. Use `orion-change-orchestrator` for requested
+  source, build, and configuration changes, whether direct or queued. If one
+  request mixes those changes with documentation or skill edits, keep the
+  documentation and skill portion on `main` and orchestrate only the
+  implementation portion. Review/status-only requests remain read-only. The
+  implementation worker must apply `orion-minimal-implementation`. Plan
+  insertion follows the intended local numeric order; queued execution selects
+  the first unclaimed, dependency-ready leaf.
 
 
 # Repository Agent Policy

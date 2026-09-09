@@ -14,27 +14,30 @@ description: >-
 Use this workflow for requested source, build, and configuration changes,
 including a direct request with no queued task. Documentation-only changes, all
 `MODULE_REVIEW.md` changes, and skill edits are made and committed directly on
-`main`; never route them through this workflow, its coordinator, an
-implementation worker, a dedicated worktree, or a subagent. When a request mixes
-implementation with those edits, separate the scopes and use this workflow only
-for the implementation portion. Creating or editing tasks and their queue
-relationships belongs directly to
+`main` outside this workflow, except for the queued-execution task-tree state
+owned explicitly below; never delegate documentation edits to an implementation
+worker, dedicated worktree, or subagent. When a request mixes implementation
+with those edits, separate the scopes and use this workflow only for the
+implementation portion. Creating or editing tasks and their queue relationships
+belongs directly to
 [orion-task-runner](../orion-task-runner/SKILL.md), without launching an
-implementation worker. Task claims and completion metadata retain the queued
-execution ownership defined there. Review, audit, and status requests remain
-read-only unless the user asks to implement changes.
+implementation worker. During queued execution, this orchestrator applies the
+runner itself for claims, queue moves, pause state, and completion metadata,
+committing every task-tree transition directly on `main`. Review, audit, and
+status requests remain read-only unless the user asks to implement changes.
 
 Keep the primary agent in coordinator/reviewer mode. Give one bounded change
 at a time to a fresh implementation worker, route implementation findings back
 to that worker, and stop at the user gate before integration. Never have two
 implementation workers active at once.
 
-The coordinator owns selection, governing implementation plans, review, user
-communication, and queued-task completion metadata. Its only task-branch
-mutation is completion-metadata cleanup and amendment after clean review.
-It never edits implementation code, tests, or worker review fixes. The worker
-owns worktree setup, implementation, tests, commits, review fixes, final squash,
-and integration and worktree/branch cleanup after approval.
+The primary agent running this orchestrator owns selection, governing
+implementation plans, review, user communication, and every queued task-tree
+edit. It commits task-tree state directly on `main` and never changes it through
+a task branch or worktree. It never edits implementation code, tests, or worker
+review fixes. The worker owns worktree setup, implementation, tests, commits,
+review fixes, final squash, and integration and worktree/branch cleanup after
+approval.
 
 ## Resolve the Change
 
@@ -81,16 +84,22 @@ not a fabricated leaf or queue dependency.
 
 Decide whether the change needs a new or updated governing implementation plan.
 The primary agent creates or corrects that documentation directly on `main`,
-outside this workflow, commits it separately with a one-line subject, and records
-the resulting exact committed base. Do not delegate that edit to the coordinator
-or worker. Check for overlapping user-owned edits, staged unrelated files, or a
-Git operation first; report conflicts without changing them. Do not claim queued
-work on `main`. Documentation-only plan commits do not require tests.
+outside this workflow and commits it separately with a one-line subject. Do not
+delegate that edit to the worker. Check for overlapping user-owned edits, staged
+unrelated files, or a Git operation first; report conflicts without changing
+them. Documentation-only plan commits do not require tests.
 
-If no governing plan change is needed, record the exact committed `main` HEAD.
-Existing unstaged changes must remain outside the worker's isolated base;
-resolve any overlap with the requested work before proceeding. Recheck queued
-ownership before launch.
+After governing plans are current, recheck queued ownership. For queued work,
+apply `orion-task-runner` directly on `main`: make any required queue move, add
+the claim, update only mechanically required task-path references, and
+immediately commit that state as one atomic documentation-only commit. Do not
+delegate this edit or commit: the primary orchestrator performs it directly on
+`main`, never through a worker, subagent, task branch, or worktree. If the claim
+cannot be isolated from unrelated changes, report the conflict without launching
+the worker. Record the resulting exact committed `main` HEAD as the worker base.
+Direct changes skip the claim and use the current committed `main` HEAD. Existing
+unstaged changes must remain outside the worker's isolated base; resolve any
+overlap with the requested work before proceeding.
 
 A document or skill is never a worker edit target. Pure task-description, queue,
 and dependency edits belong directly to the runner; other documentation and
@@ -118,19 +127,16 @@ The worker must:
 2. Create a collision-free `codex/<change-slug>` branch and
    `.worktrees/<change-slug>` from the exact committed base supplied by the
    coordinator. Resume an existing branch/worktree only if this workflow owns it.
-3. For queued work only, claim the selected leaf in that worktree using the
-   runner's format and immediately commit the documentation-only claim. Include
-   any required upcoming-to-current queue move and mechanical task-path reference
-   updates, but no unrelated or substantive governing-plan edits. Do not run tests
-   for this claim commit. If the claim cannot be isolated, report the conflict.
-   Direct changes skip this step entirely.
+3. For queued work, verify that the supplied base already contains the selected
+   leaf's claim and any required queue move. Never edit task-tree files or include
+   task-tree changes in worker commits, squashes, or amendments. Direct changes
+   have no task-tree state.
 4. Until the integration gate, perform implementation commands and edits only
    in that worktree. Preserve unrelated shared-workspace state. Treat governing
    plans, documentation, `MODULE_REVIEW.md`, and skills as primary-owned inputs,
    never worker edit targets.
 5. Implement production behavior and tests under `AGENTS.md`, run focused
-   checks and the required development verification. Documentation-only task
-   claims remain exempt from Maven as specified by `AGENTS.md`.
+   checks and the required development verification.
 6. Commit the change and return its scope, any actual task path, worktree, branch,
    base and head SHAs, and the required `orion-minimal-implementation` summary:
    problem, solution, changed parts and specific changes, verification results,
@@ -155,37 +161,20 @@ requires a new user decision or authority, report the specific blocker.
 After clean implementation review, ask the worker to squash all change-unique
 commits into one logical commit and leave its worktree clean:
 
-- For queued work, use the task-tagged subject required by `AGENTS.md`, retaining
-  the task leaf and claim. The worker must not perform completion deletion.
+- For queued work, use the task-tagged subject required by `AGENTS.md`. The task
+  leaf and claim already exist on `main` and must not appear in the branch's
+  change-unique commits.
 - For a direct change, use a descriptive single-line subject without a fabricated
   task path or tag. No task-metadata cleanup applies.
 
 The worker returns the prepared SHA and leaves the branch/worktree in place.
-
-For queued work only, the primary coordinator confirms that SHA and clean
-state, waits until the worker is idle, then performs completion-only metadata
-edits in the dedicated task worktree:
-
-1. Delete the completed numbered leaf file.
-2. Remove completed empty composite ancestors in full, including `TASK.md`,
-   only when aggregate acceptance and remaining scope are satisfied. Preserve
-   parents with unfinished siblings, the queue roots, and root `docs/plans/TASK.md`.
-3. Remove the task's outstanding-work entries from active plans and replace
-   still-needed dependency references with verified completion evidence. Do not
-   maintain parent child lists or renumber remaining entries to close gaps.
-4. Check the metadata diff and affected references, stage only this cleanup,
-   and amend the same commit preserving its subject. Do not edit implementation
-   code, tests, substantive design, or implementation instructions.
-
-This is the narrow exception allowing coordinator task-branch mutations.
-Direct requests have no invented cleanup targets. Check documentation-only
-completion metadata without rerunning Maven.
+Task-tree completion does not happen before the integration gate and is never
+amended into this implementation commit.
 
 Review the complete final diff after preparation. Send new implementation
 findings to the same worker for fixes, amendment, and the verification required
-by `AGENTS.md`; the worker preserves coordinator cleanup. The coordinator owns
-completion-metadata corrections and re-reviews after every amendment. Present
-only the final clean, reviewed SHA, including any completion cleanup, at the gate.
+by `AGENTS.md`. Re-review after every amendment and present only the final clean,
+reviewed implementation SHA at the gate.
 
 ## Mandatory User Gate
 
@@ -200,13 +189,12 @@ such as "run all changes" or "run the whole pool" do not bypass this per-change 
 
 ## Resume and Finish
 
-On the next user turn, verify the reviewed SHA and branch are unchanged and
-the dedicated worktree is clean. If integration is authorized, send the same
-worker the mechanical completion task under `AGENTS.md`: cherry-pick the reviewed
+On the next user turn, verify the reviewed SHA and branch are unchanged and the
+dedicated worktree is clean. If integration is authorized, send the same worker
+the mechanical integration task under `AGENTS.md`: cherry-pick the reviewed
 commit to `main`, run required post-commit verification, handle change-caused
 failures with the same-subject fix-commit rule, and remove only the completed
 worktree and branch once transfer and the required clean-state checks succeed.
-Documentation-only commits do not require Maven.
 
 This permits the worker to operate on shared `main` after the gate, after
 checking its expected base, staged/working state, and absence of a conflicting
@@ -215,12 +203,22 @@ conflict, the reviewed commit changed, unrelated test failures occur, or cleanup
 cannot meet `AGENTS.md`, report the exact blocker.
 
 If the user transferred the commit, verify the reviewed delta is present on
-`main`, delegate any required verification and remaining safe cleanup to the
-worker, and confirm the outcome rather than relying on the message alone.
-The coordinator does not edit implementation code or run its tests.
+`main`, delegate any required implementation verification and worktree cleanup
+to the worker, and confirm the outcome rather than relying on the message alone.
+The primary agent does not edit implementation code or run its tests.
 
-Confirm transfer, verification, worktree removal, and branch deletion before
-reporting completion. For a continuing pool or explicit change list, select
-the next ready item automatically in its applicable order and launch a fresh
-Sol/high worker. Apply the same review and user gate to each item; a single
-direct change ends when its integration and cleanup are complete.
+After queued implementation is present and verified on `main`, this orchestrator
+immediately applies `orion-task-runner` there and creates one separate atomic
+documentation-only completion commit. Delete the completed leaf and eligible
+empty composite ancestors, update outstanding-work and dependency references,
+and preserve unfinished siblings and queue roots. Never delegate this task-tree
+edit, perform it in the worktree, or amend it into the implementation commit. Do
+not run Maven for the documentation-only completion commit. If integration or
+verification failed, leave the claimed task intact and report the blocker.
+
+Confirm transfer, verification, worktree removal, branch deletion, and the
+task-tree completion commit before reporting queued work complete. For a
+continuing pool or explicit change list, select the next ready item automatically
+in its applicable order and launch a fresh Sol/high worker. Apply the same review
+and user gate to each item; a single direct change ends when its integration and
+cleanup are complete.
