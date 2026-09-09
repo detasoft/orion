@@ -10,8 +10,8 @@ changing the version-1 journal bytes.
 
 ## Scope
 
-- Name the first `PTY_INPUT` payload field as the input identity in both shared
-  and native protocol documentation.
+- Name the first `PTY_INPUT` payload field `ptyInputId` in the typed Java model
+  and in both shared and native protocol documentation.
 - Replace the typed Java payload's `CommandId` representation with the existing
   permissive text representation of the input identity; add no new wrapper.
 - Update every in-repository typed consumer, fixture construction, and test.

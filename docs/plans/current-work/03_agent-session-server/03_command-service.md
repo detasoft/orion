@@ -15,6 +15,6 @@ separate transient delivery results from durable journal confirmation.
 - Process transient command results for responsive clients without treating
   acceptance as durable session history.
 - Correlate only journal evidence whose schema carries the required command
-  identity; do not treat `PTY_INPUT`'s input ID as a `CommandId`.
+  identity; do not treat `PTY_INPUT`'s `ptyInputId` as a `CommandId`.
 - Test active-connection routing, takeover races, retry after disconnect,
   duplicate results, invalid or exited sessions, and journal confirmation.

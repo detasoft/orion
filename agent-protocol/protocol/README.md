@@ -92,7 +92,7 @@ The shared version 1 allocation is:
 | ID | Event | Payload |
 | ---: | --- | --- |
 | `0x0100` | `PTY_OUTPUT` | byte string |
-| `0x0101` | `PTY_INPUT` | `[inputId, byte string]` |
+| `0x0101` | `PTY_INPUT` | `[ptyInputId, byte string]` |
 | `0x0102` | `PTY_RESIZE` | `[columns, rows]` |
 | `0x0200` | `PROCESS_STARTED` | `[processId]` |
 | `0x0201` | `PROCESS_EXITED` | `[signed exit code]` |
