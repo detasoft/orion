@@ -53,9 +53,13 @@ final class CborItemScanner {
         while (position < end) {
             Frame container = containers.peek();
             if (container != null && container.kind == Kind.INDEFINITE_STRING) {
+                int chunkStart = position;
                 int complete = scanStringChunk(bytes, end, container);
                 if (complete != INCOMPLETE) {
                     return complete;
+                }
+                if (position == chunkStart) {
+                    return INCOMPLETE;
                 }
                 continue;
             }

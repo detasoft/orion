@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -109,6 +110,83 @@ class AgentProtocolDecoderTest {
     }
 
     @Test
+    void waitsForIncompleteIndefiniteStringChunkHeadersAndBodies() {
+        assertFragmentCompletes("8218635f58020102ff", 5);
+        assertFragmentCompletes("8218635f420102ff", 6);
+        assertFragmentCompletes("8218637f78026869ff", 5);
+        assertFragmentCompletes("8218637f78026869ff", 7);
+    }
+
+    @Test
+    void decodesNestedIndefiniteStringsAcrossEveryByteBoundary() {
+        byte[] encoded = Hex.parse("8318639f5f420102ff7f626869ffff01");
+        AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
+
+        for (int index = 0; index < encoded.length; index++) {
+            SequenceDecodeResult<AgentMessage> result = decoder.accept(
+                    ByteBuffer.wrap(encoded, index, 1));
+            assertThat(result.terminalIssue()).isEmpty();
+            if (index < encoded.length - 1) {
+                assertThat(result.outcomes()).isEmpty();
+                assertThat(decoder.pendingBytes()).isEqualTo(index + 1);
+            } else {
+                assertThat(decoded(result)).containsExactly(unknown(encoded));
+                assertThat(decoder.pendingBytes()).isZero();
+            }
+        }
+    }
+
+    @Test
+    void reportsTruncatedFragmentedIndefiniteStringAtFinish() {
+        byte[] truncated = Hex.parse("8218635f4201");
+        AgentProtocolDecoder truncatedDecoder = new AgentProtocolDecoder(LIMITS);
+
+        SequenceDecodeResult<AgentMessage> partial = truncatedDecoder.accept(ByteBuffer.wrap(truncated));
+
+        assertThat(partial.outcomes()).isEmpty();
+        assertThat(partial.terminalIssue()).isEmpty();
+        assertThat(truncatedDecoder.pendingBytes()).isEqualTo(truncated.length);
+        SequenceDecodeResult<AgentMessage> finished = truncatedDecoder.finish();
+        assertThat(finished.terminalIssue()).isPresent();
+        assertThat(finished.terminalIssue().orElseThrow().pendingBytes()).isEqualTo(truncated.length);
+        assertThat(finished.terminalIssue().orElseThrow().exception().reason())
+                .isEqualTo(AgentProtocolException.Reason.MALFORMED_CBOR);
+    }
+
+    @Test
+    void rejectsMalformedIndefiniteStringChunksAfterFragmentation() {
+        assertMalformedChunk("8218635f", "6101ff");
+        assertMalformedChunk("8218637f", "4101ff");
+    }
+
+    @Test
+    void preservesScannerStateAcrossCompactionAndBufferGrowth() throws Exception {
+        byte[] prefix = CODEC.encode(new AgentMessage.RequestSessionList());
+        byte[] payload = new byte[9_000];
+        Arrays.fill(payload, (byte) 0xa5);
+        ByteBuffer item = ByteBuffer.allocate(payload.length + 8);
+        item.put(Hex.parse("8218635f592328"));
+        item.put(payload);
+        item.put((byte) 0xff);
+        byte[] encoded = item.array();
+        byte[] sequence = concatenate(prefix, encoded);
+        AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
+
+        SequenceDecodeResult<AgentMessage> first = decoder.accept(ByteBuffer.wrap(sequence, 0, 8 * 1024));
+
+        assertThat(decoded(first)).containsExactly(new AgentMessage.RequestSessionList());
+        assertThat(first.terminalIssue()).isEmpty();
+        assertThat(decoder.pendingBytes()).isEqualTo(8 * 1024 - prefix.length);
+
+        SequenceDecodeResult<AgentMessage> second = decoder.accept(
+                ByteBuffer.wrap(sequence, 8 * 1024, sequence.length - 8 * 1024));
+
+        assertThat(decoded(second)).containsExactly(unknown(encoded));
+        assertThat(second.terminalIssue()).isEmpty();
+        assertThat(decoder.pendingBytes()).isZero();
+    }
+
+    @Test
     void acceptsStructuralFormsAndRejectsMalformedForms() {
         AgentProtocolLimits limits = new AgentProtocolLimits(64, 8, 16, 16, 3);
         List<byte[]> completeSemanticFailures = List.of(
@@ -175,6 +253,44 @@ class AgentProtocolDecoderTest {
             }
         }
         return values;
+    }
+
+    private static void assertFragmentCompletes(String hexadecimal, int fragmentLength) {
+        byte[] encoded = Hex.parse(hexadecimal);
+        AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
+
+        SequenceDecodeResult<AgentMessage> partial = decoder.accept(
+                ByteBuffer.wrap(encoded, 0, fragmentLength));
+
+        assertThat(partial.outcomes()).isEmpty();
+        assertThat(partial.terminalIssue()).isEmpty();
+        assertThat(decoder.pendingBytes()).isEqualTo(fragmentLength);
+
+        SequenceDecodeResult<AgentMessage> complete = decoder.accept(
+                ByteBuffer.wrap(encoded, fragmentLength, encoded.length - fragmentLength));
+
+        assertThat(decoded(complete)).containsExactly(unknown(encoded));
+        assertThat(complete.terminalIssue()).isEmpty();
+        assertThat(decoder.pendingBytes()).isZero();
+    }
+
+    private static void assertMalformedChunk(String prefixHexadecimal, String suffixHexadecimal) {
+        AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
+
+        SequenceDecodeResult<AgentMessage> prefix = decoder.accept(
+                ByteBuffer.wrap(Hex.parse(prefixHexadecimal)));
+        SequenceDecodeResult<AgentMessage> malformed = decoder.accept(
+                ByteBuffer.wrap(Hex.parse(suffixHexadecimal)));
+
+        assertThat(prefix.outcomes()).isEmpty();
+        assertThat(prefix.terminalIssue()).isEmpty();
+        assertThat(malformed.terminalIssue()).isPresent();
+        assertThat(malformed.terminalIssue().orElseThrow().exception().reason())
+                .isEqualTo(AgentProtocolException.Reason.MALFORMED_CBOR);
+    }
+
+    private static AgentMessage.Unknown unknown(byte[] encoded) {
+        return new AgentMessage.Unknown(99, ProtocolBytes.copyOf(encoded));
     }
 
     private static byte[] concatenate(byte[]... items) {
