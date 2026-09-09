@@ -1,6 +1,10 @@
 # Bound Concurrent ACME Issuance
 
-Source: finding 7 in [the module review](../../../../net/http-core/MODULE_REVIEW.md)
+Status: in progress
+Source: finding 7 in [the module review](../../../net/http-core/MODULE_REVIEW.md)
+
+- [ ] Bound concurrent ACME certificate issuance.
+  - Owner: codex, session http-acme-8b4d, started 2026-09-09 21:05 Europe/Amsterdam.
 
 Add non-blocking single-flight admission to the existing ACME certificate
 service so issuance waiting for HTTP-01 callbacks cannot exhaust Jetty workers.
