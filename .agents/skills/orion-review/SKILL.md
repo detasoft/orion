@@ -1,6 +1,8 @@
 ---
 name: orion-review
-description: Use when reviewing one or more Orion modules, creating or refreshing MODULE_REVIEW.md, or repairing findings from those reports interactively.
+description: >-
+  Use when reviewing one or more Orion modules, creating or refreshing
+  MODULE_REVIEW.md, or repairing findings from those reports interactively.
 ---
 
 # Orion Review
@@ -13,6 +15,14 @@ again before implementation.
 **REQUIRED SUB-SKILLS:** Use `orion-minimal-implementation` for the audit, ordering,
 and every repair. Use `orion-change-orchestrator` for the repair queue and
 `orion-task-runner` for task-tree ownership.
+
+Edit and commit `MODULE_REVIEW.md` files directly on `main`, never through the
+orchestrator, coordinator, implementation worker, dedicated worktree, or
+subagent. Record review state as early as it becomes accurate: commit newly
+confirmed issues before starting their repairs, and immediately after a fix
+lands on `main`, revalidate the affected issue and commit its removal or update
+in a separate documentation-only commit. Do not defer report maintenance to a
+later repair or batch when it can already be stated correctly.
 
 ## Resolve the modules
 
@@ -35,13 +45,15 @@ Launch one fresh analysis worker per module, up to available concurrency:
 - reasoning effort `xhigh`;
 - `fork_turns="none"`, or the smallest bounded fork supported;
 - explicit module path, report path, repository rules, and output contract;
-- permission to edit only that module's `MODULE_REVIEW.md`.
+- read-only access: return evidence and proposed report changes without editing
+  `MODULE_REVIEW.md` or any repository file.
 
 Analysis workers inspect production code, tests, history, documentation,
 configuration, and real consumers across module boundaries where a contract or
 ownership claim requires it. They do not edit source, tests, build files, task
 state, or repository metadata, and do not run Maven merely for a static audit.
-The primary agent reviews every report diff and cross-module conclusion.
+The primary agent reviews every proposed report change and cross-module
+conclusion.
 
 For each old finding, verify its essential premise in the current production
 path. Remove it when the problem is fixed or the premise is disproved. Also
@@ -57,7 +69,15 @@ report with style remarks or speculative future needs.
 
 ## Report contract
 
-Preserve a useful existing report structure. Each active finding must include:
+Apart from a minimal title, keep `MODULE_REVIEW.md` as a list of active issues
+only. Do not add status lines, review or re-evaluation dates, issue counts,
+general summaries, introductory prose, progress notes, or resolved-history
+sections. In particular, do not write boilerplate such as `Status: re-evaluated
+against current code on <date>; <count> structural findings remain`. Add an issue
+when confirmed, update it when its present facts change, and delete it when
+resolved or disproved.
+
+Each active issue must include:
 
 1. **Problem** — the observable or structural failure and a concrete trigger.
 2. **Sources** — relative Markdown links to production symbols, meaningful
@@ -74,17 +94,17 @@ Preserve a useful existing report structure. Each active finding must include:
    compatibility, newly possible failures, lost capability, and containment.
 7. **Confidence** — high, medium, or low, with the main uncertainty.
 
-For a broad review also keep scope and limits, the verified current model,
-things that can be deleted and their preconditions, an incremental path,
-invariants that must remain, and material open questions.
-
-As each worker finishes, the primary agent validates its report and immediately
-presents its confirmed findings with clickable source and documentation links,
-contract, and repair options. After all workers finish, recheck cross-module
-conclusions and finalize the overall repair queue. Also present removed stale
-findings, important coverage limits, and a detailed card for the first repair.
-Keep report findings ranked by structural value; order the separate repair
-queue by the smallest safe change as described below.
+As each worker finishes, the primary agent validates its evidence and
+cross-module conclusions, updates only the corresponding `MODULE_REVIEW.md`
+directly on `main`, and commits those report changes before starting a repair.
+Stage only report hunks produced by this workflow; never absorb pre-existing
+changes in the same file. Then immediately present the confirmed findings with
+clickable source and documentation links, contract, and repair options. After
+all workers finish, recheck cross-module conclusions and finalize the overall
+repair queue. Also present removed stale findings, important coverage limits,
+and a detailed card for the first repair. Keep report findings ranked by
+structural value; order the separate repair queue by the smallest safe change as
+described below.
 
 ## Order by the smallest safe repair
 
@@ -143,18 +163,19 @@ accepted.
 Invoke `orion-change-orchestrator` with the current task as its pool. Its code
 worker model and effort remain the values specified by that skill. The primary
 agent remains coordinator and reviewer; it does not implement branch fixes.
-Make report cleanup part of the task's definition of done: before final squash,
-the implementation worker revalidates the finding, removes every resolved or
-invalidated item and dependent prose from the affected `MODULE_REVIEW.md`, and
-includes that documentation in the reviewed task commit.
+The implementation worker never edits `MODULE_REVIEW.md`. After the reviewed
+fix lands on `main`, the primary agent immediately revalidates the issue, removes
+or updates every resolved or invalidated item and dependent prose, and commits
+only that report change directly on `main` as documentation-only work.
 
 Keep the orchestrator's mandatory reviewed-commit user gate. After the user
-authorizes or confirms integration, complete tests and cleanup, then verify the
-integrated report read-only. If broader revalidation is needed, use a fresh
-Astra/xhigh analysis worker with the audit restrictions above and commit only
-this workflow's report changes as documentation before continuing. Confirm a
-clean `main`, rebuild the queue, and automatically present and start the next
-ready task without asking the user to select it again.
+authorizes or confirms integration, complete tests and cleanup, then update and
+commit the integrated report directly on `main` before continuing. If broader
+revalidation is needed, use a fresh Astra/xhigh analysis worker with the
+read-only audit restrictions above; the primary agent still makes and commits
+the report change. Confirm that unrelated state is preserved, rebuild the queue,
+and automatically present and start the next ready task without asking the user
+to select it again.
 
 Rebuild the queue after each repair because one implementation may resolve or
 invalidate several findings. Before starting the next orchestrator instance,
@@ -168,10 +189,11 @@ dependency, unsafe unrelated workspace state, or a genuine implementation
 blocker. Continue independent audits while waiting for a decision when
 possible.
 
-If only an audit was requested, update the reports and stop after reporting the
-results; do not start task or implementation work. If remediation requires a
-clean committed `main`, commit only the hunks created by this workflow in
-authorized review and plan documents needed as orchestrator inputs.
+If only an audit was requested, update and commit each report directly on `main`
+as soon as its validated result is ready, then stop after reporting the results;
+do not start task or implementation work. If remediation requires a clean
+committed `main`, commit only the hunks created by this workflow in authorized
+review and plan documents needed as orchestrator inputs.
 Authorization to update a report does not authorize pre-existing changes in the
 same file. Never stage unrelated changes. If ownership cannot be separated or
 unrelated state still prevents a clean base, report the exact blocker rather

@@ -97,12 +97,19 @@
   `docs/plans/` plan files.
 - Use `orion-task-runner` directly for creating or editing tasks, task
   descriptions, ordering, composition, and dependencies, and for task selection.
-  Use `orion-change-orchestrator` for every other requested repository change,
-  including direct features, fixes, refactors, documentation, and skill edits
-  without a queued task. Review/status-only requests remain read-only. The
-  implementation worker must apply `orion-minimal-implementation`. Plan insertion
-  follows the intended local numeric order; queued execution selects the first
-  unclaimed, dependency-ready leaf.
+  Make documentation-only changes, all `MODULE_REVIEW.md` changes, and skill
+  edits directly on `main`: do not route them through
+  `orion-change-orchestrator`, a coordinator, an implementation worker, a
+  dedicated worktree, or a subagent. This exception does not change the
+  task-runner and queued-execution ownership rules for task claims and completion
+  metadata. Use `orion-change-orchestrator` for requested source, build, and
+  configuration changes, whether direct or queued. If one request mixes those
+  changes with documentation or skill edits, keep the documentation and skill
+  portion on `main` and orchestrate only the implementation portion.
+  Review/status-only requests remain read-only. The implementation worker must
+  apply `orion-minimal-implementation`. Plan insertion follows the intended local
+  numeric order; queued execution selects the first unclaimed, dependency-ready
+  leaf.
 - Whenever you create a task, commit its task-tree changes immediately without
   waiting for a separate commit request. Treat this as a documentation-only
   commit and do not run tests afterward.

@@ -1,21 +1,27 @@
 ---
 name: orion-change-orchestrator
 description: >-
-  Coordinate any requested Orion repository change through one implementation
-  worker and review gates, including features, fixes, refactors, docs, and skills,
-  whether queue-backed or direct. Exclude task-tree planning, task descriptions,
-  ordering, composition, and dependencies; orion-task-runner handles those.
-  Review and status requests alone remain read-only.
+  Use when an Orion source, build, or configuration change requires an
+  implementation worker and review gates, whether queue-backed or direct.
+  Exclude documentation-only changes, MODULE_REVIEW.md, skills, task-tree
+  planning, task descriptions, ordering, composition, and dependencies.
 ---
 
 # Orion Change Orchestrator
 
 ## Scope and Roles
 
-Use this workflow for requested repository changes, including a direct request
-with no queued task. Creating or editing tasks and their queue relationships
-belongs directly to [orion-task-runner](../orion-task-runner/SKILL.md), without
-launching an implementation worker. Review, audit, and status requests remain
+Use this workflow for requested source, build, and configuration changes,
+including a direct request with no queued task. Documentation-only changes, all
+`MODULE_REVIEW.md` changes, and skill edits are made and committed directly on
+`main`; never route them through this workflow, its coordinator, an
+implementation worker, a dedicated worktree, or a subagent. When a request mixes
+implementation with those edits, separate the scopes and use this workflow only
+for the implementation portion. Creating or editing tasks and their queue
+relationships belongs directly to
+[orion-task-runner](../orion-task-runner/SKILL.md), without launching an
+implementation worker. Task claims and completion metadata retain the queued
+execution ownership defined there. Review, audit, and status requests remain
 read-only unless the user asks to implement changes.
 
 Keep the primary agent in coordinator/reviewer mode. Give one bounded change
@@ -74,34 +80,33 @@ not a fabricated leaf or queue dependency.
 ## Prepare Governing Plans and Base
 
 Decide whether the change needs a new or updated governing implementation plan.
-The coordinator owns these inputs and any material scope correction. When
-needed, edit only the relevant plan on `main`, commit it separately with a
-one-line subject, and record the resulting exact committed base. Check for
-overlapping user-owned edits, staged unrelated files, or a Git operation first;
-report conflicts without changing them. Do not claim queued work on `main`.
-Documentation-only plan commits do not require tests.
+The primary agent creates or corrects that documentation directly on `main`,
+outside this workflow, commits it separately with a one-line subject, and records
+the resulting exact committed base. Do not delegate that edit to the coordinator
+or worker. Check for overlapping user-owned edits, staged unrelated files, or a
+Git operation first; report conflicts without changing them. Do not claim queued
+work on `main`. Documentation-only plan commits do not require tests.
 
 If no governing plan change is needed, record the exact committed `main` HEAD.
 Existing unstaged changes must remain outside the worker's isolated base;
 resolve any overlap with the requested work before proceeding. Recheck queued
 ownership before launch.
 
-A document that is itself the requested deliverable, including a design or
-plan file under `docs/plans/`, is a valid worker edit target. This differs from
-the governing plan supplied to implement another change. Pure task-description,
-queue, and dependency edits still belong directly to the runner.
+A document or skill is never a worker edit target. Pure task-description, queue,
+and dependency edits belong directly to the runner; other documentation and
+skill edits belong directly to the primary agent on `main`.
 
 If the worker discovers a material gap in its governing plan, it reports it
-instead of revising that input. The coordinator updates and commits the plan on
-`main`, then asks the same worker to rebase onto that exact commit, recheck the
-worktree, and resume. Apply the same rule to substantive plan corrections found
-during review.
+instead of revising that input. The primary agent pauses this workflow, updates
+and commits the plan directly on `main`, then asks the same worker to rebase onto
+that exact commit, recheck the worktree, and resume. Apply the same rule to
+substantive plan corrections found during review.
 
 ## Launch One Worker
 
-Spawn a fresh worker with model `gpt-5.6-sol`, reasoning effort `high`, and
-`fork_turns="none"` or the smallest supported bounded fork. Supply only the
-explicit context needed for the selected change.
+Spawn a fresh worker with the same model as the primary agent, reasoning effort
+`high`, and `fork_turns="none"` or the smallest supported bounded fork. Supply
+only the explicit context needed for the selected change.
 
 The worker must:
 
@@ -121,11 +126,11 @@ The worker must:
    Direct changes skip this step entirely.
 4. Until the integration gate, perform implementation commands and edits only
    in that worktree. Preserve unrelated shared-workspace state. Treat governing
-   plan inputs as coordinator-owned; requested document deliverables remain
-   ordinary implementation targets.
+   plans, documentation, `MODULE_REVIEW.md`, and skills as primary-owned inputs,
+   never worker edit targets.
 5. Implement production behavior and tests under `AGENTS.md`, run focused
-   checks and the required development verification. Use proportional document
-   or skill checks for documentation-only changes; do not run Maven for them.
+   checks and the required development verification. Documentation-only task
+   claims remain exempt from Maven as specified by `AGENTS.md`.
 6. Commit the change and return its scope, any actual task path, worktree, branch,
    base and head SHAs, and the required `orion-minimal-implementation` summary:
    problem, solution, changed parts and specific changes, verification results,
