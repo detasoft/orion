@@ -1,307 +1,164 @@
 # Module Review: `connectors/acl-storage`
 
-Date: 2026-09-03
-Status: reviewed in isolation
+## 1. A resolved repository identity is reparsed into a different identity
 
-## Scope and coverage
+**Problem.** A local repository name containing a percent escape can resolve and provision successfully, then make
+ACL startup open a different repository. For example, `local:team%2Frepo` is normalized by bootstrap as the literal
+repository name `team%2Frepo`. The ACL resolver reconstructs `local:team%2Frepo`, and the connector parses it as a
+URI whose scheme-specific part is decoded to `team/repo`. Startup then fails after successful bootstrap, or reads
+and writes the wrong repository if both identities exist.
 
-This review covers the module POM, all four production classes, the current
-storage test suite, the remaining test helper, and module-specific history
-including the removal of former Git adapters and the restoration of native Git
-storage.
+**Sources.** Bootstrap preserves the literal substring in
+[`ProxyAwareNativeGitRepositoryProvider.prepareLocal`](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L196)
+and its
+[`repositoryName` normalization](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L335).
+The resolved identity is stored by
+[`ResolvedBootstrapSource`](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ResolvedBootstrapSource.java#L7),
+then converted back to a locator by
+[`AccessControlStorageResolver.resolve`](src/main/java/pro/deta/orion/acl/storage/AccessControlStorageResolver.java#L17)
+and reparsed by
+[`NativeGitAccessControlStorage.repositoryName`](src/main/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorage.java#L148).
+[`ResourceLocation.normalizedRelativePath`](../../core/schema/src/main/java/pro/deta/orion/util/ResourceLocation.java#L74)
+uses decoded URI accessors. The existing
+[`resolverProjectsRepositoryBackedSourceToLocalAlias`](src/test/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorageTest.java#L39)
+test covers an ordinary alias but not an encoded identity.
 
-The review treats imported types as contracts visible through their use in
-this module. It deliberately does not inspect the implementation of
-`core/acl`, the configuration schema, native Git storage, bootstrap wiring, or
-external callers. Those boundaries may change the recommended migration and
-are called out as open questions rather than guessed.
+**Documented behavior.** The bootstrap proxy plan requires ACL to consume the resolved configuration handle and
+the exact provider instance in
+[`Make ACL consume only the resolved configuration source`](../../docs/plans/2026-09-02-bootstrap-proxy-runtime-implementation.md#L151).
+The queued
+[`canonical repository names`](../../docs/plans/upcoming-work/01_acl-storage-hardening/03_canonical-repository-names.md)
+task separately requires one repository identity at every raw ingress.
 
-This was a static architecture review. Maven verification was not run for the
-review itself because the repository review rules assign verification to
-implementation work.
+**Contract.** `ResolvedBootstrapSource.repositoryName()` is the identity already selected by the provider. ACL
+reads and writes must use that value verbatim, including for proxy aliases. Raw-locator decoding belongs before
+resolution; a later connector may not reinterpret the resolved identity. This is an internal cross-module identity
+guarantee, not a demonstrated filesystem escape: the file provider hashes the exact repository name.
 
-## Current conceptual model
+**Minimal repair.** Construct native ACL storage directly from the resolved repository name, ref, paths, and
+creation flag. Delete the name-to-URI round trip and the connector's second repository-name parser. Update direct
+constructor tests to use the production resolved-source path; do not add a compatibility constructor or another
+identity type. Preserve provider-mediated reads and writes.
 
-`AccessControlStorageResolver` reads one bootstrap location and selects a
-concrete storage directly:
+**Alternatives and consequences.** The broader canonical-name task can replace every raw ingress parser, but it
+affects more modules and needs a compatibility decision for existing persisted names. Rejecting percent escapes
+before provisioning contains this trigger but removes currently accepted names. Adjusting only the second parser
+retains two owners that can diverge again. Directly consuming the resolved identity changes only an internal
+construction path and does not rewrite Git data or external locator syntax.
 
-| Location | Implementation | Durable unit | Version | Change notification |
-| --- | --- | --- | --- | --- |
-| empty or `file:` | `LocalAccessControlStorage` | separate filesystem files | absent | default no-op |
-| `local:` | `NativeGitAccessControlStorage` | files on one Git ref | repository version | filtered ref updates |
+**Confidence.** High. The mismatch follows the complete production path and standard decoded `URI` accessors;
+the trigger has not yet been exercised by a runtime regression test.
 
-Both implementations present the same apparent operations: load a map of
-configured paths, save a snapshot with author/message metadata, identify one
-primary path, and optionally observe changes. Their actual guarantees differ.
+## 2. Local save can persist a credential update that reports failure
 
-Local storage resolves each configured logical path below a configured
-directory and reads or writes files sequentially. Native Git freezes its
-repository, ref, and path coordinates, delegates one map operation to a
-repository, returns its version, and forwards accepted updates for the
-selected ref.
+**Problem.** A credential update passes every loaded ACL document to storage even when only one document changed.
+Local storage rewrites every supplied file in configured order. If the changed primary file is writable and a
+later unchanged secondary file is not, the primary update is persisted before the save throws. The service returns
+`PERSISTENCE_FAILED` without reloading, leaving new durable credentials beside the previous live ACL. A direct
+`Files.write` can also truncate the active document before replacement content is fully published.
 
-There is no module-owned transaction, lock, generation manifest, or
-compare-and-set boundary. The selected backend owns durable mutation, while
-Local storage continues to read its addressing from the mutable configuration
-object.
+**Sources.** [`LocalAccessControlStorage.save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L40)
+writes entries sequentially. The service copies the full loaded map in
+[`saveCredentialDraft`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1161),
+saves before strict reload in
+[`saveAccessControlSnapshotAndReload`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L1537),
+and translates the exception to `PERSISTENCE_FAILED` in
+[`addSshCredentials`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L281).
+The split-file service test
+[`atomicallyAddsCanonicalKeysAndPreservesTheOtherAclFile`](../../core/acl/src/test/java/pro/deta/orion/acl/OrionAccessControlServiceImplTest.java#L153)
+uses an in-memory store and cannot expose filesystem publication failure.
 
-## Highest-value findings
+**Documented behavior.** The SSH credential plan requires changing only the owning draft, preserving every other
+file, and activating only after successful persistence in
+[`snapshot-aware query and mutation helpers`](../../docs/plans/2026-09-04-ssh-credential-commands.md#L260).
+The queued
+[`saved snapshot contract`](../../docs/plans/upcoming-work/01_acl-storage-hardening/05_exact-snapshot-save.md)
+requires an explicit Local publication guarantee but leaves multi-file atomicity as a decision.
 
-### 1. One storage type promises capabilities that only one backend implements
+**Contract.** A normal single-document mutation must not require write access to byte-identical documents, must
+not report failure after publishing that mutation, and must not destroy the previous complete document while
+preparing its replacement. Atomicity across genuinely changed documents, power-loss durability, and external-writer
+CAS are separate guarantees that the present interface does not define.
 
-**Finding.** The two concrete classes are presented as substitutes but expose
-materially different storage models. Native Git supplies a version, uses save
-author/message metadata, and emits ref-change notifications. Local storage
-returns no version, ignores the save request, and inherits a no-op change
-subscription.
+**Minimal repair.** Validate every supplied path before mutation, omit byte-identical documents, write each changed
+document to a sibling temporary file, and atomically replace the target. Coordinate the replacement with physical
+containment. Cover an unchanged non-writable secondary, preparation failure, durable contents, live activation,
+and restart.
 
-**Evidence.** `NativeGitAccessControlStorage.load` returns the repository
-version at lines 38-46, `save` translates the author and message at lines
-51-61, and `onChange` filters ref updates at lines 70-78. Local returns
-`Optional.empty()` at `LocalAccessControlStorage.java:32` and ignores its
-`request` parameter at lines 41-49. No current contract test demonstrates
-interchangeable behavior across both implementations.
+**Alternatives and consequences.** Selecting changed documents only in the service avoids redundant writes but
+does not protect other callers or prevent truncation. Immutable filesystem generations can make genuine
+multi-document operations atomic but change the operator-visible layout. Restricting those operations to native
+Git removes supported Local capability. Per-file atomic replacement must not be described as a transaction for
+[`resetRootPassword`](../../core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java#L751),
+which can modify multiple documents.
 
-**Why it likely exists.** Storage schemes were added over time beneath an
-existing broad interface. Git-specific revision and notification features
-were retained as optional-looking properties instead of deciding which
-guarantees every authoritative ACL store must provide.
+**Confidence.** High for the write order and service outcome. Filesystem fault injection and crash recovery were
+not executed during this static review.
 
-**Simpler model.** First choose one mandatory contract. If live mutation,
-audited revisions, and reload notification are required, expose native Git as
-the authoritative store and make filesystem content an explicit bootstrap
-import. If the real requirement is only loading and saving bytes, remove
-version, audit metadata, and change observation from the common contract.
-Introduce capability types only after a real caller requires both modes at
-runtime.
+## 3. Physical Local containment is bypassed through symlinks
 
-**Contract change.** The two locations would no longer be freely
-interchangeable. Either filesystem storage loses writable-live-store status,
-or callers lose the assumption that every store can provide revision and
-notification semantics.
+**Problem.** A configured path such as `config/orion.xml` passes the lexical check when `config` is a symlink to
+an outside directory. Load then reads outside content and save can overwrite it. A symlink at the final file has
+the same effect. Normal bootstrap preflight does not close the path: it checks final existence without following
+links, then uses regular-file and read operations that follow links, and it does not anchor later storage I/O.
 
-**Consequences.** Callers stop branching on empty versions or silently missing
-notifications. A configured mode either supplies its declared guarantees or
-fails during resolution.
+**Sources.** Local storage performs a lexical prefix check in
+[`aclPath`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L65),
+then follows the resolved path during
+[`load`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L21) and
+[`save`](src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java#L40).
+Bootstrap's
+[`validateDirectConfiguration`](../../core/bootstrap/src/main/java/pro/deta/orion/BootstrapContext.java#L129)
+combines `NOFOLLOW_LINKS` existence with following operations. The current
+[`filesystem runtime test`](../../core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java#L55)
+covers ordinary files only.
 
-**Confidence.** High that the implementations are not substitutes; medium on
-which smaller contract is correct because external consumers were excluded.
+**Documented behavior.** The queued
+[`physical containment`](../../docs/plans/upcoming-work/01_acl-storage-hardening/04_local-path-containment.md)
+task explicitly requires protection against intermediate and final symlinks and containment through use.
 
-### 2. `save(snapshot)` neither preserves the configured file set nor publishes one snapshot
+**Contract.** The configured root is trusted, but control of a descendant link must not grant Orion's process
+access to a target outside that root. The attack requires a manipulable link and an outside target readable or
+writable by Orion. The boundary applies during bootstrap preflight and every later storage operation.
 
-**Finding.** `load` and `save` use different definitions of the stored ACL.
-Loading reads exactly `config.getPaths()`, while saving iterates whatever keys
-the supplied snapshot contains. Missing configured keys retain stale data,
-extra keys are persisted but never loaded, and normalized aliases can refer to
-the same physical file. Local storage can also expose a partially written
-multi-file state if a later write fails or a concurrent load occurs.
+**Minimal repair.** Resolve the root once, anchor traversal and I/O to it, and reject descendant symlink
+components and targets with operations that maintain containment through use. Apply the same boundary to the
+bootstrap direct-source read. Preserve safe creation of missing nested directories without introducing a general
+storage framework.
 
-**Evidence.** Local loads configured paths at
-`LocalAccessControlStorage.java:25-31` but saves `snapshot.files()` at lines
-43-49. It neither removes configured files absent from the snapshot nor checks
-that the snapshot key set equals the configured key set. Its writes are
-independent and have no publication marker or rollback. Native Git also passes
-`snapshot.files()` directly at `NativeGitAccessControlStorage.java:55-59`;
-this isolated review does not prove how omitted configured paths affect the
-repository tree.
+**Alternatives and consequences.** A single `toRealPath()` check rejects static escapes but retains a replacement
+race. Trusting links weakens the documented security boundary. Rejecting every descendant link is simpler than
+supporting safe links but removes linked ACL layouts that currently happen to work. Platform support should be
+validated together with atomic replacement.
 
-Local normalization can make two logical snapshot keys refer to one physical
-file. For example, `a/b` and `a/./b` remain distinct map keys but normalize to
-the same target.
+**Confidence.** High for the static symlink bypass. No adversarial replacement race was executed.
 
-**Why it likely exists.** The API moved from one ACL file to a map of files,
-but per-file write behavior was retained and no exact-set or publication
-invariant was added.
+## 4. Two helpers remain after their storage path was removed
 
-**Simpler model.** Make configured paths an immutable, normalized, unique set
-owned by the storage instance. Require every saved snapshot to contain exactly
-that set. Then define whether “snapshot” means one atomic revision. If it does,
-publish an immutable filesystem generation through one switch rather than
-simulating a snapshot with sequential overwrites. If it does not, narrow the
-API name and document the weaker behavior.
+**Problem.** The module still compiles the unused production helper `AccessControlStorageSecret` and an unused
+module-local copy of `PlainRootTokenAccessForTests`. Remote bootstrap secret resolution now belongs to the proxy
+runtime, while other modules own separate test accessors that are actually referenced.
 
-**Contract change.** Exact-set validation rejects partial and extra-file saves
-that currently succeed. Atomic filesystem publication changes the durable
-layout; explicitly weakening the contract permits mixed revisions and must be
-accepted by ACL consumers.
+**Sources.** The unused files are
+[`AccessControlStorageSecret`](src/main/java/pro/deta/orion/acl/storage/AccessControlStorageSecret.java#L11) and
+[`PlainRootTokenAccessForTests`](src/test/java/pro/deta/orion/auth/PlainRootTokenAccessForTests.java#L3).
+Live bootstrap secret ownership enters through
+[`ProxyAwareNativeGitRepositoryProvider`](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L50).
+The module's [`pom.xml`](pom.xml#L1) does not publish a test JAR or register either class as a service.
 
-**Consequences.** One path set becomes authoritative, stale-file and alias
-cases disappear, and failure behavior becomes testable. Atomic generations
-cost additional layout logic; the weaker alternative is smaller but allows
-transiently inconsistent authorization data.
+**Documented behavior.** The existing
+[`unused helper deletion`](../../docs/plans/upcoming-work/01_acl-storage-hardening/02_remove-unused-helpers.md)
+task names these two files and requires preservation of independently used copies.
 
-**Confidence.** High on the key-set and partial-write behavior; medium on the
-required atomicity because no consumer was inspected.
+**Contract.** No production, wire, persisted, reflective, service-loader, generated-wiring, or published test
+contract uses either file. Deletion must remain limited to this module's copies.
 
-### 3. Backend instances disagree about configuration lifetime
+**Minimal repair.** Delete the two files without replacement and remove only dependencies or package exposure
+made unused by those deletions.
 
-**Finding.** Native Git copies its addressing fields at construction, while
-Local storage retains and repeatedly reads the mutable schema object.
+**Alternatives and consequences.** Retention preserves no verified behavior. Centralizing every similarly named
+test accessor would create a wider fixture contract with no production requirement. Deletion has no supported
+runtime consequence.
 
-**Evidence.** `NativeGitAccessControlStorage` assigns repository, ref, and
-`List.copyOf(paths)` in its constructor at lines 27-33. Local stores the whole
-configuration object at line 19 and consults its paths, primary path, and
-location during later operations at lines 25, 57, and 70.
-
-Mutating one `BootstrapAccessControlConfig` after resolution therefore changes
-Local behavior immediately but does not alter an existing native Git storage
-instance.
-
-**Why it likely exists.** Constructors cached only values needed for setup,
-while the schema object remained a convenient source for the rest. There is no
-explicit decision whether configuration objects are immutable snapshots or
-live reload handles.
-
-**Simpler model.** Resolve and validate location, normalized path set, primary
-path, and ref once. Store only those immutable values in each backend. Runtime
-reconfiguration should replace a complete storage instance rather than mutate
-half of its coordinates in place.
-
-**Contract change.** Mutating `BootstrapAccessControlConfig` after resolution
-would no longer alter an existing storage. A reload owner would have to create
-and swap a new instance.
-
-**Consequences.** Every operation uses one coherent configuration generation,
-constructors become the validation boundary, and concurrency no longer
-depends on undocumented schema mutation.
-
-**Confidence.** High.
-
-### 4. Storage operation failures use incompatible control-flow models
-
-**Finding.** Reads return typed `Result` failures, while writes communicate
-expected backend failures through unrelated unchecked exceptions. Equivalent
-validation and backend failures are also translated differently by Local and
-native Git storage.
-
-**Evidence.** Local converts `IOException` and `IllegalArgumentException` to
-`GENERAL` on load at `LocalAccessControlStorage.java:33-36`, but save wraps only
-`IOException`, allowing path validation to escape directly. Native Git
-converts selected exceptions on load and throws `IllegalStateException` on
-save.
-
-**Why it likely exists.** The read side needed `NOT_FOUND` for bootstrap
-creation, while save remained a void command. Each connector then translated
-its native failures independently.
-
-**Simpler model.** Use one small failure vocabulary for both operations:
-`NOT_FOUND`, invalid configuration or snapshot, unavailable backend, conflict
-if versioned writes need it, and unexpected failure. Represent expected save
-failure through the same typed result path as load, or through one storage
-exception type if callers do not compose results. Do not catch arbitrary
-runtime exceptions as backend failures.
-
-**Contract change.** `save` would no longer appear to succeed and then throw an
-arbitrary runtime type. Callers must handle one explicit save outcome.
-
-**Consequences.** Retry and user-facing diagnostics can be decided once rather
-than per backend. This changes the imported storage API and requires consumer
-migration outside this isolated module.
-
-**Confidence.** High on the inconsistency; medium on result versus exception as
-the final representation.
-
-## Smaller inconsistencies
-
-- Native Git validates `..` and absolute forms before converting backslashes
-  to slashes (`NativeGitAccessControlStorage.java:102-111`). A percent-decoded
-  backslash can therefore become a forbidden segment after validation. The
-  current file provider hashes repository names, so this is an inconsistent
-  repository-name boundary rather than a demonstrated filesystem escape.
-- Local path containment is lexical. A symlink below the configured directory
-  can redirect `Files.readAllBytes` or `Files.write` outside it. If containment
-  is a security boundary, verify physical paths and use no-follow operations
-  rather than relying only on `normalize().startsWith(...)`.
-- `AccessControlStorageSecret` has no production caller. The remaining
-  `PlainRootTokenAccessForTests` copy is also unreferenced after the old
-  monolithic ACL storage/service test was deleted.
-- The only current storage tests cover native Git. Historical Local tests were
-  removed with a broad obsolete suite, leaving filesystem load, save, missing,
-  overwrite, multi-file, containment, and failure behavior uncharacterized at
-  the connector boundary.
-- Local extends `OrionEnableServiceSupport`, while native Git does not. Neither
-  class overrides lifecycle behavior, so the reason for inheritance is not
-  visible here.
-- `LocalAccessControlStorage.aclDirectory` accepts `ResourceScheme.Local` as a
-  filesystem directory even though the resolver assigns that scheme to native
-  Git. Direct construction can therefore give one scheme a second meaning.
-
-## Things to try deleting
-
-- `AccessControlStorageSecret` and the ACL module copy of
-  `PlainRootTokenAccessForTests`, after confirming no generated or reflective
-  use.
-- The `ResourceScheme.Local` branch in `LocalAccessControlStorage`; the resolver
-  already gives that scheme one different meaning.
-- Retained mutable `BootstrapAccessControlConfig` references inside backend
-  instances; replace them with resolved immutable coordinates.
-- Public visibility on concrete storage implementations if the next external
-  usage audit confirms that only the resolver is a supported construction API.
-- Version, save audit metadata, or change subscription from the common storage
-  contract if product requirements do not require them for every backend.
-
-## Proposed conceptual model
-
-The minimum coherent model is:
-
-1. One resolver parses and validates one immutable storage specification.
-2. One scheme maps to exactly one backend.
-3. One backend instance owns fixed normalized paths and a fixed primary path.
-4. `load` and `save` share one failure vocabulary and one exact file-set
-   invariant.
-5. A supported mode exposes only guarantees it actually implements.
-
-The remaining product decision is whether filesystem content is an
-authoritative mutable ACL store or a bootstrap source. Do not preserve optional
-versions, ignored audit metadata, and silent notifications as a compromise
-between those models.
-
-## Incremental migration path
-
-1. Restore focused characterization tests for Local load, save, missing files,
-   overwrite, multiple files, primary path, and resolver routing.
-2. Delete unused helpers and the duplicate filesystem interpretation of
-   `local:`.
-3. Introduce one storage-neutral repository-name parser below transports and
-   connectors; normalize separators before rejecting dot segments.
-4. Harden Local path handling against traversal and symlink escape.
-5. Resolve configuration into immutable backend coordinates at construction
-   and reject empty, duplicate, aliased, escaping, and non-primary paths before
-   any I/O.
-6. Make saved snapshot keys equal the configured path set and define one save
-   failure vocabulary shared with load.
-7. Decide whether multi-file filesystem publication must be atomic and either
-   implement one generation switch or explicitly narrow the contract.
-8. Decide, using actual consumers, whether version, audit metadata, and change
-   notification are mandatory; then narrow the common interface accordingly.
-
-Each step can be verified independently. No large storage format migration is
-necessary unless atomic filesystem generations are selected.
-
-## Do not change
-
-- Preserve `NOT_FOUND` as distinct from a general backend failure. Bootstrap
-  creation decisions need that distinction even if the representation changes.
-- Preserve byte-for-byte file contents and deterministic configured path order.
-  ACL parsing and normalization belong above the connector boundary.
-- Preserve native Git's create-race recovery: `FILE_ALREADY_EXISTS` followed
-  by `find` is useful idempotent provisioning behavior if creation remains.
-- Preserve filtering native Git notifications by the configured ref and the
-  ability to close a registered subscription.
-- Preserve Local traversal checks while strengthening canonicalization,
-  physical containment, and alias detection.
-
-## Open questions
-
-- Is filesystem content an authoritative writable ACL store or only a
-  bootstrap/import source?
-- Must one multi-file ACL load observe a single revision, and must save be
-  atomic across all configured paths?
-- Does any consumer use snapshot versions for optimistic concurrency, caching,
-  or diagnostics?
-- Must every live backend support change notification, or is polling/restart
-  acceptable for filesystem content?
-- Is `BootstrapAccessControlConfig` ever mutated or replaced while a storage is
-  live?
-- Are concrete storage classes consumed as a public API outside this module,
-  or can only `AccessControlStorageResolver` remain public?
+**Confidence.** High from repository-wide symbol, service, build, and history searches. External source consumers
+of this unpublished module-local test class are not supported by the Maven graph.
