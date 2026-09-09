@@ -80,7 +80,8 @@ Update the test journal decoder to expose source before sequence so real-host as
 Run outside the sandbox:
 
 ```bash
-make session-host-test
+cd session-host
+"$HOME/.cargo/bin/cargo" test --locked
 ```
 
 Expected: the new source-aware assertions fail until the codec and journal encoder implement the replacement layouts; the crate must compile.
@@ -94,7 +95,8 @@ Decode the source prefix once, validate the source-specific envelope rule, retai
 Rename the generator entry to `control_source_aware`, emit both sources for all five operation types, and regenerate fixtures:
 
 ```bash
-make session-host-fixtures
+cd session-host
+"$HOME/.cargo/bin/cargo" run --locked --release --bin generate-protocol-fixtures
 ```
 
 Delete the two superseded operation fixtures and their generator/test references. Keep `command-events-v1.hex` because journal format version 1 remains current, but replace its bytes with source-aware server and manual results.
@@ -104,7 +106,8 @@ Delete the two superseded operation fixtures and their generator/test references
 Run outside the sandbox:
 
 ```bash
-make session-host-test
+cd session-host
+"$HOME/.cargo/bin/cargo" test --locked
 ```
 
 Expected: all Rust tests pass.
@@ -141,7 +144,8 @@ Reuse the existing lost-receipt, effect-failure, and result-append-failure cover
 Run outside the sandbox:
 
 ```bash
-make session-host-test
+cd session-host
+"$HOME/.cargo/bin/cargo" test --locked
 ```
 
 Expected: the new repeated/interleaved `MANUAL` tests fail because the global high-water mark still applies to every operation.
@@ -163,7 +167,8 @@ After `RECEIVED`, execute and append the same `JournalEvent::CommandResult` for 
 Run outside the sandbox:
 
 ```bash
-make session-host-test
+cd session-host
+"$HOME/.cargo/bin/cargo" test --locked
 ```
 
 Expected: all Rust unit and real-host tests pass.
@@ -293,7 +298,7 @@ Send server and manual operations through `SessionControlClient`, including repe
 Run outside the sandbox:
 
 ```bash
-make session-host-build
+make session-host
 make run-test MODULE=agentd TEST='NativeControlLivePeerTest'
 ```
 
@@ -313,7 +318,9 @@ git commit -m "Remove superseded native operation coverage"
 Run outside the sandbox:
 
 ```bash
-make session-host-test
+cd session-host
+"$HOME/.cargo/bin/cargo" test --locked
+cd ..
 make test
 mvn verify -Pdev -T 4
 git diff --check
