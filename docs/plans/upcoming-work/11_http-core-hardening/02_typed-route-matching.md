@@ -3,7 +3,8 @@
 Status: todo
 Source: finding 3 in [the module review](../../../../net/http-core/MODULE_REVIEW.md)
 Foundation: unified route invocation is integrated in `a380b4d0`.
-Depends on: [canonical repository names](../../current-work/12_acl-storage-hardening/03_canonical-repository-names.md)
+Prerequisite: canonical repository names are integrated in `92f4fbe0`; see the
+[accepted design](../../2026-09-09-canonical-repository-names-design.md).
 
 Replace unrestricted character wildcards and handler-local path parsing with
 one segment-aware routing result shared by dispatch and handlers.

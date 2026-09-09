@@ -27,9 +27,9 @@ repository synchronization path; reconcile its scope before implementation.
 
 ### Operator interfaces and HTTP
 
-HTTP invocation is integrated in `a380b4d0`; typed matching waits for canonical
-repository names. Recheck the PTY failure after the occupied
-terminal-administration task before making overlapping fixes.
+HTTP invocation is integrated in `a380b4d0`, and canonical repository names are
+integrated in `92f4fbe0`; typed matching has both foundations. Recheck the PTY
+failure after the occupied terminal-administration task before making overlapping fixes.
 
 ### Acceptance reviews
 

@@ -55,12 +55,11 @@ administration with their active owners.
 | M1 | [Remaining key owners](current-work/01_unified-key-material-bootstrap/01_remaining-key-owner-migration.md) | **Next overall**; remove the remaining independent key storage. |
 | M2 | [JWT rotation and refresh](current-work/01_unified-key-material-bootstrap/02_short-lived-jwt-rotation-and-refresh.md) | Identity foundation is integrated; may run beside M1 if consumers do not overlap. |
 | M3 | [Rotation/recovery acceptance](current-work/01_unified-key-material-bootstrap/03_rotation-recovery-and-acceptance.md) | M1 + M2; encrypted configuration foundation is integrated. |
-| C2 | [Canonical repository names](current-work/12_acl-storage-hardening/03_canonical-repository-names.md) | Coordinate with Git parser/storage boundary; one storage-neutral identity. |
-| C3 | [Local path containment](upcoming-work/01_acl-storage-hardening/04_local-path-containment.md) | After characterization and canonical path decisions. |
+| C3 | [Local path containment](upcoming-work/01_acl-storage-hardening/04_local-path-containment.md) | Characterization is integrated in `1119d618`; canonical repository names are integrated in `92f4fbe0`. |
 | C4 | [Exact snapshot save](upcoming-work/01_acl-storage-hardening/05_exact-snapshot-save.md) | Preserve the established path boundary and publication semantics. |
 | C5 | [Consistent storage failures](upcoming-work/01_acl-storage-hardening/06_consistent-storage-failures.md) | Migrate the settled read/write contract once. |
 | C6 | [Hierarchical authorization](current-work/02_hierarchical-orion-configuration/01_hierarchical-authorization.md) | ACL foundation first, as required by its parent; users/roles are integrated. |
-| C7 | [Native Git configuration snapshots](current-work/02_hierarchical-orion-configuration/02_native-git-configuration-snapshots.md) | Can advance beside remaining C2–C6; Local characterization is integrated. Coordinate bootstrap ownership. |
+| C7 | [Native Git configuration snapshots](current-work/02_hierarchical-orion-configuration/02_native-git-configuration-snapshots.md) | Can advance beside remaining C3–C6; Local characterization is integrated. Coordinate bootstrap ownership. |
 | C8 | [Configuration administration/acceptance](current-work/02_hierarchical-orion-configuration/03_administration-and-acceptance.md) | C6 + C7 and integrated repository/mirror configuration. |
 
 ## 2. Agent control, replication, and commands
@@ -136,7 +135,7 @@ Review storage after its boundary stabilizes, before externalizing it.
 | --- | --- | --- |
 | G1 | [Canonical Git object ID](upcoming-work/02_git-wire-architecture-simplification/01_canonical-git-object-id.md) | First wire task. |
 | G2 | [Blocking output migration](upcoming-work/02_git-wire-architecture-simplification/02_blocking-output-migration.md) | Follow G1; delete resumable output machinery. |
-| G3 | [Parser/storage boundary](upcoming-work/02_git-wire-architecture-simplification/03_parser-storage-boundary.md) | G2; coordinate canonical repository names C2. |
+| G3 | [Parser/storage boundary](upcoming-work/02_git-wire-architecture-simplification/03_parser-storage-boundary.md) | G2; canonical repository names are integrated in `92f4fbe0`. |
 | G4 | [Repository command context](upcoming-work/02_git-wire-architecture-simplification/04_repository-command-context.md) | G3; resolve repository resources once. |
 | G5 | [Capability advertisement policy](upcoming-work/02_git-wire-architecture-simplification/05_global-capability-advertisement-policy.md) | G4; one veto at settled composition points. |
 | G6 | [Native storage architecture review](upcoming-work/05_git-native-storage-architecture-review.md) | G1 + G3 + G4; can run beside G5. |
@@ -184,7 +183,7 @@ engine or duplicate the App/webhook task in two places.
 
 | Order | Existing task | Gate / reason |
 | --- | --- | --- |
-| H2 | [Typed route matching](upcoming-work/11_http-core-hardening/02_typed-route-matching.md) | Unified invocation is complete in `a380b4d0`; wait for canonical repository names. |
+| H2 | [Typed route matching](upcoming-work/11_http-core-hardening/02_typed-route-matching.md) | Unified invocation is complete in `a380b4d0`; canonical repository names are complete in `92f4fbe0`. |
 | T1 | [Terminal administration](current-work/08_interactive-ssh-shell/01_terminal-administration.md) | **Owned**; integrate terminal interaction/configuration work. |
 | T2 | [SSH PTY timeout](upcoming-work/12_ssh-pty-completion-timeout.md) | Recheck after T1; fix only a remaining reproducible failure. |
 | T3 | [Streaming monitoring](current-work/08_interactive-ssh-shell/02_streaming-monitoring.md) | Core/terminal baseline is integrated; recommend T1/T2 first because rendering and cancellation overlap. |
