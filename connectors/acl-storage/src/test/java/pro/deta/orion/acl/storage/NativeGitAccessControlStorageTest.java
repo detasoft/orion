@@ -8,6 +8,7 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
+import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.internal.UserEmail;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
@@ -36,7 +37,7 @@ class NativeGitAccessControlStorageTest {
     }
 
     @Test
-    void resolverProjectsRepositoryBackedSourceToLocalAlias() throws Exception {
+    void resolverUsesRepositoryBackedSourceAlias() throws Exception {
         String secondaryPath = "config/roles.xml";
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         NativeGitRepository repository = provider.create("bootstrap/proxy-alias")
@@ -62,16 +63,55 @@ class NativeGitAccessControlStorageTest {
                 provider).resolve();
 
         assertThat(storage).isInstanceOf(NativeGitAccessControlStorage.class);
+        assertThat(storage.primaryPath()).isEqualTo(ACL_PATH);
+        assertThat(storage.createIfMissing()).isFalse();
         assertThat(storage.load().valueOrFailure("resolved ACL").files())
                 .containsEntry(ACL_PATH, bytes("resolved acl"))
                 .containsEntry(secondaryPath, bytes("resolved roles"));
     }
 
     @Test
-    void storageDoesNotCreateRepositoryDuringAclStartup() {
-        NativeGitRepositoryProvider provider = new pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider();
+    void preservesResolvedEncodedRepositoryIdentityForReadsAndWrites(@TempDir Path root)
+            throws Exception {
+        FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(root);
+        NativeGitRepository selected = backend.create("team%2Frepo").valueOrFailure("selected repository");
+        NativeGitRepository other = backend.create("team/repo").valueOrFailure("other repository");
+        String ref = "refs/heads/configuration";
+        selected.saveFiles(ref, Map.of(ACL_PATH, bytes("selected ACL")), "seed", GitCommitAuthor.EMPTY);
+        other.saveFiles(ref, Map.of(ACL_PATH, bytes("other ACL")), "seed", GitCommitAuthor.EMPTY);
+        String otherVersion = other.refs().get(ref);
+        BootstrapConfigurationSourceConfig configuration = config();
+        configuration.setLocation("local:team%2Frepo");
+        configuration.setRef("configuration");
+        configuration.setCreateDefaultIfMissing(false);
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
+        ResolvedBootstrapSource source = provider.resolveProvisional(
+                BootstrapRepositorySources.CONFIGURATION, configuration, false);
+        assertThat(source.repositoryName()).contains("team%2Frepo");
+        AccessControlStorage storage = new AccessControlStorageResolver(
+                new BootstrapRepositorySources(List.of(source)), provider).resolve();
 
-        new NativeGitAccessControlStorage(config(), provider);
+        AccessControlSnapshot loaded = storage.load().valueOrFailure("selected ACL");
+        assertThat(loaded.files())
+                .containsEntry(ACL_PATH, bytes("selected ACL"));
+        assertThat(storage.primaryPath()).isEqualTo(ACL_PATH);
+        assertThat(storage.createIfMissing()).isFalse();
+        storage.save(
+                new AccessControlSnapshot(Map.of(ACL_PATH, bytes("versioned update")), loaded.version()),
+                new AccessControlSaveRequest("versioned update", UserEmail.EMPTY));
+
+        assertThat(selected.loadFiles(ref, List.of(ACL_PATH)).files())
+                .containsEntry(ACL_PATH, bytes("versioned update"));
+        assertThat(other.loadFiles(ref, List.of(ACL_PATH)).files())
+                .containsEntry(ACL_PATH, bytes("other ACL"));
+        assertThat(other.refs().get(ref)).isEqualTo(otherVersion);
+    }
+
+    @Test
+    void storageDoesNotCreateRepositoryDuringAclStartup() {
+        NativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
+
+        resolvedStorage(provider, List.of(ACL_PATH));
 
         assertThat(provider.repositoryNames()).isEmpty();
     }
@@ -79,7 +119,7 @@ class NativeGitAccessControlStorageTest {
     @Test
     void createsConfiguredRepositoryAndCommitsInitialAcl(@TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitAccessControlStorage storage = preparedStorage(provider);
+        AccessControlStorage storage = preparedStorage(provider);
 
         assertThat(storage.load()).isInstanceOf(Result.Failure.class);
         assertThat(((Result.Failure<?>) storage.load()).code()).isEqualTo(Result.FailureCode.NOT_FOUND);
@@ -92,18 +132,19 @@ class NativeGitAccessControlStorageTest {
         assertThat(snapshot.files()).containsOnlyKeys(ACL_PATH);
         assertThat(snapshot.files().get(ACL_PATH)).isEqualTo(bytes("initial acl"));
         assertThat(snapshot.version()).isPresent();
+        assertThat(storage.createIfMissing()).isTrue();
         assertThat(provider.repositoryNames()).containsExactly("internal/configuration");
     }
 
     @Test
     void reusesExistingRepositoryAndConfiguredRefAfterRestart(@TempDir Path rootDirectory) {
-        NativeGitAccessControlStorage first = preparedStorage(
+        AccessControlStorage first = preparedStorage(
                 new FileNativeGitRepositoryProvider(rootDirectory));
         first.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("persisted acl")),
                 new AccessControlSaveRequest("bootstrap ACL", UserEmail.EMPTY));
 
-        NativeGitAccessControlStorage restarted = preparedStorage(
+        AccessControlStorage restarted = preparedStorage(
                 new FileNativeGitRepositoryProvider(rootDirectory));
 
         assertThat(restarted.load().valueOrFailure("ACL should survive restart").files().get(ACL_PATH))
@@ -120,7 +161,7 @@ class NativeGitAccessControlStorageTest {
                 Map.of("README.md", bytes("not an ACL")),
                 "add readme",
                 GitCommitAuthor.EMPTY);
-        NativeGitAccessControlStorage storage = preparedStorage(provider);
+        AccessControlStorage storage = preparedStorage(provider);
 
         Result<AccessControlSnapshot> result = storage.load();
 
@@ -138,9 +179,7 @@ class NativeGitAccessControlStorageTest {
                 Map.of(ACL_PATH, bytes("primary ACL")),
                 "add primary ACL",
                 GitCommitAuthor.EMPTY);
-        BootstrapConfigurationSourceConfig configuration = config();
-        configuration.setPaths(List.of(ACL_PATH, "config/roles.xml"));
-        NativeGitAccessControlStorage storage = new NativeGitAccessControlStorage(configuration, provider);
+        AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH, "config/roles.xml"));
 
         Result<AccessControlSnapshot> result = storage.load();
 
@@ -151,7 +190,7 @@ class NativeGitAccessControlStorageTest {
     @Test
     void reportsOnlyAcceptedUpdatesToConfiguredRef(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitAccessControlStorage storage = preparedStorage(provider);
+        AccessControlStorage storage = preparedStorage(provider);
         AtomicInteger changes = new AtomicInteger();
         AccessControlStorage.ChangeSubscription subscription = storage.onChange(
                 ignored -> changes.incrementAndGet());
@@ -178,7 +217,7 @@ class NativeGitAccessControlStorageTest {
     @Test
     void staleVersionedSaveCannotOverwriteWinningAclOrUnrelatedFiles(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider provider = new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitAccessControlStorage storage = preparedStorage(provider);
+        AccessControlStorage storage = preparedStorage(provider);
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("version one")),
                 new AccessControlSaveRequest("version one", UserEmail.EMPTY));
@@ -213,7 +252,7 @@ class NativeGitAccessControlStorageTest {
                 Map.of("winner.txt", bytes("winner")),
                 "winner",
                 GitCommitAuthor.EMPTY);
-        NativeGitAccessControlStorage storage = new NativeGitAccessControlStorage(config(), provider);
+        AccessControlStorage storage = resolvedStorage(provider, List.of(ACL_PATH));
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("created")),
@@ -230,7 +269,7 @@ class NativeGitAccessControlStorageTest {
     void loadsThroughProviderReadOperation(@TempDir Path rootDirectory) throws Exception {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(rootDirectory);
         RecordingProvider provider = new RecordingProvider(backend);
-        NativeGitAccessControlStorage storage = preparedStorage(provider);
+        AccessControlStorage storage = preparedStorage(provider);
         backend.find("internal/configuration").valueOrFailure("repository").saveFiles(
                 "refs/heads/configuration",
                 Map.of(ACL_PATH, bytes("provider acl")),
@@ -247,7 +286,7 @@ class NativeGitAccessControlStorageTest {
     void savesConfiguredRefThroughProviderOperation(@TempDir Path rootDirectory) {
         RecordingProvider provider = new RecordingProvider(
                 new FileNativeGitRepositoryProvider(rootDirectory));
-        NativeGitAccessControlStorage storage = preparedStorage(provider);
+        AccessControlStorage storage = preparedStorage(provider);
 
         storage.save(
                 AccessControlSnapshot.singleFile(ACL_PATH, bytes("provider acl")),
@@ -267,12 +306,26 @@ class NativeGitAccessControlStorageTest {
         return config;
     }
 
-    private static NativeGitAccessControlStorage preparedStorage(
+    private static AccessControlStorage preparedStorage(
             NativeGitRepositoryProvider provider) {
         if (!provider.exists("internal/configuration")) {
             provider.create("internal/configuration").valueOrFailure("repository");
         }
-        return new NativeGitAccessControlStorage(config(), provider);
+        return resolvedStorage(provider, List.of(ACL_PATH));
+    }
+
+    private static AccessControlStorage resolvedStorage(
+            NativeGitRepositoryProvider provider, List<String> paths) {
+        ResolvedBootstrapSource source = new ResolvedBootstrapSource(
+                BootstrapRepositorySources.CONFIGURATION,
+                "local:internal/configuration",
+                Optional.of("internal/configuration"),
+                "refs/heads/configuration",
+                paths,
+                Optional.empty(),
+                true);
+        return new AccessControlStorageResolver(new BootstrapRepositorySources(List.of(source)), provider)
+                .resolve();
     }
 
     private static byte[] bytes(String value) {

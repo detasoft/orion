@@ -16,26 +16,20 @@ public class AccessControlStorageResolver {
 
     public AccessControlStorage resolve() {
         ResolvedBootstrapSource resolved = repositorySources.required(BootstrapRepositorySources.CONFIGURATION);
+        if (resolved.repositoryName().isPresent()) {
+            return new NativeGitAccessControlStorage(resolved, repositoryProvider);
+        }
         BootstrapConfigurationSourceConfig configuration = new BootstrapConfigurationSourceConfig();
-        configuration.setLocation(resolved.repositoryName()
-                .map(repositoryName -> "local:" + repositoryName)
-                .orElse(resolved.location()));
+        configuration.setLocation(resolved.location());
         configuration.setRef(resolved.refName());
         configuration.setPaths(resolved.paths());
         configuration.setCreateDefaultIfMissing(resolved.createIfMissing());
-        return resolve(configuration);
-    }
-
-    AccessControlStorage resolve(BootstrapConfigurationSourceConfig configuration) {
-        String location = configuration.getLocation();
+        String location = resolved.location();
         ResourceLocation resourceLocation = ResourceLocation.parse(location, "ACL location");
         return switch (resourceLocation.scheme()) {
             case ResourceScheme.Empty ignored -> new LocalAccessControlStorage(configuration);
             case ResourceScheme.File ignored -> new LocalAccessControlStorage(configuration);
-            case ResourceScheme.Local ignored ->
-                    new NativeGitAccessControlStorage(configuration, repositoryProvider);
-            case ResourceScheme.Other ignored ->
-                    throw new IllegalArgumentException("Unsupported ACL location: " + location);
+            default -> throw new IllegalArgumentException("Unsupported ACL location: " + location);
         };
     }
 }

@@ -8,14 +8,10 @@ import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
-import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
-import pro.deta.orion.util.ResourceLocation;
-import pro.deta.orion.util.ResourceScheme;
+import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.util.Result;
 
-import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -26,18 +22,15 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
     private final List<String> paths;
     private final boolean createIfMissing;
 
-    public NativeGitAccessControlStorage(
-            BootstrapConfigurationSourceConfig config,
+    NativeGitAccessControlStorage(
+            ResolvedBootstrapSource source,
             NativeGitRepositoryProvider repositoryProvider) {
-        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(source, "source");
         this.repositoryProvider = Objects.requireNonNull(repositoryProvider, "repositoryProvider");
-        repositoryName = repositoryName(config.getLocation());
-        configurationRef = refName(config.selectedRef());
-        paths = config.selectedPaths();
-        if (paths.isEmpty()) {
-            throw new IllegalArgumentException("At least one ACL path must be configured");
-        }
-        createIfMissing = config.isCreateDefaultIfMissing();
+        repositoryName = source.repositoryName().orElseThrow();
+        configurationRef = source.refName();
+        paths = source.paths();
+        createIfMissing = source.createIfMissing();
     }
 
     @Override
@@ -143,31 +136,5 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
             }
         });
         return subscription::close;
-    }
-
-    private static String repositoryName(String location) {
-        ResourceLocation resourceLocation = ResourceLocation.parse(location, "ACL location");
-        if (!(resourceLocation.scheme() instanceof ResourceScheme.Local)) {
-            throw new IllegalArgumentException("Native ACL location must use local: " + location);
-        }
-        String name = resourceLocation.normalizedRelativePath();
-        Path path = Path.of(name);
-        if (name.isBlank()
-                || path.isAbsolute()
-                || name.equals(".")
-                || name.equals("..")
-                || name.startsWith("../")) {
-            throw new IllegalArgumentException("Invalid native configuration repository name: " + name);
-        }
-        return name.replace('\\', '/');
-    }
-
-    private static String refName(String configuredRef) {
-        if (configuredRef == null || configuredRef.isBlank()) {
-            throw new IllegalArgumentException("Configuration ref must not be empty");
-        }
-        return configuredRef.startsWith("refs/")
-                ? configuredRef
-                : "refs/heads/" + configuredRef;
     }
 }
