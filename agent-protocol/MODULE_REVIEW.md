@@ -1,52 +1,5 @@
 # Module Review: `agent-protocol`
 
-### 6. Fragmented indefinite-length CBOR strings can spin forever
-
-**Problem.** `CborItemScanner.scan` repeatedly calls `scanStringChunk` while an indefinite-length byte or
-text string is open. If the current chunk header or body is incomplete, `scanStringChunk` returns `INCOMPLETE`
-without advancing `position`, but `scan` immediately continues the same loop instead of returning to its
-caller. For example, the valid unknown control item `82 18 63 5f 42 01 02 ff` hangs when its first fragment is
-`82 18 63 5f 42 01`. The same no-progress loop can occur when an item crosses the parser's internal buffer
-boundary, trapping a transport or journal reader thread rather than waiting for more bytes.
-
-**Sources.** The loop is in
-[`CborItemScanner.scan`](src/main/java/pro/deta/orion/agent/protocol/CborItemScanner.java#L52); the two
-no-progress returns are in
-[`scanStringChunk`](src/main/java/pro/deta/orion/agent/protocol/CborItemScanner.java#L146). The scanner is fed
-through the 8 KiB incremental buffer in
-[`CborSequenceParser`](src/main/java/pro/deta/orion/agent/protocol/CborSequenceParser.java#L10). Real callers
-run it on the server control ingress in
-[`AgentControlRoute`](../net/http-core/src/main/java/pro/deta/orion/transport/http/AgentControlRoute.java#L125),
-the AgentD HTTP/2 receive path in
-[`JettyHttp2Transport`](../agentd/src/main/java/pro/deta/orion/agentd/transport/JettyHttp2Transport.java#L442),
-the AgentD journal reader in
-[`FileSystemSessionJournalReader`](../agentd/src/main/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReader.java#L385),
-and server journal recovery in
-[`SegmentReader`](../agent-session-server/src/main/java/pro/deta/orion/agent/server/journal/SegmentReader.java#L817).
-Existing fragmentation coverage uses ordinary definite-length values and misses this state in
-[`AgentProtocolDecoderTest`](src/test/java/pro/deta/orion/agent/protocol/AgentProtocolDecoderTest.java#L91).
-
-**Documented behavior.** The [protocol specification](protocol/README.md#L3) permits a DATA frame to split an
-item at any byte and permits valid indefinite containers. The
-[stream-decoding design](../docs/plans/2026-09-03-typed-agent-protocol-stream-decoding-design.md#L156) preserves
-those forms and requires incomplete input to wait for later data.
-
-**Contract.** Fragmentation must not affect decoding. A valid but incomplete CBOR item remains pending without
-busy-waiting, while the same item must decode once its remaining bytes arrive. Existing byte, collection,
-string, binary, nesting, opaque-preservation, and terminal structural-failure behavior remains unchanged.
-
-**Minimal repair.** Make the indefinite-string branch return `INCOMPLETE` whenever `scanStringChunk` neither
-completes the outer item nor advances the scanner. Keep all state in the existing scanner and parser. Add
-regressions for partial byte- and text-string chunk headers and bodies, nested containers, repeated fragments,
-buffer growth, completion, truncation, malformed chunks, and splits at every byte boundary.
-
-**Alternatives and consequences.** Rejecting indefinite strings would narrow the documented wire contract.
-Adding timeouts or extra threads would only mask a deterministic parser loop. A new outer frame or parser
-abstraction is unnecessary; the defect is a missing no-progress distinction in the current state machine.
-
-**Confidence.** High. The loop follows directly from the two branches that return without changing
-`position`; runtime verification has not yet been run.
-
 ### 4. Raw journal preservation duplicates payload storage and CBOR traversal
 
 **Problem.** A decoded journal record owns separate copies of both `encodedPayload` and the complete
@@ -91,6 +44,11 @@ abstraction than the current requirement justifies.
 **Confidence.** High on duplicate ownership and traversal; no allocation or throughput benchmark has yet
 measured their absolute production cost.
 
+**Priority signals.** Importance: medium — the duplication affects every decoded journal record on live
+replication and persistence paths, but no production latency or allocation measurement establishes a blocking
+impact. Repair ease: low — the smallest safe repair changes record ownership and storage validation across
+modules while preserving exact bytes, defensive access, fixtures, and separate limit policies.
+
 ### 3. Typed `PTY_INPUT` assigns the native input UUID the wrong identity
 
 **Problem.** The server command contains both a server `CommandId` and a distinct input UUID. AgentD sends the
@@ -133,6 +91,11 @@ Documentation-only correction would leave the Java API actively misleading.
 **Confidence.** High on the native producer path; medium on the best Java representation because the typed
 payload API currently has no production consumer.
 
+**Priority signals.** Importance: medium — the public typed model reports the wrong identity, but no production
+caller currently consumes that typed payload. Repair ease: medium — the wire bytes remain unchanged, while the
+Java representation, protocol wording, fixtures, and tests must move together without adding a new identity
+concept.
+
 ### 7. Unsupported handshake versions are discarded before negotiation policy sees them
 
 **Problem.** `AgentProtocolCodec` rejects an unsupported `HELLO` or `WELCOME` version as a semantic error. The
@@ -173,3 +136,8 @@ not merely the implementation.
 
 **Confidence.** High on the current loss path; medium on whether immediate handshake failure remains the desired
 product behavior despite the current authoritative specification.
+
+**Priority signals.** Importance: high — an unsupported peer response can bypass the documented negotiation
+failure and allow a later supported response to establish the control connection. Repair ease: medium — the
+existing rejection can be carried through the ordered transport/handshake flow, but the change crosses module
+boundaries and must preserve recovery for unrelated semantic failures.
