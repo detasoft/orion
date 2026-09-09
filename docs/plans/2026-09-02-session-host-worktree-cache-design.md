@@ -27,7 +27,17 @@ user cache. Existing build, test, and fixture goals retain their current
 missing dependency when prefetch was not run, while prewarmed worktrees reuse
 the shared cache automatically.
 
+Because the toolchain cache is shared, serialize its readiness check,
+installation, and validation with an OS-owned advisory lock: `lockf` on Darwin
+and `flock` on Linux. The kernel releases these locks when a process exits or is
+killed, so bootstrap does not create persistent owner or stale-lock state.
+Treat an incomplete or incorrectly versioned cached toolchain as unprepared and
+repair it with the pinned installer while still holding the lock. Cargo fetch,
+build, test, and fixture execution remain outside the toolchain lock.
+
 Verify the design with executable Makefile tests using an isolated fake home
 and fake pinned toolchain. Cover both the prefetch command and the separation
-between the shared Cargo home and worktree-local compilation target. Run the
-real prefetch goal and the normal project verification after implementation.
+between the shared Cargo home and worktree-local compilation target. Also cover
+late concurrent starters, abnormal lock-owner termination, and incomplete
+toolchain recovery. Run the real prefetch goal and the normal project
+verification after implementation.

@@ -77,6 +77,12 @@ Add the phony `session-host-prefetch` goal depending on
 `session-host-prepare`. Invoke the pinned Cargo with the same `RUSTUP_HOME` and
 `CARGO_HOME` as other goals and run `fetch --locked` from `session-host`.
 
+Protect the shared toolchain readiness check, bootstrap, and version validation
+with the host's advisory file lock: `lockf` on Darwin and `flock` on Linux.
+Validate and repair partial toolchains while holding the lock. Let the kernel
+release ownership after normal exit, failure, signal, crash, or `SIGKILL`; do
+not implement owner files, stale-lock reclamation, or recursive cleanup.
+
 **Step 4: Remove duplicate Maven configuration**
 
 Delete the cache properties and the corresponding Make command-line arguments
@@ -90,6 +96,12 @@ Update `session-host/README.md` to describe the user-scoped cache,
 worktree-local compilation artifacts, and `make session-host-prefetch`.
 
 **Step 6: Run focused tests and verify GREEN**
+
+Add concurrent fake-installer coverage before GREEN. Start a second worktree
+after the first installer publishes its executables and verify that it still
+waits for completed validation. Terminate a lock owner abnormally and verify a
+later prepare acquires the released advisory lock. Seed an executable-only
+partial toolchain and verify the pinned installer repairs it.
 
 Run outside the sandbox:
 
