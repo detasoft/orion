@@ -94,6 +94,10 @@ Each active issue must include:
    compatibility, newly possible failures, lost capability, and containment.
 7. **Confidence** — high, medium, or low, with the main uncertainty.
 
+Treat finding numbers as stable identifiers. Never renumber existing findings
+when adding, updating, removing, or reordering them. Number each new finding one
+higher than the maximum finding number currently present; do not reuse gaps.
+
 As each worker finishes, the primary agent validates its evidence and
 cross-module conclusions, updates only the corresponding `MODULE_REVIEW.md`
 directly on `main`, and commits those report changes before starting a repair.
