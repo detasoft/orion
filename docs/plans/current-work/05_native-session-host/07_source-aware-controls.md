@@ -5,6 +5,9 @@ Depends on: unified AgentD native controls (completed in `c298ad34`)
 Blocks: [SERVER sequence recovery](08_server-operation-sequence-recovery.md) and
 [local terminal](../04_agentd/07_local-terminal.md)
 Related: [server command orchestration](../04_agentd/04_command-orchestration.md)
+Plan: ../../2026-09-09-source-aware-session-controls.md
+
+- Owner: codex, session source-aware-controls-701c, started 2026-09-09 19:10 Europe/Amsterdam.
 
 Allow AgentD and a manual client to control the same live session concurrently,
 including direct manual access while AgentD is unavailable. Mark every command
