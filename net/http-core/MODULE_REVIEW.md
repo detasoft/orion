@@ -180,46 +180,6 @@ errors with incidental messages, and streaming failure behavior is ambiguous aft
 low, because absence and typed failures cross Git service, storage and HTTP boundaries and need pre- and
 post-commit verification.
 
-## 6. The public configuration schema rejects a supported object collection
-
-**Problem.** Schema generation drops generic field types and describes every collection as strings.
-bootstrap.keyMaterial.serverSigning.verification accepts objects with alias and version, but its public
-schema advertises string items. The endpoint therefore publishes a second configuration language that rejects
-valid input.
-
-**Sources.** [Published schema declaration](src/main/java/pro/deta/orion/transport/http/OrionConfigurationJsonSchema.java#L21),
-[collection inference](src/main/java/pro/deta/orion/transport/http/OrionConfigurationJsonSchema.java#L59),
-[configuration type](../../core/schema/src/main/java/pro/deta/orion/schema/config/ServerSigningConfig.java#L12),
-[actual YAML/TOML loaders](../../connectors/configuration-location/src/main/java/pro/deta/orion/config/LocationConfigurationProvider.java#L129),
-[accepted object-list fixture](../../connectors/configuration-location/src/test/java/pro/deta/orion/config/OrionConfigurationBootstrapShapeTest.java#L69), and
-[limited schema test](src/test/java/pro/deta/orion/transport/http/OrionConfigurationJsonSchemaTest.java#L12).
-
-**Documented behavior.** The [README](../../README.md#L315) publishes this endpoint as a configuration JSON schema.
-The generated document declares Draft 2020-12 and YAML/TOML configuration coverage.
-
-**Contract.** Valid supported configuration objects must conform to the advertised structural schema.
-Current maps inspected here contain strings; their generic handling is not a separate demonstrated mismatch.
-No in-repository validation consumer was found, but that does not remove the publicly documented schema
-contract.
-
-**Minimal repair.** Preserve generic element types in the existing generator and add conformance coverage using
-representative input accepted by the real configuration loader. Keep the serving route thin. Place shared
-schema logic with configuration ownership only where that eliminates duplicate property interpretation;
-moving the same inference unchanged does not solve the defect.
-
-**Alternatives and consequences.** An explicit schema for the current configuration graph avoids reflection
-but must have owner-level conformance checks. Weakening the endpoint to UI hints or removing restrictive schema
-keywords changes the published validation guarantee and is not justified by the absence of a local consumer.
-Do not add a general schema framework solely for this object list.
-
-**Confidence.** High on the current collection mismatch; broader serialization-property conformance needs
-focused verification.
-
-**Priority signals.** Importance: medium, because the published schema rejects a supported configuration but
-no in-repository validation consumer was found. Repair ease: medium, because the mismatch is local to the
-existing generator and its tests, while the public schema contract still requires representative loader
-conformance.
-
 ## 7. Concurrent ACME issuance can exhaust workers needed for HTTP-01 callbacks
 
 **Problem.** Each admin issuance request synchronously waits for CA authorization and order completion on a
