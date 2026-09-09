@@ -6,6 +6,8 @@ import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -35,13 +37,13 @@ public final class OrionConfigurationJsonSchema {
         Map<String, Object> properties = new LinkedHashMap<>();
         for (Field field : configurationFields(type)) {
             Object fieldValue = fieldValue(field, value);
-            properties.put(field.getName(), fieldSchema(field.getType(), fieldValue));
+            properties.put(field.getName(), fieldSchema(field.getType(), field.getGenericType(), fieldValue));
         }
         schema.put("properties", properties);
         return schema;
     }
 
-    private static Map<String, Object> fieldSchema(Class<?> type, Object value) {
+    private static Map<String, Object> fieldSchema(Class<?> type, Type genericType, Object value) {
         if (type == String.class) {
             return simpleSchema("string", value);
         }
@@ -58,7 +60,7 @@ public final class OrionConfigurationJsonSchema {
         }
         if (Collection.class.isAssignableFrom(type)) {
             Map<String, Object> schema = simpleSchema("array", value);
-            schema.put("items", Map.of("type", "string"));
+            schema.put("items", collectionItemSchema(genericType));
             return schema;
         }
         if (Map.class.isAssignableFrom(type)) {
@@ -67,6 +69,16 @@ public final class OrionConfigurationJsonSchema {
             return schema;
         }
         return objectSchema(type, value != null ? value : newInstance(type));
+    }
+
+    private static Map<String, Object> collectionItemSchema(Type genericType) {
+        if (genericType instanceof ParameterizedType parameterizedType) {
+            Type elementType = parameterizedType.getActualTypeArguments()[0];
+            if (elementType instanceof Class<?> elementClass) {
+                return fieldSchema(elementClass, elementType, null);
+            }
+        }
+        return Map.of("type", "string");
     }
 
     private static Map<String, Object> simpleSchema(String type, Object value) {
