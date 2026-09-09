@@ -9,6 +9,7 @@ tasks may be ready at the same time.
 ## Child Tasks
 
 - [ ] [Repair Git configuration integration fixtures](git-configuration-integration-fixtures/TASK.md)
+- [ ] [Fix the SSH PTY completion integration timeout](ssh-pty-completion-timeout/TASK.md)
 - [ ] [Harden ACL storage contracts](acl-storage-hardening/TASK.md)
 - [ ] [Harden HTTP core contracts](http-core-hardening/TASK.md)
 - [ ] [Implement GitHub commit replication](github-commit-replication/TASK.md)
