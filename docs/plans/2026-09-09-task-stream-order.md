@@ -149,7 +149,7 @@ Review storage after its boundary stabilizes, before externalizing it.
 | L5 | [Smart HTTP/SSH parity](upcoming-work/03_git-client-architecture-simplification/05_smart-http-ssh-behavior.md) | L1–L3 required; include L4's completed parser behavior. |
 | L6 | [Client removal re-audit](upcoming-work/03_git-client-architecture-simplification/06_post-simplification-removal-review.md) | L1–L5 + G3. |
 | G8 | [Server transport review](upcoming-work/06_git-server-transport-architecture-review.md) | G7 + L6 + completed remote proxy bootstrap R1–R4. |
-| G9 | [Virtual-thread SSH/Jetty transport](upcoming-work/07_virtual-thread-jetty-ssh-git-transport.md) | G8; finish HTTP hardening H1–H2 before changing Jetty execution. |
+| G9 | [Virtual-thread SSH/Jetty transport](upcoming-work/07_virtual-thread-jetty-ssh-git-transport.md) | G8; HTTP invocation is complete in `a380b4d0`; finish typed matching H2 before changing Jetty execution. |
 | G10 | [External repository storage](upcoming-work/08_externalized-repository-storage.md) | G6 and its accepted prerequisite follow-ups; choose the concrete backend before extraction. Independent of G9. |
 
 G9 and G10 contain implementation checklists inside their leaf files.
@@ -184,8 +184,7 @@ engine or duplicate the App/webhook task in two places.
 
 | Order | Existing task | Gate / reason |
 | --- | --- | --- |
-| H1 | [Unified HTTP invocation](upcoming-work/11_http-core-hardening/01_unified-route-invocation.md) | Available foundation; coordinate route consumers under active administration work. |
-| H2 | [Typed route matching](upcoming-work/11_http-core-hardening/02_typed-route-matching.md) | H1. |
+| H2 | [Typed route matching](upcoming-work/11_http-core-hardening/02_typed-route-matching.md) | Unified invocation is complete in `a380b4d0`. |
 | T1 | [Terminal administration](current-work/08_interactive-ssh-shell/01_terminal-administration.md) | **Owned**; integrate terminal interaction/configuration work. |
 | T2 | [SSH PTY timeout](upcoming-work/12_ssh-pty-completion-timeout.md) | Recheck after T1; fix only a remaining reproducible failure. |
 | T3 | [Streaming monitoring](current-work/08_interactive-ssh-shell/02_streaming-monitoring.md) | Core/terminal baseline is integrated; recommend T1/T2 first because rendering and cancellation overlap. |

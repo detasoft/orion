@@ -27,8 +27,9 @@ repository synchronization path; reconcile its scope before implementation.
 
 ### Operator interfaces and HTTP
 
-HTTP invocation precedes typed matching. Recheck the PTY failure after the
-occupied terminal-administration task before making overlapping fixes.
+HTTP invocation is integrated in `a380b4d0`; typed matching is ready. Recheck
+the PTY failure after the occupied terminal-administration task before making
+overlapping fixes.
 
 ### Acceptance reviews
 

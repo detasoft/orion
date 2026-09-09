@@ -2,7 +2,7 @@
 
 Status: todo
 Source: finding 3 in [the module review](../../../../net/http-core/MODULE_REVIEW.md)
-Depends on: [unified route invocation](../../current-work/11_unified-route-invocation.md)
+Foundation: unified route invocation is integrated in `a380b4d0`.
 
 Replace unrestricted character wildcards and handler-local path parsing with
 one segment-aware routing result shared by dispatch and handlers.
