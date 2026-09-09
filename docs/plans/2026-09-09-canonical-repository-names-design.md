@@ -55,7 +55,8 @@ defining competing alphabets.
 - Native providers apply the ordinary-name entry point to `exists`, `find`, and `create` calls and validate names read
   from persisted metadata. This is a defensive boundary using the same parser, not a second validation policy.
 - ACL storage consumes the canonical resolved identity. No connector-local parser is restored, and `acl-storage`
-  does not depend on `git-parser`.
+  neither imports `git-parser` nor declares a direct dependency on it. Its existing transitive path through the
+  native proxy and client remains outside this change.
 - Authorization and configuration ingresses that construct repository identities use the same contract; code that
   only transports an already canonical value does not add another representation.
 
@@ -83,8 +84,8 @@ Ingress tests cover Git wire, HTTP admin and Git routes, the frontend admin clie
 native providers. They prove that invalid input does not reach a provider, that the frontend does not rewrite the
 operator's spelling, and that authorization and provider selection receive the same canonical identity. Storage
 tests cover canonical metadata across reopen and fail-fast behavior for invalid persisted metadata. Dependency
-verification confirms that `acl-storage` does not depend on `git-parser` and that the shared contract has no
-transport dependency.
+verification confirms that `acl-storage` adds no direct dependency on or source import from `git-parser` and that
+the shared contract has no transport dependency.
 
 Focused tests run through the repository `make run-test` target. Routine development verification uses
 `mvn verify -Pdev -T 4`; after the implementation commit is integrated on `main`, `make test` provides the required

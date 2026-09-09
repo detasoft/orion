@@ -410,16 +410,18 @@ be classified as an unrelated content-path/ref validator or removed in its ownin
 
 **Step 2: Check module dependency direction**
 
-Run outside the sandbox:
+Check the connector POM and sources, then run the schema dependency check outside the sandbox:
 
 ```bash
-mvn dependency:tree -Pdev -pl connectors/acl-storage \
-  -Dincludes=pro.deta.orion.git:git-parser
-mvn dependency:tree -Pdev -pl core/schema \
+rg -n '<artifactId>git-parser</artifactId>|pro\.deta\.orion\.git\.parser' \
+  connectors/acl-storage/pom.xml connectors/acl-storage/src
+mvn dependency:tree -Pdev -pl core/schema -am \
   -Dincludes=pro.deta.orion.git:*,pro.deta.orion.net:*
 ```
 
-Expected: neither tree contains a matching dependency.
+Expected: neither command contains a matching dependency or import. The connector's existing transitive path
+through `git-native-proxy` and `git-client` is outside this task; this check prevents a new direct coupling to the
+transport parser.
 
 **Step 3: Run routine development verification**
 
