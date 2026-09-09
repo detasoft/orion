@@ -270,32 +270,6 @@ completion of arbitrary application work could make shutdown unbounded and is a 
 **Confidence.** Medium: the current ownership and test ambiguity are verified; the runtime cause of the
 recorded missing callback remains unresolved.
 
-## 8. HTTP exposes backlog configuration that its connector ignores
-
-**Problem.** HttpTransportConfig inherits a configurable backlog, but HTTP connector construction applies only
-address and port. Changing HTTP backlog therefore does not change the requested accept-queue capacity.
-
-**Sources.** [Backlog property](../../core/schema/src/main/java/pro/deta/orion/schema/config/TransportConfig.java#L13),
-[HTTP configuration](../../core/schema/src/main/java/pro/deta/orion/schema/config/HttpTransportConfig.java#L12),
-[connector construction](src/main/java/pro/deta/orion/transport/http/JettyHTTPServer.java#L187), and
-[existing connector tests](src/test/java/pro/deta/orion/transport/http/JettyHTTPServerTest.java#L167).
-
-**Documented behavior.** No authoritative HTTP-specific backlog semantics were found. The accepted
-configuration property is present in the shared transport model. HTTPS desired state has no backlog property.
-
-**Contract.** A configured HTTP backlog should either be applied to the connector or be explicitly unsupported.
-It is an operating-system hint, not a guarantee of an exact number of accepted connections.
-bootstrap.threadPoolSize configures the separate Orion executor and is not an HTTP pool-size promise.
-
-**Minimal repair.** Apply the existing HTTP backlog value when constructing the connector and verify the
-configured connector setting. Do not add a new HTTP capacity model.
-
-**Alternatives and consequences.** Removing backlog from the HTTP configuration shape is a broader source and
-configuration compatibility change because it is inherited. Applying it may change connection admission under
-load; preserve OS/Jetty semantics rather than promising an exact queue length.
-
-**Confidence.** High on the ignored property; no explicit HTTP-specific documentation was found.
-
 ## 9. HTTPS tests release their port before Jetty binds it
 
 **Problem.** The HTTPS fixture selects an ephemeral port with a temporary ServerSocket, closes it, and later
