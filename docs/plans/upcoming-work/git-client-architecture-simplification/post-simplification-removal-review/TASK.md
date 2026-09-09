@@ -7,7 +7,7 @@ Depends on: ../single-session-request-planning/TASK.md,
 ../session-inactivity-timeouts/TASK.md,
 ../smart-http-ssh-behavior/TASK.md,
 ../../git-wire-architecture-simplification/parser-storage-boundary/TASK.md
-Required skill: `architecture-simplifier`
+Required skill: `minimal-implementation` in read-only review mode
 
 Repeat the read-only Git client simplification review after the four preceding
 changes and the parser/storage boundary are complete. Record already removed

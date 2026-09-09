@@ -124,14 +124,12 @@ The implementation worker owns tests, all outside the sandbox.
 
 ## Review and Completion
 
-Apply minimal-delta before implementation and perform read-only
-architecture-review and architecture-simplifier checks against the final
-subsystem. Preserve the atomicity, durability, generation, credential, and
-ownership guarantees that justify local complexity.
+Apply `minimal-implementation` before and during implementation and perform
+its final self-review of the subsystem. Preserve the atomicity, durability,
+generation, credential, and ownership guarantees that justify local complexity.
 
 Return the committed implementation for orchestrator review. After fixes and
 clean review, squash the task branch, remove the completed leaf and its links,
 and update next-task references to launch-and-reconnect-authentication. Keep
 this ordinary plan. Do not transfer to main or remove the worktree/branch before
 the per-task user gate.
-

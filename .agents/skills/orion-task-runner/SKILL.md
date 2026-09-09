@@ -128,7 +128,8 @@ user how to proceed instead of committing mixed changes.
 ## Execution Rules
 
 1. Follow `AGENTS.md` for Maven profiles, commit behavior, tests, comments, and
-   task tree scope.
+   task tree scope. Apply `minimal-implementation` before and during task
+   implementation, including its final self-review.
 2. Read any referenced plan under `docs/plans/` before changing related code.
 3. Add or extend tests when changing functionality.
 4. Run focused verification during implementation and the appropriate Maven check before claiming completion.
@@ -157,5 +158,7 @@ Task: <task name>
 Path: <path to the task's TASK.md>
 ```
 
-Also summarize code changes, list verification run, and mention any unrelated
-pre-existing working tree changes.
+Also provide the required `minimal-implementation` summary: what was solved,
+how it was solved, which parts changed and what changed in each, and actual
+verification results with any remaining work. Mention unrelated pre-existing
+working tree changes.

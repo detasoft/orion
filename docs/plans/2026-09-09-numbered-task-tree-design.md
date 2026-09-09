@@ -42,7 +42,8 @@ No completed task nodes are retained in the active filesystem queue.
 `orion-task-runner` owns discovery, selection, planning placement, and the
 canonical task-tree rules. Executing a selected leaf always uses
 `orion-review-orchestrator`, and implementation workers must apply
-`minimal-delta` before and during implementation.
+`minimal-implementation` before and during implementation, including its final
+self-review and required change summary.
 
 `orion-review-orchestrator` must accept a numbered leaf file as the executable
 task identity, preserve its path through claim and review, delete it in the

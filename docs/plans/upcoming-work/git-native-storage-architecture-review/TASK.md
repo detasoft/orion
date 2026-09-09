@@ -6,7 +6,7 @@ Depends on:
 [the parser/storage boundary](../git-wire-architecture-simplification/parser-storage-boundary/TASK.md),
 [one repository command context](../git-wire-architecture-simplification/repository-command-context/TASK.md)
 Blocks: [externalized repository storage](../externalized-repository-storage/TASK.md)
-Required skill: `architecture-simplifier`
+Required skill: `minimal-implementation` in read-only review mode
 
 Perform a read-only architecture simplification review of
 `git/git-native-storage` before extracting an external repository storage

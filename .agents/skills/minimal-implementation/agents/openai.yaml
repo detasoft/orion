@@ -1,0 +1,4 @@
+interface:
+  display_name: "Minimal Implementation"
+  short_description: "Implement and review with fewer concepts"
+  default_prompt: "Use $minimal-implementation to implement this change in small verified parts, then summarize the problem, solution, affected parts, and verification."

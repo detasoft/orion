@@ -1,6 +1,9 @@
-# Java/Kotlin Backend Review Guide
+# Java/Kotlin Implementation and Review Guide
 
-Use this reference only for Java, Kotlin, Spring, or other JVM backend code. It extends the main workflow; it does not turn the review into a language-style audit.
+Use this reference for Java, Kotlin, Spring, or other JVM backend code. Apply
+these checks before implementation and during self-review. In a dedicated
+review, report recommendations without making changes. The operating mode and
+scope come from the main skill and the user's request.
 
 ## Build the JVM-Specific Map
 
@@ -8,7 +11,8 @@ Inspect the actual module graph and runtime composition before judging package b
 
 - Gradle or Maven modules and dependency direction;
 - application, plugin, and service entry points;
-- Spring configuration, component scanning, conditional beans, and profiles;
+- dependency injection and runtime bindings, including Dagger composition and
+  Spring configuration, component scanning, conditional beans, and profiles;
 - persistence mappings, migrations, transactions, caches, and outbox or journal mechanisms;
 - async executors, coroutines, reactive pipelines, scheduled jobs, locks, and thread ownership;
 - serialization formats and externally persisted type names;
@@ -30,7 +34,11 @@ When a class is used by only one owning class or subsystem, prefer recommending 
 
 Do not stop at recommending reduced visibility. Ask whether the one-consumer class represents an independently useful concept or merely fragments the owner's behavior. Recommend inlining, merging, or deleting it when that produces a smaller and clearer model. Do not propose extracting a class merely to satisfy a pattern, obtain a mock seam, or shorten a file.
 
-Before narrowing or merging, verify Spring construction and proxying, reflection, serialization, persistence mapping, service loading, tests that instantiate the type, plugin implementations, and source or binary compatibility. These are possible reasons to retain visibility or separation, not assumptions that every class needs them.
+Before narrowing or merging, verify dependency injection and generated wiring,
+Spring construction and proxying, reflection, serialization, persistence
+mapping, service loading, tests that instantiate the type, plugin
+implementations, and source or binary compatibility. These are possible reasons
+to retain visibility or separation, not assumptions that every class needs them.
 
 ### DTO and mapper chains
 
@@ -82,7 +90,13 @@ Look for the same failure repeatedly wrapped, translated, or split among excepti
 
 Treat extension points differently from internal abstractions. Verify whether implementations live outside the repository, are loaded reflectively, or rely on binary or serialization compatibility. A locally single-implementation interface may still be a real public contract.
 
-When simplification requires breaking compatibility, propose an adapter and deprecation migration with an explicit removal point rather than leaving two permanent architectures.
+For a replaced internal API, update every real in-repository consumer and
+remove the old path together, as required by the main skill. Do not introduce
+adapters, deprecation aliases, or parallel paths for hypothetical consumers.
+When a verified external contract must remain compatible, preserve that
+contract through the canonical implementation. If the requested simplification
+cannot preserve it, identify the exact conflict and obtain the missing product
+decision before changing the contract; a review must report the conflict.
 
 ## Evidence Techniques
 

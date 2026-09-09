@@ -4,7 +4,7 @@ Status: todo
 Depends on:
 [AgentD MVP acceptance](../../current-work/agentd/release-and-acceptance/TASK.md),
 [central agent session server MVP acceptance](../../current-work/agent-session-server/release-and-acceptance/TASK.md)
-Required skill: `architecture-simplifier`
+Required skill: `minimal-implementation` in read-only review mode
 
 Perform a read-only end-to-end architecture review of `agentd` and the central
 agent session server after both sides of the current MVP are complete.

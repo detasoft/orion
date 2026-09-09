@@ -28,6 +28,6 @@ blocking `BufferedByteOutput` writes now complete synchronously.
 
 ## Follow-Up Review
 
-After implementation, rerun `architecture-simplifier` on the output path and
-record any further safe removals as separate tasks; do not fold them into this
-migration opportunistically.
+After implementation, use `minimal-implementation` in read-only review mode
+on the output path and record any further safe removals as separate tasks; do
+not fold them into this migration opportunistically.

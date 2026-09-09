@@ -116,11 +116,12 @@ When several implementations satisfy the requirement, choose in this order:
 
 ## Architectural-change trigger
 
-Always use both the `minimal-delta` and `architecture-simplifier` skills when
-reviewing changes or developing tasks, regardless of the scope or complexity
-of the work.
+Always use the `minimal-implementation` skill when reviewing changes or
+developing tasks, regardless of the scope or complexity of the work. Apply its
+implementation workflow for changes and its read-only mode for review requests.
 
-Before making a change that introduces or materially modifies any of the following, apply the `minimal-delta` skill:
+Before making a change that introduces or materially modifies any of the
+following, apply the skill's model, concept, and contract analysis:
 
 - public API or protocol
 - persistent state or schema
@@ -135,7 +136,14 @@ A new `Manager`, `Provider`, `Registry`, `Factory`, `Coordinator`, `Service`, or
 
 ## Review expectation
 
-After any non-trivial implementation, verify that the same requirement could not be met with fewer concepts or a smaller architectural delta. Use the `architecture-review` skill when a change is cross-module, concept-heavy, or difficult to explain locally.
+After any non-trivial implementation, perform the self-review required by
+`minimal-implementation`: verify that the same requirement could not be met
+with fewer concepts or a smaller architectural delta. For cross-module,
+concept-heavy changes, inspect both individual modules and their interactions.
+
+Finish implementation with the skill's required summary: what was being
+solved, how it was solved, which parts changed and what changed in each, and
+verification results with any remaining work.
 
 ## Philosophy
 
