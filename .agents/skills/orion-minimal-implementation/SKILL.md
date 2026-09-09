@@ -1,12 +1,12 @@
 ---
-name: minimal-implementation
+name: orion-minimal-implementation
 description: >-
   Use when implementing features, fixing bugs, refactoring code, or reviewing
   changes or subsystem architecture, especially when work touches ownership,
   state, contracts, module boundaries, or potentially duplicated concepts.
 ---
 
-# Minimal Implementation
+# Orion Minimal Implementation
 
 Implement the requested behavior with the minimum necessary architecture.
 Preserve required behavior and invariants, reuse existing mechanisms, and
@@ -223,11 +223,28 @@ Keep each edit tied to the required result, a preserved invariant, or necessary
 verification. Avoid unrelated renames, formatting, moves, and cleanup. Preserve
 established patterns unless they prevent the required behavior.
 
+Start with the minimal compilable production skeleton needed to express the
+change, then write the test. The skeleton may define the required types and
+signatures but must not implement the required behavior. Do not run tests while
+missing production interfaces, classes, methods, constructors, or signatures
+prevent compilation, and do not treat compilation errors as a meaningful
+failing test. The first test run must execute the selected test and fail because
+the required behavior is absent.
+
 For functional changes, add or extend tests in the same change. Cover the
 straightforward happy path and at least one meaningful scenario such as update,
 invalid state, reload, multiple backends, cancellation, or recovery. Select
 scenarios from the actual risks. Verify required behavior rather than mirroring
 implementation details or asserting only that an old concept is absent.
+
+Do not create tests that read production source files to assert the presence,
+absence, or ordering of particular strings, tokens, imports, declarations,
+method calls, or regular-expression matches. These tests do not verify runtime
+behavior and couple the suite to source formatting and implementation details.
+Verify observable behavior or a meaningful contract instead. Enforce a genuine
+source-level policy with an appropriate build or static-analysis rule; if none
+exists within scope, report the enforcement gap rather than adding a
+source-scanning test.
 
 Follow repository rules for test order, commands, and verification ownership.
 Run checks appropriate to the changed behavior and affected boundaries.

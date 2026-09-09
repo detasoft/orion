@@ -166,7 +166,7 @@ be deleted.
 6. Remove session-side nullable response variables and `finally` blocks; the
    invoked `send...` method is the sole producer owner.
 7. Rerun the focused tests and expect GREEN.
-8. Run `minimal-implementation` in read-only review mode on the resulting output path.
+8. Run `orion-minimal-implementation` in read-only review mode on the resulting output path.
    Record additional safe removals as separate task nodes, or record that none
    were found. Do not remove further helpers or the `GitWireError` classification
    in this commit; server diagnostics still use structured error kinds.
@@ -322,7 +322,7 @@ be deleted.
    ownership, action-specific authorization, and default byte compatibility.
 6. Complete the read-only task at
    `docs/plans/upcoming-work/02_git-wire-architecture-simplification/06_post-simplification-review.md`
-   with `minimal-implementation` in read-only review mode after all five implementation tasks are done.
+   with `orion-minimal-implementation` in read-only review mode after all five implementation tasks are done.
 7. Update
    `docs/reviews/2026-09-03-git-parser-architecture-simplification.md` with a
    dated `resolved`, `remaining`, or `regressed` conclusion and evidence for

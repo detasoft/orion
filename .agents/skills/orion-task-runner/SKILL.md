@@ -14,7 +14,7 @@ description: >-
 Use this skill for selection, planning, and task tracking. Every task execution
 must use [orion-review-orchestrator](../orion-review-orchestrator/SKILL.md),
 which owns worker launch, review, and the integration gate. The implementation
-worker must apply [minimal-implementation](../minimal-implementation/SKILL.md).
+worker must apply [orion-minimal-implementation](../orion-minimal-implementation/SKILL.md).
 
 When the orchestrator or its assigned worker reads this skill, apply the task
 model and the rules for that role; do not invoke the orchestrator recursively
@@ -128,7 +128,7 @@ implementation. Stage only changes made to start that task; do not run tests
 for the documentation-only claim commit. If the claim cannot be isolated,
 report the conflict without starting implementation.
 
-Read the referenced plans and apply `minimal-implementation` before and during
+Read the referenced plans and apply `orion-minimal-implementation` before and during
 implementation, including its final self-review. Follow the orchestrator and
 `AGENTS.md` for tests, verification, review fixes, commits, and integration.
 
@@ -162,6 +162,6 @@ existing claim using the same session identity:
 ```
 
 Report the task name and leaf-file path explicitly. Provide the required
-`minimal-implementation` summary: what was solved, how it was solved, which parts
+`orion-minimal-implementation` summary: what was solved, how it was solved, which parts
 changed and what changed in each, and actual verification results with any
 remaining work. Mention unrelated pre-existing working-tree changes.

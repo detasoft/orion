@@ -6,7 +6,7 @@ Depends on:
 [the parser/storage boundary](02_git-wire-architecture-simplification/03_parser-storage-boundary.md),
 [one repository command context](02_git-wire-architecture-simplification/04_repository-command-context.md)
 Blocks: [externalized repository storage](08_externalized-repository-storage.md)
-Required skill: `minimal-implementation` in read-only review mode
+Required skill: `orion-minimal-implementation` in read-only review mode
 
 Perform a read-only architecture simplification review of
 `git/git-native-storage` before extracting an external repository storage

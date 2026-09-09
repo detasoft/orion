@@ -94,7 +94,7 @@
   `docs/plans/` plan files.
 - Use `orion-task-runner` for task selection/planning and
   `orion-review-orchestrator` for every task execution. The implementation
-  worker must apply `minimal-implementation`. Plan insertion follows the intended local
+  worker must apply `orion-minimal-implementation`. Plan insertion follows the intended local
   numeric order; selection takes the first unclaimed, dependency-ready leaf.
 - Whenever you create a task, commit its task-tree changes immediately without
   waiting for a separate commit request. Treat this as a documentation-only
@@ -133,7 +133,7 @@ When several implementations satisfy the requirement, choose in this order:
 
 ## Architectural-change trigger
 
-Always use the `minimal-implementation` skill when reviewing changes or
+Always use the `orion-minimal-implementation` skill when reviewing changes or
 developing tasks, regardless of the scope or complexity of the work. Apply its
 implementation workflow for changes and its read-only mode for review requests.
 
@@ -154,7 +154,7 @@ A new `Manager`, `Provider`, `Registry`, `Factory`, `Coordinator`, `Service`, or
 ## Review expectation
 
 After any non-trivial implementation, perform the self-review required by
-`minimal-implementation`: verify that the same requirement could not be met
+`orion-minimal-implementation`: verify that the same requirement could not be met
 with fewer concepts or a smaller architectural delta. For cross-module,
 concept-heavy changes, inspect both individual modules and their interactions.
 

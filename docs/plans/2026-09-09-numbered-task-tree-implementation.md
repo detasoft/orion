@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the Orion task tree with locally numbered composite directories and leaf Markdown files, and require orchestrated execution with `minimal-implementation`.
+**Goal:** Replace the Orion task tree with locally numbered composite directories and leaf Markdown files, and require orchestrated execution with `orion-minimal-implementation`.
 
-**Architecture:** The filesystem is the only child-order source: numbered directories contain composite `TASK.md` descriptions and numbered Markdown files are executable leaves. The task runner selects and plans work, while `orion-review-orchestrator` exclusively executes selected leaves through workers that apply `minimal-implementation`.
+**Architecture:** The filesystem is the only child-order source: numbered directories contain composite `TASK.md` descriptions and numbered Markdown files are executable leaves. The task runner selects and plans work, while `orion-review-orchestrator` exclusively executes selected leaves through workers that apply `orion-minimal-implementation`.
 
 **Tech Stack:** Markdown task files, Git path history, Codex skills, repository link and skill validators.
 
@@ -29,7 +29,7 @@ the unmodified skills.
 
 Expected: the agent either ignores leaf Markdown files, expects every task to
 live in a `TASK.md`, duplicates order through parent checklists, or executes
-without making both `orion-review-orchestrator` and `minimal-implementation` mandatory.
+without making both `orion-review-orchestrator` and `orion-minimal-implementation` mandatory.
 
 **Step 3: Preserve the exact failure modes**
 
@@ -132,7 +132,7 @@ starting execution.
 **Step 3: Require minimal implementation delta**
 
 Require every implementation worker launched by the orchestrator to use
-`minimal-implementation` before and during implementation, including its final
+`orion-minimal-implementation` before and during implementation, including its final
 self-review and required change summary. Preserve the existing review gate,
 worktree isolation, user integration gate, verification ownership, and cleanup
 rules.
@@ -182,12 +182,12 @@ updated skills.
 
 Expected: it selects the lowest-numbered ready leaf recursively, stores its
 claim in that leaf file, delegates execution to `orion-review-orchestrator`,
-requires the worker to apply `minimal-implementation`, and deletes the leaf file only in
+requires the worker to apply `orion-minimal-implementation`, and deletes the leaf file only in
 the reviewed completion commit.
 
 **Step 5: Review for architectural duplication**
 
-Apply `minimal-implementation` in read-only review mode to the resulting task workflow.
+Apply `orion-minimal-implementation` in read-only review mode to the resulting task workflow.
 Confirm there is one task identity, one ordering source, one claim location,
 and one execution path.
 

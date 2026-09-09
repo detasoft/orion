@@ -28,7 +28,7 @@ Before selecting work, read and apply:
 
 - `AGENTS.md`;
 - `docs/reviews/RULES.md`;
-- `../minimal-implementation/SKILL.md` for worker implementation and concept review;
+- `../orion-minimal-implementation/SKILL.md` for worker implementation and concept review;
 - `docs/plans/TASK.md` and the relevant descendant task nodes;
 - `../orion-task-runner/SKILL.md` for task selection, ownership, claim, and
   task-tree rules; apply it in the coordinator role without recursive delegation.
@@ -133,7 +133,7 @@ on `main`, review, and user communication.
 The worker must:
 
 1. Read `AGENTS.md`, the selected numbered leaf file, ancestor `TASK.md` files,
-   referenced plans, and applicable local rules. Apply `minimal-implementation` before
+   referenced plans, and applicable local rules. Apply `orion-minimal-implementation` before
    and during implementation. Reading the runner here supplies worker claim
    and tracking rules; it does not authorize another worker or recursive
    orchestrator invocation.
@@ -150,12 +150,12 @@ The worker must:
    on `main`; it will be included in the branch's final squash.
 4. Until the user gate, perform every subsequent command and edit in that
    worktree. Preserve all unrelated shared-workspace state.
-5. Apply `minimal-implementation` before and during implementation, including
+5. Apply `orion-minimal-implementation` before and during implementation, including
    its behavioral slices, concept checks, and final self-review. Implement
    production behavior and tests under `AGENTS.md`, run focused checks while
    developing, and run the required development verification.
 6. Commit its work and return the task path, worktree, branch, base and head
-   SHAs, the required `minimal-implementation` summary of the problem, solution,
+   SHAs, the required `orion-minimal-implementation` summary of the problem, solution,
    changed parts and their specific changes, verification commands and results,
    and any known risks. It must not transfer the task commit to `main` yet.
 
@@ -166,7 +166,7 @@ claiming or editing implementation files and report why.
 
 Wait for the worker, then review the complete branch diff against its real
 base. Apply `docs/reviews/RULES.md`, relevant `@AiRule` class comments, the task
-contract, repository conventions, and `minimal-implementation` in read-only
+contract, repository conventions, and `orion-minimal-implementation` in read-only
 review mode. Check implementation and tests, not only the worker summary.
 
 Do not run Maven verification solely for review. The worker owns verification;

@@ -121,7 +121,7 @@ The implementation worker owns all Maven execution, outside the sandbox.
 
 ## Review and Completion
 
-Apply `minimal-implementation` before and during implementation, then perform
+Apply `orion-minimal-implementation` before and during implementation, then perform
 its final self-review of the changed subsystem and its HTTP/TLS/runtime
 callers. Retain complexity only for verified full-duplex I/O, ordering,
 boundedness, deadlines, and lifecycle ownership.

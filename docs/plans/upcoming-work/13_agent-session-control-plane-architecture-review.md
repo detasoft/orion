@@ -4,7 +4,7 @@ Status: todo
 Depends on:
 [AgentD MVP acceptance](../current-work/04_agentd/08_release-and-acceptance.md),
 [central agent session server MVP acceptance](../current-work/03_agent-session-server/06_release-and-acceptance.md)
-Required skill: `minimal-implementation` in read-only review mode
+Required skill: `orion-minimal-implementation` in read-only review mode
 
 Perform a read-only end-to-end architecture review of `agentd` and the central
 agent session server after both sides of the current MVP are complete.

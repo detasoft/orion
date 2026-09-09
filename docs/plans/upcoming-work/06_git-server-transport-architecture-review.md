@@ -6,7 +6,7 @@ Depends on:
 [the Git client removal re-audit](03_git-client-architecture-simplification/06_post-simplification-removal-review.md),
 [remote Git proxy bootstrap](../current-work/06_remote-git-proxy-bootstrap/TASK.md)
 Blocks: [the virtual-thread Git transport migration](07_virtual-thread-jetty-ssh-git-transport.md)
-Required skill: `minimal-implementation` in read-only review mode
+Required skill: `orion-minimal-implementation` in read-only review mode
 
 Perform a read-only vertical architecture review of `net/git-transport` and
 the Git-specific part of `net/http-core` after the current Git simplifications

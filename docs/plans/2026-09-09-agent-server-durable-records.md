@@ -124,7 +124,7 @@ The implementation worker owns tests, all outside the sandbox.
 
 ## Review and Completion
 
-Apply `minimal-implementation` before and during implementation and perform
+Apply `orion-minimal-implementation` before and during implementation and perform
 its final self-review of the subsystem. Preserve the atomicity, durability,
 generation, credential, and ownership guarantees that justify local complexity.
 

@@ -5,7 +5,7 @@ Depends on:
 [hierarchical configuration acceptance](../current-work/02_hierarchical-orion-configuration/03_administration-and-acceptance.md),
 [key-material rotation and bootstrap acceptance](../current-work/01_unified-key-material-bootstrap/03_rotation-recovery-and-acceptance.md),
 [the Git server transport review](06_git-server-transport-architecture-review.md)
-Required skill: `minimal-implementation` in read-only review mode
+Required skill: `orion-minimal-implementation` in read-only review mode
 
 Perform a read-only architecture review of `core/bootstrap`, `net/transport`,
 their Dagger composition, and direct runtime lifecycle boundaries after the
