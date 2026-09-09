@@ -1,8 +1,8 @@
 # Complete Control Handshake and Authentication
 
 Status: todo
-Depends on: 00_unsupported-handshake-version.md and completed AgentD launch
-identity and HTTP/2 transport.
+Depends on: integrated unsupported-version repair `b7dce0ce` and completed
+AgentD launch identity and HTTP/2 transport.
 Server contract: [Authentication](../../03_agent-session-server/01_control-and-registries/02_launch-and-reconnect-authentication.md)
 
 Generalize the existing initial handshake so each new transport connection
