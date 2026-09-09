@@ -1,9 +1,9 @@
 # Align AgentD with the Stabilized Session-Host Contract
 
 Status: todo (runtime alignment remains; documentation audit completed 2026-09-07)
-Parent: TASK.md
-Current contract: ../../2026-09-03-native-control-journal-idempotency-design.md
-Session-host review: ../../../../session-host/MODULE_REVIEW.md
+Parent: ../TASK.md
+Current contract: ../../../2026-09-03-native-control-journal-idempotency-design.md
+Session-host review: ../../../../../session-host/MODULE_REVIEW.md
 
 Bring every remaining AgentD session-host integration path to the final native
 control, journal, metadata, and lifecycle contracts after the focused control
@@ -60,6 +60,6 @@ The linked contract records the current Java/native interface differences.
 ## Boundary
 
 This task owns AgentD conformance with the established native host contracts
-and removal of superseded AgentD paths. It does not change the session-host
-wire or journal formats, implement server command orchestration, or add local
-terminal UI behavior.
+and removal of superseded AgentD paths. It does not change the session-host wire
+or journal formats, implement server command orchestration, or add local terminal
+UI behavior.

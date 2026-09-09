@@ -235,7 +235,7 @@ Journal-sync sends schema-2 `ACK_JOURNAL` only from a complete server-durable
 prefix and observes its journaled result. It must avoid a feedback loop driven
 solely by ACK results. The
 [native-control task](current-work/agentd/native-control-contract/TASK.md) and
-[alignment task](current-work/04_agentd/03_session-host-contract-alignment.md)
+[alignment task](current-work/04_agentd/03_session-host-contract-alignment/TASK.md)
 track the Java changes needed to conform to the current native contract.
 
 ## Verification Design

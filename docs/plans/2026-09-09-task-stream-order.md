@@ -84,7 +84,7 @@ control foundation before attaching replication and command routing to it.
 | D3 | [AgentD control runtime/acceptance](current-work/04_agentd/01_control-connection-lifecycle/04_runtime-and-acceptance.md) | D2a + D2b + A5. A5 does not depend on D3. |
 | J1 | [Server session replication](current-work/03_agent-session-server/02_session-replication.md) | A5; durable journal storage is integrated. The old worktree does not make this ready. |
 | J2 | [AgentD journal sync](current-work/04_agentd/02_journal-sync.md) | D3 + J1 for integrated delivery; settle ACK sequence allocation with command orchestration. |
-| J3 | [Remaining native contract alignment](current-work/04_agentd/03_session-host-contract-alignment.md) | Audit against integrated focused fixes before coding; finish with J2 and K2. Do not make the whole audit a prerequisite of those implementations. |
+| J3 | [Remaining native contract alignment](current-work/04_agentd/03_session-host-contract-alignment/TASK.md) | Audit against integrated focused fixes before coding; finish with J2 and K2. Do not make the whole audit a prerequisite of those implementations. |
 | K1 | [Server command service](current-work/03_agent-session-server/03_command-service.md) | A5; recommend J1 first for durable command evidence. Agree retry/unknown-result semantics with K2. |
 | K2 | [AgentD command orchestration](current-work/04_agentd/04_command-orchestration.md) | **Paused/owned**; journal sync, source-aware controls, and N6b recovery first. |
 | K3 | [Diagnostic secret redaction](current-work/04_agentd/05_diagnostic-secret-redaction.md) | K2; required before AgentD release. |

@@ -6,7 +6,7 @@ The current behavior is specified in
 [Native Control and Journal Contract](2026-09-03-native-control-journal-idempotency-design.md)
 and the [native protocol reference](../../session-host/protocol/README.md).
 Remaining Java integration belongs to the
-[AgentD alignment task](current-work/04_agentd/03_session-host-contract-alignment.md).
+[AgentD alignment task](current-work/04_agentd/03_session-host-contract-alignment/TASK.md).
 
 ## Admission and execution
 
