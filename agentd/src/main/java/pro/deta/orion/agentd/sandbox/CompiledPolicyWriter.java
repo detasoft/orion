@@ -15,12 +15,20 @@ import java.util.Set;
 
 public final class CompiledPolicyWriter {
     public static final String FILE_NAME = "sandbox-policy.cbor";
+    static final int SESSION_HOST_MAX_POLICY_BYTES = 1024 * 1024;
+    static final int SESSION_HOST_MAX_RULES = 32_768;
+    static final int SESSION_HOST_MAX_PATH_BYTES = 4096;
 
     public byte[] encode(CompiledPolicy policy) {
         if (policy.handledRights() != LandlockRight.HANDLED_MASK) {
             throw new PolicyException("compiled policy has an invalid handled-rights mask");
         }
         List<CompiledPolicy.Rule> rules = new ArrayList<>(policy.rules());
+        if (rules.size() > SESSION_HOST_MAX_RULES) {
+            throw new PolicyException(
+                    "compiled policy exceeds the session-host limit of "
+                            + SESSION_HOST_MAX_RULES + " rules");
+        }
         rules.sort(Comparator.comparing(
                 rule -> rule.path().toString().getBytes(StandardCharsets.UTF_8),
                 CompiledPolicyWriter::compareBytes));
@@ -37,7 +45,13 @@ public final class CompiledPolicyWriter {
             unsigned(output, rule.rights());
             previous = rule.path();
         }
-        return output.toByteArray();
+        byte[] encoded = output.toByteArray();
+        if (encoded.length > SESSION_HOST_MAX_POLICY_BYTES) {
+            throw new PolicyException(
+                    "compiled policy exceeds the session-host limit of "
+                            + SESSION_HOST_MAX_POLICY_BYTES + " bytes");
+        }
+        return encoded;
     }
 
     public Path write(Path sessionDirectory, CompiledPolicy policy) throws IOException {
@@ -92,8 +106,10 @@ public final class CompiledPolicyWriter {
 
     private static void text(ByteArrayOutputStream output, String value) {
         byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > SourcePolicyParser.MAX_PATH_BYTES) {
-            throw new PolicyException("compiled grant path is too long");
+        if (bytes.length > SESSION_HOST_MAX_PATH_BYTES) {
+            throw new PolicyException(
+                    "compiled grant path exceeds the session-host limit of "
+                            + SESSION_HOST_MAX_PATH_BYTES + " bytes");
         }
         argument(output, 3, bytes.length);
         output.writeBytes(bytes);

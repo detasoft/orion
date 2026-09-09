@@ -80,6 +80,24 @@ class JsonSessionManifestReaderTest {
     }
 
     @Test
+    void readsTheMaximumSandboxRuleCountAcceptedBySessionHost() throws Exception {
+        Path session = writeManifest("maximum-rules", "");
+        StringBuilder rules = new StringBuilder("\"readOnlyPaths\": [\"/usr\"], \"rules\": [");
+        for (int index = 0; index < 32_768; index++) {
+            if (index > 0) {
+                rules.append(',');
+            }
+            rules.append("{\"path\":\"/").append(index).append("\",\"rights\":[\"read-file\"]}");
+        }
+        rules.append(']');
+        replace(session, "\"readOnlyPaths\": [\"/usr\"]", rules.toString());
+
+        SessionManifest manifest = reader.read(session);
+
+        assertThat(manifest.sandbox().rules()).hasSize(32_768);
+    }
+
+    @Test
     void rejectsMismatchedIdentityAndUnsafeUnixEndpoint() throws Exception {
         Path mismatched = writeManifest("directory-id", "", "metadata-id", "control.sock");
         Path unsafe = writeManifest("unsafe", "", "unsafe", "../other/control.sock");
@@ -123,7 +141,7 @@ class JsonSessionManifestReaderTest {
     @Test
     void boundsBytesConsumedFromTheOpenedManifest() throws Exception {
         Path session = writeManifest("growing", "");
-        byte[] replacementBytes = new byte[1024 * 1024 + 1];
+        byte[] replacementBytes = new byte[(int) JsonSessionManifestReader.MAX_MANIFEST_BYTES + 1];
         JsonSessionManifestReader replacingReader = new JsonSessionManifestReader(
                 ignored -> new ByteArrayInputStream(replacementBytes));
 

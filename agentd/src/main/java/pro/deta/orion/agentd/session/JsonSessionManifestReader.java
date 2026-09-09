@@ -18,8 +18,9 @@ import java.util.Objects;
 import java.util.OptionalLong;
 
 public final class JsonSessionManifestReader implements SessionManifestReader {
-    private static final long MAX_MANIFEST_BYTES = 1024 * 1024;
+    static final long MAX_MANIFEST_BYTES = 32L * 1024 * 1024;
     private static final int MAX_ARRAY_ITEMS = 4096;
+    private static final int SESSION_HOST_MAX_SANDBOX_RULES = 32_768;
     private static final int MAX_TEXT_LENGTH = 64 * 1024;
     private static final int SUPPORTED_METADATA_VERSION = 1;
     private static final int SUPPORTED_JOURNAL_VERSION = 1;
@@ -139,7 +140,7 @@ public final class JsonSessionManifestReader implements SessionManifestReader {
         requireToken(parser.currentToken(), JsonToken.START_ARRAY, "rules must be an array");
         List<SessionManifest.SandboxRule> rules = new ArrayList<>();
         while (parser.nextToken() != JsonToken.END_ARRAY) {
-            if (rules.size() == MAX_ARRAY_ITEMS) {
+            if (rules.size() == SESSION_HOST_MAX_SANDBOX_RULES) {
                 throw invalid("rules has too many items");
             }
             requireToken(parser.currentToken(), JsonToken.START_OBJECT, "sandbox rule must be an object");

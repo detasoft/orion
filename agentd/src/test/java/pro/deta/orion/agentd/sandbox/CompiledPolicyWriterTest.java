@@ -6,11 +6,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CompiledPolicyWriterTest {
     @TempDir
@@ -36,5 +38,34 @@ class CompiledPolicyWriterTest {
                     java.nio.file.attribute.PosixFilePermission.OWNER_READ,
                     java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
         }
+    }
+
+    @Test
+    void rejectsPoliciesBeyondSessionHostLimits() {
+        List<CompiledPolicy.Rule> tooManyRules = new ArrayList<>();
+        for (int index = 0; index <= 32_768; index++) {
+            tooManyRules.add(new CompiledPolicy.Rule(
+                    Path.of("/rule-" + index), LandlockRight.READ_FILE.mask()));
+        }
+        CompiledPolicy tooMany = new CompiledPolicy(LandlockRight.HANDLED_MASK, tooManyRules);
+
+        String suffix = "x".repeat(4_080);
+        List<CompiledPolicy.Rule> oversizedRules = new ArrayList<>();
+        for (int index = 0; index < 257; index++) {
+            oversizedRules.add(new CompiledPolicy.Rule(
+                    Path.of("/" + String.format("%04x", index) + suffix),
+                    LandlockRight.READ_FILE.mask()));
+        }
+        CompiledPolicy oversized = new CompiledPolicy(LandlockRight.HANDLED_MASK, oversizedRules);
+        CompiledPolicyWriter writer = new CompiledPolicyWriter();
+
+        assertThatThrownBy(() -> writer.encode(tooMany))
+                .isInstanceOf(PolicyException.class)
+                .hasMessageContaining("session-host")
+                .hasMessageContaining("32768");
+        assertThatThrownBy(() -> writer.encode(oversized))
+                .isInstanceOf(PolicyException.class)
+                .hasMessageContaining("session-host")
+                .hasMessageContaining("1048576");
     }
 }
