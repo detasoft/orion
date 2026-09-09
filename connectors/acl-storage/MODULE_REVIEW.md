@@ -49,6 +49,10 @@ construction path and does not rewrite Git data or external locator syntax.
 **Confidence.** High. The mismatch follows the complete production path and standard decoded `URI` accessors;
 the trigger has not yet been exercised by a runtime regression test.
 
+**Priority signals.** Importance: high, because one accepted locator can provision one repository and make ACL
+operate on another. Repair ease: medium, because the fix can reuse the resolved source but changes an internal
+construction path and its direct tests across the bootstrap/connector boundary.
+
 ## 2. Local save can persist a credential update that reports failure
 
 **Problem.** A credential update passes every loaded ACL document to storage even when only one document changed.
@@ -95,6 +99,10 @@ which can modify multiple documents.
 **Confidence.** High for the write order and service outcome. Filesystem fault injection and crash recovery were
 not executed during this static review.
 
+**Priority signals.** Importance: high, because a credential mutation can be durable while being reported as
+failed and remaining inactive in memory. Repair ease: low, because safe publication must be coordinated with
+containment, multiple-document semantics, restart behavior, and filesystem-failure tests.
+
 ## 3. Physical Local containment is bypassed through symlinks
 
 **Problem.** A configured path such as `config/orion.xml` passes the lexical check when `config` is a symlink to
@@ -133,32 +141,6 @@ validated together with atomic replacement.
 
 **Confidence.** High for the static symlink bypass. No adversarial replacement race was executed.
 
-## 4. Two helpers remain after their storage path was removed
-
-**Problem.** The module still compiles the unused production helper `AccessControlStorageSecret` and an unused
-module-local copy of `PlainRootTokenAccessForTests`. Remote bootstrap secret resolution now belongs to the proxy
-runtime, while other modules own separate test accessors that are actually referenced.
-
-**Sources.** The unused files are
-[`AccessControlStorageSecret`](src/main/java/pro/deta/orion/acl/storage/AccessControlStorageSecret.java#L11) and
-[`PlainRootTokenAccessForTests`](src/test/java/pro/deta/orion/auth/PlainRootTokenAccessForTests.java#L3).
-Live bootstrap secret ownership enters through
-[`ProxyAwareNativeGitRepositoryProvider`](../../git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java#L50).
-The module's [`pom.xml`](pom.xml#L1) does not publish a test JAR or register either class as a service.
-
-**Documented behavior.** The existing
-[`unused helper deletion`](../../docs/plans/upcoming-work/01_acl-storage-hardening/02_remove-unused-helpers.md)
-task names these two files and requires preservation of independently used copies.
-
-**Contract.** No production, wire, persisted, reflective, service-loader, generated-wiring, or published test
-contract uses either file. Deletion must remain limited to this module's copies.
-
-**Minimal repair.** Delete the two files without replacement and remove only dependencies or package exposure
-made unused by those deletions.
-
-**Alternatives and consequences.** Retention preserves no verified behavior. Centralizing every similarly named
-test accessor would create a wider fixture contract with no production requirement. Deletion has no supported
-runtime consequence.
-
-**Confidence.** High from repository-wide symbol, service, build, and history searches. External source consumers
-of this unpublished module-local test class are not supported by the Maven graph.
+**Priority signals.** Importance: high, because descendant links cross the configured filesystem trust boundary
+for both reads and writes. Repair ease: low, because the repair must preserve containment through use across
+bootstrap and storage I/O, account for replacement races, and validate platform behavior.
