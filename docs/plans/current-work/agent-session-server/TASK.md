@@ -4,7 +4,7 @@ Status: todo
 Journal contract: ../../2026-09-02-session-journal-cbor-sequence.md
 Agent counterpart: ../agentd/TASK.md
 Next work: [Server-side agent connection and registration](control-and-registries/TASK.md).
-Next available task: [HTTP/2 control transport](control-and-registries/http2-control-transport/TASK.md).
+Next available task: [Durable agent and launch records](control-and-registries/agent-and-launch-records/TASK.md).
 
 Accept outbound AgentD connections, retain the replicated part of every session
 journal, route commands, and expose durable history and live events to clients.

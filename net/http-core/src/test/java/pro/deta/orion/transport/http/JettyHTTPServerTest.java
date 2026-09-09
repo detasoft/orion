@@ -2,6 +2,12 @@ package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentProtocolCodec;
+import pro.deta.orion.agent.protocol.AgentProtocolDecoder;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.SequenceDecodeResult;
+import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
@@ -32,8 +38,11 @@ import javax.net.ssl.TrustManager;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.URI;
 import java.net.URL;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyStore;
@@ -42,16 +51,35 @@ import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.time.Duration;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.LinkedBlockingQueue;
+import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpURI;
+import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.http.MetaData;
+import org.eclipse.jetty.http2.api.Session;
+import org.eclipse.jetty.http2.api.Stream;
+import org.eclipse.jetty.http2.client.HTTP2Client;
+import org.eclipse.jetty.http2.frames.DataFrame;
+import org.eclipse.jetty.http2.frames.HeadersFrame;
+import org.eclipse.jetty.http2.frames.ResetFrame;
+import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHTTPServerTest {
+    private static final AgentProtocolCodec AGENT_CODEC = new AgentProtocolCodec(AgentProtocolLimits.defaults());
     private static final String CLUSTER = "test-cluster";
     private static final KeyMaterialDescriptor SIGNING = descriptor(
             "server-signing-v1", KeyMaterialPurpose.SERVER_SIGNING);
@@ -195,6 +223,328 @@ class JettyHTTPServerTest {
         } finally {
             server.onStop();
         }
+    }
+
+    @Test
+    void servesBidirectionalAgentControlOverHttp2BeforeRequestBodyArrives() throws Exception {
+        List<AgentMessage> received = new CopyOnWriteArrayList<>();
+        CompletableFuture<Void> handshakeCompleted = new CompletableFuture<>();
+        AgentMessage firstReply = new AgentMessage.RequestSessionList();
+        AgentMessage secondReply = new AgentMessage.SessionSync(new SessionId("reply"), Optional.empty());
+        AgentControlHandler handler = connection -> {
+            return new AgentControlHandler.Session() {
+                @Override
+                public void onMessage(AgentMessage message) {
+                    received.add(message);
+                    if (received.size() == 2) {
+                        connection.send(firstReply);
+                        connection.send(secondReply).thenRun(() -> {
+                            connection.handshakeComplete();
+                            handshakeCompleted.complete(null);
+                        });
+                    } else if (received.size() == 3) {
+                        connection.send(firstReply);
+                    }
+                }
+
+                @Override
+                public void onClosed(Throwable failure) {
+                }
+            };
+        };
+        try (MaterialFixture material = material()) {
+            AgentControlRoute control = new AgentControlRoute(
+                    handler, AgentProtocolLimits.defaults(), Duration.ofMillis(200));
+            JettyHTTPServer server = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    material.owner().tls(), control, new OkRoute());
+            server.onStart();
+            try (TestAgentClient client = agentClient(server, material.serverCertificate())) {
+                byte[] first = AGENT_CODEC.encode(new AgentMessage.RequestSessionList());
+                byte[] second = AGENT_CODEC.encode(
+                        new AgentMessage.SessionSync(new SessionId("incoming"), Optional.empty()));
+                client.connect();
+
+                byte[] input = concatenate(first, second);
+                client.send(new byte[]{0x01});
+                client.send(java.util.Arrays.copyOfRange(input, 0, 1));
+                client.send(java.util.Arrays.copyOfRange(input, 1, input.length));
+                awaitMessages(received, 2);
+                assertThat(received).containsExactly(
+                        new AgentMessage.RequestSessionList(),
+                        new AgentMessage.SessionSync(new SessionId("incoming"), Optional.empty()));
+                assertThat(client.replies.poll(5, TimeUnit.SECONDS)).isEqualTo(firstReply);
+                assertThat(client.replies.poll(5, TimeUnit.SECONDS)).isEqualTo(secondReply);
+                handshakeCompleted.get(5, TimeUnit.SECONDS);
+
+                Thread.sleep(400);
+                client.send(first);
+                awaitMessages(received, 3);
+                assertThat(client.replies.poll(5, TimeUnit.SECONDS)).isEqualTo(firstReply);
+            } finally {
+                server.onStop();
+            }
+        }
+    }
+
+    @Test
+    void rejectsProductionControlAndMalformedInputAfterSuccessfulHeaders() throws Exception {
+        try (MaterialFixture material = material()) {
+            AgentControlRoute production = new AgentControlRoute();
+            JettyHTTPServer server = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    material.owner().tls(), production);
+            server.onStart();
+            try (TestAgentClient client = agentClient(server, material.serverCertificate())) {
+                client.connect();
+                client.send(AGENT_CODEC.encode(new AgentMessage.RequestSessionList()));
+                client.terminal.get(5, TimeUnit.SECONDS);
+            } finally {
+                server.onStop();
+            }
+
+            CompletableFuture<Throwable> closed = new CompletableFuture<>();
+            AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
+                @Override
+                public void onMessage(AgentMessage message) {
+                }
+
+                @Override
+                public void onClosed(Throwable failure) {
+                    closed.complete(failure);
+                }
+            };
+            JettyHTTPServer malformedServer = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    material.owner().tls(),
+                    new AgentControlRoute(handler, AgentProtocolLimits.defaults(), Duration.ofSeconds(5)));
+            malformedServer.onStart();
+            try (TestAgentClient client = agentClient(malformedServer, material.serverCertificate())) {
+                client.connect();
+                client.send(new byte[]{(byte) 0xff});
+                assertThat(closed.get(5, TimeUnit.SECONDS)).isNotNull();
+            } finally {
+                malformedServer.onStop();
+            }
+        }
+    }
+
+    @Test
+    void timesOutQuietControlWithoutBlockingHttp1Route() throws Exception {
+        CompletableFuture<Throwable> closed = new CompletableFuture<>();
+        AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
+            @Override
+            public void onMessage(AgentMessage message) {
+            }
+
+            @Override
+            public void onClosed(Throwable failure) {
+                closed.complete(failure);
+            }
+        };
+        try (MaterialFixture material = material()) {
+            AgentControlRoute control = new AgentControlRoute(
+                    handler, AgentProtocolLimits.defaults(), Duration.ofMillis(200));
+            JettyHTTPServer server = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    material.owner().tls(), control, new OkRoute());
+            server.onStart();
+            try (TestAgentClient client = agentClient(server, material.serverCertificate())) {
+                client.connect();
+                HttpsURLConnection ordinary = httpsConnection(server, clientContext(null, null));
+                assertThat(ordinary.getResponseCode()).isEqualTo(200);
+                assertThat(new String(ordinary.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+                        .isEqualTo("OK");
+                assertThat(closed.get(5, TimeUnit.SECONDS))
+                        .hasMessageContaining("timed out");
+            } finally {
+                server.onStop();
+            }
+        }
+    }
+
+    @Test
+    void rejectsOversizeAndInvalidTransportRequests() throws Exception {
+        CompletableFuture<Throwable> closed = new CompletableFuture<>();
+        AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
+            @Override
+            public void onMessage(AgentMessage message) {
+            }
+
+            @Override
+            public void onClosed(Throwable failure) {
+                closed.complete(failure);
+            }
+        };
+        try (MaterialFixture material = material()) {
+            AgentControlRoute control = new AgentControlRoute(
+                    handler, AgentProtocolLimits.defaults().withMaxMessageBytes(8), Duration.ofSeconds(5));
+            JettyHTTPServer server = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    material.owner().tls(), control);
+            server.onStart();
+            try (TestAgentClient client = agentClient(server, material.serverCertificate())) {
+                client.connect();
+                client.send(new byte[]{0x58, 0x20, 0, 0, 0, 0, 0, 0, 0});
+                assertThat(closed.get(5, TimeUnit.SECONDS)).isNotNull();
+                client.terminal.get(5, TimeUnit.SECONDS);
+
+                HttpsURLConnection get = (HttpsURLConnection) server.relativiseHttps(AgentControlRoute.PATH)
+                        .openConnection();
+                get.setSSLSocketFactory(clientContext(null, null).getSocketFactory());
+                get.setHostnameVerifier((hostname, session) -> true);
+                assertThat(get.getResponseCode()).isEqualTo(405);
+
+                HttpsURLConnection post = (HttpsURLConnection) server.relativiseHttps(AgentControlRoute.PATH)
+                        .openConnection();
+                post.setSSLSocketFactory(clientContext(null, null).getSocketFactory());
+                post.setHostnameVerifier((hostname, session) -> true);
+                post.setRequestMethod("POST");
+                post.setDoOutput(true);
+                post.getOutputStream().close();
+                assertThat(post.getResponseCode()).isEqualTo(505);
+            } finally {
+                server.onStop();
+            }
+        }
+    }
+
+    @Test
+    void abortsBlockedOutputAndSettlesPendingSends() throws Exception {
+        List<CompletableFuture<Void>> sends = new CopyOnWriteArrayList<>();
+        CompletableFuture<Void> sendsReady = new CompletableFuture<>();
+        CompletableFuture<Throwable> closed = new CompletableFuture<>();
+        AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
+            @Override
+            public void onMessage(AgentMessage message) {
+                for (int i = 0; i < 65; i++) {
+                    sends.add(connection.send(new AgentMessage.RequestSessionList()).toCompletableFuture());
+                }
+                sendsReady.complete(null);
+            }
+
+            @Override
+            public void onClosed(Throwable failure) {
+                closed.complete(failure);
+            }
+        };
+        try (MaterialFixture material = material()) {
+            AgentControlRoute control = new AgentControlRoute(
+                    handler, AgentProtocolLimits.defaults(), Duration.ofMillis(300));
+            JettyHTTPServer server = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    material.owner().tls(), control);
+            server.onStart();
+            try (TestAgentClient client = agentClient(server, material.serverCertificate(), false, 1)) {
+                client.connect();
+                client.send(AGENT_CODEC.encode(new AgentMessage.RequestSessionList()));
+                sendsReady.get(5, TimeUnit.SECONDS);
+                assertThat(sends).hasSize(65);
+                assertThat(sends.getFirst()).isNotDone();
+                assertThat(sends.getLast()).isCompletedExceptionally();
+                assertThat(closed).isNotDone();
+
+                assertThat(closed.get(5, TimeUnit.SECONDS)).hasMessageContaining("timed out");
+                client.terminal.get(5, TimeUnit.SECONDS);
+                awaitSettled(sends);
+                assertThat(sends).allMatch(CompletableFuture::isDone);
+            } finally {
+                server.onStop();
+            }
+        }
+    }
+
+    @Test
+    void cleansUpPeerResetAndServerShutdownAcrossSlowStreams() throws Exception {
+        LinkedBlockingQueue<Throwable> closed = new LinkedBlockingQueue<>();
+        AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
+            @Override
+            public void onMessage(AgentMessage message) {
+            }
+
+            @Override
+            public void onClosed(Throwable failure) {
+                closed.add(failure == null ? new IOException("closed") : failure);
+            }
+        };
+        try (MaterialFixture material = material()) {
+            AgentControlRoute control = new AgentControlRoute(
+                    handler, AgentProtocolLimits.defaults(), Duration.ofSeconds(30));
+            JettyHTTPServer server = server(
+                    httpConfiguration(false),
+                    desiredState(OrionHttpsConfiguration.ClientAuthentication.DISABLED, List.of()),
+                    material.owner().tls(), control, new OkRoute());
+            server.onStart();
+            List<TestAgentClient> clients = new ArrayList<>();
+            try {
+                for (int i = 0; i < 6; i++) {
+                    TestAgentClient client = agentClient(server, material.serverCertificate());
+                    client.connect();
+                    clients.add(client);
+                }
+                HttpsURLConnection ordinary = httpsConnection(server, clientContext(null, null));
+                assertThat(ordinary.getResponseCode()).isEqualTo(200);
+
+                clients.getFirst().reset();
+                assertThat(closed.poll(5, TimeUnit.SECONDS)).isNotNull();
+                server.onStop();
+                for (int i = 1; i < clients.size(); i++) {
+                    assertThat(closed.poll(5, TimeUnit.SECONDS)).isNotNull();
+                    clients.get(i).terminal.get(5, TimeUnit.SECONDS);
+                }
+            } finally {
+                server.onStop();
+                for (TestAgentClient client : clients) {
+                    client.close();
+                }
+            }
+        }
+    }
+
+    private static TestAgentClient agentClient(JettyHTTPServer server, X509Certificate certificate)
+            throws Exception {
+        return agentClient(server, certificate, true, 65_535);
+    }
+
+    private static TestAgentClient agentClient(
+            JettyHTTPServer server, X509Certificate certificate, boolean demandData, int receiveWindow)
+            throws Exception {
+        KeyStore trust = KeyStore.getInstance("PKCS12");
+        trust.load(null, new char[0]);
+        trust.setCertificateEntry("server", certificate);
+        SslContextFactory.Client tls = new SslContextFactory.Client();
+        tls.setTrustStore(trust);
+        return new TestAgentClient(URI.create(server.relativiseHttps("").toString()), tls, demandData, receiveWindow);
+    }
+
+    private static byte[] concatenate(byte[]... items) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        for (byte[] item : items) {
+            output.write(item);
+        }
+        return output.toByteArray();
+    }
+
+    private static void awaitMessages(List<AgentMessage> messages, int count) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (messages.size() < count && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(messages).hasSize(count);
+    }
+
+    private static void awaitSettled(List<CompletableFuture<Void>> futures) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (futures.stream().anyMatch(future -> !future.isDone()) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(futures).allMatch(CompletableFuture::isDone);
     }
 
     private static void assertHttpsSucceeds(
@@ -354,9 +704,9 @@ class JettyHTTPServerTest {
             OrionConfiguration bootstrap,
             OrionDesiredState desiredState,
             TlsCapability tls,
-            OrionHttpRoute route) {
+            OrionHttpRoute... routes) {
         OrionHttpRouteServlet servlet = new OrionHttpRouteServlet(
-                new OrionHttpRouteRegistry(Set.of(route)),
+                new OrionHttpRouteRegistry(Set.of(routes)),
                 new OrionHttpResponseWriter(new ObjectMapper()));
         return new JettyHTTPServer(bootstrap, desiredState, tls, servlet, null);
     }
@@ -446,6 +796,131 @@ class JettyHTTPServerTest {
 
         private void release() {
             release.countDown();
+        }
+    }
+
+    private static final class TestAgentClient implements AutoCloseable {
+        private final URI endpoint;
+        private final SslContextFactory.Client tls;
+        private final HTTP2Client client = new HTTP2Client();
+        private final AgentProtocolDecoder decoder = new AgentProtocolDecoder(AgentProtocolLimits.defaults());
+        private final LinkedBlockingQueue<AgentMessage> replies = new LinkedBlockingQueue<>();
+        private final CompletableFuture<Void> accepted = new CompletableFuture<>();
+        private final CompletableFuture<Void> terminal = new CompletableFuture<>();
+        private final boolean demandData;
+        private Stream stream;
+
+        private TestAgentClient(
+                URI endpoint, SslContextFactory.Client tls, boolean demandData, int receiveWindow) {
+            this.endpoint = endpoint;
+            this.tls = tls;
+            this.demandData = demandData;
+            tls.setEndpointIdentificationAlgorithm("HTTPS");
+            client.setProtocols(List.of("h2"));
+            client.setUseALPN(true);
+            client.setInitialStreamRecvWindow(receiveWindow);
+        }
+
+        private void connect() throws Exception {
+            tls.start();
+            client.start();
+            int port = endpoint.getPort() < 0 ? 443 : endpoint.getPort();
+            Session session = client.connect(
+                    tls,
+                    new InetSocketAddress(endpoint.getHost(), port),
+                    new Session.Listener() {
+                        @Override
+                        public void onFailure(Session session, Throwable failure, Callback callback) {
+                            callback.succeeded();
+                            terminal.completeExceptionally(failure);
+                        }
+                    }).get(5, TimeUnit.SECONDS);
+            MetaData.Request request = new MetaData.Request(
+                    "POST",
+                    HttpURI.from(endpoint.resolve(AgentControlRoute.PATH)),
+                    HttpVersion.HTTP_2,
+                    HttpFields.EMPTY);
+            stream = session.newStream(new HeadersFrame(request, null, false), new Stream.Listener() {
+                @Override
+                public void onHeaders(Stream stream, HeadersFrame frame) {
+                    if (frame.getMetaData() instanceof MetaData.Response response
+                            && response.getStatus() == 200 && !frame.isEndStream()) {
+                        accepted.complete(null);
+                        if (demandData) {
+                            stream.demand();
+                        }
+                    } else {
+                        accepted.completeExceptionally(new AssertionError("control response was not non-final 200"));
+                    }
+                }
+
+                @Override
+                public void onDataAvailable(Stream stream) {
+                    Stream.Data data;
+                    while ((data = stream.readData()) != null) {
+                        try {
+                            SequenceDecodeResult<AgentMessage> result = decoder.accept(data.frame().getByteBuffer());
+                            for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
+                                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
+                                    replies.add(decoded.value());
+                                }
+                            }
+                            result.terminalIssue().ifPresent(issue -> terminal.completeExceptionally(issue.exception()));
+                            if (data.frame().isEndStream()) {
+                                terminal.complete(null);
+                            }
+                        } finally {
+                            data.release();
+                        }
+                    }
+                    if (demandData && !terminal.isDone()) {
+                        stream.demand();
+                    }
+                }
+
+                @Override
+                public void onReset(Stream stream, ResetFrame frame, Callback callback) {
+                    callback.succeeded();
+                    terminal.complete(null);
+                }
+
+                @Override
+                public void onFailure(Stream stream, int error, String reason, Throwable failure,
+                                      Callback callback) {
+                    callback.succeeded();
+                    terminal.completeExceptionally(failure == null
+                            ? new IOException("stream failure " + error + ": " + reason) : failure);
+                }
+
+                @Override
+                public void onClosed(Stream stream) {
+                    terminal.complete(null);
+                }
+            }).get(5, TimeUnit.SECONDS);
+            accepted.get(5, TimeUnit.SECONDS);
+        }
+
+        private void send(byte[] bytes) throws Exception {
+            CompletableFuture<Void> sent = new CompletableFuture<>();
+            stream.data(new DataFrame(stream.getId(), ByteBuffer.wrap(bytes), false),
+                    Callback.from(() -> sent.complete(null), sent::completeExceptionally));
+            sent.get(5, TimeUnit.SECONDS);
+        }
+
+        private void reset() throws Exception {
+            CompletableFuture<Void> reset = new CompletableFuture<>();
+            stream.reset(new ResetFrame(stream.getId(), 0),
+                    Callback.from(() -> reset.complete(null), reset::completeExceptionally));
+            reset.get(5, TimeUnit.SECONDS);
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (stream != null && !stream.isClosed()) {
+                stream.reset(new ResetFrame(stream.getId(), 0), Callback.NOOP);
+            }
+            client.stop();
+            tls.stop();
         }
     }
 

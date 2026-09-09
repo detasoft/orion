@@ -110,4 +110,10 @@ public class OrionHttpModule {
         return route;
     }
 
+    @Provides
+    @IntoSet
+    static OrionHttpRoute agentControlRoute(AgentControlRoute route) {
+        return route;
+    }
+
 }

@@ -1,7 +1,7 @@
 # Authenticate Agent Launches and Reconnects
 
 Status: todo
-Depends on: ../http2-control-transport/TASK.md, ../agent-and-launch-records/TASK.md
+Depends on: completed HTTP/2 control transport, ../agent-and-launch-records/TASK.md
 
 Authenticate each control stream against the server-owned launch before making
 the connection available to other server operations.

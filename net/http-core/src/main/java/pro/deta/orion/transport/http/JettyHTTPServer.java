@@ -6,7 +6,9 @@ import jakarta.servlet.DispatcherType;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jetty.server.*;
+import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.ee10.servlet.FilterHolder;
+import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.server.handler.gzip.GzipHandler;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
@@ -126,10 +128,14 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
             context.setContextPath(ROOT_CONTEXT_PATH);
             context.insertHandler(gzipHandler);
 
-            context.addServlet(new ServletHolder(rootServlet), "/*");
+            ServletHolder servletHolder = new ServletHolder(rootServlet);
+            servletHolder.setAsyncSupported(true);
+            context.addServlet(servletHolder, "/*");
             if (authorizationFilter != null) {
+                FilterHolder filterHolder = new FilterHolder(authorizationFilter);
+                filterHolder.setAsyncSupported(true);
                 context.addFilter(
-                        new FilterHolder(authorizationFilter),
+                        filterHolder,
                         authorizationFilter.filterPath(),
                         EnumSet.of(DispatcherType.REQUEST));
             }
@@ -161,10 +167,17 @@ public class JettyHTTPServer  implements ServiceLifecycleStateMachineAdapter.Ser
         sslContextFactory.setNeedClientAuth(
                 material.clientAuthentication() == TlsClientAuthentication.REQUIRED);
 
+        HttpConfiguration httpConfiguration = new HttpConfiguration();
+        HttpConnectionFactory http1 = new HttpConnectionFactory(httpConfiguration);
+        HTTP2ServerConnectionFactory http2 = new HTTP2ServerConnectionFactory(httpConfiguration);
+        ALPNServerConnectionFactory alpn = new ALPNServerConnectionFactory(http2.getProtocol(), http1.getProtocol());
+        alpn.setDefaultProtocol(http1.getProtocol());
         ServerConnector httpsConnector = new ServerConnector(
                 server,
-                new SslConnectionFactory(sslContextFactory, "http/1.1"),
-                new HttpConnectionFactory(new HttpConfiguration()));
+                new SslConnectionFactory(sslContextFactory, alpn.getProtocol()),
+                alpn,
+                http2,
+                http1);
         httpsConnector.setName("https");
         httpsConnector.setHost(https.address());
         httpsConnector.setPort(https.port());

@@ -3,8 +3,7 @@
 Status: todo
 Design: ../../../2026-09-02-agentd-server-launched-identity-design.md
 Agent counterpart: [AgentD control lifecycle](../../agentd/control-connection-lifecycle/TASK.md)
-Next available task: [HTTP/2 control transport](http2-control-transport/TASK.md).
-Also ready: [Durable agent and launch records](agent-and-launch-records/TASK.md).
+Next available task: [Durable agent and launch records](agent-and-launch-records/TASK.md).
 
 Integrate authenticated AgentD connections with durable logical agent and
 session metadata while keeping connection state transient. The server creates
@@ -12,7 +11,6 @@ each agent identity before launch; AgentD authenticates that existing identity.
 
 ## Child Tasks
 
-- [ ] [Add HTTP/2 control transport](http2-control-transport/TASK.md)
 - [ ] [Persist agent and launch records](agent-and-launch-records/TASK.md)
 - [ ] [Authenticate agent launches and reconnects](launch-and-reconnect-authentication/TASK.md)
 - [ ] [Track authoritative connections and health](connection-ownership-and-health/TASK.md)
