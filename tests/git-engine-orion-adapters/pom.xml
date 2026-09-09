@@ -14,6 +14,10 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>schema</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.tests</groupId>
             <artifactId>git-engine-test-support</artifactId>
         </dependency>

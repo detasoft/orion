@@ -67,7 +67,7 @@ class OrionGitRouteNativeTest {
         service(route,
                 request(
                         "GET",
-                        "/r/team/project.git/info/refs",
+                        "/r/team%2Fproject.git/info/refs",
                         null,
                         "git-upload-pack",
                         Map.of(

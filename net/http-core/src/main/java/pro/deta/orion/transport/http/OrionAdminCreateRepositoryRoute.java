@@ -5,6 +5,7 @@ import jakarta.inject.Inject;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -42,10 +43,7 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
         AdminRepositoryRequest request = objectMapper.readValue(
                 req.getInputStream(),
                 AdminRepositoryRequest.class);
-        if (request.name() == null || request.name().isBlank()) {
-            throw new IllegalArgumentException("Repository name is required");
-        }
-        String repositoryName = normalizeRepositoryName(request.name());
+        String repositoryName = RepositoryName.parse(request.name()).value();
         Result<NativeGitRepository> created = gitRepositoryProvider.create(repositoryName);
         boolean repositoryCreated = true;
         if (created instanceof Result.Failure<NativeGitRepository> failure
@@ -56,21 +54,6 @@ public class OrionAdminCreateRepositoryRoute extends BaseAdminRoute {
         }
         Map<String, Object> body = Map.of("status", "ok", "created", repositoryCreated);
         return repositoryCreated ? OrionHttpResponse.created(body) : OrionHttpResponse.ok(body);
-    }
-
-    private static String normalizeRepositoryName(String rawRepositoryName) {
-        String repositoryName = rawRepositoryName;
-        while (repositoryName.startsWith("/")) {
-            repositoryName = repositoryName.substring(1);
-        }
-        repositoryName = repositoryName.replaceFirst("\\.git$", "");
-        if (repositoryName.isBlank()
-                || repositoryName.contains("\0")
-                || repositoryName.contains("\\")
-                || repositoryName.contains("..")) {
-            throw new IllegalArgumentException("Invalid Git repository path");
-        }
-        return repositoryName;
     }
 
     public record AdminRepositoryRequest(String name) {

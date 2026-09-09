@@ -15,6 +15,7 @@ import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.nio.file.Path;
@@ -120,7 +121,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             BootstrapSourceConfig source) {
         String id = requireSourceId(sourceId);
         BootstrapGitLocation location = BootstrapGitLocation.parse(source);
-        String repositoryName = location.proxyName();
+        String repositoryName = repositoryName(location.proxyName());
         String previousSource = provisionalSources.get(id);
         if (previousSource != null && !previousSource.equals(repositoryName)) {
             throw new IllegalStateException("Bootstrap source binding conflicts");
@@ -179,7 +180,12 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                 "catalog bindings");
         Map<String, RuntimeGitProxyBinding> candidate = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, RuntimeGitProxyBinding> entry : loaded.entrySet()) {
-            String repositoryName = repositoryName(entry.getKey());
+            String storedName = entry.getKey();
+            String repositoryName = repositoryName(storedName);
+            if (!repositoryName.equals(storedName)) {
+                throw new IllegalArgumentException(
+                        "Persistent proxy repository name is not canonical: " + storedName);
+            }
             RuntimeGitProxyBinding binding = Objects.requireNonNull(entry.getValue(), "proxy binding");
             if (!backend.exists(repositoryName)) {
                 throw new IllegalStateException("Persistent proxy repository is unavailable: " + repositoryName);
@@ -234,7 +240,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
 
     @Override
     public boolean exists(String repositoryName) {
-        return backend.exists(repositoryName);
+        String canonicalName = repositoryName(repositoryName);
+        return backend.exists(canonicalName);
     }
 
     @Override
@@ -244,7 +251,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
 
     @Override
     public Result<NativeGitRepository> create(String repositoryName) {
-        return backend.create(repositoryName);
+        String canonicalName = repositoryName(repositoryName);
+        return backend.create(canonicalName);
     }
 
     @Override
@@ -264,13 +272,14 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             Map<String, byte[]> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
-        RuntimeGitProxyBinding proxy = binding(repositoryName);
+        String canonicalName = repositoryName(repositoryName);
+        RuntimeGitProxyBinding proxy = binding(canonicalName);
         if (proxy == null) {
-            NativeGitRepositoryProvider.super.saveFiles(repositoryName, refName, files, message, author);
+            NativeGitRepositoryProvider.super.saveFiles(canonicalName, refName, files, message, author);
             return;
         }
-        NativeGitRepository repository = backend.find(repositoryName)
-                .valueOrFailure("Cannot open native repository " + repositoryName);
+        NativeGitRepository repository = backend.find(canonicalName)
+                .valueOrFailure("Cannot open native repository " + canonicalName);
         NativeGitFileUpdate update = repository.prepareProxyFileUpdate(refName, files, message, author);
         List<RefUpdateResult> results = proxy.publish(update.objects(), update.refUpdates(), true);
         if (results.contains(RefUpdateResult.STALE)) {
@@ -284,20 +293,22 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
             LooseObjectStore objects,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
-        RuntimeGitProxyBinding proxy = binding(repositoryName);
+        String canonicalName = repositoryName(repositoryName);
+        RuntimeGitProxyBinding proxy = binding(canonicalName);
         if (proxy == null) {
-            return NativeGitRepositoryProvider.super.publish(repositoryName, objects, updates, atomic);
+            return NativeGitRepositoryProvider.super.publish(canonicalName, objects, updates, atomic);
         }
         return proxy.publish(objects, updates, atomic);
     }
 
     private Result<NativeGitRepository> policyBound(String repositoryName) {
-        RuntimeGitProxyBinding proxy = binding(repositoryName);
+        String canonicalName = repositoryName(repositoryName);
+        RuntimeGitProxyBinding proxy = binding(canonicalName);
         if (proxy == null) {
-            return backend.find(repositoryName);
+            return backend.find(canonicalName);
         }
         proxy.refresh();
-        return switch (backend.find(repositoryName)) {
+        return switch (backend.find(canonicalName)) {
             case Result.Success(NativeGitRepository repository) ->
                     new Result.Success<>(new PolicyBoundNativeGitRepository(
                             this,
@@ -333,14 +344,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     }
 
     private static String repositoryName(String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("Bootstrap repository name must not be blank");
-        }
-        Path path = Path.of(value).normalize();
-        if (path.isAbsolute() || path.startsWith("..") || path.toString().equals(".")) {
-            throw new IllegalArgumentException("Bootstrap repository name is invalid");
-        }
-        return path.toString().replace('\\', '/');
+        return RepositoryName.parse(value).value();
     }
 
     private static String repositoryPath(String value) {

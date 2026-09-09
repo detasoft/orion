@@ -27,6 +27,7 @@ import java.util.zip.CRC32;
 import java.util.zip.DeflaterOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FileNativeGitRepositoryProviderTest {
     private static final String NULL_ID = "0".repeat(40);
@@ -38,7 +39,7 @@ class FileNativeGitRepositoryProviderTest {
         FileNativeGitRepositoryProvider first =
                 new FileNativeGitRepositoryProvider(rootDirectory);
         NativeGitRepository repository = first.create(
-                "team/project.git").valueOrFailure("repository");
+                "team/project").valueOrFailure("repository");
         GitObjectId blob = repository.writeObject(
                 ObjectType.BLOB,
                 "persistent".getBytes(StandardCharsets.UTF_8));
@@ -46,10 +47,10 @@ class FileNativeGitRepositoryProviderTest {
 
         FileNativeGitRepositoryProvider second =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository reopened = second.find("team/project.git")
+        NativeGitRepository reopened = second.find("team/project")
                 .valueOrFailure("repository");
 
-        assertThat(reopened.name()).isEqualTo("team/project.git");
+        assertThat(reopened.name()).isEqualTo("team/project");
         assertThat(reopened.defaultHead()).isEqualTo("refs/heads/main");
         assertThat(reopened.refs())
                 .containsEntry("refs/heads/main", blob.value());
@@ -69,7 +70,7 @@ class FileNativeGitRepositoryProviderTest {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
 
-        provider.create("team/project.git")
+        provider.create("team/project")
                 .valueOrFailure("repository");
 
         assertThat(Files.exists(rootDirectory.resolve("team"))).isFalse();
@@ -92,9 +93,9 @@ class FileNativeGitRepositoryProviderTest {
     void createFailsWhenRepositoryAlreadyExists(@TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        provider.create("project.git").valueOrFailure("repository");
+        provider.create("project").valueOrFailure("repository");
 
-        Result<NativeGitRepository> result = provider.create("project.git");
+        Result<NativeGitRepository> result = provider.create("project");
 
         assertThat(result).isInstanceOf(Result.Failure.class);
         assertThat(((Result.Failure<?>) result).code())
@@ -106,10 +107,54 @@ class FileNativeGitRepositoryProviderTest {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
 
-        Result<NativeGitRepository> result = provider.find("missing.git");
+        Result<NativeGitRepository> result = provider.find("missing");
 
         assertThat(result).isInstanceOf(Result.Failure.class);
-        assertThat(provider.exists("missing.git")).isFalse();
+        assertThat(provider.exists("missing")).isFalse();
+    }
+
+    @Test
+    void canonicalizesNamesBeforeLookupAndPersistsTheCanonicalIdentity(
+            @TempDir Path rootDirectory) {
+        FileNativeGitRepositoryProvider first =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+
+        NativeGitRepository created = first.create("team%2Frepo")
+                .valueOrFailure("repository");
+
+        assertThat(created.name()).isEqualTo("team/repo");
+        assertThat(first.find("team/repo").valueOrFailure("repository"))
+                .isSameAs(created);
+        assertThat(first.create("team/repo")).isInstanceOf(Result.Failure.class);
+
+        FileNativeGitRepositoryProvider reopened =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        assertThat(reopened.find("team/repo").valueOrFailure("repository").name())
+                .isEqualTo("team/repo");
+        assertThat(reopened.repositoryNames()).containsExactly("team/repo");
+    }
+
+    @Test
+    void rejectsInvalidPersistedRepositoryNames(@TempDir Path rootDirectory) throws IOException {
+        FileNativeGitRepositoryProvider provider =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+        provider.create("team/repo").valueOrFailure("repository");
+        Path metadata = singlePathWithSuffix(
+                rootDirectory,
+                "orion-native-repository.properties");
+        String content = Files.readString(metadata, StandardCharsets.UTF_8);
+        Files.writeString(
+                metadata,
+                content.replace("name=team/repo", "name=Team/repo"),
+                StandardCharsets.UTF_8);
+
+        FileNativeGitRepositoryProvider reopened =
+                new FileNativeGitRepositoryProvider(rootDirectory);
+
+        assertThatThrownBy(reopened::repositoryNames)
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> reopened.find("team/repo"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -117,7 +162,7 @@ class FileNativeGitRepositoryProviderTest {
             @TempDir Path rootDirectory) throws IOException {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = provider.create("team/project.git")
+        NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         byte[] first = "published-one".getBytes(StandardCharsets.UTF_8);
         byte[] second = "published-two".getBytes(StandardCharsets.UTF_8);
@@ -174,7 +219,7 @@ class FileNativeGitRepositoryProviderTest {
             @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = provider.create("team/project.git")
+        NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         byte[] first = "pack-backed-one".getBytes(StandardCharsets.UTF_8);
         byte[] second = "pack-backed-two".getBytes(StandardCharsets.UTF_8);
@@ -188,7 +233,7 @@ class FileNativeGitRepositoryProviderTest {
 
         FileNativeGitRepositoryProvider reopenedProvider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository reopened = reopenedProvider.find("team/project.git")
+        NativeGitRepository reopened = reopenedProvider.find("team/project")
                 .valueOrFailure("repository");
         assertPublishedObject(reopened, blobId(second), second);
         assertThat(reopened.readObjectPrefix(GitObjectId.of(blobId(first)), 9))
@@ -208,7 +253,7 @@ class FileNativeGitRepositoryProviderTest {
             @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = provider.create("team/project.git")
+        NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         byte[] source = "hello world".getBytes(StandardCharsets.UTF_8);
         byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
@@ -226,7 +271,7 @@ class FileNativeGitRepositoryProviderTest {
 
         FileNativeGitRepositoryProvider reopenedProvider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository reopened = reopenedProvider.find("team/project.git")
+        NativeGitRepository reopened = reopenedProvider.find("team/project")
                 .valueOrFailure("repository");
         assertPublishedObject(reopened, blobId(target), target);
     }
@@ -236,7 +281,7 @@ class FileNativeGitRepositoryProviderTest {
             @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = provider.create("team/project.git")
+        NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         byte[] source = "hello world".getBytes(StandardCharsets.UTF_8);
         byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
@@ -260,7 +305,7 @@ class FileNativeGitRepositoryProviderTest {
 
         FileNativeGitRepositoryProvider reopenedProvider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository reopened = reopenedProvider.find("team/project.git")
+        NativeGitRepository reopened = reopenedProvider.find("team/project")
                 .valueOrFailure("repository");
         assertThat(reopened.readObjectPrefix(GitObjectId.of(blobId(target)), 7))
                 .isPresent()
@@ -279,7 +324,7 @@ class FileNativeGitRepositoryProviderTest {
             @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = provider.create("team/project.git")
+        NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         byte[] pack = pack("indexed-object".getBytes(StandardCharsets.UTF_8));
 
@@ -297,7 +342,7 @@ class FileNativeGitRepositoryProviderTest {
             @TempDir Path rootDirectory) throws IOException {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = provider.create("team/project.git")
+        NativeGitRepository repository = provider.create("team/project")
                 .valueOrFailure("repository");
         byte[] pack = pack("broken".getBytes(StandardCharsets.UTF_8));
         pack[pack.length - 1] ^= 1;

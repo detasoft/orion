@@ -185,9 +185,7 @@ public class OrionGitRoute implements OrionHttpRoute {
             GitBlockingWireTransport wire) {
         return new GitBlockingWireSession(
                 repositoryService,
-                new AuthenticatedRepositoryAccessHook(
-                        securityContext,
-                        true),
+                new AuthenticatedRepositoryAccessHook(securityContext),
                 GitWireConfiguration.allSupported(),
                 packfileUriSourceFactory,
                 wire);

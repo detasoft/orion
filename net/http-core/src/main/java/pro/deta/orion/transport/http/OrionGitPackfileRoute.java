@@ -10,6 +10,7 @@ import pro.deta.orion.auth.check.rule.SubjectAccessRules;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.pack.PublishedPackContent;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -105,21 +106,12 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
                     SubjectAccessRules.authenticated());
             accessEnforcer().require(
                     securityContext,
-                    RepositoryResource.of(repositoryResourceName(repositoryName)),
+                    RepositoryResource.of(repositoryName),
                     RepositoryAccessRules.read());
             return true;
         } catch (OrionSecurityException error) {
             return false;
         }
-    }
-
-    private static String repositoryResourceName(String repositoryName) {
-        String normalized = repositoryName;
-        while (normalized.startsWith("/")) {
-            normalized = normalized.substring(1);
-        }
-        normalized = normalized.replaceFirst("\\.git$", "");
-        return normalized;
     }
 
     private static SecurityContext securityContextFrom(
@@ -140,12 +132,11 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
         if (packPath <= ROUTE_PREFIX.length()) {
             return Optional.empty();
         }
-        String repositoryName = path.substring(
+        String repositoryPath = path.substring(
                 ROUTE_PREFIX.length(),
                 packPath);
         String fileName = path.substring(packPath + PACK_PATH.length());
-        if (repositoryName.isBlank()
-                || !fileName.endsWith(PACK_SUFFIX)) {
+        if (!fileName.endsWith(PACK_SUFFIX)) {
             return Optional.empty();
         }
         String packId = fileName.substring(
@@ -154,7 +145,12 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
         if (!isLowercaseSha1(packId)) {
             return Optional.empty();
         }
-        return Optional.of(new RouteMatch(repositoryName, packId));
+        try {
+            String repositoryName = RepositoryName.fromGitPath(repositoryPath).value();
+            return Optional.of(new RouteMatch(repositoryName, packId));
+        } catch (IllegalArgumentException error) {
+            return Optional.empty();
+        }
     }
 
     private static String routePath(HttpServletRequest req) {

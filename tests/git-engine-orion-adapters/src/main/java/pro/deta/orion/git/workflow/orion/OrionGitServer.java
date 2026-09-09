@@ -5,13 +5,13 @@ import org.eclipse.jgit.transport.RefSpec;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.workflow.GitCapability;
 import pro.deta.orion.git.workflow.GitRemoteRepository;
 import pro.deta.orion.git.workflow.GitServer;
 import pro.deta.orion.git.workflow.RepositorySnapshot;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.config.GitTransportConfig;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.transport.git.DefaultGitNativeRepositoryService;
 import pro.deta.orion.transport.git.GitNativeTransportService;
 import pro.deta.orion.util.Result;
@@ -62,7 +62,7 @@ final class OrionGitServer implements GitServer {
             start(requestedRoot);
         }
         NativeGitRepository repository = success(
-                provider.create(GitWireBootstrap.normalizeRepositoryPath(repositoryName)),
+                provider.create(RepositoryName.fromGitPath(repositoryName).value()),
                 "provision " + repositoryName);
         repositories.put(repositoryName, repository);
         return remoteRepository(repositoryName);
@@ -176,7 +176,7 @@ final class OrionGitServer implements GitServer {
         NativeGitRepository repository = repositories.get(name);
         if (repository == null) {
             repository = success(
-                    provider.find(GitWireBootstrap.normalizeRepositoryPath(name)),
+                    provider.find(RepositoryName.fromGitPath(name).value()),
                     "find " + name);
             repositories.put(name, repository);
         }

@@ -17,24 +17,27 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class GitWireBootstrapTest {
 
     @Test
-    void normalizesRepositoryPathsForTransportLookup() {
-        assertThat(GitWireBootstrap.normalizeRepositoryPath(" /team/project.git "))
-                .isEqualTo("team/project");
-        assertThat(GitWireBootstrap.normalizeRepositoryPath("project"))
-                .isEqualTo("project");
+    void canonicalizesEquivalentRepositoryPathsAtEveryWireIngress() throws Exception {
+        GitWireBootstrap smartHttp = smartHttp("/team%2Frepo.git");
+        InitialRequestData ssh = GitWireBootstrap.sshCommandData(
+                "git-upload-pack '/team%5Crepo.git'",
+                null);
+        GitWireBootstrap daemon = nativeDaemonPayload("git-upload-pack /team/repo.git");
+
+        assertThat(smartHttp.data().getRepositoryPath()).isEqualTo("team/repo");
+        assertThat(ssh.getRepositoryPath()).isEqualTo("team/repo");
+        assertThat(daemon.data().getRepositoryPath()).isEqualTo("team/repo");
     }
 
     @Test
-    void rejectsInvalidRepositoryPathsForTransportLookup() {
-        assertThatThrownBy(() -> GitWireBootstrap.normalizeRepositoryPath("/"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Invalid Git repository path");
-        assertThatThrownBy(() -> GitWireBootstrap.normalizeRepositoryPath("../project.git"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Invalid Git repository path");
-        assertThatThrownBy(() -> GitWireBootstrap.normalizeRepositoryPath("team\\project.git"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Invalid Git repository path");
+    void rejectsInvalidRepositoryPathsAtWireIngress() {
+        for (String path : new String[]{
+                "/", "//repo.git", "/../repo.git", "/%2E%2E/repo.git", "/repo%252Egit",
+                "/repo%GG.git", "/Repo.git", "/r%C3%A9po.git"}) {
+            assertThatThrownBy(() -> smartHttp(path))
+                    .as("Git repository path %s", path)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test
@@ -183,6 +186,16 @@ class GitWireBootstrapTest {
                         new ByteArrayInputStream(
                                 ascii.getBytes(StandardCharsets.US_ASCII))),
                 new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()));
+    }
+
+    private static GitWireBootstrap smartHttp(String repositoryPath) {
+        return GitWireBootstrap.smartHttp(
+                new InputStreamBufferedByteInput(new ByteArrayInputStream(new byte[0])),
+                new OutputStreamBufferedByteOutput(new ByteArrayOutputStream()),
+                InitialRequestService.UPLOAD_PACK,
+                repositoryPath,
+                "localhost",
+                null);
     }
 
     private static GitWireBootstrap nativeDaemonPayload(String payload) throws Exception {

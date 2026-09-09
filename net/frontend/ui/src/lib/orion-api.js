@@ -1,9 +1,5 @@
 const DEFAULT_BASE_URL = ''
 
-export function normalizeRepositoryName(value) {
-  return value.trim().replace(/^\/+/, '').replace(/\.git$/i, '')
-}
-
 export function formatRelativeDate(value, now = new Date()) {
   const date = value instanceof Date ? value : new Date(value)
   const seconds = Math.round((date.getTime() - now.getTime()) / 1000)
@@ -71,7 +67,7 @@ export function createOrionClient(options = {}) {
     createRepository(name) {
       return request('/api/admin/repositories', {
         method: 'POST',
-        body: JSON.stringify({ name: normalizeRepositoryName(name) }),
+        body: JSON.stringify({ name }),
       })
     },
     createOrUpdateUser(user) {

@@ -2,6 +2,7 @@ package pro.deta.orion.git.nativestorage;
 
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.util.ArrayList;
@@ -58,9 +59,6 @@ public final class InMemoryNativeGitRepositoryProvider implements NativeGitRepos
     }
 
     private static String requireName(String repositoryName) {
-        if (repositoryName == null || repositoryName.isBlank()) {
-            throw new IllegalArgumentException("repositoryName must not be blank");
-        }
-        return repositoryName;
+        return RepositoryName.parse(repositoryName).value();
     }
 }

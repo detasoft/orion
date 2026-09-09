@@ -71,15 +71,12 @@ class NativeGitAccessControlStorageTest {
     }
 
     @Test
-    void preservesResolvedEncodedRepositoryIdentityForReadsAndWrites(@TempDir Path root)
+    void usesOneCanonicalResolvedIdentityForEncodedReadsAndWrites(@TempDir Path root)
             throws Exception {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(root);
-        NativeGitRepository selected = backend.create("team%2Frepo").valueOrFailure("selected repository");
-        NativeGitRepository other = backend.create("team/repo").valueOrFailure("other repository");
+        NativeGitRepository selected = backend.create("team/repo").valueOrFailure("selected repository");
         String ref = "refs/heads/configuration";
         selected.saveFiles(ref, Map.of(ACL_PATH, bytes("selected ACL")), "seed", GitCommitAuthor.EMPTY);
-        other.saveFiles(ref, Map.of(ACL_PATH, bytes("other ACL")), "seed", GitCommitAuthor.EMPTY);
-        String otherVersion = other.refs().get(ref);
         BootstrapConfigurationSourceConfig configuration = config();
         configuration.setLocation("local:team%2Frepo");
         configuration.setRef("configuration");
@@ -87,7 +84,7 @@ class NativeGitAccessControlStorageTest {
         ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(backend);
         ResolvedBootstrapSource source = provider.resolveProvisional(
                 BootstrapRepositorySources.CONFIGURATION, configuration, false);
-        assertThat(source.repositoryName()).contains("team%2Frepo");
+        assertThat(source.repositoryName()).contains("team/repo");
         AccessControlStorage storage = new AccessControlStorageResolver(
                 new BootstrapRepositorySources(List.of(source)), provider).resolve();
 
@@ -102,9 +99,7 @@ class NativeGitAccessControlStorageTest {
 
         assertThat(selected.loadFiles(ref, List.of(ACL_PATH)).files())
                 .containsEntry(ACL_PATH, bytes("versioned update"));
-        assertThat(other.loadFiles(ref, List.of(ACL_PATH)).files())
-                .containsEntry(ACL_PATH, bytes("other ACL"));
-        assertThat(other.refs().get(ref)).isEqualTo(otherVersion);
+        assertThat(backend.repositoryNames()).containsExactly("team/repo");
     }
 
     @Test

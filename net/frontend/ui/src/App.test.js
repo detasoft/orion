@@ -13,7 +13,6 @@ const client = {
 vi.mock('./lib/orion-api.js', () => ({
   createOrionClient: vi.fn(() => client),
   formatRelativeDate: vi.fn(() => 'just now'),
-  normalizeRepositoryName: vi.fn((name) => name.trim().replace(/\.git$/, '')),
 }))
 
 import App from './App.vue'
@@ -90,17 +89,17 @@ describe('Orion connection', () => {
     await connect(wrapper)
 
     await wrapper.get('.primary-button.compact').trigger('click')
-    await wrapper.get('input[placeholder="team/project"]').setValue('platform/my repo#?')
+    await wrapper.get('input[placeholder="team/project"]').setValue('platform/my-repo')
     await wrapper.get('form.modal').trigger('submit')
     await flushPromises()
     await wrapper.findAll('.primary-nav .nav-item')[1].trigger('click')
 
-    expect(client.createRepository).toHaveBeenCalledWith('platform/my repo#?')
-    expect(wrapper.text()).toContain('platform/my repo#?')
+    expect(client.createRepository).toHaveBeenCalledWith('platform/my-repo')
+    expect(wrapper.text()).toContain('platform/my-repo')
     expect(wrapper.text()).toContain('reported by Orion')
-    expect(wrapper.text()).toContain('ssh://alice@git.example:2222/platform/my%20repo%23%3F.git')
-    expect(wrapper.text()).toContain('https://git.example/r/platform/my%20repo%23%3F')
-    expect(wrapper.text()).toContain('git://git.example:9418/platform/my%20repo%23%3F')
+    expect(wrapper.text()).toContain('ssh://alice@git.example:2222/platform/my-repo.git')
+    expect(wrapper.text()).toContain('https://git.example/r/platform/my-repo')
+    expect(wrapper.text()).toContain('git://git.example:9418/platform/my-repo')
     expect(wrapper.findAll('.clone-url')).toHaveLength(3)
   })
 

@@ -19,20 +19,12 @@ public final class AuthenticatedRepositoryAccessHook
     private static final String BRANCH_REF_PREFIX = "refs/heads/";
 
     private final SecurityContext securityContext;
-    private final boolean strictRepositoryName;
 
     public AuthenticatedRepositoryAccessHook(
             SecurityContext securityContext) {
-        this(securityContext, false);
-    }
-
-    public AuthenticatedRepositoryAccessHook(
-            SecurityContext securityContext,
-            boolean strictRepositoryName) {
         this.securityContext = Objects.requireNonNull(
                 securityContext,
                 "securityContext");
-        this.strictRepositoryName = strictRepositoryName;
     }
 
     @Override
@@ -44,10 +36,7 @@ public final class AuthenticatedRepositoryAccessHook
 
     @Override
     public void beforeRead(String repositoryName) {
-        RepositoryResource repositoryResource =
-                repositoryResource(
-                        repositoryName,
-                        strictRepositoryName);
+        RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
         require(() -> accessEnforcer().require(
                 securityContext,
                 SubjectAccessRules.authenticated()));
@@ -67,10 +56,7 @@ public final class AuthenticatedRepositoryAccessHook
                     "Requested Git object does not resolve to a reachable branch",
                     null);
         }
-        RepositoryResource repositoryResource =
-                repositoryResource(
-                        repositoryName,
-                        strictRepositoryName);
+        RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
         AccessDeniedException denied = null;
         for (String branchName : branchNames) {
             try {
@@ -88,10 +74,7 @@ public final class AuthenticatedRepositoryAccessHook
 
     @Override
     public void beforeCreate(String repositoryName) {
-        RepositoryResource repositoryResource =
-                repositoryResource(
-                        repositoryName,
-                        strictRepositoryName);
+        RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
         require(() -> accessEnforcer().require(
                 securityContext,
                 repositoryResource,
@@ -100,10 +83,7 @@ public final class AuthenticatedRepositoryAccessHook
 
     @Override
     public void beforeWrite(String repositoryName) {
-        RepositoryResource repositoryResource =
-                repositoryResource(
-                        repositoryName,
-                        strictRepositoryName);
+        RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
         require(() -> accessEnforcer().require(
                 securityContext,
                 repositoryResource,
@@ -115,10 +95,7 @@ public final class AuthenticatedRepositoryAccessHook
             String repositoryName,
             String refName,
             boolean force) {
-        RepositoryResource repositoryResource =
-                repositoryResource(
-                        repositoryName,
-                        strictRepositoryName);
+        RepositoryResource repositoryResource = RepositoryResource.of(repositoryName);
         if (refName.startsWith(BRANCH_REF_PREFIX)) {
             String branchName = refName.substring(BRANCH_REF_PREFIX.length());
             require(() -> accessEnforcer().require(
@@ -140,44 +117,6 @@ public final class AuthenticatedRepositoryAccessHook
         } catch (OrionSecurityException e) {
             throw new AccessDeniedException(e.getMessage(), e);
         }
-    }
-
-    private static RepositoryResource repositoryResource(
-            String repositoryName,
-            boolean strictRepositoryName) {
-        return RepositoryResource.of(normalizeRepositoryName(
-                repositoryName,
-                strictRepositoryName));
-    }
-
-    private static String normalizeRepositoryName(
-            String repositoryName,
-            boolean strictRepositoryName) {
-        String normalized;
-        if (strictRepositoryName) {
-            normalized = repositoryName == null ? "" : repositoryName;
-        } else {
-            normalized = Objects.requireNonNull(
-                    repositoryName,
-                    "repositoryName");
-        }
-        while (normalized.startsWith("/")) {
-            normalized = normalized.substring(1);
-        }
-        normalized = normalized.replaceFirst("\\.git$", "");
-        if (strictRepositoryName
-                && (normalized.contains("\0")
-                || normalized.contains("\\")
-                || normalized.contains(".."))) {
-            throw new IllegalArgumentException(
-                    "Invalid Git repository path");
-        }
-        if (normalized.isBlank()) {
-            throw new IllegalArgumentException(strictRepositoryName
-                    ? "Invalid Git repository path"
-                    : "repositoryName must not be blank");
-        }
-        return normalized;
     }
 
     private interface AccessCheck {

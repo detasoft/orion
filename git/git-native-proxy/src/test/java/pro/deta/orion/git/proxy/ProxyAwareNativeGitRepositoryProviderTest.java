@@ -21,6 +21,80 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
     @Test
+    void canonicalizesBeforeProxyBindingLookupAndBackendAccess() throws Exception {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        backend.create("team/repo").valueOrFailure("repository");
+        AtomicInteger refreshes = new AtomicInteger();
+        AtomicInteger publishes = new AtomicInteger();
+        RuntimeGitProxyBinding binding = new RuntimeGitProxyBinding() {
+            @Override
+            public void refresh() {
+                refreshes.incrementAndGet();
+            }
+
+            @Override
+            public List<RefUpdateResult> publish(
+                    LooseObjectStore objects,
+                    List<LooseRefStore.Update> updates,
+                    boolean atomic) {
+                publishes.incrementAndGet();
+                return java.util.Collections.nCopies(updates.size(), RefUpdateResult.CREATED);
+            }
+        };
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
+                backend,
+                new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> { },
+                (location, transport, repository, updates, atomic) -> List.of());
+        provider.activate(ignored -> Map.of("team/repo", binding), ignored -> new char[0]);
+
+        NativeGitRepository repository = provider.openForRead("team%2Frepo")
+                .valueOrFailure("proxy repository");
+        provider.saveFiles(
+                "team%5Crepo",
+                "refs/heads/main",
+                Map.of("orion.xml", "configuration".getBytes(StandardCharsets.UTF_8)),
+                "save through proxy",
+                GitCommitAuthor.EMPTY);
+
+        assertThat(repository.name()).isEqualTo("team/repo");
+        assertThat(refreshes).hasValue(1);
+        assertThat(publishes).hasValue(1);
+    }
+
+    @Test
+    void canonicalizesLocalBootstrapRepositoryIdentity() {
+        ProxyAwareNativeGitRepositoryProvider provider = provider(
+                new AtomicInteger(),
+                new AtomicInteger());
+
+        ResolvedBootstrapSource source = provider.resolveProvisional(
+                "configuration",
+                localSource("team%2Frepo"),
+                true);
+
+        assertThat(source.repositoryName()).contains("team/repo");
+        assertThat(provider.exists("team/repo")).isTrue();
+    }
+
+    @Test
+    void rejectsInvalidLocalBootstrapRepositoryNames() {
+        ProxyAwareNativeGitRepositoryProvider provider = provider(
+                new AtomicInteger(),
+                new AtomicInteger());
+
+        for (String name : List.of(
+                "/repo", "../repo", "%2E%2E/repo", "%GG", "Repo", "repo.git")) {
+            assertThatThrownBy(() -> provider.resolveProvisional(
+                    "source-" + Math.abs(name.hashCode()),
+                    localSource(name),
+                    true))
+                    .as("local repository name %s", name)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void refreshesProvisionalProxyBeforeEachLogicalRead() {
         AtomicInteger refreshes = new AtomicInteger();
         ProxyAwareNativeGitRepositoryProvider provider = provider(
@@ -207,6 +281,23 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     @Test
+    void activationRejectsNonCanonicalPersistentBindingNames() {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        backend.create("team/repo").valueOrFailure("repository");
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
+                backend,
+                new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> { },
+                (location, transport, repository, updates, atomic) -> List.of());
+
+        assertThatThrownBy(() -> provider.activate(
+                ignored -> Map.of("team%2Frepo", new RecordingBinding()),
+                ignored -> new char[0]))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not canonical");
+    }
+
+    @Test
     void activationRemovesUnadoptedProvisionalBindings() {
         AtomicInteger refreshes = new AtomicInteger();
         ProxyAwareNativeGitRepositoryProvider provider = provider(refreshes, new AtomicInteger());
@@ -244,6 +335,15 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         source.setLocation("git+file:///upstream.git");
         source.setRef("refs/heads/main");
         source.setPath(path);
+        source.setAuth(Map.of());
+        return source;
+    }
+
+    private static BootstrapSourceConfig localSource(String repositoryName) {
+        BootstrapSourceConfig source = new BootstrapSourceConfig();
+        source.setLocation("local:" + repositoryName);
+        source.setRef("refs/heads/main");
+        source.setPath("orion.xml");
         source.setAuth(Map.of());
         return source;
     }

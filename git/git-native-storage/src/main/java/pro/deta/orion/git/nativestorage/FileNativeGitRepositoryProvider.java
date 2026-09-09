@@ -4,6 +4,7 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.pack.LocalPackObjectDirectory;
 import pro.deta.orion.git.nativestorage.pack.LocalPackPublicationStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.schema.orion.RepositoryName;
 import pro.deta.orion.util.Result;
 
 import java.io.IOException;
@@ -131,10 +132,14 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
         }
         String name = properties.getProperty(NAME_PROPERTY);
         String defaultHead = properties.getProperty(DEFAULT_HEAD_PROPERTY, DEFAULT_HEAD);
-        if (name == null || name.isBlank()) {
+        if (name == null) {
             throw new IllegalStateException("Native repository metadata is missing a name");
         }
-        return new RepositoryMetadata(name, defaultHead);
+        String canonicalName = requireName(name);
+        if (!canonicalName.equals(name)) {
+            throw new IllegalArgumentException("Native repository metadata name is not canonical: " + name);
+        }
+        return new RepositoryMetadata(canonicalName, defaultHead);
     }
 
     private Path metadataPath(String repositoryName) {
@@ -146,10 +151,7 @@ public final class FileNativeGitRepositoryProvider implements NativeGitRepositor
     }
 
     private static String requireName(String repositoryName) {
-        if (repositoryName == null || repositoryName.isBlank()) {
-            throw new IllegalArgumentException("repositoryName must not be blank");
-        }
-        return repositoryName;
+        return RepositoryName.parse(repositoryName).value();
     }
 
     private static String repositoryId(String repositoryName) {

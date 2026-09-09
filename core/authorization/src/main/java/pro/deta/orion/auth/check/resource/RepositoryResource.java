@@ -1,15 +1,14 @@
 package pro.deta.orion.auth.check.resource;
 
 import pro.deta.orion.auth.check.RootResource;
-
-import java.util.Objects;
+import pro.deta.orion.schema.orion.RepositoryName;
 
 /**
  * Repository-level resource used for create, read and write checks before the git service opens or creates storage.
  */
 public record RepositoryResource(String repositoryName) implements RootResource {
     public RepositoryResource {
-        Objects.requireNonNull(repositoryName, "repositoryName");
+        repositoryName = RepositoryName.parse(repositoryName).value();
     }
 
     public static RepositoryResource of(String repositoryName) {

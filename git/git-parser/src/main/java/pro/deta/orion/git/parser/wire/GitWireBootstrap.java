@@ -5,6 +5,7 @@ import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
 import pro.deta.orion.net.io.BufferedByteInput;
 import pro.deta.orion.net.io.BufferedByteOutput;
+import pro.deta.orion.schema.orion.RepositoryName;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -61,7 +62,11 @@ public final class GitWireBootstrap {
     }
 
     private static InitialRequestData transportRequest(InitialRequestService service, String repositoryPath, String host, String gitProtocol) {
-        return new InitialRequestData(service, normalizeRepositoryPath(repositoryPath), host, gitProtocolParameters(gitProtocol));
+        return new InitialRequestData(
+                service,
+                RepositoryName.fromGitPath(repositoryPath).value(),
+                host,
+                gitProtocolParameters(gitProtocol));
     }
 
     private static InitialRequestData nativeDaemonData(String request) {
@@ -86,7 +91,7 @@ public final class GitWireBootstrap {
         List<String> protocolParameters = metadata.protocolParameters();
         return new InitialRequestData(
                 InitialRequestService.fromWireName(service),
-                normalizeRepositoryPath(repositoryPath),
+                RepositoryName.fromGitPath(repositoryPath).value(),
                 metadata.host(),
                 gitProtocolParameters(String.join(":", protocolParameters)),
                 protocolParameters);
@@ -252,18 +257,6 @@ public final class GitWireBootstrap {
             case "2" -> 2;
             default -> -1;
         };
-    }
-
-    public static String normalizeRepositoryPath(String repository) {
-        String normalized = repository == null ? "" : repository.trim();
-        while (normalized.startsWith("/")) {
-            normalized = normalized.substring(1);
-        }
-        normalized = normalized.replaceFirst("\\.git$", "");
-        if (normalized.isBlank() || normalized.contains("\0") || normalized.contains("\\") || normalized.contains("..")) {
-            throw new IllegalArgumentException("Invalid Git repository path");
-        }
-        return normalized;
     }
 
     private record GitSshRequest(InitialRequestService service, String repositoryPath) {

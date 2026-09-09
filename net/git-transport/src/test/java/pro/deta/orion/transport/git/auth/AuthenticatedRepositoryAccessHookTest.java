@@ -6,6 +6,7 @@ import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -160,7 +161,26 @@ class AuthenticatedRepositoryAccessHookTest {
     }
 
     @Test
-    void repositoryResourceIgnoresGitSuffix() {
+    void wireCanonicalNameUsesTheExactRepositoryGrant() {
+        AuthenticatedRepositoryAccessHook hook =
+                new AuthenticatedRepositoryAccessHook(
+                        repositorySecurityContext(
+                                "team/repo",
+                                false,
+                                true));
+        String repositoryName = GitWireBootstrap.sshCommandData(
+                        "git-upload-pack '/team%2Frepo.git'",
+                        null)
+                .getRepositoryPath();
+
+        assertThatCode(() -> hook.beforeRead(repositoryName))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> hook.beforeCreate(repositoryName))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsInvalidCanonicalRepositoryNames() {
         AuthenticatedRepositoryAccessHook hook =
                 new AuthenticatedRepositoryAccessHook(
                         repositorySecurityContext(
@@ -168,31 +188,12 @@ class AuthenticatedRepositoryAccessHookTest {
                                 false,
                                 true));
 
-        assertThatCode(() -> hook.beforeRead("/team/project.git"))
-                .doesNotThrowAnyException();
-        assertThatCode(() -> hook.beforeCreate("/team/project.git"))
-                .doesNotThrowAnyException();
-    }
-
-    @Test
-    void strictRepositoryNamesRejectHttpUnsafePaths() {
-        AuthenticatedRepositoryAccessHook hook =
-                new AuthenticatedRepositoryAccessHook(
-                        repositorySecurityContext(
-                                "team/project",
-                                false,
-                                true),
-                        true);
-
         assertThatThrownBy(() -> hook.beforeRead("team/../project.git"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid Git repository path");
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> hook.beforeRead("team\\project.git"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid Git repository path");
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> hook.beforeRead("team/project.git\0"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid Git repository path");
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private static SecurityContext authenticatedWithoutGrants() {

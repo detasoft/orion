@@ -38,33 +38,6 @@ class DefaultOperatorDomainSourceTest {
     }
 
     @Test
-    void percentEncodesUtf8BytesWithoutFormEncoding() {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        provider.create("space and/é");
-        provider.create("quote'name");
-
-        List<OperatorDomainViews.RepositoryView> views = availableSnapshot(source(
-                provider, emptyRuntime(), DefaultOperatorDomainSourceTest::resources).repositories()).value();
-
-        assertThat(views)
-                .extracting(OperatorDomainViews.RepositoryView::id)
-                .containsExactly("quote%27name", "space%20and%2F%C3%A9");
-        assertThat(views).allSatisfy(view -> assertThat(view.name()).isEmpty());
-    }
-
-    @Test
-    void encodesWholeNavigationOperatorRepositoryNames() {
-        InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        provider.create(".");
-        provider.create("..");
-
-        assertThat(availableSnapshot(source(provider, emptyRuntime(), DefaultOperatorDomainSourceTest::resources)
-                .repositories()).value())
-                .extracting(OperatorDomainViews.RepositoryView::id)
-                .containsExactly("%2E", "%2E%2E");
-    }
-
-    @Test
     void returnsOneFailureInsteadOfAPartialRepositorySnapshot() {
         NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
             @Override

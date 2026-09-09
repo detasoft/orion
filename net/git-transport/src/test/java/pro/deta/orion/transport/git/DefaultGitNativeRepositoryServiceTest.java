@@ -60,11 +60,11 @@ class DefaultGitNativeRepositoryServiceTest {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        assertThatThrownBy(() -> legacyUploadPackAdvertisement(service, request("/demo.git")))
+        assertThatThrownBy(() -> legacyUploadPackAdvertisement(service, request("demo")))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Native repository does not exist: /demo.git");
+                .hasMessageContaining("Native repository does not exist: demo");
 
-        assertThat(provider.exists("/demo.git")).isFalse();
+        assertThat(provider.exists("demo")).isFalse();
     }
 
     @Test
@@ -72,7 +72,7 @@ class DefaultGitNativeRepositoryServiceTest {
         RecordingProvider provider = new RecordingProvider(providerWithMainRef());
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        legacyUploadPackAdvertisement(service, request("/demo.git"));
+        legacyUploadPackAdvertisement(service, request("demo"));
 
         assertThat(provider.readCalls).isEqualTo(1);
     }
@@ -80,12 +80,12 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void advertisesRefsFromFileBackedRepositoryProvider(@TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider firstProvider = new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = firstProvider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = firstProvider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         FileNativeGitRepositoryProvider secondProvider = new FileNativeGitRepositoryProvider(rootDirectory);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(secondProvider);
 
-        GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("/demo.git"));
+        GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("demo"));
 
         assertThat(advertisement.refs()).containsExactly(GitAdvertisedRef.direct(MAIN_ID, "HEAD"), GitAdvertisedRef.direct(MAIN_ID, "refs/heads/main"));
     }
@@ -93,12 +93,12 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void advertisesHeadFirstAndSortsRepositoryRefs() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/tags/v1", NULL_ID, TAG_ID);
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("/demo.git"));
+        GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("demo"));
 
         assertThat(advertisement.refs()).containsExactly(GitAdvertisedRef.direct(MAIN_ID, "HEAD"), GitAdvertisedRef.direct(MAIN_ID, "refs/heads/main"), GitAdvertisedRef.direct(TAG_ID, "refs/tags/v1"));
         assertThat(advertisement.capabilities())
@@ -122,11 +122,11 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void advertisesHeadFromExistingBranchWhenDefaultHeadTargetIsMissing() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("/demo.git"));
+        GitV1Advertisement advertisement = legacyUploadPackAdvertisement(service, request("demo"));
 
         assertThat(advertisement.refs()).containsExactly(
                 GitAdvertisedRef.direct(MAIN_ID, "HEAD"),
@@ -233,7 +233,7 @@ class DefaultGitNativeRepositoryServiceTest {
         for (UploadCapabilityCase capabilityCase : cases) {
             GitV1Advertisement advertisement =
                     service.legacyUploadPackAdvertisement(
-                            request("/demo.git"),
+                            request("demo"),
                             GitNativeRepositoryAccessHook.ALLOW_ALL,
                             capabilityCase.configuration());
 
@@ -244,11 +244,11 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void advertisesReceivePackRefsAndCapabilities() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitV1Advertisement advertisement = legacyReceivePackAdvertisement(service, receiveRequest("/demo.git"));
+        GitV1Advertisement advertisement = legacyReceivePackAdvertisement(service, receiveRequest("demo"));
 
         assertThat(advertisement.refs()).containsExactly(GitAdvertisedRef.direct(MAIN_ID, "HEAD"), GitAdvertisedRef.direct(MAIN_ID, "refs/heads/main"));
         assertThat(advertisement.capabilities())
@@ -328,7 +328,7 @@ class DefaultGitNativeRepositoryServiceTest {
         for (ReceiveCapabilityCase capabilityCase : cases) {
             GitV1Advertisement advertisement =
                     service.legacyReceivePackAdvertisement(
-                            receiveRequest("/demo.git"),
+                            receiveRequest("demo"),
                             GitNativeRepositoryAccessHook.ALLOW_ALL,
                             capabilityCase.configuration());
 
@@ -341,7 +341,7 @@ class DefaultGitNativeRepositoryServiceTest {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitV1Advertisement advertisement = legacyReceivePackAdvertisement(service, receiveRequest("/demo.git"));
+        GitV1Advertisement advertisement = legacyReceivePackAdvertisement(service, receiveRequest("demo"));
 
         assertThat(advertisement.refs()).containsExactly(GitAdvertisedRef.direct(NULL_ID, "capabilities^{}"));
     }
@@ -350,38 +350,38 @@ class DefaultGitNativeRepositoryServiceTest {
     void uploadChecksReadAccessBeforeRepositoryLookup() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository");
+        provider.create("demo").valueOrFailure("repository");
         RecordingAccessHook accessHook = new RecordingAccessHook();
         GitNativeRepositoryService service =
                 new DefaultGitNativeRepositoryService(provider);
 
         service.legacyUploadPackAdvertisement(
-                request("/demo.git"),
+                request("demo"),
                 accessHook,
                 GitWireConfiguration.allSupported());
 
-        assertThat(accessHook.calls()).containsExactly("read /demo.git");
+        assertThat(accessHook.calls()).containsExactly("read demo");
     }
 
     @Test
     void uploadStopsBeforeRepositoryLookupWhenReadHookRejects() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository");
+        provider.create("demo").valueOrFailure("repository");
         RecordingAccessHook accessHook = new RecordingAccessHook();
         accessHook.rejectRead();
         GitNativeRepositoryService service =
                 new DefaultGitNativeRepositoryService(provider);
 
         assertThatThrownBy(() -> service.legacyUploadPackAdvertisement(
-                request("/demo.git"),
+                request("demo"),
                 accessHook,
                 GitWireConfiguration.allSupported()))
                 .isInstanceOf(
                         GitNativeRepositoryAccessHook.AccessDeniedException.class)
-                .hasMessageContaining("denied read /demo.git");
+                .hasMessageContaining("denied read demo");
 
-        assertThat(accessHook.calls()).containsExactly("read /demo.git");
+        assertThat(accessHook.calls()).containsExactly("read demo");
     }
 
     @Test
@@ -393,33 +393,33 @@ class DefaultGitNativeRepositoryServiceTest {
                 new DefaultGitNativeRepositoryService(provider);
 
         service.legacyReceivePackAdvertisement(
-                receiveRequest("/demo.git"),
+                receiveRequest("demo"),
                 accessHook,
                 GitWireConfiguration.allSupported());
 
-        assertThat(provider.exists("/demo.git")).isTrue();
+        assertThat(provider.exists("demo")).isTrue();
         assertThat(accessHook.calls()).containsExactly(
-                "receive /demo.git",
-                "create /demo.git");
+                "receive demo",
+                "create demo");
     }
 
     @Test
     void receiveFindsExistingRepositoryAfterReceiveAndWriteHooks() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository");
+        provider.create("demo").valueOrFailure("repository");
         RecordingAccessHook accessHook = new RecordingAccessHook();
         GitNativeRepositoryService service =
                 new DefaultGitNativeRepositoryService(provider);
 
         service.legacyReceivePackAdvertisement(
-                receiveRequest("/demo.git"),
+                receiveRequest("demo"),
                 accessHook,
                 GitWireConfiguration.allSupported());
 
         assertThat(accessHook.calls()).containsExactly(
-                "receive /demo.git",
-                "write /demo.git");
+                "receive demo",
+                "write demo");
     }
 
     @Test
@@ -432,19 +432,19 @@ class DefaultGitNativeRepositoryServiceTest {
                 new DefaultGitNativeRepositoryService(provider);
 
         assertThatThrownBy(() -> service.legacyReceivePackAdvertisement(
-                receiveRequest("/demo.git"),
+                receiveRequest("demo"),
                 accessHook,
                 GitWireConfiguration.allSupported()))
                 .isInstanceOf(
                         GitNativeRepositoryAccessHook.AccessDeniedException.class)
-                .hasMessageContaining("denied receive /demo.git");
-        assertThat(provider.exists("/demo.git")).isFalse();
+                .hasMessageContaining("denied receive demo");
+        assertThat(provider.exists("demo")).isFalse();
     }
 
     @Test
     void receiveAppliesValidNonAtomicRefsAfterPublishingIncomingObjects() {
         InMemoryNativeGitRepositoryProvider provider = providerWithMainRef();
-        NativeGitRepository repository = provider.find("/demo.git")
+        NativeGitRepository repository = provider.find("demo")
                 .valueOrFailure("repository");
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
         LooseObjectStore quarantine = new LooseObjectStore();
@@ -484,7 +484,7 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void receivePublishesThroughRepositoryProvider() {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = backend.create("/demo.git")
+        NativeGitRepository repository = backend.create("demo")
                 .valueOrFailure("repository");
         RecordingProvider provider = new RecordingProvider(backend);
         provider.rejectPublication = true;
@@ -518,7 +518,7 @@ class DefaultGitNativeRepositoryServiceTest {
     void receiveRejectsUnauthorizedRefWithoutPublishingIt() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git")
+        NativeGitRepository repository = provider.create("demo")
                 .valueOrFailure("repository");
         GitNativeRepositoryService service =
                 new DefaultGitNativeRepositoryService(provider);
@@ -545,14 +545,14 @@ class DefaultGitNativeRepositoryServiceTest {
                 new GitNativeRepositoryService.ReceivePackStatus(
                         "refs/heads/feature", false, "ACCESS_DENIED"));
         assertThat(repository.refs()).doesNotContainKey("refs/heads/feature");
-        assertThat(accessHook.calls()).contains("update /demo.git refs/heads/feature false");
+        assertThat(accessHook.calls()).contains("update demo refs/heads/feature false");
     }
 
     @Test
     void receiveIdentifiesNonFastForwardUpdateForAuthorization() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git")
+        NativeGitRepository repository = provider.create("demo")
                 .valueOrFailure("repository");
         GitObjectId oldObject = repository.writeObject(
                 ObjectType.BLOB,
@@ -581,7 +581,7 @@ class DefaultGitNativeRepositoryServiceTest {
         assertThat(statuses).containsExactly(
                 new GitNativeRepositoryService.ReceivePackStatus(
                         "refs/heads/main", true, ""));
-        assertThat(accessHook.calls()).contains("update /demo.git refs/heads/main true");
+        assertThat(accessHook.calls()).contains("update demo refs/heads/main true");
     }
 
     @Test
@@ -589,7 +589,7 @@ class DefaultGitNativeRepositoryServiceTest {
             @TempDir Path rootDirectory) {
         FileNativeGitRepositoryProvider provider =
                 new FileNativeGitRepositoryProvider(rootDirectory);
-        NativeGitRepository repository = provider.create("/demo.git")
+        NativeGitRepository repository = provider.create("demo")
                 .valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -642,7 +642,7 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void receiveDoesNotPublishRefWithIncompleteObjectClosure() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git")
+        NativeGitRepository repository = provider.create("demo")
                 .valueOrFailure("repository");
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
         LooseObjectStore quarantine = new LooseObjectStore();
@@ -674,12 +674,12 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void fetchesPackFromRepositoryNamedByInitialRequest() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository");
+        provider.create("demo").valueOrFailure("repository");
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
         NativePackProducer producer = legacyUploadPack(
                 service,
-                request("/demo.git"),
+                request("demo"),
                 new NativeFetchRequest(
                         Set.of(),
                         Set.of(),
@@ -690,7 +690,7 @@ class DefaultGitNativeRepositoryServiceTest {
         ByteBuf pack = Unpooled.buffer();
         try (producer) {
             assertThat(producer.produce(pack)).isEqualTo(NativePackProducer.Result.COMPLETED);
-            assertThat(provider.exists("/demo.git")).isTrue();
+            assertThat(provider.exists("demo")).isTrue();
             assertThat(pack.readCharSequence(4, java.nio.charset.StandardCharsets.US_ASCII)).hasToString("PACK");
         } finally {
             pack.release();
@@ -701,7 +701,7 @@ class DefaultGitNativeRepositoryServiceTest {
     void fetchResolvesBranchesContainingEachWantedObject() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git")
+        NativeGitRepository repository = provider.create("demo")
                 .valueOrFailure("repository");
         GitObjectId wanted = repository.writeObject(
                 ObjectType.BLOB,
@@ -713,7 +713,7 @@ class DefaultGitNativeRepositoryServiceTest {
         RecordingAccessHook accessHook = new RecordingAccessHook();
 
         try (NativePackProducer ignored = service.legacyUploadPack(
-                request("/demo.git"),
+                request("demo"),
                 new NativeFetchRequest(
                         Set.of(wanted),
                         Set.of(),
@@ -722,8 +722,8 @@ class DefaultGitNativeRepositoryServiceTest {
                         NativeFetchOptions.initial(false, false, false)),
                 accessHook)) {
             assertThat(accessHook.calls()).containsExactly(
-                    "read /demo.git",
-                    "fetch /demo.git [feature, main]");
+                    "read demo",
+                    "fetch demo [feature, main]");
         }
     }
 
@@ -731,7 +731,7 @@ class DefaultGitNativeRepositoryServiceTest {
     void fetchReportsUnresolvedWantToAccessHook() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository");
+        provider.create("demo").valueOrFailure("repository");
         GitNativeRepositoryService service =
                 new DefaultGitNativeRepositoryService(provider);
         RecordingAccessHook accessHook = new RecordingAccessHook();
@@ -739,7 +739,7 @@ class DefaultGitNativeRepositoryServiceTest {
         GitObjectId missing = GitObjectId.of("f".repeat(40));
 
         assertThatThrownBy(() -> service.legacyUploadPack(
-                request("/demo.git"),
+                request("demo"),
                 new NativeFetchRequest(
                         Set.of(missing),
                         Set.of(),
@@ -751,15 +751,15 @@ class DefaultGitNativeRepositoryServiceTest {
                         GitNativeRepositoryAccessHook.AccessDeniedException.class)
                 .hasMessageContaining("unresolved want");
         assertThat(accessHook.calls()).containsExactly(
-                "read /demo.git",
-                "fetch /demo.git []");
+                "read demo",
+                "fetch demo []");
     }
 
     @Test
     void protocolV2FetchResolvesBranchesContainingWantedObject() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git")
+        NativeGitRepository repository = provider.create("demo")
                 .valueOrFailure("repository");
         GitObjectId wanted = repository.writeObject(
                 ObjectType.BLOB,
@@ -776,14 +776,14 @@ class DefaultGitNativeRepositoryServiceTest {
                 NativeFetchOptions.initial(false, false, false));
 
         try (NativePackProducer ignored = service.protocolV2Fetch(
-                request("/demo.git"),
+                request("demo"),
                 fetchRequest,
                 accessHook,
                 NativePackfileUriSourceFactory.NONE)
                 .packProducer()) {
             assertThat(accessHook.calls()).containsExactly(
-                    "read /demo.git",
-                    "fetch /demo.git [main]");
+                    "read demo",
+                    "fetch demo [main]");
         }
     }
 
@@ -791,7 +791,7 @@ class DefaultGitNativeRepositoryServiceTest {
     void protocolV2FetchReportsUnresolvedWantToAccessHook() {
         InMemoryNativeGitRepositoryProvider provider =
                 new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository");
+        provider.create("demo").valueOrFailure("repository");
         GitNativeRepositoryService service =
                 new DefaultGitNativeRepositoryService(provider);
         RecordingAccessHook accessHook = new RecordingAccessHook();
@@ -805,7 +805,7 @@ class DefaultGitNativeRepositoryServiceTest {
                 NativeFetchOptions.initial(false, false, false));
 
         assertThatThrownBy(() -> service.protocolV2Fetch(
-                request("/demo.git"),
+                request("demo"),
                 fetchRequest,
                 accessHook,
                 NativePackfileUriSourceFactory.NONE))
@@ -813,14 +813,14 @@ class DefaultGitNativeRepositoryServiceTest {
                         GitNativeRepositoryAccessHook.AccessDeniedException.class)
                 .hasMessageContaining("unresolved want");
         assertThat(accessHook.calls()).containsExactly(
-                "read /demo.git",
-                "fetch /demo.git []");
+                "read demo",
+                "fetch demo []");
     }
 
     @Test
     void acknowledgesProtocolV2FetchHavesPresentInRepositoryOrder() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId firstPresent = repository.writeObject(ObjectType.BLOB, "first".getBytes(StandardCharsets.US_ASCII));
         GitObjectId secondPresent = repository.writeObject(ObjectType.BLOB, "second".getBytes(StandardCharsets.US_ASCII));
         GitObjectId missing = GitObjectId.of("f".repeat(40));
@@ -832,7 +832,7 @@ class DefaultGitNativeRepositoryServiceTest {
 
         List<GitObjectId> acknowledgments = protocolV2FetchAcknowledgments(
                 service,
-                request("/demo.git"),
+                request("demo"),
                 new NativeFetchRequest(
                         Set.of(firstPresent),
                         haves,
@@ -852,14 +852,14 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void listsMatchingBranchesAndLightweightTagsInLexicographicOrder() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId lightweightTagId = repository.writeObject(ObjectType.COMMIT, "tag target".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef("refs/tags/v1", NULL_ID, lightweightTagId.value());
         repository.updateRef("refs/heads/topic", NULL_ID, TAG_ID);
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false, List.of("refs/")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "refs/heads/main"), direct(TAG_ID, "refs/heads/topic"), direct(lightweightTagId.value(), "refs/tags/v1"));
     }
@@ -867,11 +867,14 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void doesNotDuplicateRefsMatchedByOverlappingPrefixes() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(false, false, false, List.of("refs/", "refs/heads/")));
+        GitLsRefsResponse response = lsRefs(
+                service,
+                request("demo"),
+                new LsRefsRequest(false, false, false, List.of("refs/", "refs/heads/")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "refs/heads/main"));
     }
@@ -879,11 +882,11 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void returnsEmptyResponseWhenNoRefsMatch() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(false, false, false, List.of("refs/tags/")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, false, false, List.of("refs/tags/")));
 
         assertThat(response.refs()).isEmpty();
     }
@@ -891,11 +894,11 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void listsResolvedHeadWithoutSymrefTargetWhenNotRequested() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(false, false, false, List.of("HEAD")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, false, false, List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "HEAD"));
     }
@@ -903,11 +906,11 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void listsResolvedHeadWithSymrefTargetWhenRequested() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(false, true, false, List.of("HEAD")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false, List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "HEAD", Optional.of("refs/heads/main"), Optional.empty()));
     }
@@ -915,13 +918,13 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void listsHeadFromExistingBranchWhenDefaultHeadTargetIsMissing() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/master", NULL_ID, MAIN_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
         GitLsRefsResponse response = lsRefs(
                 service,
-                request("/demo.git"),
+                request("demo"),
                 new LsRefsRequest(false, true, true, List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(
@@ -931,12 +934,12 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void listsOnlySynthesizedHeadWhenSnapshotContainsStoredHead() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         repository.updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         repository.updateRef("HEAD", NULL_ID, TAG_ID);
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(false, true, false, List.of("HEAD")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, false, List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(direct(MAIN_ID, "HEAD", Optional.of("refs/heads/main"), Optional.empty()));
     }
@@ -944,10 +947,10 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void listsUnbornHeadWhenRequested() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository");
+        provider.create("demo").valueOrFailure("repository");
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(false, true, true, List.of("HEAD")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(false, true, true, List.of("HEAD")));
 
         assertThat(response.refs()).containsExactly(new GitLsRefsResponse.UnbornRef("HEAD", "refs/heads/main"));
     }
@@ -955,14 +958,14 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void peelsNestedAnnotatedTagToFinalNonTagObject() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId commitId = repository.writeObject(ObjectType.COMMIT, "commit".getBytes(StandardCharsets.US_ASCII));
         GitObjectId innerTagId = repository.writeObject(ObjectType.TAG, tagData(commitId.value()));
         GitObjectId outerTagId = repository.writeObject(ObjectType.TAG, tagData(innerTagId.value()));
         repository.updateRef("refs/tags/nested", NULL_ID, outerTagId.value());
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(outerTagId.value(), "refs/tags/nested", Optional.empty(), Optional.of(commitId.value())));
     }
@@ -970,7 +973,7 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void peelsAnnotatedTagWithLargeBodyFromBoundedPrefix() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId commitId = repository.writeObject(ObjectType.COMMIT, "commit".getBytes(StandardCharsets.US_ASCII));
         byte[] objectLine = ("object " + commitId.value() + "\n").getBytes(StandardCharsets.US_ASCII);
         byte[] tagData = new byte[1024 * 1024 + objectLine.length];
@@ -981,7 +984,10 @@ class DefaultGitNativeRepositoryServiceTest {
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
         Optional<LooseObjectPrefix> prefix = repository.readObjectPrefix(tagId, 48);
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/tags/large")));
+        GitLsRefsResponse response = lsRefs(
+                service,
+                request("demo"),
+                new LsRefsRequest(true, false, false, List.of("refs/tags/large")));
 
         assertThat(prefix).isPresent();
         assertThat(prefix.get().dataPrefix()).hasSize(48).isEqualTo(objectLine);
@@ -991,12 +997,12 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void omitsPeeledAttributeForMalformedAnnotatedTag() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId malformedTagId = repository.writeObject(ObjectType.TAG, "object not-a-hex-object-id\n".getBytes(StandardCharsets.US_ASCII));
         repository.updateRef("refs/tags/malformed", NULL_ID, malformedTagId.value());
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(malformedTagId.value(), "refs/tags/malformed"));
     }
@@ -1004,12 +1010,12 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void omitsPeeledAttributeWhenAnnotatedTagTargetIsMissing() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId tagId = repository.writeObject(ObjectType.TAG, tagData("f".repeat(40)));
         repository.updateRef("refs/tags/missing-target", NULL_ID, tagId.value());
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(tagId.value(), "refs/tags/missing-target"));
     }
@@ -1017,7 +1023,7 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void memoizesSharedTagChainsAcrossMatchingRefs() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId commitId = repository.writeObject(ObjectType.COMMIT, "commit".getBytes(StandardCharsets.US_ASCII));
         List<GitObjectId> tagIds = new ArrayList<>();
         GitObjectId targetId = commitId;
@@ -1030,7 +1036,10 @@ class DefaultGitNativeRepositoryServiceTest {
         }
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/tags/shared-")));
+        GitLsRefsResponse response = lsRefs(
+                service,
+                request("demo"),
+                new LsRefsRequest(true, false, false, List.of("refs/tags/shared-")));
 
         List<GitLsRefsResponse.DirectRef> expected = new ArrayList<>();
         for (int i = 0; i < chainLength; i++) {
@@ -1042,14 +1051,14 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void distinguishesCachedLightweightTagFromAnnotatedTagTarget() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId commitId = repository.writeObject(ObjectType.COMMIT, "commit".getBytes(StandardCharsets.US_ASCII));
         GitObjectId annotatedTagId = repository.writeObject(ObjectType.TAG, tagData(commitId.value()));
         repository.updateRef("refs/tags/a-lightweight", NULL_ID, commitId.value());
         repository.updateRef("refs/tags/z-annotated", NULL_ID, annotatedTagId.value());
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
+        GitLsRefsResponse response = lsRefs(service, request("demo"), new LsRefsRequest(true, false, false, List.of("refs/tags/")));
 
         assertThat(response.refs()).containsExactly(direct(commitId.value(), "refs/tags/a-lightweight"), direct(annotatedTagId.value(), "refs/tags/z-annotated", Optional.empty(), Optional.of(commitId.value())));
     }
@@ -1057,7 +1066,7 @@ class DefaultGitNativeRepositoryServiceTest {
     @Test
     void omitsPeeledAttributeWhenTagChainExceedsDepthLimit() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        NativeGitRepository repository = provider.create("/demo.git").valueOrFailure("repository");
+        NativeGitRepository repository = provider.create("demo").valueOrFailure("repository");
         GitObjectId targetId = repository.writeObject(ObjectType.COMMIT, "commit".getBytes(StandardCharsets.US_ASCII));
         for (int i = 0; i <= DefaultGitNativeRepositoryService.MAX_TAG_TRAVERSAL_DEPTH; i++) {
             targetId = repository.writeObject(ObjectType.TAG, tagData(targetId.value()));
@@ -1065,7 +1074,10 @@ class DefaultGitNativeRepositoryServiceTest {
         repository.updateRef("refs/tags/too-deep", NULL_ID, targetId.value());
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
 
-        GitLsRefsResponse response = lsRefs(service, request("/demo.git"), new LsRefsRequest(true, false, false, List.of("refs/tags/too-deep")));
+        GitLsRefsResponse response = lsRefs(
+                service,
+                request("demo"),
+                new LsRefsRequest(true, false, false, List.of("refs/tags/too-deep")));
 
         assertThat(response.refs()).containsExactly(direct(targetId.value(), "refs/tags/too-deep"));
     }
@@ -1132,7 +1144,7 @@ class DefaultGitNativeRepositoryServiceTest {
 
     private static InMemoryNativeGitRepositoryProvider providerWithMainRef() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
-        provider.create("/demo.git").valueOrFailure("repository").updateRef("refs/heads/main", NULL_ID, MAIN_ID);
+        provider.create("demo").valueOrFailure("repository").updateRef("refs/heads/main", NULL_ID, MAIN_ID);
         return provider;
     }
 
@@ -1167,7 +1179,7 @@ class DefaultGitNativeRepositoryServiceTest {
             List<LegacyReceiveCommand> commands,
             Set<String> capabilities,
             LooseObjectStore quarantine) {
-        InitialRequestData request = receiveRequest("/demo.git");
+        InitialRequestData request = receiveRequest("demo");
         GitV1Advertisement advertisement = service.legacyReceivePackAdvertisement(
                 request,
                 GitNativeRepositoryAccessHook.ALLOW_ALL,
@@ -1185,7 +1197,7 @@ class DefaultGitNativeRepositoryServiceTest {
             GitNativeRepositoryService service,
             byte[] pack) {
         try (PackIngestionSession session = service.beginLegacyReceivePack(
-                receiveRequest("/demo.git"),
+                receiveRequest("demo"),
                 GitNativeRepositoryAccessHook.ALLOW_ALL)) {
             ByteBuf input = Unpooled.wrappedBuffer(pack);
             try {

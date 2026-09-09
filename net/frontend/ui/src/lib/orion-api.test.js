@@ -1,15 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createOrionClient, formatRelativeDate, normalizeRepositoryName } from './orion-api.js'
-
-describe('normalizeRepositoryName', () => {
-  it('removes leading slashes and the git suffix', () => {
-    expect(normalizeRepositoryName(' /teams/console.git ')).toBe('teams/console')
-  })
-
-  it('keeps a nested repository name intact', () => {
-    expect(normalizeRepositoryName('platform/orion')).toBe('platform/orion')
-  })
-})
+import { createOrionClient, formatRelativeDate } from './orion-api.js'
 
 describe('formatRelativeDate', () => {
   it('formats recent timestamps', () => {
@@ -32,7 +22,7 @@ describe('createOrionClient', () => {
     expect(fetchImpl.mock.calls[0][1].method).toBeUndefined()
   })
 
-  it('sends the bearer token and normalized repository name', async () => {
+  it('sends the bearer token and unchanged repository name', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'ok' }), {
       status: 201,
       headers: { 'Content-Type': 'application/json' },
@@ -48,7 +38,7 @@ describe('createOrionClient', () => {
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('http://localhost:8000/api/admin/repositories')
     expect(init.headers.get('Authorization')).toBe('Bearer secret-token')
-    expect(JSON.parse(init.body)).toEqual({ name: 'platform/console' })
+    expect(JSON.parse(init.body)).toEqual({ name: '/platform/console.git' })
   })
 
   it('reports a useful error when Orion rejects the request', async () => {

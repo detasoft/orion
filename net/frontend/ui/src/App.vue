@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import AppIcon from './components/AppIcon.vue'
-import { createOrionClient, formatRelativeDate, normalizeRepositoryName } from './lib/orion-api.js'
+import { createOrionClient, formatRelativeDate } from './lib/orion-api.js'
 import { loadConnectionSettings, saveConnectionSettings } from './lib/connection-store.js'
 
 const navItems = [
@@ -184,7 +184,7 @@ function authenticatedCloneCommand(url) {
 }
 
 async function createRepository() {
-  const name = normalizeRepositoryName(newRepository.value.name)
+  const name = newRepository.value.name
   if (!name) {
     showToast('Repository name is required', 'error')
     return

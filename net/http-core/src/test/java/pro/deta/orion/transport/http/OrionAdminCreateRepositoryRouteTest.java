@@ -17,6 +17,7 @@ import java.util.List;
 import static jakarta.servlet.http.HttpServletResponse.SC_CREATED;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrionAdminCreateRepositoryRouteTest {
     private final InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
@@ -55,6 +56,29 @@ class OrionAdminCreateRepositoryRouteTest {
 
         assertThat(response.status()).isEqualTo(SC_OK);
         assertThat(response.body()).isEqualTo(Map.of("status", "ok", "created", false));
+    }
+
+    @Test
+    void createsAndListsTheCanonicalRepositoryName() throws Exception {
+        OrionHttpResponse response = route.doPost(request("team%2Frepo"));
+
+        assertThat(response.status()).isEqualTo(SC_CREATED);
+        assertThat(provider.repositoryNames()).containsExactly("team/repo");
+        assertThat(route.doGet(null).body()).isEqualTo(Map.of(
+                "repositories",
+                List.of(new OrionAdminCreateRepositoryRoute.RepositoryResponse("team/repo"))));
+    }
+
+    @Test
+    void rejectsInvalidNamesBeforeProviderCreation() {
+        for (String name : List.of(
+                "/repo", "repo.git", "Repo", "../repo", "%2E%2E/repo", "%GG")) {
+            assertThatThrownBy(() -> route.doPost(request(name)))
+                    .as("repository name %s", name)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        assertThat(provider.repositoryNames()).isEmpty();
     }
 
     private static HttpServletRequest request(String name) {
