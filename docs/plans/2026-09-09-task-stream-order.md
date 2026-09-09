@@ -184,7 +184,7 @@ engine or duplicate the App/webhook task in two places.
 
 | Order | Existing task | Gate / reason |
 | --- | --- | --- |
-| H2 | [Typed route matching](upcoming-work/11_http-core-hardening/02_typed-route-matching.md) | Unified invocation is complete in `a380b4d0`. |
+| H2 | [Typed route matching](upcoming-work/11_http-core-hardening/02_typed-route-matching.md) | Unified invocation is complete in `a380b4d0`; wait for canonical repository names. |
 | T1 | [Terminal administration](current-work/08_interactive-ssh-shell/01_terminal-administration.md) | **Owned**; integrate terminal interaction/configuration work. |
 | T2 | [SSH PTY timeout](upcoming-work/12_ssh-pty-completion-timeout.md) | Recheck after T1; fix only a remaining reproducible failure. |
 | T3 | [Streaming monitoring](current-work/08_interactive-ssh-shell/02_streaming-monitoring.md) | Core/terminal baseline is integrated; recommend T1/T2 first because rendering and cancellation overlap. |
