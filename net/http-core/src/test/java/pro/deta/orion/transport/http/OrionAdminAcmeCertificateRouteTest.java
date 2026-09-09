@@ -16,8 +16,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
+import static jakarta.servlet.http.HttpServletResponse.SC_CONFLICT;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -55,6 +57,20 @@ class OrionAdminAcmeCertificateRouteTest {
 
         assertThat(response.status()).isEqualTo(SC_NOT_FOUND);
         assertThat(response.body()).isNull();
+    }
+
+    @Test
+    void reportsBusyIssuanceAsConflictWithoutInternalDetails() throws Exception {
+        OrionAdminAcmeCertificateRoute route = new OrionAdminAcmeCertificateRoute(
+                new BusyAcmeCertificateService(),
+                new ObjectMapper());
+
+        OrionHttpResponse response = route.doPost(request(""));
+
+        assertThat(response.status()).isEqualTo(SC_CONFLICT);
+        assertThat(response.body()).isEqualTo(Map.of(
+                "status", "busy",
+                "message", "ACME certificate issuance is already in progress"));
     }
 
     private static OrionAdminAcmeCertificateRoute route(
@@ -161,6 +177,21 @@ class OrionAdminAcmeCertificateRouteTest {
         @Override
         public Optional<IssuedAcmeCertificate> savedCertificate() {
             return saved;
+        }
+    }
+
+    private static final class BusyAcmeCertificateService extends AcmeCertificateService {
+        private BusyAcmeCertificateService() {
+            super(
+                    new OrionConfiguration(),
+                    new OrionDesiredState(),
+                    AcmeKeyMaterialCapability.unavailable(),
+                    new AcmeCertificateIssuer(null));
+        }
+
+        @Override
+        public IssuedAcmeCertificate issue(IssueRequest request) {
+            throw new IssuanceBusyException();
         }
     }
 }

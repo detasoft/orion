@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Singleton
 public class AcmeCertificateService {
@@ -35,6 +36,7 @@ public class AcmeCertificateService {
     private final OrionDesiredState desiredState;
     private final AcmeKeyMaterialCapability keyMaterial;
     private final AcmeCertificateIssuer certificateIssuer;
+    private final AtomicBoolean issuanceInProgress = new AtomicBoolean();
 
     @Inject
     public AcmeCertificateService(
@@ -51,6 +53,17 @@ public class AcmeCertificateService {
     }
 
     public IssuedAcmeCertificate issue(IssueRequest request) {
+        if (!issuanceInProgress.compareAndSet(false, true)) {
+            throw new IssuanceBusyException();
+        }
+        try {
+            return issueAdmitted(request);
+        } finally {
+            issuanceInProgress.set(false);
+        }
+    }
+
+    private IssuedAcmeCertificate issueAdmitted(IssueRequest request) {
         IssueSettings settings = settingsFrom(request);
         AcmeKeyMaterial keys;
         try {
@@ -296,5 +309,8 @@ public class AcmeCertificateService {
     private record CertificateMaterial(
             List<X509Certificate> chain,
             Optional<X509Certificate> issuerTrustAnchor) {
+    }
+
+    static final class IssuanceBusyException extends RuntimeException {
     }
 }

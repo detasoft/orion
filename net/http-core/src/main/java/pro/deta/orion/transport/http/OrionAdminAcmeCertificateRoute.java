@@ -9,7 +9,9 @@ import java.io.IOException;
 import java.io.StringWriter;
 import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.Map;
 
+import static jakarta.servlet.http.HttpServletResponse.SC_CONFLICT;
 import static jakarta.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import static jakarta.servlet.http.HttpServletResponse.SC_OK;
 
@@ -38,10 +40,16 @@ public class OrionAdminAcmeCertificateRoute extends BaseAdminRoute {
     @Override
     protected OrionHttpResponse doPost(HttpServletRequest req) throws IOException {
         AcmeCertificateService.IssueRequest request = issueRequest(req);
-        IssuedAcmeCertificate certificate = certificateService.issue(request);
-        return certificateResponse(
-                certificateChainPem(certificate.certificateChain()),
-                fileNameFor(certificate));
+        try {
+            IssuedAcmeCertificate certificate = certificateService.issue(request);
+            return certificateResponse(
+                    certificateChainPem(certificate.certificateChain()),
+                    fileNameFor(certificate));
+        } catch (AcmeCertificateService.IssuanceBusyException ignored) {
+            return OrionHttpResponse.json(SC_CONFLICT, Map.of(
+                    "status", "busy",
+                    "message", "ACME certificate issuance is already in progress"));
+        }
     }
 
     private AcmeCertificateService.IssueRequest issueRequest(HttpServletRequest req) throws IOException {

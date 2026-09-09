@@ -3,6 +3,9 @@ package pro.deta.orion.transport.http;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.config.OrionDesiredState;
+import pro.deta.orion.keymaterial.AcmeKeyMaterial;
+import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
 import pro.deta.orion.keymaterial.KeyMaterialAlias;
@@ -20,18 +23,28 @@ import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionHttpsConfiguration;
 import pro.deta.orion.schema.orion.OrionMaterialReference;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class AcmeCertificateServiceTest {
     private static final String CLUSTER = "test-cluster";
@@ -118,6 +131,51 @@ class AcmeCertificateServiceTest {
         }
     }
 
+    @Test
+    void rejectsConcurrentIssuanceBeforeKeyAcquisitionOrIssuerEntryAndReopensAfterSuccess() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore());
+                ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            CountingAcmeKeyMaterial keyMaterial = new CountingAcmeKeyMaterial(owner.acme());
+            BlockingFirstIssuer issuer = new BlockingFirstIssuer();
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), keyMaterial, issuer);
+            Future<IssuedAcmeCertificate> first = executor.submit(
+                    () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY));
+
+            assertThat(issuer.awaitStarted()).isTrue();
+            try {
+                assertTimeoutPreemptively(Duration.ofSeconds(1), () -> assertThatThrownBy(
+                        () -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
+                        .isInstanceOf(AcmeCertificateService.IssuanceBusyException.class));
+                assertThat(keyMaterial.acquireCalls()).isEqualTo(1);
+                assertThat(issuer.issueCalls()).isEqualTo(1);
+            } finally {
+                issuer.release();
+            }
+
+            assertThat(first.get(5, TimeUnit.SECONDS).certificateChain()).hasSize(1);
+            assertThat(service.issue(AcmeCertificateService.IssueRequest.EMPTY).certificateChain()).hasSize(1);
+            assertThat(keyMaterial.acquireCalls()).isEqualTo(2);
+            assertThat(issuer.issueCalls()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void reopensIssuanceAdmissionAfterFailure() throws Exception {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
+            FailFirstIssuer issuer = new FailFirstIssuer();
+            AcmeCertificateService service = new AcmeCertificateService(
+                    bootstrap(), desiredState(false), owner.acme(), issuer);
+
+            assertThatThrownBy(() -> service.issue(AcmeCertificateService.IssueRequest.EMPTY))
+                    .isInstanceOf(AcmeCertificateIssueException.class)
+                    .hasMessage("expected issuance failure");
+
+            assertThat(service.issue(AcmeCertificateService.IssueRequest.EMPTY).certificateChain()).hasSize(1);
+            assertThat(issuer.issueCalls()).isEqualTo(2);
+        }
+    }
+
     private OrionConfiguration bootstrap() {
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
@@ -196,6 +254,116 @@ class AcmeCertificateServiceTest {
             KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
             generator.initialize(2048);
             return generator.generateKeyPair();
+        }
+    }
+
+    private static final class BlockingFirstIssuer extends AcmeCertificateIssuer {
+        private final CountDownLatch started = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+        private final AtomicInteger issueCalls = new AtomicInteger();
+
+        private BlockingFirstIssuer() {
+            super(new AcmeHttpChallengeService());
+        }
+
+        @Override
+        public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
+            if (issueCalls.incrementAndGet() == 1) {
+                started.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("Timed out waiting to release the first issuance");
+                    }
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(failure);
+                }
+            }
+            return certificateFor(request);
+        }
+
+        private boolean awaitStarted() throws InterruptedException {
+            return started.await(5, TimeUnit.SECONDS);
+        }
+
+        private void release() {
+            release.countDown();
+        }
+
+        private int issueCalls() {
+            return issueCalls.get();
+        }
+    }
+
+    private static final class FailFirstIssuer extends AcmeCertificateIssuer {
+        private final AtomicInteger issueCalls = new AtomicInteger();
+
+        private FailFirstIssuer() {
+            super(new AcmeHttpChallengeService());
+        }
+
+        @Override
+        public IssuedAcmeCertificate issue(AcmeCertificateIssueRequest request) {
+            if (issueCalls.incrementAndGet() == 1) {
+                throw new AcmeCertificateIssueException("expected issuance failure");
+            }
+            return certificateFor(request);
+        }
+
+        private int issueCalls() {
+            return issueCalls.get();
+        }
+    }
+
+    private static final class CountingAcmeKeyMaterial implements AcmeKeyMaterialCapability {
+        private final AcmeKeyMaterialCapability delegate;
+        private final AtomicInteger acquireCalls = new AtomicInteger();
+
+        private CountingAcmeKeyMaterial(AcmeKeyMaterialCapability delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public AcmeKeyMaterial acquire(
+                AcmeMaterialConfiguration configuration,
+                int accountKeySize,
+                int domainKeySize) throws IOException, GeneralSecurityException {
+            acquireCalls.incrementAndGet();
+            return delegate.acquire(configuration, accountKeySize, domainKeySize);
+        }
+
+        @Override
+        public void installCertificateChain(
+                AcmeMaterialConfiguration configuration,
+                List<? extends Certificate> certificateChain,
+                Optional<X509Certificate> issuerTrustAnchor) throws IOException, GeneralSecurityException {
+            delegate.installCertificateChain(configuration, certificateChain, issuerTrustAnchor);
+        }
+
+        @Override
+        public Optional<List<X509Certificate>> certificateChain(AcmeMaterialConfiguration configuration)
+                throws GeneralSecurityException {
+            return delegate.certificateChain(configuration);
+        }
+
+        @Override
+        public Optional<X509Certificate> issuerTrustAnchor(AcmeMaterialConfiguration configuration)
+                throws GeneralSecurityException {
+            return delegate.issuerTrustAnchor(configuration);
+        }
+
+        private int acquireCalls() {
+            return acquireCalls.get();
+        }
+    }
+
+    private static IssuedAcmeCertificate certificateFor(AcmeCertificateIssueRequest request) {
+        try {
+            X509Certificate leaf = TestCertificateChain.selfSignedLeaf(
+                    "example.test", request.domainKeyPair());
+            return new IssuedAcmeCertificate(request.domains(), List.of(leaf));
+        } catch (Exception failure) {
+            throw new AssertionError(failure);
         }
     }
 }
