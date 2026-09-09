@@ -49,54 +49,6 @@ replication and persistence paths, but no production latency or allocation measu
 impact. Repair ease: low — the smallest safe repair changes record ownership and storage validation across
 modules while preserving exact bytes, defensive access, fixtures, and separate limit policies.
 
-### 3. Typed `PTY_INPUT` assigns the native input UUID the wrong identity
-
-**Problem.** The server command contains both a server `CommandId` and a distinct input UUID. AgentD sends the
-UUID to the native host, and the native journal writes its textual UUID into `PTY_INPUT`. The Java journal model
-and shared protocol table instead call that text a `CommandId`. A server command such as `command-1` with a
-different input UUID is therefore journaled under the UUID, while the typed Java API reports that value as the
-server command ID. The compatibility fixture hides the mismatch by wrapping UUID text in `CommandId`.
-
-**Sources.** The two source identities are declared by
-[`AgentMessage.Input`](src/main/java/pro/deta/orion/agent/protocol/AgentMessage.java#L210), while
-[`SessionEventPayload.PtyInput`](src/main/java/pro/deta/orion/agent/protocol/SessionEventPayload.java#L14) and
-[`SessionEventCodec.decodePtyInput`](src/main/java/pro/deta/orion/agent/protocol/SessionEventCodec.java#L122)
-label the journal field as `CommandId`. AgentD serializes the UUID in
-[`NativeControlCodec`](../agentd/src/main/java/pro/deta/orion/agentd/session/NativeControlCodec.java#L20); the
-host appends those 16 bytes in
-[`apply_input`](../session-host/src/platform/unix.rs#L1190) and writes their textual form in
-[`encode_event`](../session-host/src/journal.rs#L850). The shared fixture constructs the misleading wrapper in
-[`AgentProtocolFixtureTest`](src/test/java/pro/deta/orion/agent/protocol/AgentProtocolFixtureTest.java#L41),
-while the [native live-peer test](../agentd/src/test/java/pro/deta/orion/agentd/session/NativeControlLivePeerTest.java#L42)
-exercises a real input UUID.
-
-**Documented behavior.** The [shared protocol table](protocol/README.md#L90) currently calls the field a
-`CommandId`. The [native protocol](../session-host/protocol/README.md#L93) says it preserves the input identity
-and explicitly assigns replay protection to `operationSequence`, not to this field. No production caller of
-`decodeKnownPayload` was found.
-
-**Contract.** Preserve the version-1 journal's existing text bytes and byte-for-byte fixtures. Distinguish the
-server command correlation ID, the input identity carried into `PTY_INPUT`, and the native operation sequence
-used for admission/replay. Preserve the typed field's existing 1–128-character safe-ASCII validation. This
-finding does not establish a new deduplication or journal-confirmation policy.
-
-**Minimal repair.** Correct the shared documentation and typed Java payload name/meaning to input identity while
-preserving the existing text wire representation and identifier validation. Update fixtures and tests to use
-different command and input identities so they can no longer mask the boundary.
-
-**Alternatives and consequences.** Changing the persisted field to raw UUID bytes or adding an operation
-sequence is a versioned wire change and is not needed to fix the semantic label. A new wrapper type would state
-the domain more strongly but adds a public concept without a current production typed-payload consumer.
-Documentation-only correction would leave the Java API actively misleading.
-
-**Confidence.** High on the native producer path; medium on the best Java representation because the typed
-payload API currently has no production consumer.
-
-**Priority signals.** Importance: medium — the public typed model reports the wrong identity, but no production
-caller currently consumes that typed payload. Repair ease: medium — the wire bytes remain unchanged, while the
-Java representation, protocol wording, fixtures, and tests must move together without adding a new identity
-concept.
-
 ### 7. Unsupported handshake versions are discarded before negotiation policy sees them
 
 **Problem.** `AgentProtocolCodec` rejects an unsupported `HELLO` or `WELCOME` version as a semantic error. The
