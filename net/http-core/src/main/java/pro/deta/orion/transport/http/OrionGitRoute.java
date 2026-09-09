@@ -204,7 +204,7 @@ public class OrionGitRoute implements OrionHttpRoute {
     }
 
     private NativePackfileUriSourceFactory packfileUriSourceFactory(HttpServletRequest request) {
-        GitPackfileUriConfig packfileUri = gitTransportConfig == null ? null : gitTransportConfig.getPackfileUri();
+        GitPackfileUriConfig packfileUri = gitTransportConfig.getPackfileUri();
         Optional<String> baseUri = OrionGitPackfileUriBaseResolver.resolve(request, packfileUri);
         if (baseUri.isEmpty()) {
             return NativePackfileUriSourceFactory.NONE;
