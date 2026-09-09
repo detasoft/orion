@@ -1,7 +1,7 @@
 # Durable Agent and Launch Records
 
-Task: `current-work/agent-session-server/control-and-registries/agent-and-launch-records`
-Pool: [Server agent registration](current-work/agent-session-server/control-and-registries/TASK.md)
+Task: `current-work/03_agent-session-server/01_control-and-registries/01_agent-and-launch-records.md`
+Pool: [Server agent registration](current-work/03_agent-session-server/01_control-and-registries/TASK.md)
 Design: [Server-launched identity](2026-09-02-agentd-server-launched-identity-design.md)
 
 This ordinary implementation plan is owned by the review orchestrator on

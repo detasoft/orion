@@ -160,7 +160,7 @@ core is stable. Harness event ingress can proceed in parallel with the Linux
 sandbox. Windows implementation follows validated common contracts and does
 not block the first Linux/macOS harness slice. Agent-side discovery, journal
 transport, and restart recovery are tracked separately in
-[`current-work/agentd/TASK.md`](current-work/agentd/TASK.md).
+[`current-work/04_agentd/TASK.md`](current-work/04_agentd/TASK.md).
 
 ## MVP Boundary
 

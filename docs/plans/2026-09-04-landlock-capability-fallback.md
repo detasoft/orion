@@ -297,7 +297,7 @@ git commit -m "Remove legacy Landlock mode checks"
 
 **Files:**
 
-- Modify: `docs/plans/current-work/native-session-host/TASK.md`
+- Modify: `docs/plans/current-work/05_native-session-host/TASK.md`
 - Delete: `docs/plans/current-work/native-session-host/landlock-capability-fallback/TASK.md`
 
 **Step 1: Run component verification**

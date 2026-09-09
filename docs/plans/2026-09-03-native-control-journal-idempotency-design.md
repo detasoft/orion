@@ -19,7 +19,7 @@ journal synchronization remain queued work, not completed integration.
 
 The Rust host and Java client currently expose different operation layouts.
 The comparison below records both implementations; the
-[alignment task](current-work/agentd/session-host-contract-alignment/TASK.md)
+[alignment task](current-work/04_agentd/03_session-host-contract-alignment.md)
 tracks the remaining Java integration work. Do not infer interoperability from
 both sides calling their payload schema `2`.
 

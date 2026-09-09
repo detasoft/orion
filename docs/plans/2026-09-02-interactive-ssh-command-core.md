@@ -496,7 +496,7 @@ git commit -m "Route SSH exec through command dispatcher"
 **Files:**
 - Delete after verification:
   `docs/plans/current-work/interactive-ssh-shell/command-core-and-exec/TASK.md`
-- Modify after verification: `docs/plans/current-work/interactive-ssh-shell/TASK.md`
+- Modify after verification: `docs/plans/current-work/08_interactive-ssh-shell/TASK.md`
 
 **Step 1: Review repository rules and changed classes**
 

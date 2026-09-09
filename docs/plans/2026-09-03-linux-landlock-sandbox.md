@@ -546,7 +546,7 @@ blocking findings, and repeat the smallest relevant tests after every fix.
 **Step 5: Prepare the dedicated-worktree completion commit**
 
 Follow the repository worktree rules: remove this leaf directory and its link
-from `docs/plans/current-work/native-session-host/TASK.md`, squash all unique
+from `docs/plans/current-work/05_native-session-host/TASK.md`, squash all unique
 task commits, and use exactly:
 
 ```text

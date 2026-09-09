@@ -87,7 +87,7 @@ Follow @superpowers:test-driven-development per task. Use @superpowers:requestin
 
 **Files:**
 - Modify: `agentd/src/main/java/pro/deta/orion/agentd/journal/package-info.java`
-- Modify: `docs/plans/current-work/agentd/TASK.md`
+- Modify: `docs/plans/current-work/04_agentd/TASK.md`
 - Delete: `docs/plans/current-work/agentd/journal-reader-incremental-follow/TASK.md`
 
 **Steps:**

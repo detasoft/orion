@@ -321,9 +321,8 @@ be deleted.
 5. Review the final diff against all five task nodes, especially producer close
    ownership, action-specific authorization, and default byte compatibility.
 6. Complete the read-only task at
-   `docs/plans/upcoming-work/git-wire-architecture-simplification/post-simplification-review/TASK.md`
-   with `minimal-implementation` in read-only review mode after all five
-   implementation tasks are done.
+   `docs/plans/upcoming-work/02_git-wire-architecture-simplification/06_post-simplification-review.md`
+   with `minimal-implementation` in read-only review mode after all five implementation tasks are done.
 7. Update
    `docs/reviews/2026-09-03-git-parser-architecture-simplification.md` with a
    dated `resolved`, `remaining`, or `regressed` conclusion and evidence for

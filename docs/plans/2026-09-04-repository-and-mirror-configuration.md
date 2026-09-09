@@ -287,10 +287,10 @@ git commit -m "Verify repository remote XML configuration"
 
 **Files:**
 
-- Modify: `docs/plans/current-work/hierarchical-orion-configuration/TASK.md`
+- Modify: `docs/plans/current-work/02_hierarchical-orion-configuration/TASK.md`
 - Delete after completion: `docs/plans/current-work/hierarchical-orion-configuration/repository-and-mirror-configuration/`
-- Move: `docs/plans/upcoming-work/external-git-repository-sync/` to `docs/plans/current-work/external-git-repository-sync/`
-- Create: `docs/plans/current-work/external-git-repository-sync/primary-upstream/TASK.md`
+- Move: `docs/plans/upcoming-work/external-git-repository-sync/` to `docs/plans/current-work/07_external-git-repository-sync/`
+- Create: `docs/plans/current-work/07_external-git-repository-sync/01_primary-upstream.md`
 - Modify: `docs/plans/current-work/TASK.md`
 - Modify: `docs/plans/upcoming-work/TASK.md`
 

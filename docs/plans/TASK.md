@@ -1,42 +1,28 @@
 # Orion Task Tree
 
 Status: active
-Source: converted from the former root task list on 2026-08-05.
 
-This directory tree is the source of truth for current and upcoming Orion work.
-Each task directory contains its own `TASK.md`. A task directory may also
-contain child task directories.
+This filesystem tree is the source of truth for current and upcoming Orion work.
+The unnumbered queue roots are [current work](current-work/TASK.md) and
+[upcoming work](upcoming-work/TASK.md).
 
-## Queues
+Below either queue, `NN_slug/` is a composite task with its own `TASK.md`,
+and `NN_slug.md` is an executable leaf. Composites may nest to any depth.
+Numeric prefixes are local to each directory, unique across sibling files and
+directories, and may have gaps. Directory entries alone define child membership
+and order; parent files describe scope, dependencies, ownership, and acceptance.
 
-- [Current work](current-work/TASK.md)
-- [Upcoming work](upcoming-work/TASK.md)
+For the next task, traverse current work recursively in numeric sibling order
+and select the first unclaimed, dependency-ready leaf. Use upcoming work if no
+current leaf is ready, including required prerequisites. Check the leaf,
+ancestors, other worktrees, and branch history for ownership and integration
+evidence; an old owner timestamp or missing file does not prove release or
+completion. The [dependency and coordination audit](2026-09-09-task-stream-order.md)
+records cross-task gates; its snapshot labels are not a separate queue order.
 
-## Execution Order
-
-Use the [stream order and dependency map](2026-09-09-task-stream-order.md)
-to choose work across the two queues. Queue location records commitment;
-stream order records sequencing. Existing task paths and owners remain canonical.
-
-Next overall, if still unclaimed:
-[Migrate the remaining Orion key owners](current-work/unified-key-material-bootstrap/remaining-key-owner-migration/TASK.md).
-Its material and identity prerequisites are integrated, and SSH host keys still
-use independent files. Finish that consolidation before adding new key flows.
-
-Independent next work in the Agent control stream:
-[Persist agent and launch records](current-work/agent-session-server/control-and-registries/agent-and-launch-records/TASK.md).
-The AgentD handshake can proceed alongside the server record work against the
-existing identity protocol.
-
-Recheck ownership, prerequisites, and the working tree before each selection.
-Skip occupied work, including children of an occupied parent; do not reclaim
-it because an owner timestamp is old. Among dependency-ready current tasks,
-prefer deletion or consolidation, then the stream order in the linked queues.
-
-## Rules
-
-- Do not maintain a separate root `TASKS.md` task list.
-- Keep each `TASK.md` focused on status, scope, ownership, and immediate child
-  tasks.
-- Keep detailed designs and implementation steps in ordinary plan files under
-  `docs/plans/`.
+Use `orion-task-runner` for selection and planning. Every execution uses
+`orion-review-orchestrator` and an implementation worker applying `minimal-implementation`.
+Insert planned tasks by their intended local ordinal. Delete completed leaves
+and completed empty compositions after verification and review; retain these
+queue roots. Keep detailed designs and completion evidence in ordinary
+`docs/plans/` documents. Do not maintain a second task list in `TASKS.md`.

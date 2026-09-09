@@ -657,7 +657,7 @@ Expected: the cleanup commit and all regular Maven tests succeed.
 ```bash
 git diff --check main...HEAD
 rg -n "identity\.json|FileMachineCredentialStore|persistent machine credential|PKCS#12|PKCS12" \
-  agentd agent-protocol docs/plans/current-work/agentd docs/plans/2026-09-02-agentd.md
+  agentd agent-protocol docs/plans/current-work/04_agentd docs/plans/2026-09-02-agentd.md
 ```
 
 Expected: `git diff --check` is silent. Search results appear only where the
@@ -720,6 +720,6 @@ Authenticate server-launched AgentD [task: agentd/identity-and-registration]
 
 The squash must delete
 `docs/plans/current-work/agentd/identity-and-registration/` and remove its link
-from `docs/plans/current-work/agentd/TASK.md`. The orchestrator then
+from `docs/plans/current-work/04_agentd/TASK.md`. The orchestrator then
 cherry-picks the squashed commit to `main`, runs the required post-commit
 `make test`, and removes the worktree and branch before reporting completion.

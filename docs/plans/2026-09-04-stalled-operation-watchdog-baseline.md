@@ -18,8 +18,8 @@ realistic scheduling margin and the longer remote command still exceeds the whol
 **Files:**
 
 - Modify: `agent-provisioning/src/test/java/pro/deta/orion/provisioning/MinaSshOperationTest.java:267`
-- Modify: `docs/plans/current-work/remote-machine-provisioning/TASK.md`
-- Modify: `docs/plans/current-work/remote-machine-provisioning/stalled-operation-watchdog-baseline/TASK.md`
+- Modify: `docs/plans/current-work/09_remote-machine-provisioning/TASK.md`
+- Modify: `docs/plans/current-work/09_remote-machine-provisioning/02_stalled-operation-watchdog-baseline.md`
 
 **Step 1: Confirm the existing regression**
 

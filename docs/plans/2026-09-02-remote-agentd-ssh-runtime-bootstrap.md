@@ -244,7 +244,7 @@ git commit -m "Launch provisioned AgentD independently of SSH"
 
 **Files:**
 - Review: `docs/reviews/RULES.md`
-- Modify: `docs/plans/current-work/remote-machine-provisioning/TASK.md`
+- Modify: `docs/plans/current-work/09_remote-machine-provisioning/TASK.md`
 - Delete: `docs/plans/current-work/remote-machine-provisioning/ssh-runtime-bootstrap/TASK.md`
 
 **Step 1: Review the complete diff**

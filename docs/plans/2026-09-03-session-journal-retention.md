@@ -609,7 +609,7 @@ git commit -m "Integrate bounded session journals"
 **Files:**
 
 - Delete: `docs/plans/current-work/native-session-host/journal-retention/TASK.md`
-- Modify: `docs/plans/current-work/native-session-host/TASK.md`
+- Modify: `docs/plans/current-work/05_native-session-host/TASK.md`
 
 **Step 1: Apply the project review rules**
 

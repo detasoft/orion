@@ -339,7 +339,7 @@ git commit -m "Verify SSH query automation behavior"
 
 - Read: `docs/reviews/RULES.md`
 - Delete: `docs/plans/current-work/interactive-ssh-shell/query-and-output/TASK.md`
-- Modify: `docs/plans/current-work/interactive-ssh-shell/TASK.md`
+- Modify: `docs/plans/current-work/08_interactive-ssh-shell/TASK.md`
 
 **Step 1: Review the complete diff**
 

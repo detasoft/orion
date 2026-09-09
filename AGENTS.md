@@ -27,12 +27,21 @@
   - After implementation, review fixes, and verification are complete, squash
     all commits unique to the task branch into one logical commit.
   - Use the squashed commit subject template:
-    `<imperative summary> [task: <path-from-the-task-queue-without-TASK.md>]`.
+    `<imperative summary> [task: <leaf-path-relative-to-its-queue-root>]`.
     Example:
-    `Implement native session host protocol bootstrap [task: native-session-host/contracts-and-build]`.
-  - Delete the completed leaf task directory and remove its link from the
-    parent `TASK.md` in the squashed commit instead of retaining a completed
-    task node.
+    `Implement native protocol bootstrap [task: 05_native-session-host/01_contracts-and-build.md]`.
+  - The implementation worker retains the leaf and claim in its squash. The
+    primary `orion-review-orchestrator` coordinator owns completion cleanup
+    in the dedicated task worktree and amends that same commit, preserving its
+    subject. This permits only completion metadata edits, never implementation
+    code or tests; present the amended SHA at the integration gate.
+  - The coordinator deletes the completed numbered leaf file and removes
+    completed empty composite ancestor directories in full only when their
+    aggregate acceptance and scope are satisfied. Preserve parents with
+    unfinished siblings, the queue roots, and root `TASK.md`. It removes the task's
+    outstanding-work entries from active plans and replace still-needed
+    dependency references with verified completion evidence. Do not retain
+    completed task nodes or renumber remaining siblings to close gaps.
   - Transfer the squashed commit to `main` with `git cherry-pick`, never with a
     merge commit. Run the required post-commit tests on `main`, then remove the
     completed worktree and its branch only after confirming the transfer and a
@@ -73,12 +82,20 @@
   violates a blocking review rule.
 - Commit messages must be a single line. Do not add a body, bullet points, or multi-line descriptions — the entire meaning goes in the subject line.
 - Use the filesystem task tree rooted at `docs/plans/TASK.md` to track current
-  high-level implementation work and upcoming tasks. Every task directory must
-  contain its own `TASK.md`, and directories may form a hierarchy of tasks.
+  high-level implementation work and upcoming tasks. `current-work/` and
+  `upcoming-work/` are unnumbered queue roots. Below them, `NN_slug/` directories
+  describe composite tasks in `TASK.md`, and `NN_slug.md` files are executable
+  leaves. Nest composites to any depth. Numeric prefixes are local, may have
+  gaps, and must be unique across sibling files and directories. Filesystem
+  order is the only child queue; do not duplicate it in parent checklists.
   `TASKS.md` is only a compatibility pointer; do not maintain task lists there.
   Keep task nodes short, update them when starting or finishing substantial
   work, and leave detailed designs and implementation steps in ordinary
   `docs/plans/` plan files.
+- Use `orion-task-runner` for task selection/planning and
+  `orion-review-orchestrator` for every task execution. The implementation
+  worker must apply `minimal-implementation`. Plan insertion follows the intended local
+  numeric order; selection takes the first unclaimed, dependency-ready leaf.
 - Whenever you create a task, commit its task-tree changes immediately without
   waiting for a separate commit request. Treat this as a documentation-only
   commit and do not run tests afterward.

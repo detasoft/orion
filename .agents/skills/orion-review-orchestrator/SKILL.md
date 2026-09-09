@@ -1,8 +1,9 @@
 ---
 name: orion-review-orchestrator
 description: >-
-  Use when the user asks for review-gated subagent execution over an Orion task
-  subtree, an explicit task list, or tasks introduced by a commit.
+  Execute Orion task leaves through one implementation worker and review gates.
+  Required by orion-task-runner for execution; also use for an explicit task
+  subtree, task list, or tasks introduced by a commit.
 ---
 
 # Orion Review Orchestrator
@@ -17,8 +18,9 @@ After the user permits or confirms the transfer, finish integration and start
 the next ready task automatically.
 
 Never have two implementation workers active at once. The primary agent may
-inspect, orchestrate, and update plans on `main` as described below, but must
-not implement fixes or edit the task branch.
+inspect, orchestrate, and update plans on `main`. Its only task-branch mutation
+is the completion-metadata cleanup and commit amendment described below; it
+must never edit implementation code, tests, or worker review fixes.
 
 ## Required Repository Guidance
 
@@ -26,10 +28,10 @@ Before selecting work, read and apply:
 
 - `AGENTS.md`;
 - `docs/reviews/RULES.md`;
-- `../minimal-implementation/SKILL.md` for concept analysis and review;
+- `../minimal-implementation/SKILL.md` for worker implementation and concept review;
 - `docs/plans/TASK.md` and the relevant descendant task nodes;
 - `../orion-task-runner/SKILL.md` for task selection, ownership, claim, and
-  task-tree rules.
+  task-tree rules; apply it in the coordinator role without recursive delegation.
 
 Inspect `git status --short` and `git worktree list --porcelain`. Treat existing
 changes, branches, worktrees, and claims as owned by somebody else unless this
@@ -40,29 +42,38 @@ including branches without an attached worktree. Any discovered owner line is
 a claim; if ownership cannot be resolved safely, treat the candidate as
 blocked. Do not stage, modify, or clean unrelated state.
 
+A leaf deleted by an unintegrated task branch also remains occupied while its
+completion awaits integration, even when the final squash removed its owner
+line. Resolve that identity from the branch diff/history and pending worktree
+before selecting another worker; do not interpret the deletion as a release.
+
 ## Resolve the Pool
 
 Accept any of these pool definitions:
 
+- a single numbered leaf file;
 - a task-tree directory or parent `TASK.md`;
-- an explicit ordered list of task nodes;
+- an explicit list of numbered leaf files or composite task nodes;
 - a commit that introduced task nodes.
 
-For a commit-defined pool, inspect the task files added by that commit and the
-current task tree. Choose the newly added aggregate task root, then use its
-linked leaf tasks in parent-file order. Treat that order as sequential unless
-the task nodes explicitly declare that they are independent. Do not execute the
-aggregate parent as a separate implementation task. Follow explicit
-`Depends on` relationships before file order, and re-resolve paths if the task
-subtree has since moved from upcoming work to current work.
+Resolve every pool against the current canonical task tree defined by the
+runner. Discover numbered leaf files and composite directories recursively,
+sorting mixed siblings by their numeric prefixes at every depth. A composite's
+`TASK.md` is context, never a separate implementation task. An explicit task
+list limits membership; numeric filesystem order determines selection.
 
-Commit `a40ec0da` identifies the Git interoperability matrix rooted at
-`docs/plans/upcoming-work/git-interoperability-matrix`. Its initial leaf order
-is harness and state model, reference adapters, Orion adapters, workflow
-scenarios, then Maven/CI integration. Current dependency and ownership state
-still takes precedence over that historical order. This pool is strictly
-sequential even though its original task files do not contain explicit
-`Depends on` fields.
+For a commit-defined pool, inspect added numbered leaf files and composite
+`TASK.md` files with Git's rename detection so a moved task is not mistaken for
+new work. Include newly introduced leaves and descendants of newly introduced
+composites; do not include unrelated siblings under an existing parent. Map
+these task identities to current paths through Git history and content, since
+queue moves and local renumbering can change a path. If the commit uses paths
+that no longer exist, trace their current identities instead of treating absent
+files as completed tasks. Report ambiguity rather than broadening the pool.
+
+Follow explicit dependencies and coordination gates before numeric selection
+priority. Numeric order alone does not prohibit independent work when an earlier
+leaf is blocked. Preserve any explicitly sequential pool constraint.
 
 Select only an unclaimed, dependency-ready leaf. A claimed prerequisite is a
 blocker; do not skip ahead to dependent work. If no ready leaf remains, either
@@ -80,7 +91,7 @@ When a plan change is needed:
    progress, and still contains no claim for the selected task. If the plan
    overlaps unrelated or user-owned changes, stop and report the conflict.
 2. Edit only the relevant ordinary plan documents in the shared `main`
-   worktree. Do not claim the task or edit its `TASK.md` on `main`.
+   worktree. Do not claim the task or edit its leaf file on `main`.
 3. Commit the plan-only change directly on `main` with a concise one-line
    subject. Follow `AGENTS.md`; in particular, do not run tests for a
    documentation-only commit.
@@ -107,17 +118,25 @@ Spawn a fresh worker for the selected leaf with:
 - only the context needed for this task rather than the whole review thread,
   supplied explicitly in the worker prompt.
 
-Tell the worker that it owns every task-branch mutation, including task claim,
-worktree setup, implementation, tests, commits, review fixes, final squash,
-integration after approval, and cleanup. It must treat ordinary implementation
-plans as orchestrator-owned inputs and report required plan changes rather than
-editing them. The primary agent owns selection, plan maintenance on `main`,
-review, and user communication.
+Tell the worker that it owns task claim, worktree setup, implementation, tests,
+commits, review fixes, final squash, integration after approval, and subsequent
+worktree/branch cleanup. Completion deletion from the queue and active plans
+belongs exclusively to the primary coordinator. Treat ordinary implementation
+plans as orchestrator-owned inputs and report required substantive plan changes
+rather than editing them. The worker may update mechanical task-path references
+in ordinary plans during an authorized queue move. It must retain the task leaf
+and claim when preparing the squashed implementation commit.
+Design, implementation instructions, substantive scope, and plan gaps remain
+coordinator-owned. The primary agent owns selection, substantive plan maintenance
+on `main`, review, and user communication.
 
 The worker must:
 
-1. Read `AGENTS.md`, the selected task node, its parent nodes, referenced plans,
-   and applicable local rules.
+1. Read `AGENTS.md`, the selected numbered leaf file, ancestor `TASK.md` files,
+   referenced plans, and applicable local rules. Apply `minimal-implementation` before
+   and during implementation. Reading the runner here supplies worker claim
+   and tracking rules; it does not authorize another worker or recursive
+   orchestrator invocation.
 2. Create a dedicated branch and worktree from the exact plan-updated committed
    `main` HEAD supplied by the primary without changing or including the shared
    working tree. Use a
@@ -125,7 +144,7 @@ The worker must:
    unless an existing workflow-owned branch and worktree are being resumed.
 3. Inside that worktree, claim the selected task according to
    `orion-task-runner`. Make the isolated documentation-only claim commit before
-   implementation and do not include plan changes or unrelated files. When
+   implementation and include no substantive plan changes or unrelated files. When
    starting upcoming work, perform the required task-tree move as part of that
    isolated start/claim change. Do not put this pre-review claim commit directly
    on `main`; it will be included in the branch's final squash.
@@ -169,24 +188,36 @@ decision or authority.
 
 ## Prepare the Reviewed Commit
 
-After the first clean review, send the same worker one final preparation task:
+After the first clean review, ask the same worker to squash all task-unique
+commits into one logical commit with the subject required by `AGENTS.md`.
+The worker retains the numbered task leaf and its claim, leaves the worktree
+and branch in place, and returns the prepared SHA with a clean worktree. It
+must not cherry-pick to `main` or perform completion deletion.
 
-- squash all commits unique to the task branch into one logical commit;
-- use the subject required by `AGENTS.md`;
-- delete the completed leaf task directory and remove its parent link in that
-  squashed commit;
-- when this is the final pool leaf, also remove any now-completed empty
-  aggregate task ancestors and their queue link;
-- leave the worktree and branch in place;
-- do not cherry-pick to `main`;
-- return the final commit SHA and confirm the worktree is clean.
+The primary coordinator then performs completion-only metadata cleanup in
+that dedicated task worktree, after confirming the reported SHA, clean state,
+and that the worker is idle:
 
-Review the final diff again because task-tree deletion and any rebase or squash
-preparation are part of the deliverable. Route new findings back to the worker
-and have it amend the single task commit. After every amendment, the worker
-must rerun and report the verification required by `AGENTS.md` for the changed
-content before the primary agent re-reviews it. The reviewed SHA must name
-exactly the commit presented at the user gate.
+1. Delete the completed numbered leaf file.
+2. Walk upward and remove completed empty composite directories in full,
+   including their `TASK.md`, only when aggregate acceptance and remaining scope
+   are satisfied. Preserve parents with unfinished siblings, the two queue
+   roots, and root `docs/plans/TASK.md`.
+3. Remove the task's outstanding-work entries from active plans and replace
+   still-needed dependency links with verified completion evidence. Do not
+   maintain parent child lists or renumber remaining entries to close gaps.
+4. Check the metadata diff and affected references, stage only this cleanup,
+   and amend the same commit without changing its subject. Do not change
+   implementation code, tests, substantive design, or implementation instructions.
+
+This is the explicit exception to the coordinator's task-branch mutation rule.
+The coordinator checks documentation-only cleanup without rerunning Maven and
+reviews the complete final diff, including deletion and squash preparation.
+Send new implementation findings to the same worker for fixes, amendment, and
+the verification required by `AGENTS.md`; the worker must preserve coordinator
+cleanup. The coordinator owns any correction to completion metadata and
+re-reviews after every amendment. Present only the resulting clean, reviewed
+SHA at the user gate; it must include the coordinator's completion cleanup.
 
 ## Mandatory User Gate
 

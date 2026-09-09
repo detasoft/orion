@@ -1,164 +1,167 @@
 ---
 name: orion-task-runner
 description: >-
-  Coordinate Orion repository work from the filesystem task tree rooted at
-  docs/plans/TASK.md. Use when the user asks Codex to take, choose, continue,
-  claim, or run a task from the Orion task list, including prompts like "возьми
-  задачу", "следующая задача", "продолжай по задачам", "pick a task", or
-  requests that rely on current high-level tasks.
+  Select, plan, and track Orion work in the numbered filesystem task tree rooted
+  at docs/plans/TASK.md. Use for requests to take, choose, continue, claim, run,
+  or plan tasks, including "возьми задачу", "следующая задача", "продолжай по
+  задачам", and "pick a task". Route execution through orion-review-orchestrator.
 ---
 
 # Orion Task Runner
 
-## Overview
+## Roles and Startup
 
-Use this skill to choose Orion work from the filesystem task tree rooted at
-`docs/plans/TASK.md`, mark it as owned before substantial edits, execute it
-under the repository rules, commit the task claim immediately, and keep task
-tracking current without turning it into a detailed plan.
+Use this skill for selection, planning, and task tracking. Every task execution
+must use [orion-review-orchestrator](../orion-review-orchestrator/SKILL.md),
+which owns worker launch, review, and the integration gate. The implementation
+worker must apply [minimal-implementation](../minimal-implementation/SKILL.md).
 
-## Startup
+When the orchestrator or its assigned worker reads this skill, apply the task
+model and the rules for that role; do not invoke the orchestrator recursively
+or spawn another implementation worker. The primary selects; the assigned
+worker claims and implements only its selected leaf. Status, triage, explanation,
+and planning alone do not start execution or claim work.
 
-1. Confirm the working directory is the Orion repository.
-2. Read `AGENTS.md`, `docs/plans/TASK.md`, relevant child `TASK.md` files, and
-   `git status --short` before choosing work.
-3. If root `TASKS.md` exists, treat it as a compatibility pointer only, not as
-   task state.
-4. Treat existing uncommitted changes as user-owned unless you made them in the
-   current request. Do not revert or stage unrelated changes.
-5. If the user asks only for status, triage, or explanation, do not claim a task.
+Read `AGENTS.md`, `docs/plans/TASK.md`, relevant ancestor `TASK.md` files and
+candidate leaf files, and inspect `git status --short` before choosing work.
+Treat existing changes as user-owned unless made in this request. Do not revert,
+stage, or absorb unrelated edits.
 
-## Task Selection
+## Canonical Task Model
 
-Tasks are hierarchical. Treat every directory with a `TASK.md` as a task node.
-A parent task can contain multiple ready next tasks; do not collapse the next
-step into a single item when several independent child tasks are available.
+`docs/plans/TASK.md` describes the root. `current-work/` and `upcoming-work/`
+are unnumbered queue roots, each with a `TASK.md`. Below either queue, immediate
+task entries share one locally numbered namespace:
 
-First classify tasks as claimed or unclaimed. Treat a task as claimed when its
-`TASK.md` has any of these signals:
+- `NN_slug/` is a composite task described by its own `TASK.md`.
+- `NN_slug.md` is an executable leaf task, stored directly beside other leaves
+  and composite directories.
+- Composites may contain composites at any depth. A composite describes scope,
+  aggregate status, dependencies, ownership, and acceptance; it is not itself
+  an executable leaf. Any remaining executable scope needs a numbered leaf
+  before execution.
+- Prefixes are non-negative decimal integers followed by `_`, zero-padded for
+  readable directory listings. Compare prefixes numerically, not lexically.
+  Prefix values must be unique among all siblings, across files and directories.
+  Numbering is local and may have gaps: `01_first.md`, `05_group/`, `20_last.md`.
+- Filesystem entries are the only source of child membership and order. Do not
+  maintain immediate-child checklists, ordered link indexes, or queue manifests
+  in `TASK.md`. Links explaining real dependencies and scope boundaries are fine.
 
-- any `Owner:` line, including `Owner: codex`;
-- an explicit activity marker such as `Active next task`, `Current work`, `in
-  progress`, `started`, or `paused`;
-- checked child tasks under an otherwise unchecked parent task,
-  unless the block explicitly says the work is available.
+Keep task descriptions short; put detailed designs and implementation steps in
+ordinary `docs/plans/` documents. `TASKS.md`, if present, is only a pointer to
+`docs/plans/TASK.md`, never a second task list.
 
-Claimed means occupied by another session or person. Never select, continue,
-update, or replace the owner of a claimed task unless the user explicitly names
-that task and asks to take it over.
+## Selection and Ownership
 
-### Simplification Priority
+For a generic next-task request, inspect current work first, then upcoming
+work if no current leaf is ready. Within each directory, traverse entries in
+numeric prefix order and descend into composites recursively. Select the first
+unclaimed, dependency-ready leaf in that traversal. An explicit user task or
+pool narrows the candidates; it does not bypass ownership or prerequisites.
 
-After honoring the user's explicit task or pool, ownership, and dependency
-order, prefer a dependency-ready current-work leaf whose primary result is safe
-deletion or consolidation over an additive leaf at the same selection stage.
-This preference takes precedence over parent-file order. Treat removal as safe
-when it preserves required runtime behavior and every explicitly preserved
-wire or persisted contract.
+Check both the leaf and its ancestors for claims. An `Owner:` line (including
+`Owner: codex`) or an explicit `in progress`, `started`, `paused`, `Current work`,
+or `Active next task` marker makes that node occupied. Queue-level `Status:
+active` describes a queue, not an exclusive claim. A claimed composite makes
+its descendants unavailable. Inspect other worktrees and local branches as
+required by the orchestrator; a branch-local claim also counts. Re-resolve
+renamed or moved paths through Git history and task content before deciding
+that an owner or prerequisite disappeared.
 
-Plan replacements as an atomic move to one canonical production path. Update
-all real in-repository consumers and delete the old internal API, state,
-configuration, branch, and legacy-only tests in the same task. Do not add or
-retain deprecated aliases, adapters, compatibility shims, dual read/write
-paths, migration modes, feature flags, or fallback paths for the replaced
-model. Tests and hypothetical future or external consumers do not justify a
-second production path.
+Never take over or rewrite an existing claim unless the user explicitly names
+the task and authorizes takeover. Do not treat an old timestamp as release.
+Honor explicit dependencies, deferred state, and cross-task coordination gates.
+Missing task files alone do not prove completion: check integration evidence.
+Skip blocked leaves only for genuinely independent ready work; never skip a
+prerequisite to execute its dependent. Numeric order is selection priority, not
+an implicit dependency between otherwise independent tasks.
 
-When a persisted or wire contract must remain stable, preserve it through the
-single new implementation rather than keeping the old internal API. If direct
-deletion would remove required current functionality, keep that functionality
-in the canonical path; do not solve the conflict by preserving two ways to do
-the same operation.
+Report the exact blocker when no ready leaf remains. Clarify only when the
+requested task identity is ambiguous or the next action requires new authority.
 
-For a generic request such as "take a new task", prefer this order:
+## Planning and Queue Insertion
 
-1. The first unclaimed unchecked task under `docs/plans/current-work/`.
-2. The first unclaimed unchecked child task under an active parent task.
-3. The first unclaimed unchecked task under `docs/plans/upcoming-work/`, moved
-   under current work only when starting it.
+Place new work in the appropriate existing composite or queue, assigning a
+prefix that inserts it at the intended local execution position. Prefer safe
+deletion or consolidation over additive work when planning equally ready work,
+while preserving dependencies. Execution follows the resulting numeric order.
+Use a free number in an existing gap when possible; do not renumber merely to
+close gaps after deletion. If insertion requires renumbering, change only the
+necessary siblings and update their references together. Resolve claims across
+worktrees/branches first and do not invalidate another session's active paths.
 
-When the user explicitly names or describes a task, select it only if it is
-unclaimed. Ask a concise question before proceeding when two or more unclaimed
-tasks match equally well, when the requested work is absent from the task
-tracking files, when the named task is claimed, or when no unclaimed task
-remains.
+Use a leaf file for a bounded executable task and a numbered directory with
+`TASK.md` for a composition. When splitting a leaf, put its executable scope
+in numbered children and keep the aggregate description in the composite.
+Do not duplicate the work as an executable parent and executable descendants.
 
-## Task Storage
+Commit newly created task-tree changes immediately as a documentation-only
+commit, as required by `AGENTS.md`. Do not claim planned work. When a worker
+starts upcoming work, move only its selected leaf to the appropriate current
+queue/composite, choose a free local prefix, and update affected references in
+the same isolated claim change. Preserve required aggregate context and
+dependencies in the moved leaf. Remove an emptied source composite only when
+its remaining scope is accounted for.
 
-Use `docs/plans/TASK.md` as the root task index. Use directories as task nodes
-and store each task's details in that directory's `TASK.md`. A directory can be
-both a task and a container for subtasks. Keep parent `TASK.md` files focused on
-status, scope, ownership, and the list of immediate child tasks; put detailed
-implementation notes in ordinary `docs/plans/*.md` plan files only when they
-are broader than the task node.
+Plan replacements around one canonical production path: update every real
+in-repository consumer and remove replaced internal APIs, state, configuration,
+and branches in the same task. Preserve required runtime behavior and explicit
+wire/persisted contracts. Apply `AGENTS.md` to legacy-only test removal; tests
+and hypothetical consumers do not justify a second production path.
 
-Do not recreate a central `TASKS.md` list. If root `TASKS.md` exists, leave it
-as a compatibility pointer to `docs/plans/TASK.md`.
+## Worker Claim and Execution
 
-## Claim Format
-
-Before substantial code, doc, or test edits, update only the selected unclaimed
-task node's `TASK.md`:
+Before substantial edits, the assigned worker updates only the selected
+unclaimed leaf file and any mechanical task-path references required by its
+authorized queue move in its dedicated worktree. Store the claim in the leaf:
 
 ```markdown
 - [ ] Task title and short context.
   - Owner: codex, session SESSION_ID, started YYYY-MM-DD HH:MM Europe/Amsterdam.
 ```
 
-Use the current local date and time, and record a stable identifier for the
-current Codex session instead of relying on the timestamp alone. Use the actual
-session identifier when it is available; otherwise generate a short unique local
-session id once and reuse it for all owner lines written by this session. An
-existing owner line means the task is claimed; do not update it without an
-explicit user-requested takeover. Keep the file high-level; put detailed design
-or implementation notes in `docs/plans/`.
+Use the current local time and a stable session identifier. Use the actual
+session ID when available; otherwise generate a short unique ID once and reuse
+it. Immediately commit the isolated claim and any required queue move before
+implementation. Stage only changes made to start that task; do not run tests
+for the documentation-only claim commit. If the claim cannot be isolated,
+report the conflict without starting implementation.
 
-## Claim Commit
+Read the referenced plans and apply `minimal-implementation` before and during
+implementation, including its final self-review. Follow the orchestrator and
+`AGENTS.md` for tests, verification, review fixes, commits, and integration.
 
-Immediately after claiming the task, create a documentation-only commit before
-starting implementation. Include only the `TASK.md` and other `docs/` changes
-made to start that task, such as moving its task node under current work. Do not
-stage unrelated or pre-existing changes, including other edits in `docs/`.
+## Completion and Pause
 
-Use a concise, single-line commit message that describes starting or claiming
-the selected task. Do not run tests for this documentation-only commit. If the
-claim changes cannot be isolated safely from existing edits, stop and ask the
-user how to proceed instead of committing mixed changes.
+After implementation, verification, and clean review, the worker squashes its
+work while retaining the task leaf and claim. The primary coordinator from
+`orion-review-orchestrator` then deletes the completed leaf file and amends the
+same commit in the dedicated task worktree. Only the coordinator performs this
+completion cleanup; the worker does not delete the task from the queue or plans.
 
-## Execution Rules
+The coordinator walks upward and removes completed
+empty composite directories in full, including their `TASK.md`, only when
+aggregate acceptance and remaining scope are satisfied. Preserve a parent
+with unfinished siblings, both queue roots, and the root `docs/plans/TASK.md`.
+The coordinator removes the task's outstanding-work entries from active plans. Replace
+still-needed dependency references with verified completion evidence so plans
+do not retain dangling links or continue scheduling completed work. Retain useful
+completion evidence in ordinary plans or reviews.
+Do not keep completed task nodes or renumber remaining siblings to close gaps.
 
-1. Follow `AGENTS.md` for Maven profiles, commit behavior, tests, comments, and
-   task tree scope. Apply `minimal-implementation` before and during task
-   implementation, including its final self-review.
-2. Read any referenced plan under `docs/plans/` before changing related code.
-3. Add or extend tests when changing functionality.
-4. Run focused verification during implementation and the appropriate Maven check before claiming completion.
-5. Keep task tree edits scoped to the selected task and a small number of upcoming high-level tasks.
+Follow the orchestrator's final review and user integration gate. A prepared
+branch is awaiting integration, not a completed task; `AGENTS.md` governs
+transfer, required verification, and worktree/branch cleanup.
 
-## Finish
-
-When the selected task is fully implemented and verified, mark it complete and
-remove the owner line. Add or adjust the next high-level task only if needed.
-When the task was completed in a dedicated Git worktree, follow the dedicated
-worktree completion rules in `AGENTS.md` instead of retaining a completed task
-node.
-
-When stopping with work incomplete, keep the task unchecked and replace or
-update the owner line with a short status line:
+When pausing incomplete work, retain the leaf and record the next step in its
+existing claim using the same session identity:
 
 ```markdown
   - Owner: codex, session SESSION_ID, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
 ```
 
-When closing a completed task, include both fields explicitly in the final
-response:
-
-```text
-Task: <task name>
-Path: <path to the task's TASK.md>
-```
-
-Also provide the required `minimal-implementation` summary: what was solved,
-how it was solved, which parts changed and what changed in each, and actual
-verification results with any remaining work. Mention unrelated pre-existing
-working tree changes.
+Report the task name and leaf-file path explicitly. Provide the required
+`minimal-implementation` summary: what was solved, how it was solved, which parts
+changed and what changed in each, and actual verification results with any
+remaining work. Mention unrelated pre-existing working-tree changes.

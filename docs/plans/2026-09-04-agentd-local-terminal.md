@@ -19,8 +19,8 @@ JUnit 5, AssertJ, native Rust `session-host` test artifact.
 
 Do this work only after these task nodes are complete and their task worktrees have been integrated:
 
-- `docs/plans/current-work/agentd/journal-sync/TASK.md`
-- `docs/plans/current-work/agentd/command-orchestration/TASK.md`
+- `docs/plans/current-work/04_agentd/02_journal-sync.md`
+- `docs/plans/current-work/04_agentd/04_command-orchestration.md`
 - the native control-journal idempotency and start-outcome contracts referenced by those nodes
 
 Before editing, read the final shared APIs in `agentd/journal`, `agentd/session`, and the command-orchestration
@@ -29,7 +29,7 @@ integrated equivalent rather than adding an adapter whose only purpose is to pre
 name. Read every `@AiRule` class comment in a class before changing it.
 
 Execute the task in a dedicated worktree. Claim
-`docs/plans/current-work/agentd/local-terminal/TASK.md` first and commit the claim without running tests.
+`docs/plans/current-work/04_agentd/07_local-terminal.md` first and commit the claim without running tests.
 
 ### Task 1: Make the AgentD top-level mode explicit
 
@@ -634,8 +634,8 @@ git commit -m "Verify AgentD terminal against the native host"
 
 **Files:**
 
-- Delete: `docs/plans/current-work/agentd/local-terminal/TASK.md`
-- Modify: `docs/plans/current-work/agentd/TASK.md`
+- Delete: `docs/plans/current-work/04_agentd/07_local-terminal.md`
+- Modify: `docs/plans/current-work/04_agentd/TASK.md`
 - Review: every file changed by the task branch
 
 **Step 1: Request code review**
@@ -656,14 +656,24 @@ Expected: PASS and no whitespace errors.
 
 **Step 3: Finish the dedicated worktree according to repository rules**
 
-Use `superpowers:finishing-a-development-branch`. Delete the completed leaf task directory and remove its parent
-link in the squashed commit. Squash all task-unique commits to:
+Use `orion-review-orchestrator` for final review and the user integration gate.
+The implementation worker squashes all task-unique commits while retaining
+the task leaf and claim. The primary coordinator deletes the completed numbered
+leaf file, removes the task from active plans, and amends that same commit in
+the dedicated task worktree. Only the coordinator performs this completion
+cleanup. It removes empty
+composite ancestor directories in full only when their aggregate acceptance
+and remaining scope are satisfied; preserve parents with unfinished siblings
+and the queue roots. Remove this task's outstanding-work entries from active
+plans and replace still-needed dependency links with verified completion
+evidence. Preserve this subject in the squash and coordinator amendment:
 
 ```text
-Run AgentD as a local interactive terminal [task: current-work/agentd/local-terminal]
+Run AgentD as a local interactive terminal [task: 04_agentd/07_local-terminal.md]
 ```
 
-Cherry-pick that commit to `main`; never merge. On `main`, run the required post-commit verification:
+After the user permits integration of the reviewed commit, cherry-pick it to
+`main`; never merge. On `main`, run the required post-commit verification:
 
 ```text
 make test

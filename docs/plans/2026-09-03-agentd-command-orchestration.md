@@ -35,17 +35,17 @@ discovery, local-control, journal-reader, and journal-sync boundaries.
   host operation deduplication in this leaf.
 - Do not add `hostInstanceId`; retain and document the approved SessionId/endpoint/PID correlation risk.
 - Do not implement secret redaction here. The separate
-  `docs/plans/current-work/agentd/diagnostic-secret-redaction/TASK.md` remains required before release.
+  `docs/plans/current-work/04_agentd/05_diagnostic-secret-redaction.md` remains required before release.
 - Do not implement server journal projection or command completion here. Deriving and sending the acknowledged
-  operation prefix belongs to `docs/plans/current-work/agent-session-server/session-replication/TASK.md` with
+  operation prefix belongs to `docs/plans/current-work/03_agent-session-server/02_session-replication.md` with
   journal storage; pending-command completion belongs to
-  `docs/plans/current-work/agent-session-server/command-service/TASK.md`.
+  `docs/plans/current-work/03_agent-session-server/03_command-service.md`.
 
 ### Task 0: Satisfy and inspect prerequisite contracts
 
 **Files:**
 - Inspect: `docs/plans/current-work/agentd/journal-reader/TASK.md`
-- Inspect: `docs/plans/current-work/agentd/journal-sync/TASK.md`
+- Inspect: `docs/plans/current-work/04_agentd/02_journal-sync.md`
 - Inspect: `docs/plans/current-work/native-session-host/control-journal-idempotency/TASK.md`
 - Inspect: `agentd/src/main/java/pro/deta/orion/agentd/journal/`
 - Inspect: `agentd/src/main/java/pro/deta/orion/agentd/session/ControlCommand.java`
@@ -68,7 +68,7 @@ discarding another task's work.
 
 Run: `test ! -e docs/plans/current-work/agentd/journal-reader/TASK.md`
 
-Run: `test ! -e docs/plans/current-work/agentd/journal-sync/TASK.md`
+Run: `test ! -e docs/plans/current-work/04_agentd/02_journal-sync.md`
 
 Run: `test ! -e docs/plans/current-work/native-session-host/control-journal-idempotency/TASK.md`
 

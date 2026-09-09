@@ -368,7 +368,7 @@ git commit -m "Expose primary upstream synchronization service"
 **Files:**
 
 - Create: `git/git-sync/src/test/java/pro/deta/orion/git/sync/GitSyncEndToEndTest.java`
-- Modify: `docs/plans/current-work/external-git-repository-sync/primary-upstream/TASK.md`
+- Modify: `docs/plans/current-work/07_external-git-repository-sync/01_primary-upstream.md`
 
 **Step 1: Add an HTTPS end-to-end test**
 

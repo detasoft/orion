@@ -25,7 +25,7 @@ All five primary findings in the
 [2026-09-03 baseline](../../docs/reviews/2026-09-03-git-parser-architecture-simplification.md) remain
 present. This document records current evidence and qualifications, especially around repository refresh
 semantics. It does not mark the existing
-[simplification tasks](../../docs/plans/upcoming-work/git-wire-architecture-simplification/TASK.md)
+[simplification tasks](../../docs/plans/upcoming-work/02_git-wire-architecture-simplification/TASK.md)
 complete or claim that their post-implementation review has happened.
 
 ## Current conceptual model

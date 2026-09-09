@@ -248,7 +248,7 @@ git commit -m "Handle concurrent AgentD journal maintenance"
 ### Task 6: Verify the task and prepare dedicated-worktree completion
 
 **Files:**
-- Modify: `docs/plans/current-work/agentd/TASK.md`
+- Modify: `docs/plans/current-work/04_agentd/TASK.md`
 - Delete: `docs/plans/current-work/agentd/journal-reader/TASK.md`
 
 **Step 1: Run focused verification**

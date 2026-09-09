@@ -1,6 +1,6 @@
 # Interactive Terminal Corrections and Administration
 
-Task: `current-work/interactive-ssh-shell/terminal-administration`.
+Task: `current-work/08_interactive-ssh-shell/01_terminal-administration.md`.
 
 ## Current model and minimal delta
 

@@ -347,7 +347,7 @@ git commit -m "Make Orion XML v2 the writable configuration shape"
 
 **Files:**
 
-- Modify: `docs/plans/current-work/hierarchical-orion-configuration/TASK.md`
+- Modify: `docs/plans/current-work/02_hierarchical-orion-configuration/TASK.md`
 - Delete: `docs/plans/current-work/hierarchical-orion-configuration/hierarchy-and-identifiers/TASK.md`
 - Delete: `docs/plans/current-work/hierarchical-orion-configuration/xml-schema-v2/TASK.md`
 - Modify: task files that link to either completed leaf

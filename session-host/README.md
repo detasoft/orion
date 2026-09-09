@@ -24,7 +24,7 @@ guarantee.
 
 This baseline is implemented, but production hardening remains tracked in
 [Harden Linux process-tree
-control](../docs/plans/current-work/native-session-host/linux-process-tree-control/TASK.md).
+control](../docs/plans/current-work/05_native-session-host/01_linux-process-tree-control.md).
 That task covers per-session cgroup v2 ownership where delegation is available,
 pidfd-based lifecycle observation, removal of frequent system-wide `/proc`
 scans, and acceptance tests for fast daemonization and forks racing with

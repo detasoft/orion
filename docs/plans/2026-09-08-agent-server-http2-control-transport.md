@@ -1,7 +1,7 @@
 # Agent Server HTTP/2 Control Transport
 
 Task: `current-work/agent-session-server/control-and-registries/http2-control-transport`
-Pool: [Server agent registration](current-work/agent-session-server/control-and-registries/TASK.md)
+Pool: [Server agent registration](current-work/03_agent-session-server/01_control-and-registries/TASK.md)
 Protocol: [Agent protocol](../../agent-protocol/protocol/README.md)
 
 This ordinary implementation plan is owned by the review orchestrator on

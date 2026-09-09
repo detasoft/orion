@@ -270,7 +270,7 @@ git commit -m "Preserve journaled native start failures"
 ### Task 5: Verify, review, and integrate the completed leaf
 
 **Files:**
-- Modify: `docs/plans/current-work/native-session-host/TASK.md`
+- Modify: `docs/plans/current-work/05_native-session-host/TASK.md`
 - Delete: `docs/plans/current-work/native-session-host/start-outcome-contract/TASK.md`
 
 **Step 1: Run focused and routine development verification outside the sandbox**

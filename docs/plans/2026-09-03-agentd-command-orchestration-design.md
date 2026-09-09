@@ -180,7 +180,7 @@ same start identity if it has not committed an outcome.
 The diagnostic text is capped at 1 MiB. When larger, it retains the first
 64 KiB and last 960 KiB and records the omitted byte count. Secret redaction is
 explicitly deferred to
-`docs/plans/current-work/agentd/diagnostic-secret-redaction/TASK.md`, which is
+`docs/plans/current-work/04_agentd/05_diagnostic-secret-redaction.md`, which is
 required before release. Until that task is complete, this diagnostic path is
 not considered safe for production logging or transmission.
 
@@ -235,7 +235,7 @@ Journal-sync sends schema-2 `ACK_JOURNAL` only from a complete server-durable
 prefix and observes its journaled result. It must avoid a feedback loop driven
 solely by ACK results. The
 [native-control task](current-work/agentd/native-control-contract/TASK.md) and
-[alignment task](current-work/agentd/session-host-contract-alignment/TASK.md)
+[alignment task](current-work/04_agentd/03_session-host-contract-alignment.md)
 track the Java changes needed to conform to the current native contract.
 
 ## Verification Design
