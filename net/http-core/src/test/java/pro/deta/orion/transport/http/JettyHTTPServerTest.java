@@ -516,16 +516,32 @@ class JettyHTTPServerTest {
 
     @Test
     void cleansUpPeerResetAndServerShutdownAcrossSlowStreams() throws Exception {
-        LinkedBlockingQueue<Throwable> closed = new LinkedBlockingQueue<>();
-        AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
-            @Override
-            public void onMessage(AgentMessage message) {
+        record StreamObservation(
+                List<CompletableFuture<Void>> sends,
+                CompletableFuture<Void> admitted,
+                CompletableFuture<Void> closed) {
+        }
+        LinkedBlockingQueue<StreamObservation> opened = new LinkedBlockingQueue<>();
+        AgentControlHandler handler = connection -> {
+            List<CompletableFuture<Void>> sends = new CopyOnWriteArrayList<>();
+            for (int i = 0; i < 65; i++) {
+                sends.add(connection.send(new AgentMessage.RequestSessionList()).toCompletableFuture());
             }
+            CompletableFuture<Void> admitted = new CompletableFuture<>();
+            CompletableFuture<Void> closed = new CompletableFuture<>();
+            opened.add(new StreamObservation(sends, admitted, closed));
+            return new AgentControlHandler.Session() {
+                @Override
+                public void onMessage(AgentMessage message) {
+                    connection.handshakeComplete();
+                    admitted.complete(null);
+                }
 
-            @Override
-            public void onClosed(Throwable failure) {
-                closed.add(failure == null ? new IOException("closed") : failure);
-            }
+                @Override
+                public void onClosed(Throwable failure) {
+                    closed.complete(null);
+                }
+            };
         };
         try (MaterialFixture material = material()) {
             AgentControlRoute control = new AgentControlRoute(
@@ -538,20 +554,31 @@ class JettyHTTPServerTest {
                     control,
                     new OkRoute());
             List<TestAgentClient> clients = new ArrayList<>();
+            List<StreamObservation> streams = new ArrayList<>();
             try {
                 for (int i = 0; i < 6; i++) {
-                    TestAgentClient client = agentClient(server, material.serverCertificate());
+                    TestAgentClient client = agentClient(server, material.serverCertificate(), false, 1);
                     client.connect();
                     clients.add(client);
+                    StreamObservation stream = opened.poll(5, TimeUnit.SECONDS);
+                    assertThat(stream).isNotNull();
+                    streams.add(stream);
+                    client.send(AGENT_CODEC.encode(new AgentMessage.RequestSessionList()));
+                    stream.admitted().get(5, TimeUnit.SECONDS);
+                    assertThat(stream.sends()).hasSize(65);
+                    assertThat(stream.sends().getFirst()).isNotDone();
+                    assertThat(stream.sends().getLast()).isCompletedExceptionally();
                 }
                 HttpsURLConnection ordinary = httpsConnection(server, clientContext(null, null));
                 assertThat(ordinary.getResponseCode()).isEqualTo(200);
 
                 clients.getFirst().reset();
-                assertThat(closed.poll(5, TimeUnit.SECONDS)).isNotNull();
+                streams.getFirst().closed().get(5, TimeUnit.SECONDS);
+                awaitSettled(streams.getFirst().sends());
                 server.onStop();
                 for (int i = 1; i < clients.size(); i++) {
-                    assertThat(closed.poll(5, TimeUnit.SECONDS)).isNotNull();
+                    streams.get(i).closed().get(5, TimeUnit.SECONDS);
+                    awaitSettled(streams.get(i).sends());
                     clients.get(i).terminal.get(5, TimeUnit.SECONDS);
                 }
             } finally {
