@@ -96,11 +96,12 @@ public final class SessionEventCodec {
         EventId eventId = eventId(read(items.get(0), encoded), "eventId");
         int eventType = unsignedShort(read(items.get(1), encoded), "eventType");
         CborArrayItems.Slice payload = items.get(2);
+        ProtocolBytes encodedRecord = ProtocolBytes.copyOf(encoded, from, to);
         return new SessionEventRecord(
                 eventId,
                 eventType,
-                ProtocolBytes.copyOf(encoded, payload.from(), payload.to()),
-                ProtocolBytes.copyOf(encoded, from, to),
+                encodedRecord.slice(payload.from() - from, payload.to() - from),
+                encodedRecord,
                 items.size() - 3);
     }
 
@@ -142,7 +143,7 @@ public final class SessionEventCodec {
     }
 
     private CborReader.Value payload(SessionEventRecord event) throws AgentProtocolException {
-        return new CborReader(event.encodedPayload().toByteArray(), limits).readRoot();
+        return event.encodedPayload().cborReader(limits).readRoot();
     }
 
     private List<CborReader.Value> payloadArray(SessionEventRecord event, String name)

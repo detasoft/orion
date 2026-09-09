@@ -2,9 +2,11 @@ package pro.deta.orion.agent.protocol;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.management.ManagementFactory;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -34,6 +36,72 @@ class SessionEventCodecTest {
             assertThat(CODEC.decodeKnownPayload(record)).contains(expected);
             assertThat(record.trailingFieldCount()).isZero();
         }
+    }
+
+    @Test
+    void retainsLargeEventWithOneOwnedBacking() throws Exception {
+        SessionEventCodec codec = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
+        byte[] binary = new byte[1024 * 1024];
+        Arrays.fill(binary, (byte) 0x5a);
+        byte[] expectedPayload = ByteBuffer.allocate(binary.length + 5)
+                .put((byte) 0x5a)
+                .putInt(binary.length)
+                .put(binary)
+                .array();
+        byte[] encoded = codec.encodeOpaque(
+                new EventId(7),
+                0x7ffe,
+                ProtocolBytes.copyOf(expectedPayload),
+                List.of());
+        byte[] expectedRecord = Arrays.copyOf(encoded, encoded.length);
+        for (int iteration = 0; iteration < 20; iteration++) {
+            codec.decode(encoded);
+        }
+        com.sun.management.ThreadMXBean allocationBean = allocationBean();
+
+        long before = allocationBean.getThreadAllocatedBytes(Thread.currentThread().threadId());
+        SessionEventRecord record = codec.decode(encoded);
+        long allocated = allocationBean.getThreadAllocatedBytes(Thread.currentThread().threadId()) - before;
+
+        assertThat(allocated).isLessThan(2L * encoded.length);
+        encoded[0] = 0;
+        assertThat(record.encodedPayload().toByteArray()).containsExactly(expectedPayload);
+        assertThat(record.encodedRecord().toByteArray()).containsExactly(expectedRecord);
+        assertThat(record.encodedPayload()).isEqualTo(ProtocolBytes.copyOf(expectedPayload));
+        assertThat(record.encodedPayload().hashCode())
+                .isEqualTo(ProtocolBytes.copyOf(expectedPayload).hashCode());
+        assertThat(record.encodedPayload().size()).isEqualTo(expectedPayload.length);
+        assertThat(record.encodedPayload().toString())
+                .isEqualTo("ProtocolBytes[size=" + expectedPayload.length + "]");
+
+        byte[] exposedPayload = record.encodedPayload().toByteArray();
+        byte[] exposedRecord = record.encodedRecord().toByteArray();
+        exposedPayload[0] = 0;
+        exposedRecord[0] = 0;
+        assertThat(record.encodedPayload().toByteArray()).containsExactly(expectedPayload);
+        assertThat(record.encodedRecord().toByteArray()).containsExactly(expectedRecord);
+    }
+
+    @Test
+    void decodesLargeKnownPayloadWithoutPayloadPreparseCopy() throws Exception {
+        SessionEventCodec codec = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
+        byte[] binary = new byte[1024 * 1024];
+        Arrays.fill(binary, (byte) 0x5a);
+        SessionEventRecord record = codec.decode(codec.encode(
+                new EventId(8),
+                new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(binary))));
+        for (int iteration = 0; iteration < 20; iteration++) {
+            codec.decodeKnownPayload(record);
+        }
+        com.sun.management.ThreadMXBean allocationBean = allocationBean();
+
+        long before = allocationBean.getThreadAllocatedBytes(Thread.currentThread().threadId());
+        Optional<SessionEventPayload> decoded = codec.decodeKnownPayload(record);
+        long allocated = allocationBean.getThreadAllocatedBytes(Thread.currentThread().threadId()) - before;
+
+        assertThat(allocated).isLessThan(4L * binary.length);
+        assertThat(decoded).contains(
+                new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(binary)));
     }
 
     @Test
@@ -413,6 +481,18 @@ class SessionEventCodecTest {
                 .isThrownBy(callable)
                 .extracting(AgentProtocolException::reason)
                 .isEqualTo(AgentProtocolException.Reason.LIMIT_EXCEEDED);
+    }
+
+    private static com.sun.management.ThreadMXBean allocationBean() {
+        assertThat(ManagementFactory.getThreadMXBean())
+                .isInstanceOf(com.sun.management.ThreadMXBean.class);
+        com.sun.management.ThreadMXBean allocationBean =
+                (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
+        assertThat(allocationBean.isThreadAllocatedMemorySupported()).isTrue();
+        if (!allocationBean.isThreadAllocatedMemoryEnabled()) {
+            allocationBean.setThreadAllocatedMemoryEnabled(true);
+        }
+        return allocationBean;
     }
 
     private static void addDecoded(
