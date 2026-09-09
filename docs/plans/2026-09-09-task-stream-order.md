@@ -55,13 +55,12 @@ administration with their active owners.
 | M1 | [Remaining key owners](current-work/01_unified-key-material-bootstrap/01_remaining-key-owner-migration.md) | **Next overall**; remove the remaining independent key storage. |
 | M2 | [JWT rotation and refresh](current-work/01_unified-key-material-bootstrap/02_short-lived-jwt-rotation-and-refresh.md) | Identity foundation is integrated; may run beside M1 if consumers do not overlap. |
 | M3 | [Rotation/recovery acceptance](current-work/01_unified-key-material-bootstrap/03_rotation-recovery-and-acceptance.md) | M1 + M2; encrypted configuration foundation is integrated. |
-| C1 | [Local ACL characterization](current-work/11_local-acl-storage-characterization.md) | Capture retained behavior before changing storage contracts. |
 | C2 | [Canonical repository names](upcoming-work/01_acl-storage-hardening/03_canonical-repository-names.md) | Coordinate with Git parser/storage boundary; one storage-neutral identity. |
 | C3 | [Local path containment](upcoming-work/01_acl-storage-hardening/04_local-path-containment.md) | After characterization and canonical path decisions. |
 | C4 | [Exact snapshot save](upcoming-work/01_acl-storage-hardening/05_exact-snapshot-save.md) | Preserve the established path boundary and publication semantics. |
 | C5 | [Consistent storage failures](upcoming-work/01_acl-storage-hardening/06_consistent-storage-failures.md) | Migrate the settled read/write contract once. |
 | C6 | [Hierarchical authorization](current-work/02_hierarchical-orion-configuration/01_hierarchical-authorization.md) | ACL foundation first, as required by its parent; users/roles are integrated. |
-| C7 | [Native Git configuration snapshots](current-work/02_hierarchical-orion-configuration/02_native-git-configuration-snapshots.md) | Can advance beside C1–C6 using the completed material/configuration barrier; coordinate bootstrap ownership. |
+| C7 | [Native Git configuration snapshots](current-work/02_hierarchical-orion-configuration/02_native-git-configuration-snapshots.md) | Can advance beside remaining C2–C6; Local characterization is integrated. Coordinate bootstrap ownership. |
 | C8 | [Configuration administration/acceptance](current-work/02_hierarchical-orion-configuration/03_administration-and-acceptance.md) | C6 + C7 and integrated repository/mirror configuration. |
 
 ## 2. Agent control, replication, and commands

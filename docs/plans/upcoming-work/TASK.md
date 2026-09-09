@@ -11,8 +11,8 @@ to run before a dependent current task.
 
 ### Material and configuration foundation
 
-Characterize Local storage and remove verified dead helpers before changing
-storage contracts; complete this foundation before hierarchical authorization.
+Local storage characterization and dead-helper removal are integrated. Preserve
+that baseline while changing storage contracts before hierarchical authorization.
 
 ### Git protocol, client, storage, and transports
 
