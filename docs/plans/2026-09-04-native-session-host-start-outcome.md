@@ -211,14 +211,14 @@ Run: `make session-host-test`
 Run the pinned formatter through the prepared toolchain:
 
 ```bash
-RUSTUP_HOME="$HOME/.cache/orion/session-host/rust-toolchains/1.97.0-aarch64-apple-darwin/rustup" \
-CARGO_HOME="$HOME/.cache/orion/session-host/rust-toolchains/1.97.0-aarch64-apple-darwin/cargo" \
-"$HOME/.cache/orion/session-host/rust-toolchains/1.97.0-aarch64-apple-darwin/cargo/bin/cargo" \
+RUSTUP_HOME=.orion-cache/rust-toolchains/1.97.0-aarch64-apple-darwin/rustup \
+CARGO_HOME=.orion-cache/rust-toolchains/1.97.0-aarch64-apple-darwin/cargo \
+.orion-cache/rust-toolchains/1.97.0-aarch64-apple-darwin/cargo/bin/cargo \
 fmt --manifest-path session-host/Cargo.toml -- --check
 ```
 
-Expected: tests and format check PASS. If the host triple differs, use the user-cache path selected by
-`make session-host-prefetch` rather than the literal Darwin path.
+Expected: tests and format check PASS. If the host triple differs, use the cache path selected by
+`make session-host-prepare` rather than the literal Darwin path.
 
 **Step 5: Commit native outcome resolution**
 
