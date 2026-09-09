@@ -51,7 +51,8 @@ public final class JettyHttp2Transport implements AgentTransport {
         thread.setDaemon(true);
         return thread;
     });
-    private final List<Consumer<AgentMessage>> controlReceivers = new CopyOnWriteArrayList<>();
+    private final List<Consumer<SequenceDecodeResult.Outcome<AgentMessage>>> controlReceivers =
+            new CopyOnWriteArrayList<>();
     private final List<BiConsumer<SessionId, AgentMessage>> sessionReceivers = new CopyOnWriteArrayList<>();
     private final List<Consumer<TransportSignal>> signals = new CopyOnWriteArrayList<>();
     private final Map<SessionId, Pending> activeSessions = new ConcurrentHashMap<>();
@@ -164,7 +165,7 @@ public final class JettyHttp2Transport implements AgentTransport {
     }
 
     @Override
-    public void onControlMessage(Consumer<AgentMessage> receiver) {
+    public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
         controlReceivers.add(Objects.requireNonNull(receiver, "receiver"));
     }
 
@@ -487,15 +488,14 @@ public final class JettyHttp2Transport implements AgentTransport {
             return;
         }
         for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
-                for (Consumer<AgentMessage> receiver : controlReceivers) {
-                    receiver.accept(decoded.value());
-                }
-                if (!generationDeliveryCurrent(generation)) {
-                    return;
-                }
-            } else if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
+            if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
                 logRecoverable("control", null, rejected.issue());
+            }
+            for (Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver : controlReceivers) {
+                receiver.accept(outcome);
+            }
+            if (!generationDeliveryCurrent(generation)) {
+                return;
             }
         }
         if (endFailure != null) {

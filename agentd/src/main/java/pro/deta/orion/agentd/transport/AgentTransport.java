@@ -5,6 +5,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionId;
 
 /** Asynchronous transport for protocol messages whose logical identity survives reconnects. */
@@ -17,7 +18,7 @@ public interface AgentTransport extends AutoCloseable {
 
     CompletionStage<Void> openSession(SessionId sessionId, SessionStreamRequest request);
 
-    void onControlMessage(Consumer<AgentMessage> receiver);
+    void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver);
 
     void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver);
 

@@ -87,6 +87,24 @@ class AgentControlServiceTest {
         assertThat(transport.closed).isTrue();
     }
 
+    @Test
+    void ignoresUnsupportedVersionOutcomeAfterHandshake() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), Duration.ofSeconds(1));
+
+        service.start();
+        AgentConnection established = service.connection().orElseThrow();
+        AgentProtocolException unsupported = new AgentProtocolException(
+                AgentProtocolException.Reason.UNSUPPORTED_VERSION, "Unsupported Agent protocol version: 2");
+        transport.controlReceiver.accept(new SequenceDecodeResult.Rejected<>(
+                new SequenceDecodeIssue.Recoverable(unsupported, 1)));
+
+        assertThat(service.connection()).contains(established);
+        service.close();
+    }
+
     private static void assertStartupFails(AgentMessage reply) {
         FakeTransport transport = new FakeTransport();
         transport.reply = reply;
@@ -113,7 +131,7 @@ class AgentControlServiceTest {
 
     private static final class FakeTransport implements AgentTransport {
         private final List<byte[]> controls = new ArrayList<>();
-        private Consumer<AgentMessage> controlReceiver;
+        private Consumer<SequenceDecodeResult.Outcome<AgentMessage>> controlReceiver;
         private Consumer<TransportSignal> signalReceiver;
         private AgentMessage reply;
         private RuntimeException connectFailure;
@@ -137,7 +155,7 @@ class AgentControlServiceTest {
             controls.add(item.clone());
             advance(sendElapsedNanos);
             if (reply != null) {
-                controlReceiver.accept(reply);
+                controlReceiver.accept(new SequenceDecodeResult.Decoded<>(reply));
             }
             return CompletableFuture.completedFuture(null);
         }
@@ -153,7 +171,7 @@ class AgentControlServiceTest {
         }
 
         @Override
-        public void onControlMessage(Consumer<AgentMessage> receiver) {
+        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
             controlReceiver = receiver;
         }
 

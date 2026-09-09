@@ -90,7 +90,7 @@ class AgentAssemblyTest {
         }
 
         @Override
-        public void onControlMessage(Consumer<AgentMessage> receiver) {
+        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
         }
 
         @Override

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionId;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -18,7 +19,7 @@ class JettyHttp2TransportTest {
     void registersTypedInboundCallbacks() {
         JettyHttp2Transport transport = transport(1, 1);
         try {
-            transport.onControlMessage(message -> assertThatMessageIsTyped(message));
+            transport.onControlOutcome(outcome -> assertThatOutcomeIsTyped(outcome));
             transport.onSessionMessage((sessionId, message) -> assertThatMessageIsTyped(message));
         } finally {
             transport.close();
@@ -101,4 +102,9 @@ class JettyHttp2TransportTest {
         }
     }
 
+    private static void assertThatOutcomeIsTyped(SequenceDecodeResult.Outcome<AgentMessage> outcome) {
+        if (outcome == null) {
+            throw new AssertionError("typed outcome must not be null");
+        }
+    }
 }

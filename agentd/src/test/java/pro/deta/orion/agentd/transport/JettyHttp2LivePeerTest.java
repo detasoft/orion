@@ -48,6 +48,7 @@ import org.junit.jupiter.api.Test;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.util.CertUtils;
 
@@ -79,7 +80,7 @@ class JettyHttp2LivePeerTest {
         })) {
             JettyHttp2Transport transport = peer.transport(true);
             LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
-            transport.onControlMessage(received::add);
+            onDecodedControl(transport, received::add);
 
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
@@ -106,7 +107,7 @@ class JettyHttp2LivePeerTest {
             JettyHttp2Transport transport = peer.transport(true);
             LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
             LinkedBlockingQueue<TransportSignal> signals = new LinkedBlockingQueue<>();
-            transport.onControlMessage(received::add);
+            onDecodedControl(transport, received::add);
             transport.onSignal(signals::add);
 
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -132,7 +133,7 @@ class JettyHttp2LivePeerTest {
             JettyHttp2Transport transport = peer.transport(true);
             LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
             LinkedBlockingQueue<TransportSignal> signals = new LinkedBlockingQueue<>();
-            transport.onControlMessage(received::add);
+            onDecodedControl(transport, received::add);
             transport.onSignal(signals::add);
 
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -155,7 +156,7 @@ class JettyHttp2LivePeerTest {
         })) {
             JettyHttp2Transport transport = peer.transport(true);
             LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
-            transport.onControlMessage(message -> {
+            onDecodedControl(transport, message -> {
                 if (message.equals(FIRST_MESSAGE)) {
                     receiverEntered.countDown();
                     await(releaseReceiver);
@@ -192,7 +193,7 @@ class JettyHttp2LivePeerTest {
         })) {
             JettyHttp2Transport transport = peer.transport(true);
             LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
-            transport.onControlMessage(message -> {
+            onDecodedControl(transport, message -> {
                 if (message.equals(FIRST_MESSAGE)) {
                     receiverEntered.countDown();
                     await(releaseReceiver);
@@ -393,7 +394,7 @@ class JettyHttp2LivePeerTest {
             CountDownLatch firstEntered = new CountDownLatch(1);
             CountDownLatch releaseFirst = new CountDownLatch(1);
             AtomicBoolean first = new AtomicBoolean(true);
-            transport.onControlMessage(item -> {
+            onDecodedControl(transport, item -> {
                 received.add(item);
                 if (first.getAndSet(false)) {
                     firstEntered.countDown();
@@ -969,6 +970,17 @@ class JettyHttp2LivePeerTest {
 
     private static DataFrame data(Stream stream, byte[] bytes) {
         return new DataFrame(stream.getId(), ByteBuffer.wrap(bytes), false);
+    }
+
+    private static void onDecodedControl(
+            JettyHttp2Transport transport,
+            Consumer<AgentMessage> receiver
+    ) {
+        transport.onControlOutcome(outcome -> {
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
+                receiver.accept(decoded.value());
+            }
+        });
     }
 
     private static byte[] sequence(byte[]... items) {

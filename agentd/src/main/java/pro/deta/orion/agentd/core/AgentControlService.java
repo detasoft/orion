@@ -12,7 +12,9 @@ import java.util.function.LongSupplier;
 
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
+import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.MachineInfo;
+import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.TransportSignal;
 
@@ -85,7 +87,7 @@ public final class AgentControlService implements AgentService {
 
     @Override
     public void start() throws HandshakeException {
-        transport.onControlMessage(this::receiveControl);
+        transport.onControlOutcome(this::receiveControl);
         transport.onSignal(this::receiveSignal);
         long deadline = nanoTime.getAsLong() + timeout.toNanos();
         try {
@@ -118,10 +120,18 @@ public final class AgentControlService implements AgentService {
         transport.close();
     }
 
-    private void receiveControl(AgentMessage message) {
+    private void receiveControl(SequenceDecodeResult.Outcome<AgentMessage> outcome) {
         if (negotiated.isDone()) {
             return;
         }
+        if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
+            if (rejected.issue().exception().reason() == AgentProtocolException.Reason.UNSUPPORTED_VERSION) {
+                negotiated.completeExceptionally(new HandshakeException(
+                        "Server selected an unsupported protocol version", rejected.issue().exception()));
+            }
+            return;
+        }
+        AgentMessage message = ((SequenceDecodeResult.Decoded<AgentMessage>) outcome).value();
         try {
             if (!(message instanceof AgentMessage.Welcome welcome)) {
                 throw new HandshakeException("First server control message is not WELCOME");

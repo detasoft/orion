@@ -17,6 +17,8 @@ import org.eclipse.jetty.server.SslConnectionFactory;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.agent.protocol.*;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
 import pro.deta.orion.util.CertUtils;
@@ -24,19 +26,22 @@ import pro.deta.orion.util.CertUtils;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.security.KeyStore;
+import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 class AgentControlLivePeerTest {
     @Test
     void negotiatesAuthenticatedHandshakeAcrossRealHttp2Transport() throws Exception {
         AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
         CompletableFuture<AgentMessage.Hello> received = new CompletableFuture<>();
-        try (Peer peer = new Peer(codec, received, false)) {
+        try (Peer peer = new Peer(codec, received, Reply.SUPPORTED, Integer.MAX_VALUE)) {
             AgentLaunchContext context = AgentHandshakeTest.context();
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), context, "1.0.0",
@@ -58,7 +63,7 @@ class AgentControlLivePeerTest {
     void negotiatesAfterAFragmentedSemanticFailure() throws Exception {
         AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
         CompletableFuture<AgentMessage.Hello> received = new CompletableFuture<>();
-        try (Peer peer = new Peer(codec, received, true)) {
+        try (Peer peer = new Peer(codec, received, Reply.SEMANTIC_THEN_SUPPORTED, 4)) {
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
                     new MachineInfo("runner", "linux", "aarch64"), Map.of());
@@ -71,6 +76,52 @@ class AgentControlLivePeerTest {
         }
     }
 
+    @Test
+    void rejectsUnsupportedWelcomeFromRealHttp2Transport() throws Exception {
+        AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+        CompletableFuture<AgentMessage.Hello> received = new CompletableFuture<>();
+        try (Peer peer = new Peer(codec, received, Reply.UNSUPPORTED, Integer.MAX_VALUE)) {
+            AgentControlService service = new AgentControlService(
+                    peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of(), Duration.ofSeconds(1));
+
+            assertThatExceptionOfType(HandshakeException.class)
+                    .isThrownBy(service::start)
+                    .withMessageContaining("unsupported")
+                    .withCauseInstanceOf(AgentProtocolException.class);
+            assertThat(received.get(5, TimeUnit.SECONDS)).isNotNull();
+            assertThat(service.connection()).isEmpty();
+            service.close();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 4096})
+    void rejectsUnsupportedWelcomeBeforeSupportedWelcomeAcrossChunkings(int chunkSize) throws Exception {
+        AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+        CompletableFuture<AgentMessage.Hello> received = new CompletableFuture<>();
+        try (Peer peer = new Peer(codec, received, Reply.UNSUPPORTED_THEN_SUPPORTED, chunkSize)) {
+            AgentControlService service = new AgentControlService(
+                    peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of(), Duration.ofSeconds(1));
+
+            assertThatExceptionOfType(HandshakeException.class)
+                    .isThrownBy(service::start)
+                    .withMessageContaining("unsupported")
+                    .withCauseInstanceOf(AgentProtocolException.class);
+            assertThat(received.get(5, TimeUnit.SECONDS)).isNotNull();
+            assertThat(service.connection()).isEmpty();
+            service.close();
+        }
+    }
+
+    private enum Reply {
+        SUPPORTED,
+        SEMANTIC_THEN_SUPPORTED,
+        UNSUPPORTED,
+        UNSUPPORTED_THEN_SUPPORTED
+    }
+
     private static final class Peer implements AutoCloseable {
         private final Server server = new Server();
         private final KeyStore keys = keys();
@@ -78,17 +129,20 @@ class AgentControlLivePeerTest {
         private final ServerConnector connector;
         private final AgentProtocolCodec codec;
         private final CompletableFuture<AgentMessage.Hello> received;
-        private final boolean prependSemanticFailure;
+        private final Reply reply;
+        private final int responseChunkSize;
         private MetaData.Request request;
 
         private Peer(
                 AgentProtocolCodec codec,
                 CompletableFuture<AgentMessage.Hello> received,
-                boolean prependSemanticFailure
+                Reply reply,
+                int responseChunkSize
         ) throws Exception {
             this.codec = codec;
             this.received = received;
-            this.prependSemanticFailure = prependSemanticFailure;
+            this.reply = reply;
+            this.responseChunkSize = responseChunkSize;
             HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory() {
                 @Override
                 protected ServerSessionListener newSessionListener(Connector ignored, EndPoint endPoint) {
@@ -148,16 +202,17 @@ class AgentControlLivePeerTest {
                         data.frame().getByteBuffer().get(item);
                         received.complete((AgentMessage.Hello) codec.decode(item));
                         AgentMessage.Welcome welcome = AgentHandshakeTest.welcome("connection-live", (byte) 9);
-                        byte[] encoded = codec.encode(welcome);
-                        if (prependSemanticFailure) {
-                            byte[] invalidWelcome = {(byte) 0x81, 0x19, (byte) 0x80, 0x01};
-                            stream.data(new DataFrame(stream.getId(), ByteBuffer.wrap(invalidWelcome), false),
-                                    Callback.from(() -> stream.data(new DataFrame(
-                                            stream.getId(), ByteBuffer.wrap(encoded), false), Callback.NOOP)));
-                        } else {
-                            stream.data(
-                                    new DataFrame(stream.getId(), ByteBuffer.wrap(encoded), false), Callback.NOOP);
-                        }
+                        byte[] supported = codec.encode(welcome);
+                        byte[] unsupported = supported.clone();
+                        unsupported[4] = 2;
+                        byte[] response = switch (reply) {
+                            case SUPPORTED -> supported;
+                            case SEMANTIC_THEN_SUPPORTED -> sequence(
+                                    new byte[]{(byte) 0x81, 0x19, (byte) 0x80, 0x01}, supported);
+                            case UNSUPPORTED -> unsupported;
+                            case UNSUPPORTED_THEN_SUPPORTED -> sequence(unsupported, supported);
+                        };
+                        send(response, 0);
                     } catch (Exception failure) {
                         received.completeExceptionally(failure);
                     } finally {
@@ -166,7 +221,22 @@ class AgentControlLivePeerTest {
                 }
                 stream.demand();
             }
+
+            private void send(byte[] response, int offset) {
+                int length = Math.min(responseChunkSize, response.length - offset);
+                byte[] chunk = Arrays.copyOfRange(response, offset, offset + length);
+                Callback callback = offset + length == response.length
+                        ? Callback.NOOP
+                        : Callback.from(() -> send(response, offset + length));
+                stream.data(new DataFrame(stream.getId(), ByteBuffer.wrap(chunk), false), callback);
+            }
         }
+    }
+
+    private static byte[] sequence(byte[] first, byte[] second) {
+        byte[] sequence = Arrays.copyOf(first, first.length + second.length);
+        System.arraycopy(second, 0, sequence, first.length, second.length);
+        return sequence;
     }
 
     private static SslContextFactory.Server serverTls(KeyStore keys) {
