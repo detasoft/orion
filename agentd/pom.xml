@@ -94,4 +94,41 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>agentd-local-session</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>run-agentd-local-session</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>pro.deta.orion.agentd.AgentdMain</mainClass>
+                                    <arguments>
+                                        <argument>terminal</argument>
+                                        <argument>start</argument>
+                                        <argument>--session-host</argument>
+                                        <argument>session-host/target/release/session-host</argument>
+                                        <argument>--state-dir</argument>
+                                        <argument>/tmp/orion-agentd-local</argument>
+                                        <argument>--</argument>
+                                        <argument>${agentd.local.command}</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

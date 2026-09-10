@@ -15,7 +15,8 @@ RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema
 	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
-	cargo-init rust-install session-host session-host-test session-host-linux-test
+	cargo-init rust-install session-host session-host-test session-host-linux-test \
+	run-agentd-session
 RUN_TEST_POSITIONAL_ARGUMENTS :=
 RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
 RUN_TEST_MODULE = $(value MODULE)
@@ -37,7 +38,8 @@ endif
 endif
 
 .PHONY: help dist test run-test test-jfr test-jfr-report xml-schema skill-check skills-check \
-	cargo-init rust-install session-host session-host-test session-host-linux-test
+	cargo-init rust-install session-host session-host-test session-host-linux-test \
+	run-agentd-session
 
 help: ## Show available goals and their descriptions
 	@awk '\
@@ -98,6 +100,13 @@ session-host: rust-install ## Build the session host release binary
 
 session-host-test: rust-install ## Run session-host Rust tests
 	cd session-host && $(HOME)/.cargo/bin/cargo test --locked
+
+COMMAND ?= $(SHELL)
+
+## Build AgentD and launch a local session; set COMMAND to override the shell
+run-agentd-session: session-host
+	$(MAVEN) package -Pdev,agentd-local-session -T 4 -q -pl agentd -am -DskipTests \
+		-Dagentd.local.command='$(COMMAND)'
 
 SESSION_HOST_LINUX_HOST ?= root@gw.ntechs.ru
 SESSION_HOST_LINUX_PORT ?= 30022
