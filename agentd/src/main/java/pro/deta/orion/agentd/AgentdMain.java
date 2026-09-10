@@ -5,13 +5,17 @@ import pro.deta.orion.agentd.core.AgentConfiguration;
 import pro.deta.orion.agentd.core.AgentLaunchContext;
 import pro.deta.orion.agentd.core.LaunchPermit;
 import pro.deta.orion.agentd.core.LaunchPermitReader;
+import pro.deta.orion.agentd.terminal.LocalSessionLauncher;
 
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.util.Arrays;
 
 public final class AgentdMain {
     private static final String USAGE = """
             Usage: java -jar agentd.jar --server HTTPS_URI [options]
+                   java -jar agentd.jar terminal start --session-host PATH
+                       --state-dir PATH [options] -- COMMAND...
 
             Options:
               --state-dir PATH       persistent AgentD state directory
@@ -35,7 +39,11 @@ public final class AgentdMain {
     }
 
     static int run(String[] args, PrintStream output, PrintStream errors) {
-        return run(args, System.in, output, errors, AgentdMain::launch);
+        return run(args, System.in, output, errors);
+    }
+
+    static int run(String[] args, InputStream input, PrintStream output, PrintStream errors) {
+        return run(args, input, output, errors, AgentdMain::launch);
     }
 
     static int run(
@@ -45,6 +53,14 @@ public final class AgentdMain {
             PrintStream errors,
             Launcher launcher
     ) {
+        if (args.length > 0 && "terminal".equals(args[0])) {
+            if (args.length < 2 || !"start".equals(args[1])) {
+                errors.println("Usage: agentd terminal start [options] -- COMMAND...");
+                return 2;
+            }
+            return LocalSessionLauncher.run(
+                    Arrays.copyOfRange(args, 2, args.length), output, errors);
+        }
         if (args.length == 1 && "--help".equals(args[0])) {
             output.print(USAGE);
             return 0;

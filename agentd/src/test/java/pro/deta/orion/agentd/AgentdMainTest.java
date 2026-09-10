@@ -27,7 +27,8 @@ class AgentdMainTest {
                 new PrintStream(errors, true, StandardCharsets.UTF_8));
 
         assertThat(exitCode).isZero();
-        assertThat(output.toString(StandardCharsets.UTF_8)).contains("Usage:", "--server");
+        assertThat(output.toString(StandardCharsets.UTF_8))
+                .contains("Usage:", "--server", "terminal start");
         assertThat(errors.toString(StandardCharsets.UTF_8)).isEmpty();
     }
 
@@ -57,6 +58,26 @@ class AgentdMainTest {
         assertThat(run(new String[]{"--help"}, forbidden, (configuration, context) -> { })).isZero();
         assertThat(run(new String[]{"--server", "http://bad"}, forbidden,
                 (configuration, context) -> { })).isEqualTo(2);
+    }
+
+    @Test
+    void routesLocalSessionLaunchWithoutReadingTheDaemonPermit() {
+        InputStream forbidden = new InputStream() {
+            @Override
+            public int read() {
+                throw new AssertionError("terminal start must not read the daemon permit");
+            }
+        };
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+
+        int exit = AgentdMain.run(
+                new String[]{"terminal", "start"},
+                forbidden,
+                new PrintStream(new ByteArrayOutputStream()),
+                new PrintStream(errors));
+
+        assertThat(exit).isEqualTo(2);
+        assertThat(errors.toString(StandardCharsets.UTF_8)).contains("terminal start");
     }
 
     @Test
