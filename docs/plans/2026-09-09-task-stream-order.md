@@ -104,16 +104,17 @@ wording. This audit does not rewrite the occupied task.
 
 ## 3. Native session execution
 
-Linux process ownership is integrated in `c0a764d1`. Its preserved source branch
-retains useful designs for the common process/PTY leaves. Real delegated-cgroup
-acceptance still needs a modern validation host but does not block those common contracts.
+Linux process ownership is integrated in `c0a764d1`. Process listing and PTY
+closure are integrated in `10e92141` and `dcebb944`; their preserved source
+branch has been removed. Real delegated-cgroup acceptance still needs a modern
+validation host but does not block those common contracts.
 
 | Order | Existing task | Gate / reason |
 | --- | --- | --- |
 | N1 | [Linux cgroup v2 acceptance](current-work/05_native-session-host/01_linux-process-tree-control.md) | Implementation integrated in `c0a764d1`; real delegated `cgroup.kill` verification waits for a supporting host. |
 | N1a | [Linux proc access failures](current-work/05_native-session-host/02_linux-proc-discovery-errors.md) | Reproduce first; coordinate the same discovery code with N1. Recheck after N1 lands. |
-| N2a | [Process listing/addressed signals](current-work/05_native-session-host/03_process-control-and-pty-closure/01_list-processes.md) | Available; reconcile the saved design with the integrated owner and current identity contract. |
-| N2b | [PTY closure](current-work/05_native-session-host/03_process-control-and-pty-closure/02_pty-closed.md) | Available; reconcile the saved design with current journal/control contracts. |
+| N2a | Process listing/addressed signals | Completed in `10e92141`. |
+| N2b | PTY closure | Completed in `dcebb944`. |
 | N3 | [Explicit termination](current-work/05_native-session-host/04_termination-coordination.md) | N2a + N2b; keep policy outside the host. |
 | N4 | [Shutdown hardening](current-work/05_native-session-host/05_termination-shutdown-hardening.md) | N3 + N2; recommend before the final lifecycle simplification. |
 | N5 | [Lifecycle ownership simplification](current-work/05_native-session-host/06_simplify-session-lifecycle.md) | N2 + N3; audit remaining duplication after N4, do not reimplement PTY closure. |

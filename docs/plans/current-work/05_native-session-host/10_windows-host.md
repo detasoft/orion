@@ -5,7 +5,7 @@ Detailed plan: ../../2026-09-01-native-session-host.md
 Depends on: completed contracts and build, completed journal core,
 completed acknowledgement-gated journal retention
 Contract: ../../2026-09-03-native-control-journal-idempotency-design.md
-Related: 03_process-control-and-pty-closure/TASK.md
+Related: completed process control and PTY closure (`10e92141`, `dcebb944`)
 
 Provide Windows parity without forking the logical journal, lifecycle, or
 control behavior.
@@ -25,7 +25,7 @@ control behavior.
   periods, escalation, and recovery policy outside the host.
 - Map resize, status, exit code, signal availability, and platform failures to
   the shared contracts. Integrate the process-list and PTY-closure contracts
-  when their common tasks are complete; do not create a Windows-only model.
+  from their completed common contracts; do not create a Windows-only model.
 - Update real AgentD launch/control consumers for Windows execution and named
   pipes, using the same protocol fixtures and operation semantics.
 - Verify raw byte preservation and document unavoidable ConPTY behavior

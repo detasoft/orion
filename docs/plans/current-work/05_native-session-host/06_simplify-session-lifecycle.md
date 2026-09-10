@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on:
-[process control and PTY closure](03_process-control-and-pty-closure/TASK.md),
+completed process control and PTY closure (`10e92141`, `dcebb944`),
 [explicit session termination](04_termination-coordination.md)
 
 Resolve overlapping lifecycle decisions without introducing a global state

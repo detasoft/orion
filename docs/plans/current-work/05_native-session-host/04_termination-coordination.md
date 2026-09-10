@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on:
-[process control and PTY closure](03_process-control-and-pty-closure/TASK.md),
+completed process control and PTY closure (`10e92141`, `dcebb944`),
 completed explicit journal durability
 
 Keep `TERMINATE` as an explicit operation submitted by the server or a manual
@@ -41,7 +41,7 @@ does not own grace periods, escalation deadlines, or retry policy.
 ## Boundary
 
 This task owns termination entry and its interaction with operation admission.
-Addressed `SIGNAL` requests and process-list semantics remain in
-`03_process-control-and-pty-closure/TASK.md`; Linux cgroup, pidfd, and
-descendant delivery mechanics are integrated in `c0a764d1`. Their outstanding
-real cgroup validation remains in `01_linux-process-tree-control.md`.
+Addressed `SIGNAL`, process-list, and PTY-closure contracts are integrated in
+`10e92141` and `dcebb944`; Linux cgroup, pidfd, and descendant delivery
+mechanics are integrated in `c0a764d1`. Their outstanding real cgroup
+validation remains in `01_linux-process-tree-control.md`.

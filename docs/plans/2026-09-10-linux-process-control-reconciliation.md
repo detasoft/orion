@@ -46,18 +46,17 @@ and runs Cargo on the configured SSH host. `SESSION_HOST_LINUX_TOOLCHAIN_BIN`,
 tools; this goal does not install or change toolchain ownership. The default
 remote run/cache parent is `/root/orion-session-host-linux`.
 
-## Preserved follow-up design
+## Reconciled follow-up design
 
-Source commit `79386060248ea965468fb013f014bef5e32c0d09`, in the preserved
-`codex/linux-process-tree-control-47c2` branch, contains the original
+Source commit `79386060248ea965468fb013f014bef5e32c0d09` contained the original
 `2026-09-04-native-process-control-design.md` and implementation notes. Those
 files are historical source, not current control requirements. In particular,
 their intent ledger, grace timer, repeated signalling, and old operation
 framing must not be restored.
 
 LIST_PROCESSES and addressed signalling later integrated in `10e92141`, using
-the reconciled process-token and retained-identity design. The useful remaining
-design is PTY closure:
+the reconciled process-token and retained-identity design. PTY closure later
+integrated in `dcebb944` with the following retained properties:
 
 - PTY_CLOSED is emitted exactly once by the terminal reader after its final
   output. Output and terminal controls share the existing serialization
@@ -68,5 +67,5 @@ design is PTY closure:
   second control execution path is needed.
 
 No process-list request, addressed-signal framing, or PTY_CLOSED event was
-implemented by this reconciliation checkpoint. Keep the source branch/worktree
-until the PTY_CLOSED leaf has reconciled its detailed design.
+implemented by this reconciliation checkpoint. After the follow-up integrations
+reconciled the useful design, the source branch and worktree were removed.
