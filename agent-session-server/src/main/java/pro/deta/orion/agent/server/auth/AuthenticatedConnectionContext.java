@@ -11,7 +11,7 @@ import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import java.util.Map;
 import java.util.Objects;
 
-/** Immutable launch identity and transport authority published only after WELCOME delivery. */
+/** Authenticated launch identity and revocable transport authority published after WELCOME delivery. */
 public final class AuthenticatedConnectionContext {
     private final AgentId agentId;
     private final AgentGeneration generation;
@@ -23,6 +23,7 @@ public final class AuthenticatedConnectionContext {
     private final ConnectionId connectionId;
     private final AgentControlHandler.Connection connection;
     private final Renewal renewal;
+    private boolean authoritative = true;
 
     AuthenticatedConnectionContext(
             AgentId agentId,
@@ -83,8 +84,15 @@ public final class AuthenticatedConnectionContext {
         return connection;
     }
 
-    public RenewalResult renewReconnectToken() {
+    public synchronized RenewalResult renewReconnectToken() {
+        if (!authoritative) {
+            return RenewalResult.REJECTED;
+        }
         return renewal.renew();
+    }
+
+    synchronized void revoke() {
+        authoritative = false;
     }
 
     public enum RenewalResult {
