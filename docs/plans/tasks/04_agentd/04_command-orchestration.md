@@ -41,14 +41,10 @@ from each session journal.
 
 ## AgentD Command Orchestration Design
 
-> Contract update, 2026-09-07: native-control and recovery passages below are
-> historical proposals, not a description of current runtime behavior. The
-> [current native contract and Java interface comparison](03_session-host-contract-alignment/TASK.md)
-> define source-aware in-memory admission, journaled command results, ACK, and
-> start-outcome uncertainty.
-> Recovery from recorded sequence maxima alone is not established when an
-> admitted operation has a pending or missing result. Reconcile affected steps
-> with that document before implementing the remaining orchestration work.
+> Recovery update, 2026-09-10: the
+> [SERVER sequence recovery contract](../05_native-session-host/08_server-operation-sequence-recovery.md)
+> defines the atomic host claim, recorded lower bound, connection fence, and
+> retention-watermark observation consumed below.
 
 ### Status
 
@@ -116,18 +112,19 @@ beside the host journal. It also adds crash consistency, retention, and
 takeover coordination that the server-launched stateless model deliberately
 avoids.
 
-#### Journal-authoritative stateless router
+#### Journal-authoritative stateless router with a live-host claim
 
 The selected approach observes command outcomes in the host journal and lets
 the server complete commands only from replicated results. Local delivery and
-admission are transient observations. A missing result leaves the effect
-unknown, and sequence allocation after reconnect remains unresolved when
-recorded history does not expose every admitted operation.
+admission are transient observations. The live host remains authoritative for
+its accepted sequence high-water mark. A missing result leaves the effect
+unknown, while an atomic claim fences older control connections and exposes the
+admission value needed for safe allocation.
 
 ### Recovery and Sequence Allocation
 
-After AgentD connects or restarts, the server supplies two facts for each
-session:
+After AgentD connects or restarts, the server supplies two durable facts for
+each session:
 
 1. the highest `operationSequence` covered by its durably acknowledged journal
    prefix; and
@@ -138,19 +135,28 @@ the current tail. This scan is not an HTTP/2 upload and does not wait for the
 replication pump. It finds recorded operation sequences, command results, and
 lifecycle facts.
 
-The maximum sequence in the server prefix and local suffix is only a lower
-bound on the live host's admission high-water mark. An operation may still be
-running or may have failed to append its result. Reaching the journal tail
-therefore does not prove that the next recorded sequence is safe to allocate.
-The orchestration implementation must resolve allocation before enabling
-commands after reconnect; it must not infer permission to replay from absent
-records or a stale rejection.
+The unsigned maximum sequence in the server prefix and local suffix is only a
+recorded lower bound. AgentD sends that floor through
+`CLAIM_SERVER_CONTROL` after the scan reaches a stable tail. Under the same
+lock used for operation admission, the live host rejects an inconsistent floor,
+fences older control connections, and returns its accepted `SERVER` sequence
+high-water mark. An older operation admitted first is included in the returned
+value; one reaching admission after the claim is rejected without an effect.
+
+AgentD enables the session lane only after a successful claim and initializes
+its in-memory allocator to the unsigned successor of the host value. A host
+value below the recorded floor, an unavailable host, an ambiguous claim, or
+`u64::MAX - 1` pauses only that session. AgentD never raises host state from
+journal evidence and never replays an envelope whose result is missing.
 
 Commands awaiting recovery remain in the bounded session lane. Journal backlog
 upload may continue independently. A retention gap or corrupt suffix pauses
 only the affected session and is reported as an integrity failure. Correct
 `ACK_JOURNAL` retention ensures deleted results are represented in the
-server-durable prefix, but does not expose unrecorded admissions.
+server-durable prefix, but does not expose unrecorded admissions. The claim also
+returns the host's durable retention watermark so journal sync can compare it
+with the server event cursor without treating either event ID as an operation
+sequence.
 
 ### Exact Command Envelope
 
@@ -622,8 +628,8 @@ observes maximum recorded sequence `11` and reaches the local tail. Repeat with 
 prefix. These are recorded-history facts, not proof of the host's complete admission high-water mark.
 
 Add an admitted operation whose result is pending or missing. The scanner must leave sequence allocation
-unresolved rather than treating recorded maximum plus one as safe. Resolve the allocation contract before
-implementing the command-dispatch steps that depend on a fresh sequence.
+unresolved rather than treating recorded maximum plus one as safe. Only the prerequisite atomic host claim may
+turn this recorded lower bound into an allocation-ready state.
 
 **Step 2: Run the scanner test to verify it fails**
 
@@ -636,8 +642,8 @@ Expected: FAIL because the scanner and state do not exist.
 Inject the prerequisite `SessionJournalReader`; call `readAfter` with the server `eventId` cursor and iterate
 with ordinary loops. Observe known command results and lifecycle payloads while leaving every record available
 to journal sync. Return the recorded maximum `SERVER` operation sequence and tail observation without claiming
-they expose admissions whose results are pending or missing. Exclude `MANUAL` sequences from server recovery.
-Any allocator subsequently selected must handle sequence exhaustion.
+they expose admissions whose results are pending or missing. Exclude `MANUAL` sequences from server recovery
+and pass the unsigned maximum of this value and the server-prefix value to the atomic claim.
 
 **Step 4: Add failing lifecycle and missing-result tests**
 
@@ -654,8 +660,10 @@ Expected: FAIL until lifecycle and command-result observations are represented.
 **Step 6: Complete immutable recovered state**
 
 `SessionCommandState` should contain the recorded sequence maximum, journal-authoritative exit flag, observed
-command results, and scanned tail `eventId`. Keep allocation readiness explicit until the reconnect contract
-is resolved. Do not copy metadata `latestTimestamp` into any of these fields.
+command results, scanned tail `eventId`, claimed host sequence high-water mark, host retention watermark, and
+allocation readiness. A successful claim initializes the allocator to the host value's unsigned successor;
+inconsistent or exhausted values keep the state blocked. Do not copy metadata `latestTimestamp` into any of
+these fields.
 
 **Step 7: Add concurrent-tail handoff and failure tests**
 
@@ -700,7 +708,7 @@ a global command lock and do not create a thread solely to enforce each I/O time
 **Step 4: Add failing cross-session and recovery-gate tests**
 
 Block session A and prove session B completes. Enqueue before `markRecovered` and prove nothing executes until
-the scanner result is installed, then assert the queued commands drain in order.
+the scanner result and successful host claim are installed, then assert the queued commands drain in order.
 
 **Step 5: Run the scheduler test to verify the new cases fail**
 
@@ -958,7 +966,9 @@ Expected: FAIL because `CommandOrchestrator` does not exist.
 
 Route START to `StartSessionHandler`; route the four controls through the scheduler and dispatcher. On
 `SESSION_SYNC`, start journal upload through the prerequisite service and independently scan the local suffix.
-Mark the lane recovered as soon as the scan reaches its stable tail, even if upload remains backlogged.
+After the scan reaches its stable tail, claim the live host with the recorded floor and enable the lane from the
+returned high-water mark. Upload may remain backlogged, but scan completion without a claim never enables
+delivery.
 
 **Step 7: Add backlog independence and isolation tests**
 
@@ -989,7 +999,8 @@ Expected: PASS.
 
 Assert process lock starts before local discovery/recovery and transport connection; command handlers are
 registered before connect; and a discovered session begins recovery only after the server supplies
-`SESSION_SYNC` cursor and acknowledged operation sequence.
+`SESSION_SYNC` cursor and acknowledged operation sequence. The lane remains blocked until the suffix scan and
+atomic host claim both complete.
 
 **Step 2: Run assembly tests to verify they fail**
 
@@ -1058,9 +1069,10 @@ Cover:
 
 ```text
 uncertain delivery without COMMAND_RESULT -> unknown outcome, no automatic replay
-receipt loss with a pending or missing result -> stale rejection does not resolve the earlier attempt
+receipt loss with a pending or missing result -> host claim advances above the admission without replay
 persisted COMMAND_RESULT before server replication -> normal journal recovery completes the command
 large upload backlog -> local scan proceeds independently; allocation readiness is checked separately
+older buffered control connection -> fenced after claim and cannot race the recovered allocator
 PROCESS_EXITED -> later command is not delivered
 pre-journal START failure -> one in-memory eventId=1 failure record
 ```
