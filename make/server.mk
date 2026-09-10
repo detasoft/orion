@@ -44,14 +44,14 @@ require-key-material-password:
 		exit 2; \
 	}
 
-enroll-admin-key:
+enroll-admin-key: ## Enroll an admin SSH key
 	@env -u ORION_ROOT_PASSWORD -u DISPLAY -u SSH_ASKPASS -u SSH_ASKPASS_REQUIRE \
 		ssh $(ORION_SSH_OPTIONS) -o PreferredAuthentications=publickey,keyboard-interactive \
 		-o PasswordAuthentication=no -p $(ORION_SSH_PORT) \
 		-l root $(ORION_SSH_HOST) enroll-key
 	@printf 'Admin SSH key enrolled using the SSH client configuration.\n'
 
-run-server: require-key-material-password
+run-server: require-key-material-password ## Run the Orion server
 	$(MAVEN) -pl core/bootstrap -am -Prun-server \
 		-Dorion.run.arguments="$(ORION_ARGS)" process-classes
 
@@ -65,36 +65,36 @@ run-server: require-key-material-password
 #      make admin-acl
 # Or run both token issue and ACL request in one command:
 #      make admin-acl-with-token
-issue-token:
+issue-token: ## Print a shell export for a temporary admin token
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	printf 'export ORION_TOKEN=%s\n' "$$token"
 
-issue-token-raw:
+issue-token-raw: ## Print a temporary admin token
 	@$(ISSUE_TOKEN_COMMAND)
 
 # SSH admin status:
 #   make ssh-state
-ssh-state:
+ssh-state: ## Query Orion state over SSH
 	ssh $(ORION_SSH_OPTIONS) -p $(ORION_SSH_PORT) -l $(ORION_SSH_USER) $(ORION_SSH_HOST) state
 
-ssh-status: ssh-state
+ssh-status: ssh-state ## Alias for ssh-state
 
 # List native repositories through the Orion SSH admin command:
 #   make list-repos
-list-repos:
+list-repos: ## List repositories over SSH
 	@ssh $(ORION_SSH_OPTIONS) -p $(ORION_SSH_PORT) \
 		-l $(ORION_SSH_USER) $(ORION_SSH_HOST) repositories
 
 # Clone a repository over Orion SSH:
 #   make clone-repository ORION_GIT_USER=e2e ORION_REPOSITORY=project.git ORION_CLONE_DIR=target/project
-clone-repository:
+clone-repository: ## Clone ORION_REPOSITORY over SSH
 	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS)' git clone $(ORION_GIT_URL) $(ORION_CLONE_DIR)
 
-clone-repo: clone-repository
+clone-repo: clone-repository ## Alias for clone-repository
 
 # Clone a repository over Orion HTTP with an ephemeral bearer token:
 #   make clone-http-repo project
-clone-http-repo:
+clone-http-repo: ## Clone a named repository over HTTP
 	@if [ "$(words $(CLONE_HTTP_REPO_ARGS))" -ne 1 ]; then \
 		echo 'Usage: make clone-http-repo <repository>' >&2; \
 		exit 2; \
@@ -104,21 +104,20 @@ clone-http-repo:
 		git --config-env=http.extraHeader=ORION_AUTH_HEADER clone \
 		"http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/r/$(firstword $(CLONE_HTTP_REPO_ARGS))"
 
-admin-acl:
+admin-acl: ## Query the admin ACL with ORION_TOKEN
 	@test -n "$$ORION_TOKEN" || (echo 'ORION_TOKEN is required. Run: eval "$$(make -s issue-token)"' >&2; exit 1)
 	curl -v http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/api/admin/acl -H "Authorization: Bearer $$ORION_TOKEN"
 
-admin-acl-with-token:
+admin-acl-with-token: ## Issue a token and query the admin ACL
 	@ORION_TOKEN="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	curl -v http://$(ORION_HTTP_HOST):$(ORION_HTTP_PORT)/api/admin/acl -H "Authorization: Bearer $$ORION_TOKEN"
 
-# Check HTTP Git discovery and SSH Git operations exposed by make run-server.
-#   make check-git-all
+## Run all Git transport checks
 check-git-all: check-ssh-git-push-create check-jetty-git check-ssh-git check-ssh-git-clone
 
 # Check the Jetty HTTP Git smart discovery endpoint exposed by make run-server.
 #   make check-jetty-git
-check-jetty-git:
+check-jetty-git: ## Check HTTP Git discovery
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	printf 'ORION_TOKEN=%s\n' "$$token"; \
 	printf 'Checking Jetty HTTP Git discovery: %s/info/refs?service=git-upload-pack\n' "$(ORION_CHECK_HTTP_GIT_URL)"; \
@@ -141,7 +140,7 @@ check-jetty-git:
 
 # Check Git upload-pack over Orion SSH exposed by make run-server.
 #   make check-ssh-git
-check-ssh-git:
+check-ssh-git: ## Check Git upload-pack over SSH
 	@token="$$($(ISSUE_TOKEN_COMMAND))" || exit $$?; \
 	printf 'ORION_TOKEN=%s\n' "$$token"; \
 	printf 'Checking SSH Git upload-pack: %s\n' "$(ORION_CHECK_GIT_URL)"; \
@@ -162,7 +161,7 @@ check-ssh-git:
 
 # Check that SSH push creates a missing native Git repository when authorized.
 #   make check-ssh-git-push-create
-check-ssh-git-push-create:
+check-ssh-git-push-create: ## Check SSH push repository creation
 	rm -rf $(ORION_CHECK_PUSH_DIR)
 	printf 'Checking SSH Git push auto-create: %s\n' "$(ORION_CHECK_GIT_URL)"
 	git init $(ORION_CHECK_PUSH_DIR)
@@ -180,7 +179,7 @@ check-ssh-git-push-create:
 
 # Check full Git clone over Orion SSH exposed by make run-server.
 #   make check-ssh-git-clone
-check-ssh-git-clone:
+check-ssh-git-clone: ## Check a full Git clone over SSH
 	rm -rf $(ORION_CHECK_SSH_CLONE_DIR)
 	printf 'Checking SSH Git clone: %s\n' "$(ORION_CHECK_GIT_URL)"
 	GIT_SSH_COMMAND='ssh $(ORION_SSH_OPTIONS)' \

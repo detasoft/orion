@@ -1,4 +1,5 @@
 MAVEN ?= mvn
+UV ?= uv
 TEST_ANALYTICS_RUN_ID ?= $(shell date -u +%Y%m%dT%H%M%SZ)
 TEST_ANALYTICS_ROOT ?= $(CURDIR)/target/test-analytics
 TEST_ANALYTICS_DIR ?= $(TEST_ANALYTICS_ROOT)/$(TEST_ANALYTICS_RUN_ID)
@@ -10,6 +11,7 @@ RUN_TEST_NAMED_USAGE = Usage: make run-test MODULE=<module> TEST='<test-locator>
 RUN_TEST_POSITIONAL_USAGE =    or: make run-test <module> '<test-locator>'
 RUN_TEST_CONFLICT_USAGE = Positional arguments cannot match Make goals; use MODULE=... TEST=... instead
 RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema \
+	help skill-check skills-check \
 	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
@@ -18,6 +20,9 @@ RUN_TEST_POSITIONAL_ARGUMENTS :=
 RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
 RUN_TEST_MODULE = $(value MODULE)
 RUN_TEST_LOCATOR = $(value TEST)
+SKILL_DIRS := $(sort $(dir $(wildcard .agents/skills/*/SKILL.md)))
+
+.DEFAULT_GOAL := help
 
 ifeq ($(firstword $(MAKECMDGOALS)),run-test)
 RUN_TEST_POSITIONAL_ARGUMENTS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
@@ -31,32 +36,67 @@ RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
 endif
 endif
 
-.PHONY: dist test run-test test-jfr test-jfr-report xml-schema cargo-init rust-install session-host \
-	session-host-test session-host-linux-test
+.PHONY: help dist test run-test test-jfr test-jfr-report xml-schema skill-check skills-check \
+	cargo-init rust-install session-host session-host-test session-host-linux-test
 
-dist:
+help: ## Show available goals and their descriptions
+	@awk '\
+		BEGIN { print "Available goals:" } \
+		/^## / { pending = substr($$0, 4); next } \
+		/^[[:alnum:]_.-]+:[^=]/ { \
+			target = $$1; \
+			sub(/:$$/, "", target); \
+			desc = ""; \
+			if ($$0 ~ /## /) { \
+				desc = $$0; \
+				sub(/^[^#]*## /, "", desc); \
+			} else if (pending != "") { \
+				desc = pending; \
+			} \
+			if (desc != "") { \
+				printf "  %-30s %s\n", target, desc; \
+			} \
+			pending = ""; \
+			next; \
+		} \
+		{ pending = "" } \
+		' $(MAKEFILE_LIST)
+
+dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
-test:
+test: ## Run the Maven/JVM test suite with the dev profile
 	$(MAVEN) test -Pdev -T 4
 
-xml-schema:
+xml-schema: ## Generate and compile the XML schema model
 	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
 
-cargo-init:
+skill-check: ## Validate one skill; set SKILL=.agents/skills/<skill>
+	@if [ -z "$(SKILL)" ]; then \
+		printf '%s\n' "Usage: make skill-check SKILL=.agents/skills/<skill>" >&2; \
+		exit 2; \
+	fi
+	$(UV) run --with pyyaml make/validate-skill.py "$(SKILL)"
+
+skills-check: ## Validate all repository skills
+	@for skill in $(SKILL_DIRS); do \
+		$(UV) run --with pyyaml make/validate-skill.py "$$skill" || exit $$?; \
+	done
+
+cargo-init: ## Install rustup when Cargo is unavailable
 	@if [ ! -x "$(HOME)/.cargo/bin/cargo" ]; then \
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 			| sh -s -- -y --profile minimal --no-modify-path --default-toolchain none; \
 	fi
 
-rust-install: cargo-init
+rust-install: cargo-init ## Install the pinned Rust toolchain
 	@$(HOME)/.cargo/bin/rustup run 1.97.0 rustc --version >/dev/null 2>&1 \
 		|| $(HOME)/.cargo/bin/rustup toolchain install 1.97.0 --profile minimal
 
-session-host: rust-install
+session-host: rust-install ## Build the session host release binary
 	cd session-host && $(HOME)/.cargo/bin/cargo build --release
 
-session-host-test: rust-install
+session-host-test: rust-install ## Run session-host Rust tests
 	cd session-host && $(HOME)/.cargo/bin/cargo test --locked
 
 SESSION_HOST_LINUX_HOST ?= root@gw.ntechs.ru
@@ -69,7 +109,7 @@ SESSION_HOST_LINUX_CFLAGS ?=
 SESSION_HOST_LINUX_SSH ?= ssh
 SESSION_HOST_LINUX_SCP ?= scp
 
-session-host-linux-test:
+session-host-linux-test: ## Run session-host tests on the configured Linux host
 	@SESSION_HOST_LINUX_HOST="$(SESSION_HOST_LINUX_HOST)" \
 		SESSION_HOST_LINUX_PORT="$(SESSION_HOST_LINUX_PORT)" \
 		SESSION_HOST_LINUX_REMOTE_ROOT="$(SESSION_HOST_LINUX_REMOTE_ROOT)" \
@@ -81,7 +121,7 @@ session-host-linux-test:
 		SESSION_HOST_LINUX_SCP="$(SESSION_HOST_LINUX_SCP)" \
 		sh make/session-host-linux-test.sh
 
-run-test:
+run-test: ## Run one focused Maven test; set MODULE and TEST
 	@if [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -eq 0 ]; then \
 		if [ -z '$(strip $(value MODULE))' ] || [ -z '$(strip $(value TEST))' ]; then \
 			printf '%s\n' "$(RUN_TEST_NAMED_USAGE)" "$(RUN_TEST_POSITIONAL_USAGE)" >&2; \
@@ -100,7 +140,7 @@ run-test:
 		-Dtest='$(RUN_TEST_LOCATOR)' \
 		-Dsurefire.failIfNoSpecifiedTests=false
 
-test-jfr:
+test-jfr: ## Run Maven tests with JFR analytics
 	@mkdir -p "$(TEST_ANALYTICS_DIR)/jfr"
 	@status=0; \
 	$(MAVEN) test -Pdev,test-jfr -T 4 -fae \
@@ -115,7 +155,7 @@ test-jfr:
 		-Dexec.args="$(TEST_ANALYTICS_DIR) $(TEST_ANALYTICS_TOP)" || exit $$?; \
 	exit $$status
 
-test-jfr-report:
+test-jfr-report: ## Generate a report from existing JFR analytics
 	$(MAVEN) -q -pl tests/test-duration-recorder -am -DskipTests compile
 	$(MAVEN) -q -pl tests/test-duration-recorder \
 		org.codehaus.mojo:exec-maven-plugin:3.5.0:java \

@@ -45,6 +45,10 @@ Add findings only for current structural or behavioral problems supported by
 real code and consumers. Apply `docs/reviews/RULES.md`; exclude style remarks,
 speculative future needs, and unsupported redesign.
 
+Apply the test-quality rules from `orion-minimal-implementation` explicitly.
+Report tests that inspect source code, build files, or configuration files as
+text instead of exercising observable behavior through supported interfaces.
+
 For each finding, record:
 
 1. **Problem** and a concrete trigger.

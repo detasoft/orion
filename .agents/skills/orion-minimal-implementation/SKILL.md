@@ -169,8 +169,10 @@ path. Tests and hypothetical consumers do not justify a second path.
 
 Follow the selected workflow and the
 [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
-Add or update meaningful tests whenever behavior changes. Verify observable
-behavior and contracts, not source strings or private implementation details.
+Add or update meaningful tests whenever behavior changes. Never create tests
+that read source code, build files, or configuration files and assert their
+text or structure. Exercise observable behavior and contracts through supported
+interfaces; verify build behavior by running the relevant build tool or lifecycle.
 
 Do not run a new test while failure is mechanically guaranteed because its
 required production source, type, or symbol does not exist yet. Record that the

@@ -53,6 +53,9 @@
 
 ## Test commands
 
+- Use `make help` as the entry point for repository commands and prefer a
+  documented Make goal. Run tools directly only when no suitable goal exists or
+  a more specific instruction requires the exact command.
 - Run all tests outside the sandbox because they may need loopback sockets.
 - Use `mvn test -Pdev -T 4` for the full Maven/JVM pre-commit check.
 - Use `make session-host-test` for the Rust `session-host` pre-commit check.
