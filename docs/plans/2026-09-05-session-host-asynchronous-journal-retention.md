@@ -155,5 +155,5 @@ Cargo tests, Maven reactor.
    `AGENTS.md`. If a task-caused fix is needed after the commit, use the same commit subject so orchestration
    can squash the branch cleanly.
 
-The review orchestrator owns final review, user approval, task-node deletion, squash, cherry-pick to `main`, the
+The change workflow owns final review, user approval, task-node deletion, squash, cherry-pick to `main`, the
 post-integration `make test`, and branch/worktree cleanup.

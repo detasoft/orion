@@ -12,16 +12,18 @@ Audit the requested modules against the current repository, keep each
 repair queue. Treat every existing finding as a hypothesis that must be checked
 again before implementation.
 
-**REQUIRED SUB-SKILLS:** Use `orion-minimal-implementation` for the audit, ordering,
-and every repair. Use `orion-change-orchestrator` only for repairs that do not
-qualify for the direct small-repair path below, and use `orion-task-runner` when
-task-tree ownership applies.
+**REQUIRED SUB-SKILLS:** Use `orion-minimal-implementation` for the audit,
+ordering, and every repair. Consider `orion-simple-workflow` first for each
+repair, then let the executor choose simple, quick, or change workflow from the
+actual magnitude, risk, useful verification, isolation, and interaction. Use
+`orion-task-runner` when task-tree ownership applies.
 
 `MODULE_REVIEW.md` files belong to the repository
 [workflow-control scope](../../../docs/definitions.md#workflow-control-scope).
 Apply its shared rules: edit and commit reports directly on `main`, never through
-the orchestrator, coordinator, implementation worker, dedicated worktree, or
-subagent. Record review state as early as it becomes accurate: commit newly
+an implementation worker, dedicated worktree, or audit subagent. Use
+`orion-quick-workflow` for these primary-owned state commits. Record review state
+as early as it becomes accurate: commit newly
 confirmed issues before starting their repairs, and immediately after a fix
 lands on `main`, revalidate the affected issue and commit its removal or update
 in a separate documentation-only commit. Do not defer report maintenance to a
@@ -162,9 +164,9 @@ revalidation. Any later analysis uses a fresh worker with no inherited turns.
 
 A repair unit remains active through its implementation, review fixes,
 integration, cleanup, and the separate revalidation commit for
-`MODULE_REVIEW.md`. Once those steps are complete, apply the orchestrator's
+`MODULE_REVIEW.md`. Once those steps are complete, apply the selected workflow's
 completed-task boundary and retire every subagent assigned to that repair. A
-direct small repair has the same context boundary even though it uses no worker.
+direct repair has the same context boundary even when it uses no worker.
 
 Before leaving either completed unit, show the user what was reviewed or solved,
 how the result was established, which parts and report entries changed, actual
@@ -181,31 +183,24 @@ the reconstructed working set is the context reset.
 
 ## Interactive repair loop
 
-When repair was requested, first classify each authorized repair. It qualifies
-for the direct small-repair path only when it is local to one existing module and
-concept, has a narrow and mechanically clear result, and changes no public,
-wire, persisted, lifecycle, concurrency, cross-module, dependency, build, or
-configuration contract. Verify real consumers before classifying a deletion as
-small; the verb `delete` alone does not qualify a repair.
+When repair is requested, consider `orion-simple-workflow` first because its
+direct implementation, self-review, staged checkpoints, and user gates normally
+fit interactive module repair. This is a recommendation, not a strict boundary.
+The executor may choose `orion-quick-workflow` for a prompt low-risk repair when
+its minimal checking and no-gate mechanics are proportionate, or
+`orion-change-workflow` when task-backed isolation and coordinator review add
+value. File type, contract category, module count, and the existence of a review
+finding are evidence, never automatic routing rules.
 
-For a qualifying small repair, the primary agent may edit, test, review, and
-commit directly on `main` without `orion-change-orchestrator`, an implementation
-worker, a subagent, a branch, or a worktree. Do not create a task merely to route
-such a repair. Still apply `orion-minimal-implementation`, preserve unrelated
-workspace state, add or update tests when behavior changes, and run verification
-proportional to the change. Immediately revalidate and commit the corresponding
-report update separately after the repair lands.
+Do not create a task merely to route simple or quick repair. When change
+workflow is selected, search all existing task nodes, including claimed ones,
+before creating anything. A matching claim blocks duplicate work. Use a suitable
+existing unclaimed leaf when possible; otherwise create the smallest coherent
+leaf. Group related findings only when they form one verifiable result, group
+changes that must be atomic, and separate independent outcomes. Do not create
+one task mechanically for every report bullet.
 
-For every other repair, search all existing task nodes, including claimed ones,
-before creating anything. A matching claimed node blocks duplicate work. Map
-each authorized repair to a suitable existing unclaimed node when possible;
-otherwise create the smallest coherent leaf needed to execute it. Group related
-small findings when they form one verifiable result, group changes that must be
-atomic, and separate independent outcomes. Follow the repository rule to commit
-newly created task-tree state immediately without tests. Do not create one task
-mechanically for every report bullet.
-
-Before handing off each task, show a finding card containing:
+Before starting a repair, show a finding card containing:
 
 - problem and concrete trigger;
 - source files and symbols;
@@ -216,46 +211,33 @@ Before handing off each task, show a finding card containing:
 - expected tests, consequences, and known uncertainty.
 
 If the report leaves a material behavior or contract choice unresolved, or the
-user asked to choose among alternatives, obtain that decision before worker
-handoff. A finding card is evidence, not approval of an unresolved product
-choice. Do not repeat approval for a repair whose design the user already
-accepted.
+user asked to choose among alternatives, obtain that decision before repair.
+A finding card is evidence, not approval of an unresolved product choice. Then
+invoke the selected workflow and follow its mechanics exactly. Quick commits
+promptly, simple uses its per-checkpoint user gates, and change uses its
+task-backed worker and integration gate.
 
-For a repair outside the direct small-repair path, invoke
-`orion-change-orchestrator` with the current task as its pool. Its code worker
-model and effort remain the values specified by that skill. The primary agent
-remains coordinator and reviewer; it does not implement branch fixes. The
-implementation worker never edits `MODULE_REVIEW.md`. After the reviewed fix
-lands on `main`, the primary agent immediately revalidates the issue, removes or
-updates every resolved or invalidated item and dependent prose, and commits only
-that report change directly on `main` as documentation-only work.
+After the fix lands on `main`, the primary agent immediately revalidates the
+issue, removes or updates every resolved or invalidated item and dependent prose,
+and commits that report state through `orion-quick-workflow`. If broader
+revalidation is needed, use a fresh Astra/xhigh analysis worker with the
+read-only audit restrictions above; the primary agent still owns the report.
 
-For orchestrated repairs, keep the orchestrator's mandatory reviewed-commit user
-gate. After the user authorizes or confirms integration, complete tests and
-cleanup, then update and commit the integrated report directly on `main` before
-continuing. If broader revalidation is needed, use a fresh Astra/xhigh analysis
-worker with the read-only audit restrictions above; the primary agent still
-makes and commits the report change. Confirm that unrelated state is preserved,
-rebuild the queue, and automatically present and start the next ready task
-without asking the user to select it again.
-
-Rebuild the queue after each repair because one implementation may resolve or
-invalidate several findings. Before starting the next orchestrator instance,
-remove obsolete unclaimed task nodes created by this workflow in a
-documentation-only commit. Before deletion, update surviving task indexes,
+Rebuild the queue after each repair because one change may resolve or invalidate
+several findings. Remove obsolete unclaimed task nodes created by this workflow
+through `orion-task-runner` and `orion-quick-workflow`. Update surviving indexes,
 dependency references, and active-plan outstanding-work entries with verified
-resolution evidence as required by the current `orion-task-runner`; preserve
-unrelated and claimed task state. Stop only for the orchestrator gate, another
-applicable explicit design gate, an unresolved product decision, a claimed
-dependency, unsafe unrelated workspace state, or a genuine implementation
-blocker. Continue independent audits while waiting for a decision when
-possible.
+resolution evidence; preserve unrelated and claimed state. Stop only for the
+selected workflow's gate, another applicable design gate, an unresolved product
+decision, a claimed dependency, unsafe workspace state, or a genuine blocker.
+Continue independent audits while waiting for a decision when possible.
 
 If only an audit was requested, update and commit each report directly on `main`
-as soon as its validated result is ready, then stop after reporting the results;
-do not start task or implementation work. If remediation requires a clean
-committed `main`, commit only the hunks created by this workflow in authorized
-review and plan documents needed as orchestrator inputs.
+through `orion-quick-workflow` as soon as its validated result is ready, then
+stop after reporting the results; do not start task or implementation work. If
+remediation requires a clean committed `main`, commit only the hunks created by
+this workflow in authorized
+review and plan documents needed as execution inputs.
 Authorization to update a report does not authorize pre-existing changes in the
 same file. Never stage unrelated changes. If ownership cannot be separated or
 unrelated state still prevents a clean base, report the exact blocker rather
@@ -267,7 +249,6 @@ A module review is current when every retained finding is supported by the
 present code and its real consumers, resolved findings and dependent prose are
 gone, report links resolve, and uncertainties are explicit. The repair pool is
 complete only when every finding is either resolved by a verified integrated
-change or proved no longer applicable, every direct repair has passed its
-required verification, every orchestrated task has passed review, integration
-verification and cleanup, no required task remains, and the affected
+change or proved no longer applicable, every repair has reached its selected
+workflow's completion condition, no required task remains, and the affected
 `MODULE_REVIEW.md` files contain no resolved finding.

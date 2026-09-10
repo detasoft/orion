@@ -355,5 +355,5 @@ Expected: BUILD SUCCESS.
 **Step 4: Return the branch for orchestrated review**
 
 Report task path, worktree, branch, base and head SHAs, changed files, exact verification results, and residual risks.
-Do not edit the orchestrator-owned plans, squash, cherry-pick, or remove the worktree until the review loop and user
+Do not edit the primary-owned plans, squash, cherry-pick, or remove the worktree until the review loop and user
 gate request those actions.

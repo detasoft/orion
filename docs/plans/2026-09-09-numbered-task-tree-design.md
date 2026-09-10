@@ -40,14 +40,16 @@ No completed task nodes are retained in the active filesystem queue.
 ## Execution
 
 `orion-task-runner` owns discovery, selection, planning placement, and the
-canonical task-tree rules. Executing a selected leaf always uses
-`orion-change-orchestrator`, and implementation workers must apply
-`orion-minimal-implementation` before and during implementation, including its final
-self-review and required change summary.
+canonical task-tree rules. Executing a selected leaf normally uses
+`orion-change-workflow`, but the executor may choose another workflow from the
+actual change. Change-workflow implementation workers must apply
+`orion-minimal-implementation` before and during implementation, including its
+final self-review and required change summary.
 
-`orion-change-orchestrator` must accept a numbered leaf file as the executable
-task identity, preserve its path through claim and review, delete it in the
-final squashed task commit, and remove empty completed composite ancestors.
+The selected workflow must accept a numbered leaf as the executable task
+identity and preserve its path through claim and review. `orion-task-runner`
+removes the leaf and completed empty composite ancestors only after the selected
+workflow reaches its completion condition.
 
 ## Migration
 

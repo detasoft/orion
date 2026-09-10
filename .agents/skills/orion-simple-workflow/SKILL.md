@@ -1,10 +1,9 @@
 ---
 name: orion-simple-workflow
 description: >-
-  Use when an Orion source, build, or configuration change is bounded,
-  predictable, and safe to implement directly in the current worktree,
-  especially clear Makefile or POM corrections, small bug fixes, local
-  deletions, and understood mechanical refactorings.
+  Use when an Orion change benefits from direct current-worktree implementation,
+  logical staged checkpoints, self-review, and explicit user approval before
+  each commit, commonly bounded predictable fixes and refactorings.
 ---
 
 # Orion Simple Workflow
@@ -17,18 +16,18 @@ staged for user review before committing it.
 
 Read `AGENTS.md`, [the canonical workflow definitions](../../../docs/definitions.md#simple-workflow),
 and [orion-minimal-implementation](../orion-minimal-implementation/SKILL.md).
-Use this skill only after the definitions select the simple workflow. Within
-`orion-review`, prefer this workflow for every repair that meets that boundary.
+Use the workflow definitions as guidance and choose this workflow when its
+checkpoint and user-review mechanics fit the actual work. Within `orion-review`,
+consider this workflow first, then decide from the repair's magnitude and risk.
 
-Do not create or claim a task, write a plan merely to route the change, launch
-an implementation worker, or create a branch or worktree. A broad rule that
-source, build, or configuration changes need managed execution does not override
-the definitions' explicit simple-workflow classification.
+Do not create or claim a task merely to route the change, write a routing plan,
+launch an implementation worker, or create a branch or worktree. File type and
+queue membership do not select or reject this workflow.
 
-If inspection reveals an uncertain contract, consumer, ownership, lifecycle,
-concurrency, dependency, or cross-module effect that fails the boundary, stop
-before expanding the change. Preserve and report the current workspace state;
-do not silently turn partially edited files into a change-workflow base.
+If inspection reveals scale, uncertainty, or risk that makes another workflow's
+mechanics more proportionate, stop before expanding the change. Preserve and
+report the current workspace state; do not silently turn partially edited files
+into a change-workflow base.
 
 ## Quick reference
 
@@ -38,7 +37,7 @@ do not silently turn partially edited files into a change-workflow base.
 | Boundary fails during inspection | Stop and report; do not expand the edit. |
 | Checkpoint is coherent and verified | Stage it, self-review it, and request user review. |
 | User requests corrections | Revise, verify, restage, and request review again. |
-| User approves | Commit with the task prefix and run post-commit verification. |
+| User approves | Commit immediately; do not repeat a passed check. |
 
 ## Implement and verify
 
@@ -64,8 +63,8 @@ task with only one logical checkpoint still follows the same gate once.
 
 ## Staged user-review gate
 
-Stage only files and hunks produced for the checkpoint. Inspect `git status
---short`, `git diff --cached`, and `git diff --check`; confirm that the index
+Stage only files and hunks produced for the checkpoint. Inspect
+`git status --short`, `git diff --cached`, and `git diff --check`; confirm that the index
 contains the complete intended checkpoint and no unrelated state. Self-review
 the staged diff against the user task, `docs/reviews/RULES.md`, applicable
 `@AiRule` comments, and `orion-minimal-implementation`. Fix task-local findings,
@@ -82,8 +81,9 @@ staged result as needed. Present the new staged diff and ask for review again.
 Do not commit an earlier staged version while newer unstaged corrections exist.
 
 After explicit approval, recheck that the index is exactly the reviewed result
-and that no unrelated staged changes would enter the commit. Create a one-line
-commit with this exact structure:
+and that no unrelated staged changes would enter the commit. Before editing or
+starting any later checkpoint, immediately create a one-line commit with this
+exact structure:
 
 ```text
 <task name>: <imperative checkpoint summary>
@@ -95,26 +95,29 @@ task-name prefix identical and make the suffix describe that checkpoint's
 actual delta. This makes the commits discoverable and squashable by subject;
 do not rewrite or squash approved commits unless the user asks.
 
-Run the post-commit verification required by `AGENTS.md`, then select and
-implement the next logical checkpoint. If that verification requires a fix
-commit, use the exact same subject as required by `AGENTS.md`. Approval of one
-staged checkpoint authorizes only its commit, not later checkpoints, edits, or
-unrelated files.
+Do not repeat verification that already passed against the identical staged
+checkpoint. Run a post-commit check only when it validates the commit itself or
+could not run before commit. If that check requires a fix commit, use the exact
+same subject as required by `AGENTS.md`. Then select the next logical checkpoint.
+Approval of one staged checkpoint authorizes only its commit, not later
+checkpoints, edits, or unrelated files.
 
 ## Documentation owned by surrounding workflows
 
 This workflow creates no routing documentation. A surrounding workflow may
 separately own a governing or workflow-control document, such as a confirmed or
 resolved `MODULE_REVIEW.md` finding. The primary agent commits that document on
-`main` when its statement becomes accurate, outside the staged implementation
-gate. Do not fold it into the implementation commit merely because its timing
-falls before or after this workflow.
+`main` through `orion-quick-workflow` when its statement becomes accurate,
+outside the staged implementation gate. Do not fold it into the implementation
+commit merely because its timing falls before or after this workflow.
 
 ## Red flags and common mistakes
 
-- Launching a worker merely because the file is source, build, or configuration.
+- Selecting or rejecting this workflow only because of file type or task state.
 - Creating a task or plan only to route a qualifying simple change.
 - Committing before the user approves the staged result.
+- Delaying an approved checkpoint commit while starting later edits.
+- Repeating an already passed check solely because the checkpoint was committed.
 - Treating approval of an older staged diff as approval of later corrections.
 - Hiding a coherent checkpoint to reduce the number of user reviews.
 - Changing the task-name prefix between checkpoint commits.

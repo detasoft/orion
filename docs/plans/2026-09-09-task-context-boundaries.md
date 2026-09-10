@@ -11,7 +11,7 @@ subagents, and rebuild the next context from current repository state.
 
 ## 2. Define the generic task boundary
 
-Update `orion-change-orchestrator` so completed work produces the required
+Update `orion-change-workflow` so completed work produces the required
 user-facing summary, completed-task workers are never reused, and continuing
 pools begin from a reconstructed minimal context rather than accumulated task
 reasoning.

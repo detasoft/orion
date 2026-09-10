@@ -1,4 +1,0 @@
-interface:
-  display_name: "Orion Change Orchestrator"
-  short_description: "Coordinate Orion changes through worker review"
-  default_prompt: "Use $orion-change-orchestrator with a same-model/high-reasoning worker."

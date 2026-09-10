@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the Orion task tree with locally numbered composite directories and leaf Markdown files, and require orchestrated execution with `orion-minimal-implementation`.
+**Goal:** Replace the Orion task tree with locally numbered composite directories and leaf Markdown files, and keep execution workflow-neutral.
 
-**Architecture:** The filesystem is the only child-order source: numbered directories contain composite `TASK.md` descriptions and numbered Markdown files are executable leaves. The task runner selects and plans work, while `orion-change-orchestrator` exclusively executes selected leaves through workers that apply `orion-minimal-implementation`.
+**Architecture:** The filesystem is the only child-order source: numbered directories contain composite `TASK.md` descriptions and numbered Markdown files are executable leaves. The task runner selects and tracks work, recommends `orion-change-workflow`, and leaves the final execution choice to the executor.
 
 **Tech Stack:** Markdown task files, Git path history, Codex skills, repository link and skill validators.
 
@@ -15,7 +15,7 @@
 **Files:**
 
 - Read: `.agents/skills/orion-task-runner/SKILL.md`
-- Read: `.agents/skills/orion-change-orchestrator/SKILL.md`
+- Read: `.agents/skills/orion-change-workflow/SKILL.md`
 - Record evidence in the implementation session summary; do not add a permanent fixture.
 
 **Step 1: Define the pressure scenario**
@@ -29,7 +29,7 @@ the unmodified skills.
 
 Expected: the agent either ignores leaf Markdown files, expects every task to
 live in a `TASK.md`, duplicates order through parent checklists, or executes
-without making both `orion-change-orchestrator` and `orion-minimal-implementation` mandatory.
+without applying the selected workflow and `orion-minimal-implementation` when required.
 
 **Step 3: Preserve the exact failure modes**
 
@@ -114,7 +114,7 @@ Run `git status --short`, `git diff --stat`, `git diff --summary`, and
 **Files:**
 
 - Modify: `.agents/skills/orion-task-runner/SKILL.md`
-- Modify: `.agents/skills/orion-change-orchestrator/SKILL.md`
+- Modify: `.agents/skills/orion-change-workflow/SKILL.md`
 
 **Step 1: Define the task model once**
 
@@ -125,13 +125,13 @@ deletion on completion. Describe only the canonical model.
 
 **Step 2: Separate selection from execution**
 
-Make `orion-change-orchestrator` a required sub-skill for every leaf execution.
-Keep status-only requests, triage, and task planning in the runner without
-starting execution.
+Recommend `orion-change-workflow` for leaf execution while allowing the executor
+to select simple or quick workflow from the actual work. Keep status-only
+requests, triage, and task planning in the runner without starting execution.
 
 **Step 3: Require minimal implementation delta**
 
-Require every implementation worker launched by the orchestrator to use
+Require every implementation worker launched by the change workflow to use
 `orion-minimal-implementation` before and during implementation, including its final
 self-review and required change summary. Preserve the existing review gate,
 worktree isolation, user integration gate, verification ownership, and cleanup
@@ -148,7 +148,7 @@ migration or accept both layouts.
 **Files:**
 
 - Validate: `.agents/skills/orion-task-runner/`
-- Validate: `.agents/skills/orion-change-orchestrator/`
+- Validate: `.agents/skills/orion-change-workflow/`
 - Validate: `docs/plans/current-work/`
 - Validate: `docs/plans/upcoming-work/`
 
@@ -158,7 +158,7 @@ Run:
 
 ```bash
 python3 /Users/vi/work/.codex/deta/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/orion-task-runner
-python3 /Users/vi/work/.codex/deta/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/orion-change-orchestrator
+python3 /Users/vi/work/.codex/deta/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/orion-change-workflow
 ```
 
 Expected: both report valid skills.
@@ -181,15 +181,15 @@ Give a fresh independent agent the same hypothetical numbered tree and the
 updated skills.
 
 Expected: it selects the lowest-numbered ready leaf recursively, stores its
-claim in that leaf file, delegates execution to `orion-change-orchestrator`,
-requires the worker to apply `orion-minimal-implementation`, and deletes the leaf file only in
-the reviewed completion commit.
+claim in that leaf file, recommends `orion-change-workflow`, permits a
+proportionate alternative, and deletes the leaf only after the selected
+workflow reaches completion.
 
 **Step 5: Review for architectural duplication**
 
 Apply `orion-minimal-implementation` in read-only review mode to the resulting task workflow.
 Confirm there is one task identity, one ordering source, one claim location,
-and one execution path.
+and one selected workflow with binding mechanics.
 
 ### Task 6: Commit the Atomic Migration
 
@@ -201,7 +201,7 @@ and one execution path.
 **Step 1: Stage the migration**
 
 Stage only `.agents/skills/orion-task-runner/SKILL.md`,
-`.agents/skills/orion-change-orchestrator/SKILL.md`, `AGENTS.md`, and the
+`.agents/skills/orion-change-workflow/SKILL.md`, `AGENTS.md`, and the
 intended `docs/` changes.
 
 **Step 2: Validate the staged diff**

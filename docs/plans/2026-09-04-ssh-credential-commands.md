@@ -539,4 +539,4 @@ without evidence. `make test` must pass after the final implementation commit un
 
 Report task path, worktree, branch, exact base/head SHAs, changed-file summary, all commands/results, and residual
 risks. Do not edit ordinary plan documents, squash, cherry-pick to `main`, delete the completed task node, or remove
-the worktree until the review orchestrator requests final preparation.
+the worktree until the change-workflow coordinator requests final preparation.

@@ -357,7 +357,7 @@ Expected: the Java client interoperates with the newly built native host and the
 
 **Step 3: Remove legacy-only assertions in a separate work commit**
 
-After the replacement behavior passes, remove remaining tests that exist only to exercise or reject the old operation payloads. Do not add source-scanning tests; use repository search as a review check. Commit this cleanup separately during implementation so its intent is reviewable; the orchestrator will still prepare the single final queued-task commit required by `AGENTS.md`.
+After the replacement behavior passes, remove remaining tests that exist only to exercise or reject the old operation payloads. Do not add source-scanning tests; use repository search as a review check. Commit this cleanup separately during implementation so its intent is reviewable; the change workflow will still prepare the single final queued-task commit required by `AGENTS.md`.
 
 ```bash
 git add session-host agentd agent-protocol

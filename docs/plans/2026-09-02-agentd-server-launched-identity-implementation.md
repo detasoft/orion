@@ -709,9 +709,9 @@ Read `docs/reviews/RULES.md` completely. Verify in particular that:
 Use `@superpowers:requesting-code-review` for the primary review checkpoint.
 Address every blocking finding and repeat Steps 1 through 4 after fixes.
 
-**Step 6: Hand completion back to the Orion task orchestrator**
+**Step 6: Hand completion back to the Orion change workflow**
 
-Do not merge the branch. The orchestrator must squash every task-branch commit
+Do not merge the branch. The change workflow must squash every task-branch commit
 to:
 
 ```text
@@ -720,6 +720,6 @@ Authenticate server-launched AgentD [task: agentd/identity-and-registration]
 
 The squash must delete
 `docs/plans/current-work/agentd/identity-and-registration/` and remove its link
-from `docs/plans/current-work/04_agentd/TASK.md`. The orchestrator then
+from `docs/plans/current-work/04_agentd/TASK.md`. The change workflow then
 cherry-picks the squashed commit to `main`, runs the required post-commit
 `make test`, and removes the worktree and branch before reporting completion.

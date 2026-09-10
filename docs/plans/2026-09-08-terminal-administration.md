@@ -104,4 +104,4 @@ findings from still-pending streaming/session attachment work; document actual t
 
 The orchestrator owns this ordinary plan on main; the worker must report material gaps instead of
 editing it. One implementation worker owns the entire leaf in its dedicated worktree. After review,
-squash the leaf, remove its task node/link, and await the orchestrator's user gate before transfer.
+squash the leaf, remove its task node/link, and await the change workflow's user gate before transfer.

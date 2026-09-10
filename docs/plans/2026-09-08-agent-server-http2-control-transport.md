@@ -4,7 +4,7 @@ Task: `current-work/agent-session-server/control-and-registries/http2-control-tr
 Pool: [Server agent registration](current-work/03_agent-session-server/01_control-and-registries/TASK.md)
 Protocol: [Agent protocol](../../agent-protocol/protocol/README.md)
 
-This ordinary implementation plan is owned by the review orchestrator on
+This ordinary implementation plan is owned by the change-workflow coordinator on
 `main`. The task worker reports material gaps and waits for a committed plan
 correction; it does not edit this plan in its task worktree.
 
@@ -126,10 +126,10 @@ its final self-review of the changed subsystem and its HTTP/TLS/runtime
 callers. Retain complexity only for verified full-duplex I/O, ordering,
 boundedness, deadlines, and lifecycle ownership.
 
-Return a committed implementation for orchestrator review. After review fixes,
+Return a committed implementation for change-workflow review. After review fixes,
 the worker prepares one squashed task commit, removes the completed leaf and
 its queue links, and updates next-task references. Keep this ordinary plan as
 the implementation record under its stable task identifier.
 
-Do not transfer to `main` or remove the worktree before the orchestrator's
+Do not transfer to `main` or remove the worktree before the change workflow's
 per-task user gate. The next server task is durable agent and launch records.

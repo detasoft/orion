@@ -1005,4 +1005,4 @@ positive contract tests and the reviewed diff.
 
 Report the task path, rebased base SHA, branch/head, commit list, changed files, focused and full verification,
 the host-incarnation risk, and the still-required diagnostic-redaction/server-projection follow-ups. Do not
-squash, delete the task node, cherry-pick, or clean up until the orchestrator review and user gate request it.
+squash, delete the task node, cherry-pick, or clean up until the change-workflow review and user gate request it.

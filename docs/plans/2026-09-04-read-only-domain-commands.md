@@ -379,8 +379,8 @@ git add net/git-transport tests/integration-test README.md
 git commit -m "Compose read-only SSH domain commands"
 ```
 
-**Step 7: Prepare orchestrator handoff**
+**Step 7: Prepare change-workflow handoff**
 
 Return the task path, branch/worktree, exact base and head SHAs, commit list, changed-file summary, focused test
 results, full verification result, and known unavailable production sources. Do not squash, delete the task node,
-cherry-pick to `main`, or clean up until the orchestrator completes review and the user passes the integration gate.
+cherry-pick to `main`, or clean up until the change workflow completes review and the user passes the integration gate.

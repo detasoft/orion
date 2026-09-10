@@ -1,11 +1,14 @@
 # Agent Instructions
 
-- When the user asks to commit changes, for example by writing `commit` or `сделай коммит`, create the intended logical commit first, then run regular Maven tests for the whole project with `make test`.
-- Do not run tests after documentation-only commits, including commits that
+- When the user asks to commit changes, for example by writing `commit` or
+  `сделай коммит`, create the intended logical commit first, then follow the
+  selected workflow's post-commit policy.
+- Documentation-only commits do not require tests, including commits that
   change only Markdown files such as task `TASK.md` files and files under
-  `docs/`.
+  `docs/`. Under quick workflow, the executor may run an existing meaningful
+  check before or after commit, but should not repeat an identical passed check.
 - Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
-- Use `make test` for routine full-project tests and the commit workflow.
+- Use `make test` for routine full-project tests and change-workflow integration.
 - For focused Maven tests, always use
   `make run-test MODULE=<module> TEST='<test-locator>'`. The target supplies the
   `dev` profile, reactor dependencies, parallelism, and the Surefire setting
@@ -18,35 +21,47 @@
   additional confirmation.
 - Always run test commands outside the sandbox, because local tests may need to bind loopback sockets and sandboxed runs can fail with `Operation not permitted`.
 - When requesting approval for Maven commands, put the Maven phase immediately after `mvn`, then pass the remaining arguments, for example `mvn test -q -pl ...`.
-- After committing, run `make test`. If it fails and the failure is fixed, create the follow-up fix commit with the exact same commit message as the original commit so the commits can be squashed later.
+- After integrating under change workflow, run `make test`. Under simple
+  workflow, do not repeat verification that passed against the identical staged
+  checkpoint; run a post-commit check only when it validates the commit itself
+  or could not run before commit. Under quick workflow, verification is optional
+  and selected by the executor; Maven or another project check is allowed when
+  useful, but is never required merely by the workflow. If a required
+  post-commit check fails and the failure is fixed, create the follow-up fix
+  commit with the exact same message as the original commit.
 - If the Maven test command fails and cannot be fixed in the current turn, report the failure and the relevant error output.
 - If post-commit Maven tests fail because of unrelated or pre-existing working tree changes, do not debug those changes unless the user explicitly asks; report the failure and finish the requested commit task.
 - If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
 - Changes within the
   [workflow-control scope](docs/definitions.md#workflow-control-scope) that are
   made in the same requested work do not need separate commits from each other.
-  They may be committed together in one documentation-only commit; do not modify
-  or temporarily remove them solely to isolate their commits.
+  A coherent quick-workflow change may also include directly related files
+  outside that scope; do not split or temporarily remove them only because their
+  categories differ.
+- Select an execution workflow from
+  [the repository workflow definitions](docs/definitions.md#repository-workflows).
+  Module-review repairs normally start with simple workflow, task execution with
+  change workflow, and documentation/task/skill edits with quick workflow. These
+  are recommendations. The executor chooses from actual magnitude, uncertainty,
+  risk, useful verification, isolation, and interaction; no file type or task
+  state forces a workflow. Once selected, that workflow's mechanics are binding.
 - Do not use `git merge` or create merge commits when integrating `origin/main` or other upstream branches. Use `git rebase` instead, unless the user explicitly asks for a merge commit.
 - When finishing a requested change in a dedicated Git worktree:
   - After implementation, review fixes, and verification are complete, squash
     all commits unique to the task branch into one logical commit.
-  - For a direct change without a queued task, use a descriptive single-line
-    subject. Do not create a task, claim, task tag, or completion-deletion target
-    merely to execute the change.
-  - For queued task execution, use the squashed commit subject template:
+  - Use the squashed commit subject template:
     `<imperative summary> [task: <leaf-path-relative-to-its-queue-root>]`.
     Example:
     `Implement native protocol bootstrap [task: 05_native-session-host/01_contracts-and-build.md]`.
-  - For queued work, task-tree state is a committed `main` input. The
+  - Task-tree execution state is a committed `main` input. The
     implementation worker and task branch do not modify task-tree files or
     include task-tree changes in branch commits, squashes, or amendments.
   - Transfer the squashed commit to `main` with `git cherry-pick`, never with a
     merge commit. Run the required post-commit tests on `main`, then remove the
     completed worktree and its branch only after confirming the transfer and a
     clean worktree.
-  - After queued work is transferred and verified, the active
-    `orion-change-orchestrator` applies `orion-task-runner` directly on `main`
+  - After work is transferred and verified, the active `orion-change-workflow`
+    applies `orion-task-runner` and `orion-quick-workflow` directly on `main`
     and immediately commits completion cleanup separately.
     Delete the completed numbered leaf and remove completed empty composite
     ancestor directories in full only when their aggregate acceptance and scope
@@ -57,7 +72,12 @@
     remaining siblings to close gaps.
   - Do not report the task complete until `git worktree list` no longer shows
     the completed worktree and its task branch has been deleted.
-- When adding or changing functionality, add or extend tests in the same change. Cover the straightforward happy path and at least one meaningful non-trivial scenario, such as overwrite/update behavior, missing or invalid state, reloads, multiple backends, or other edge cases relevant to the feature.
+- Under simple or change workflow, when adding or changing functionality, add or
+  extend tests in the same change. Cover the straightforward happy path and at
+  least one meaningful non-trivial scenario, such as overwrite/update behavior,
+  missing or invalid state, reloads, multiple backends, or another relevant edge
+  case. Quick workflow does not add tests solely for workflow ceremony; its
+  executor may run existing tests when they provide useful evidence.
 - For implementations of `Continuation`, write the production continuation
   logic first and add or update its tests afterward. Do not use test-first TDD
   for `Continuation` classes. This exception does not remove the requirement to
@@ -105,31 +125,24 @@
 - Use `orion-task-runner` directly for task selection and for every change to
   the filesystem task tree, including task creation and editing, descriptions,
   ordering, composition, dependencies, claims, queue moves, pause markers,
-  completion deletion, and completion evidence. When queued execution is
-  active, the primary agent running `orion-change-orchestrator` owns every such
-  edit and commit. Make all task-tree edits directly on `main`; never delegate
-  them to a separate coordinator, an implementation worker, a dedicated
-  worktree, a task branch, or a subagent. Commit each task-tree state transition
-  as soon as it becomes accurate, without waiting for a separate commit request
-  or batching it with later implementation, review, or cleanup. Keep each commit
-  as small and atomic as possible. Include only files in the workflow-control
-  scope and directly required plan-reference updates for that transition; treat
-  it as documentation-only and do not run tests afterward. In particular, the
-  orchestrator commits a queued task's claim and any required queue move on
-  `main` before launching the implementation worker, and commits its completion
-  cleanup on `main` immediately after the implementation is integrated and
-  verified.
+  completion deletion, and completion evidence. During execution, the primary
+  agent owns claim, queue, pause, and completion state on `main`; a worker never
+  changes state governing its own execution. Commit each task-tree state change
+  through `orion-quick-workflow` as soon as it becomes accurate. Keep one
+  coherent state change atomic, including directly related documentation across
+  scope boundaries. Any useful check for that quick commit is at the executor's
+  discretion. In change workflow, commit create-or-claim state before launching
+  the worker and completion cleanup only after verified integration and
+  worktree/branch cleanup.
 - Apply the shared ownership, commit, and test rules from the
   [workflow-control scope](docs/definitions.md#workflow-control-scope) to every
-  in-scope change. Make other documentation-only changes directly on `main` and
-  outside the implementation worker/worktree workflow. Use
-  `orion-change-orchestrator` for requested source, build, and configuration
-  changes, whether direct or queued. If one request mixes those changes with
-  documentation, keep the documentation portion on `main` and orchestrate only
-  the implementation portion. Review/status-only requests remain read-only. The
-  implementation worker must apply `orion-minimal-implementation`. Plan
-  insertion follows the intended local numeric order; queued execution selects
-  the first unclaimed, dependency-ready leaf.
+  in-scope change. Use quick workflow for primary-owned state milestones. A
+  simple or change workflow may edit documentation or workflow-control files
+  when they are explicit deliverables rather than state governing the same
+  execution. Review/status-only requests remain read-only. A change-workflow
+  implementation worker must apply `orion-minimal-implementation`. Plan insertion
+  follows the intended local numeric order; queued execution selects the first
+  unclaimed, dependency-ready leaf.
 
 
 # Repository Agent Policy

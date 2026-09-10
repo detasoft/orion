@@ -4,7 +4,7 @@ Task pool: `current-work/03_agent-session-server/01_control-and-registries/01_ag
 Pool: [Server agent registration](current-work/03_agent-session-server/01_control-and-registries/TASK.md)
 Design: [Server-launched identity](2026-09-02-agentd-server-launched-identity-design.md)
 
-This ordinary implementation plan is owned by the review orchestrator on
+This ordinary implementation plan is owned by the change-workflow coordinator on
 `main`. The worker reports material gaps before changing this plan.
 
 ## Verified Current Model
@@ -128,7 +128,7 @@ Apply `orion-minimal-implementation` before and during implementation and perfor
 its final self-review of the subsystem. Preserve the atomicity, durability,
 generation, credential, and ownership guarantees that justify local complexity.
 
-Return each committed implementation for orchestrator review. After fixes and
+Return each committed implementation for change-workflow review. After fixes and
 clean review, squash its task branch and remove the completed leaf under the
 task workflow. Remove the composite and update next-task references to
 launch-and-reconnect-authentication only after all children are integrated.

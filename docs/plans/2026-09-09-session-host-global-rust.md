@@ -162,7 +162,7 @@ no Maven toolchain logic, no compatibility alias, and no unrelated change.
 
 Stage only the implementation and executable behavior tests and create one
 descriptive single-line commit. Leave the dedicated worktree in place for the
-orchestrator's review and integration gate.
+change workflow's review and integration gate.
 
 ### Task 5: Align user documentation after integration
 

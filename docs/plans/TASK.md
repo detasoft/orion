@@ -20,11 +20,10 @@ evidence; an old owner timestamp or missing file does not prove release or
 completion. The [dependency and coordination audit](2026-09-09-task-stream-order.md)
 records cross-task gates; its snapshot labels are not a separate queue order.
 
-Use `orion-task-runner` for selection and planning. Every execution uses
-`orion-change-orchestrator` and an implementation worker applying `orion-minimal-implementation`.
-Task descriptions, ordering, composition, and dependency edits stay directly
-with the runner. Other repository changes use the change orchestrator even
-without a queued task; direct changes need no fabricated task or claim.
+Use `orion-task-runner` for selection, planning, execution routing, task
+descriptions, ordering, composition, dependencies, and lifecycle state. The
+runner chooses the execution workflow; do not encode that choice in task
+content.
 Insert planned tasks by their intended local ordinal. Delete completed leaves
 and completed empty compositions after verification and review; retain these
 queue roots. Keep detailed designs and completion evidence in ordinary

@@ -16,7 +16,7 @@ authorization-, and route-local repository-name normalizers are removed.
 
 ## Execution constraints
 
-- Execute the queued leaf through `orion-change-orchestrator`; its implementation worker must apply
+- Execute the queued leaf through `orion-change-workflow`; its implementation worker must apply
   `orion-minimal-implementation` and the repository test rules.
 - Do not edit this plan, `MODULE_REVIEW.md`, or task-tree files in the implementation worktree.
 - Run every test command outside the sandbox. Use `make run-test` for focused tests.

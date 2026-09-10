@@ -5,7 +5,8 @@ description: >-
   at docs/plans/TASK.md. Use for requests to take, choose, continue, claim, run,
   or plan tasks, including "возьми задачу", "следующая задача", "продолжай по
   задачам", and "pick a task". Handle task descriptions, ordering, composition,
-  and dependencies directly; route implementation through orion-change-orchestrator.
+  dependencies, claims, pauses, and completion independently of the workflow
+  chosen to execute a task.
 ---
 
 # Orion Task Runner
@@ -13,24 +14,27 @@ description: >-
 ## Roles and Startup
 
 Use this skill directly for selection, planning, task descriptions, ordering,
-composition, dependencies, and task tracking. These edits do not launch an
-implementation worker. Every task execution
-must use [orion-change-orchestrator](../orion-change-orchestrator/SKILL.md),
-which owns worker launch, review, and the integration gate. The implementation
-worker must apply [orion-minimal-implementation](../orion-minimal-implementation/SKILL.md).
+composition, dependencies, and task tracking. These operations do not select an
+execution workflow or launch an implementation worker by themselves. Apply the
+[workflow recommendations](../../../docs/definitions.md#repository-workflows):
+task execution normally uses `orion-change-workflow`, while the executor may
+choose `orion-simple-workflow` or `orion-quick-workflow` when their mechanics are
+more proportionate to the actual magnitude and risk. File type and task-tree
+membership never force the choice.
+
 The task tree belongs to the repository
 [workflow-control scope](../../../docs/definitions.md#workflow-control-scope);
-apply its shared ownership, commit, and test rules to every task-tree change.
+apply its shared ownership rules and use `orion-quick-workflow` for primary-owned
+task-tree commits reached during execution.
 
-When the orchestrator or its assigned worker reads this skill, apply the task
-model and the rules for that role; do not invoke the orchestrator recursively
-or spawn another implementation worker. During queued execution, the primary
-agent running the orchestrator owns every task-tree edit and commits it directly
-on `main`; the assigned worker implements only the selected leaf and never edits
-task-tree state. Status, triage, explanation, and planning alone do not start
-execution or claim work. Direct repository changes without a queued task go to
-the change orchestrator with the user request as their scope; do not create or
-claim a task merely to execute them.
+When an execution skill or its worker reads this skill, apply only the task model
+and the rules for that role; do not recursively select or launch another
+workflow. The primary agent owns claims, queue moves, pauses, and completion
+state on `main`. A change-workflow worker never edits state governing its own
+execution. Status, triage, explanation, and planning alone do not start or claim
+work. Do not create or claim a task merely because a direct quick or simple
+change has no queued task. `orion-change-workflow` is the exception because its
+selected mechanics explicitly require create-or-claim state before a worker.
 
 Read `AGENTS.md`, `docs/plans/TASK.md`, relevant ancestor `TASK.md` files and
 candidate leaf files, and inspect `git status --short` before choosing work.
@@ -74,8 +78,8 @@ Check both the leaf and its ancestors for claims. An `Owner:` line (including
 `Owner: codex`) or an explicit `in progress`, `started`, `paused`, `Current work`,
 or `Active next task` marker makes that node occupied. Queue-level `Status:
 active` describes a queue, not an exclusive claim. A claimed composite makes
-its descendants unavailable. Inspect other worktrees and local branches as
-required by the orchestrator; a branch-local claim also counts. Re-resolve
+its descendants unavailable. Inspect other worktrees and local branches when
+the selected workflow uses them; a branch-local claim also counts. Re-resolve
 renamed or moved paths through Git history and task content before deciding
 that an owner or prerequisite disappeared.
 
@@ -106,15 +110,14 @@ Use a leaf file for a bounded executable task and a numbered directory with
 in numbered children and keep the aggregate description in the composite.
 Do not duplicate the work as an executable parent and executable descendants.
 
-Under the workflow-control scope rules, commit every task-tree state change
-directly on `main` as soon as it becomes accurate, using the smallest atomic
-documentation-only commit. Do not claim planned work. When queued execution
-starts, the orchestrator moves only the selected leaf to the appropriate current
-queue/composite, chooses a free local prefix, records the claim, and updates
-affected references in the same isolated commit on `main` before launching the
-worker. Preserve required aggregate context and dependencies in the moved leaf.
+Use `orion-quick-workflow` to commit a coherent task-tree state change directly
+on `main` as soon as it becomes accurate. Do not claim planned work. When queued
+execution starts under any workflow, the primary agent moves only the selected
+leaf when required, records the claim, and updates mechanically affected
+references in the same commit. Preserve aggregate context and dependencies.
 Remove an emptied source composite only when its remaining scope is accounted
-for.
+for. The quick workflow does not add a review gate or mandatory verification to
+this state commit; any useful check remains at the executor's discretion.
 
 Plan replacements around one canonical production path: update every real
 in-repository consumer and remove replaced internal APIs, state, configuration,
@@ -122,70 +125,67 @@ and branches in the same task. Preserve required runtime behavior and explicit
 wire/persisted contracts. Apply `AGENTS.md` to legacy-only test removal; tests
 and hypothetical consumers do not justify a second production path.
 
-## Orchestrator Claim and Worker Execution
+## Choose execution and claim
 
-Before launching the implementation worker, the orchestrator updates only the
-selected unclaimed leaf and any mechanical task-path references required by its
-authorized queue move directly on `main`. Before committing the claim, choose
-collision-free task branch and worktree names and verify that neither already
-exists. Store those exact names in the leaf claim:
+After selecting a leaf, choose `orion-simple-workflow`,
+`orion-change-workflow`, or `orion-quick-workflow` from the workflow definitions
+and actual work. Change is the default recommendation, not a requirement.
+
+Before executing a selected queued leaf, record the owner, stable session
+identity, and local start time in its claim and commit the state through
+`orion-quick-workflow`. Workflow selection is runner state, not task content:
 
 ```markdown
 - [ ] Task title and short context.
-  - Owner: codex, session SESSION_ID, branch `codex/CHANGE_SLUG`, worktree
-    `.worktrees/CHANGE_SLUG`, started YYYY-MM-DD HH:MM Europe/Amsterdam.
+  - Owner: codex, session SESSION_ID, started YYYY-MM-DD HH:MM Europe/Amsterdam.
 ```
 
-Use the current local time and a stable session identifier. Use the actual
-session ID when available; otherwise generate a short unique ID once and reuse
-it. Commit the isolated claim and any required queue move with this single-line
-subject, using the exact branch and worktree names recorded in the leaf:
-
-```text
-Claim TASK [branch: codex/CHANGE_SLUG] [worktree: .worktrees/CHANGE_SLUG]
-```
-
-The orchestrator then supplies that exact committed HEAD as the worker's base.
-The worker must create and use the branch and worktree names recorded by the
-claim. Stage only changes made to start that task; do not run tests for the
-documentation-only claim commit. If the claim cannot be isolated or either name
-is no longer available, report the conflict without starting implementation.
-The worker never changes the claim, task path, or any other task-tree state in
-its branch or worktree.
-
-Read the referenced plans and apply `orion-minimal-implementation` before and during
-implementation, including its final self-review. Follow the orchestrator and
-`AGENTS.md` for tests, verification, review fixes, commits, and integration.
-
-## Completion and Pause
-
-After implementation is integrated and verified on `main`, the orchestrator
-immediately performs completion cleanup there and commits it as a separate,
-atomic documentation-only commit. Never amend completion metadata into the
-implementation commit. The orchestrator deletes the completed leaf, walks
-upward, and removes completed empty composite directories in full, including
-their `TASK.md`, only when aggregate acceptance and remaining scope are
-satisfied. Preserve a parent with unfinished siblings, both queue roots, and the
-root `docs/plans/TASK.md`. Remove the task's outstanding-work entries from active
-plans and replace still-needed dependency references with verified completion
-evidence so plans do not retain dangling links or continue scheduling completed
-work. Retain useful completion evidence in ordinary plans or reviews. Do not
-keep completed task nodes or renumber remaining siblings to close gaps.
-
-Follow the orchestrator's final review and user integration gate. A prepared
-branch is awaiting integration, not a completed task; `AGENTS.md` governs
-transfer, required verification, and worktree/branch cleanup.
-
-When the worker pauses incomplete work, it reports the next step without editing
-the task tree. The orchestrator records that state directly on `main` in the
-existing claim using the same session identity and immediately commits it:
+For `orion-change-workflow`, also choose collision-free branch and worktree
+names before the claim and record them exactly:
 
 ```markdown
-  - Owner: codex, session SESSION_ID, branch `codex/CHANGE_SLUG`, worktree
-    `.worktrees/CHANGE_SLUG`, paused YYYY-MM-DD HH:MM Europe/Amsterdam; next: brief next step.
+  - Owner: codex, session SESSION_ID, branch `codex/CHANGE_SLUG`,
+    worktree `.worktrees/CHANGE_SLUG`, started YYYY-MM-DD HH:MM Europe/Amsterdam.
 ```
 
-Report the task name and leaf-file path explicitly. Provide the required
-`orion-minimal-implementation` summary: what was solved, how it was solved, which parts
-changed and what changed in each, and actual verification results with any
-remaining work. Mention unrelated pre-existing working-tree changes.
+Use the actual session ID when available; otherwise generate one short unique ID
+and reuse it. If the claim cannot be isolated from unrelated changes, report the
+conflict without starting execution. Under change workflow, the exact committed
+HEAD containing the claim is the worker base and the worker must use the recorded
+branch and worktree. Under simple or quick workflow, return to that workflow
+after the claim commit and work directly on `main` as it specifies.
+
+The chosen execution skill owns edits, checks, review gates, and implementation
+commits. Apply `orion-minimal-implementation` whenever implementation or review
+work requires it. This runner owns only task-tree state.
+
+## Completion and pause
+
+Complete task-tree state only after the chosen workflow has reached its own
+completion condition: approved checkpoint commits and required verification for
+simple workflow; the committed result for quick workflow; or verified
+integration and worktree/branch cleanup for change workflow.
+
+Then use `orion-quick-workflow` to delete the completed leaf, walk upward, and
+remove completed empty composite directories in full, including their `TASK.md`,
+only when aggregate acceptance and remaining scope are satisfied. Preserve a
+parent with unfinished siblings, both queue roots, and root `docs/plans/TASK.md`.
+Remove outstanding-work entries and replace still-needed dependency references
+with verified completion evidence. Retain useful evidence in ordinary plans or
+reviews. Do not keep completed nodes or renumber siblings to close gaps. Commit
+this coherent completion state separately from preceding execution commits.
+
+When execution pauses incomplete work, its owner reports the next step without
+editing the task tree. The primary agent records that state on `main` in the
+existing claim using the same session identity, then commits it
+through `orion-quick-workflow`:
+
+```markdown
+  - Owner: codex, session SESSION_ID, paused YYYY-MM-DD HH:MM Europe/Amsterdam;
+    next: brief next step.
+```
+
+Report the task name and leaf path explicitly. Provide the required
+`orion-minimal-implementation` summary when that skill applied: what was solved,
+how, which parts changed, actual verification, and remaining work. Mention
+unrelated pre-existing working-tree changes.
