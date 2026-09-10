@@ -2,7 +2,8 @@
 
 Status: todo
 Depends on: 01_handshake-and-authentication.md
-Server contract: [Connection health](../../03_agent-session-server/01_control-and-registries/03_connection-ownership-and-health.md)
+Server contract: connection ownership and health completed in `afc52028`,
+`3481b970`, `c0f8a0ad`, and `068877e6`.
 
 Maintain the live authenticated control connection through transient transport
 failures and report liveness independently of local session work.

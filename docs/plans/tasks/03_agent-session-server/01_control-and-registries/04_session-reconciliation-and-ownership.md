@@ -1,7 +1,8 @@
 # Reconcile Sessions and Enforce Ownership
 
 Status: todo
-Depends on: 03_connection-ownership-and-health.md
+Depends on: connection ownership and health completed in `afc52028`, `3481b970`,
+`c0f8a0ad`, and `068877e6`.
 Replication consumer: ../02_session-replication.md
 
 Rebuild the server's view of an agent's sessions after every authenticated
