@@ -53,33 +53,41 @@ above is accepted.
 
 ## Build
 
-The exact hermetic Rust toolchain is pinned in `rust-toolchain.toml`. Direct
-Cargo invocations use that file automatically, and the Makefile reads its
-`channel` for Maven and Make builds. The `rust-version` in `Cargo.toml` is an
-independent compatibility floor, not an exact build pin.
-
-The Maven module downloads the pinned toolchain into
-`.orion-cache/rust-toolchains` when one is not already present. It does not use
-a globally installed `rustc` or Cargo. The Makefile bootstraps it with the
-pinned Rustup 1.29.1 archive for the current host and verifies its checked-in
-SHA-256 before the bootstrap executable receives permission to run.
+The exact Rust toolchain is pinned in `rust-toolchain.toml`. Maven invokes the
+installed `cargo` executable, and Rustup selects the pinned toolchain from that
+file. The `rust-version` in `Cargo.toml` is an independent compatibility floor,
+not an exact build pin.
 
 ```bash
 mvn package -pl session-host
 ```
 
-Maven stores each native build below
-`session-host/target/native-resources/META-INF/orion/native/session-host/<target>`.
-The `session-host` carrier JAR and the bootstrap executable JAR include
-every target directory present there. On macOS the executable is a native
-Mach-O binary for the host architecture. Release packaging targets x86_64 and
-arm64 independently on Linux, macOS, and Windows.
+Maven stores Cargo outputs below `session-host/target/cargo` and copies the
+selected executable to
+`session-host/target/classes/META-INF/orion/native/session-host/<target>`.
+The `session-host` carrier JAR and the bootstrap executable JAR therefore
+include the native executable. The `dist` profile uses Cargo's release profile:
+
+```bash
+mvn package -Pdist -pl core/bootstrap -am
+```
 
 Run Rust tests through Maven:
 
 ```bash
 mvn test -pl session-host
 ```
+
+Apache Maven Build Cache treats every checked-in file below `session-host` as
+an input and skips unchanged Cargo work. An invocation containing `clean`
+always runs the Rust tests again. Cargo compiler incrementality is independent
+and can be disabled with `-Drust.incremental=false`.
+
+The independently released `pro.deta.maven:rust-maven-plugin` is resolved from
+GitHub Packages. Maven settings must provide GitHub Packages credentials under
+server id `github`. For local plugin development, install its snapshot from
+`build-tools/rust-maven-plugin` and select it with
+`-Drust-maven-plugin.version=0.1.0-SNAPSHOT`.
 
 Regenerate checked-in protocol fixtures after an intentional protocol
 change:

@@ -14,8 +14,73 @@
     <artifactId>session-host</artifactId>
     <packaging>jar</packaging>
 
+    <properties>
+        <rust-maven-plugin.version>0.1.0</rust-maven-plugin.version>
+        <rust.incremental>true</rust.incremental>
+        <rust.release>false</rust.release>
+        <maven.build.cache.input.1>.</maven.build.cache.input.1>
+        <maven.build.cache.input.2>src</maven.build.cache.input.2>
+        <maven.build.cache.input.3>tests</maven.build.cache.input.3>
+        <maven.build.cache.input.4>protocol</maven.build.cache.input.4>
+        <maven.build.cache.exclude.value.1>target</maven.build.cache.exclude.value.1>
+    </properties>
+
+    <pluginRepositories>
+        <pluginRepository>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/detasoft/orion</url>
+        </pluginRepository>
+    </pluginRepositories>
+
     <build>
         <plugins>
+            <plugin>
+                <groupId>pro.deta.maven</groupId>
+                <artifactId>rust-maven-plugin</artifactId>
+                <version>${rust-maven-plugin.version}</version>
+                <configuration>
+                    <manifest>${project.basedir}/Cargo.toml</manifest>
+                    <cargoTargetDirectory>${project.build.directory}/cargo</cargoTargetDirectory>
+                    <binary>session-host</binary>
+                    <outputDirectory>
+                        ${project.build.outputDirectory}/META-INF/orion/native/session-host
+                    </outputDirectory>
+                    <incremental>${rust.incremental}</incremental>
+                    <release>${rust.release}</release>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>cargo-build</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>build</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>cargo-test</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>cargo-test-on-clean</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>test-on-clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>dist</id>
+            <properties>
+                <rust.release>true</rust.release>
+            </properties>
+        </profile>
+    </profiles>
 </project>

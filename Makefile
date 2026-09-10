@@ -37,7 +37,7 @@ endif
 dist:
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
-test: session-host-test
+test:
 	$(MAVEN) test -Pdev -T 4
 
 xml-schema:
