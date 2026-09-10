@@ -190,7 +190,8 @@ engine or duplicate the App/webhook task in two places.
 | T1 | [Terminal administration](current-work/08_interactive-ssh-shell/01_terminal-administration.md) | **Owned**; integrate terminal interaction/configuration work. |
 | T2 | [SSH PTY timeout](upcoming-work/12_ssh-pty-completion-timeout.md) | Recheck after T1; fix only a remaining reproducible failure. |
 | T3 | [Streaming monitoring](current-work/08_interactive-ssh-shell/02_streaming-monitoring.md) | Core/terminal baseline is integrated; recommend T1/T2 first because rendering and cancellation overlap. |
-| T4 | [AgentD local terminal](current-work/04_agentd/07_local-terminal.md) | J2 + K2 + N6a; offline manual mode still uses the canonical control/journal path. |
+| T4a | [AgentD local launch](current-work/04_agentd/07_local-terminal/01_launch.md) | Existing native runtime and host contracts; ready independently of server control and journal sync. |
+| T4b | [AgentD local attach](current-work/04_agentd/07_local-terminal/02_attach.md) | T4a + J2 + K2 + N6a; offline manual mode still uses the canonical control/journal path. |
 | T5a | [Web terminal](current-work/03_agent-session-server/05_web-terminal.md) | K1 + E1; end-to-end verification also needs K2/J2. |
 | T5b | [SSH session PTY gateway](current-work/08_interactive-ssh-shell/03_session-host-pty-gateway.md) | Server control + K1 + E1; terminal foundation integrated. Can advance beside T5a. |
 | T6 | [SSH security/acceptance](current-work/08_interactive-ssh-shell/04_security-and-acceptance.md) | Required shell siblings T1 + T3 + T5b, with T2 resolved or shown obsolete. |

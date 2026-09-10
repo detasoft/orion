@@ -27,7 +27,7 @@ integrated equivalent rather than adding an adapter whose only purpose is to pre
 name. Read every `@AiRule` class comment in a class before changing it.
 
 Execute the task in a dedicated worktree. Claim
-`docs/plans/current-work/04_agentd/07_local-terminal.md` first and commit the claim without running tests.
+`docs/plans/current-work/04_agentd/07_local-terminal/02_attach.md` first and commit the claim without running tests.
 
 ### Task 1: Make the AgentD top-level mode explicit
 
@@ -569,7 +569,7 @@ Expected: PASS.
 
 **Files:**
 
-- Delete: `docs/plans/current-work/04_agentd/07_local-terminal.md`
+- Delete: `docs/plans/current-work/04_agentd/07_local-terminal/02_attach.md`
 - Modify: `docs/plans/current-work/04_agentd/TASK.md`
 - Review: every file changed by the task branch
 
