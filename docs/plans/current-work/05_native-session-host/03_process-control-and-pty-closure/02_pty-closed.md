@@ -1,9 +1,14 @@
 # Implement PTY_CLOSED and Terminal Availability
 
-Status: todo
+Status: paused
 Parent: TASK.md
 Contract: ../../../2026-09-03-native-control-journal-idempotency-design.md
 Related: 01_list-processes.md
+Next: after the parent dependency is satisfied, compare the PTY-closure design
+in branch `codex/linux-process-tree-control-47c2`, worktree
+`.worktrees/linux-process-tree-control-47c2`, with current journal and control
+contracts, resolve overlaps, and implement terminal closure independently of process liveness.
+The preserved branch at `79386060` contains the design but no PTY_CLOSED event implementation.
 
 Expose terminal closure as a journal fact while keeping process-tree liveness
 and control admission in their existing owners.

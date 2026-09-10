@@ -1,13 +1,23 @@
 # Harden Linux Process-Tree Control
 
-Status: todo
+Status: paused
 Depends on: completed Unix process host
 
 Turn the implemented Linux subreaper and `/proc` descendant tracking into the
 production process-lifecycle boundary. macOS remains a development-only,
 best-effort PTY host and is outside this task.
 
-- Owner: codex, session native-process-control-47c2, started 2026-09-04 01:41 Europe/Amsterdam.
+- Owner: codex, session native-process-control-47c2,
+  branch `codex/linux-process-tree-control-47c2`,
+  worktree `.worktrees/linux-process-tree-control-47c2`, paused 2026-09-10 14:27 Europe/Amsterdam.
+- Next: reconcile the preserved branch with current main and native-control contracts,
+  resolve overlaps, assess remaining acceptance, and verify the retained implementation.
+  Saved HEAD: `79386060248ea965468fb013f014bef5e32c0d09`;
+  base: `670fce16db491165d88a53f323ba9976e4defc29`. Nine unique commits contain
+  Linux pidfd/cgroup ownership, termination hardening, HOST_WARNING, and tests.
+  The saved worktree was clean when paused; no new verification was run for this handoff.
+  Preserve this work until its progress has been reconciled. Process listing,
+  addressed-signal requests, and PTY_CLOSED are designed there but not implemented.
 
 ## Scope
 

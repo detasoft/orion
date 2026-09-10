@@ -20,8 +20,10 @@ available. Replication follows authenticated ownership, then commands and client
 
 ### Native session execution
 
-Process-tree and process/PTY-control work is occupied. Coordinate source-aware
-controls and Linux discovery fixes with those owners before overlapping changes.
+Linux process-tree control is paused with substantial changes preserved in its
+recorded branch/worktree. Process/PTY work waits for that implementation to be
+reconciled; its leaves retain next steps without inheriting a composite claim.
+Coordinate source-aware controls and Linux discovery fixes with the preserved changes.
 
 ### Remote Git
 

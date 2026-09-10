@@ -1,9 +1,14 @@
 # Implement LIST_PROCESSES and Addressed Signals
 
-Status: todo
+Status: paused
 Parent: TASK.md
 Contract: ../../../2026-09-03-native-control-journal-idempotency-design.md
 Related: ../01_linux-process-tree-control.md
+Next: after the parent dependency is satisfied, compare the process-control design
+in branch `codex/linux-process-tree-control-47c2`, worktree
+`.worktrees/linux-process-tree-control-47c2`, with the retained Linux implementation
+and current control contracts, then implement listing and addressed signals.
+The preserved branch at `79386060` contains the design but no listing request implementation.
 
 Expose a current snapshot of processes owned by a live session and allow a
 control client to signal a listed process safely.
