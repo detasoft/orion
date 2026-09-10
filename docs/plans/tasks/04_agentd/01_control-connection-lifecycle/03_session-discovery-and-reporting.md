@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on: 01_handshake-and-authentication.md and completed session discovery.
-Server contract: [Session reconciliation](../../03_agent-session-server/01_control-and-registries/04_session-reconciliation-and-ownership.md)
+Server contract: session reconciliation completed in `f518679c`, `8168ae6e`, and `b751cfc9`.
 
 Expose existing local session discovery through authenticated Agent control
 messages, including after reconnect and while local sessions continue offline.
