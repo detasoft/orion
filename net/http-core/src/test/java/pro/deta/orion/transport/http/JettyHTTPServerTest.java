@@ -105,14 +105,17 @@ class JettyHTTPServerTest {
                     new OkRoute());
 
             try {
-                HttpURLConnection http = (HttpURLConnection) server.relativiseHttp("/ok").openConnection();
-                assertThat(http.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+                try (var http = closeable(
+                        (HttpURLConnection) server.relativiseHttp("/ok").openConnection())) {
+                    assertThat(http.value().getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+                }
 
-                HttpsURLConnection https = httpsConnection(server, clientContext(null, null));
-                assertThat(https.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
-                assertThat(https.getServerCertificates())
-                        .extracting(Certificate::getPublicKey)
-                        .containsExactly(material.serverCertificate().getPublicKey());
+                try (var https = closeable(httpsConnection(server, clientContext(null, null)))) {
+                    assertThat(https.value().getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+                    assertThat(https.value().getServerCertificates())
+                            .extracting(Certificate::getPublicKey)
+                            .containsExactly(material.serverCertificate().getPublicKey());
+                }
             } finally {
                 server.onStop();
             }
@@ -185,8 +188,9 @@ class JettyHTTPServerTest {
 
             try {
                 assertThat(selections).hasValue(2);
-                assertThat(httpsConnection(server, clientContext(null, null)).getResponseCode())
-                        .isEqualTo(HttpURLConnection.HTTP_OK);
+                try (var connection = closeable(httpsConnection(server, clientContext(null, null)))) {
+                    assertThat(connection.value().getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+                }
             } finally {
                 server.onStop();
             }
@@ -261,12 +265,14 @@ class JettyHTTPServerTest {
 
         try {
             URL url = new URL("http://127.0.0.1:" + server.boundHttpPort() + "/app.js");
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestProperty("Accept-Encoding", "gzip");
-
-            assertThat(connection.getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
-            assertThat(connection.getHeaderField("Content-Encoding")).isEqualTo("gzip");
-            assertThat(connection.getInputStream().readAllBytes()).startsWith((byte) 0x1f, (byte) 0x8b);
+            try (var connection = closeable((HttpURLConnection) url.openConnection())) {
+                connection.value().setRequestProperty("Accept-Encoding", "gzip");
+                assertThat(connection.value().getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+                assertThat(connection.value().getHeaderField("Content-Encoding")).isEqualTo("gzip");
+                try (var response = connection.value().getInputStream()) {
+                    assertThat(response.readAllBytes()).startsWith((byte) 0x1f, (byte) 0x8b);
+                }
+            }
         } finally {
             server.onStop();
         }
@@ -407,10 +413,13 @@ class JettyHTTPServerTest {
                     new OkRoute());
             try (TestAgentClient client = agentClient(server, material.serverCertificate())) {
                 client.connect();
-                HttpsURLConnection ordinary = httpsConnection(server, clientContext(null, null));
-                assertThat(ordinary.getResponseCode()).isEqualTo(200);
-                assertThat(new String(ordinary.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
-                        .isEqualTo("OK");
+                try (var ordinary = closeable(httpsConnection(server, clientContext(null, null)))) {
+                    assertThat(ordinary.value().getResponseCode()).isEqualTo(200);
+                    try (var response = ordinary.value().getInputStream()) {
+                        assertThat(new String(response.readAllBytes(), StandardCharsets.UTF_8))
+                                .isEqualTo("OK");
+                    }
+                }
                 assertThat(closed.get(5, TimeUnit.SECONDS))
                         .hasMessageContaining("timed out");
             } finally {
@@ -447,20 +456,24 @@ class JettyHTTPServerTest {
                 assertThat(closed.get(5, TimeUnit.SECONDS)).isNotNull();
                 client.terminal.get(5, TimeUnit.SECONDS);
 
-                HttpsURLConnection get = (HttpsURLConnection) server.relativiseHttps(AgentControlRoute.PATH)
+                HttpsURLConnection getConnection = (HttpsURLConnection) server.relativiseHttps(AgentControlRoute.PATH)
                         .openConnection();
-                get.setSSLSocketFactory(clientContext(null, null).getSocketFactory());
-                get.setHostnameVerifier((hostname, session) -> true);
-                assertThat(get.getResponseCode()).isEqualTo(405);
+                getConnection.setSSLSocketFactory(clientContext(null, null).getSocketFactory());
+                getConnection.setHostnameVerifier((hostname, session) -> true);
+                try (var get = closeable(getConnection)) {
+                    assertThat(get.value().getResponseCode()).isEqualTo(405);
+                }
 
-                HttpsURLConnection post = (HttpsURLConnection) server.relativiseHttps(AgentControlRoute.PATH)
+                HttpsURLConnection postConnection = (HttpsURLConnection) server.relativiseHttps(AgentControlRoute.PATH)
                         .openConnection();
-                post.setSSLSocketFactory(clientContext(null, null).getSocketFactory());
-                post.setHostnameVerifier((hostname, session) -> true);
-                post.setRequestMethod("POST");
-                post.setDoOutput(true);
-                post.getOutputStream().close();
-                assertThat(post.getResponseCode()).isEqualTo(505);
+                postConnection.setSSLSocketFactory(clientContext(null, null).getSocketFactory());
+                postConnection.setHostnameVerifier((hostname, session) -> true);
+                postConnection.setRequestMethod("POST");
+                postConnection.setDoOutput(true);
+                try (var post = closeable(postConnection)) {
+                    post.value().getOutputStream().close();
+                    assertThat(post.value().getResponseCode()).isEqualTo(505);
+                }
             } finally {
                 server.onStop();
             }
@@ -569,8 +582,9 @@ class JettyHTTPServerTest {
                     assertThat(stream.sends().getFirst()).isNotDone();
                     assertThat(stream.sends().getLast()).isCompletedExceptionally();
                 }
-                HttpsURLConnection ordinary = httpsConnection(server, clientContext(null, null));
-                assertThat(ordinary.getResponseCode()).isEqualTo(200);
+                try (var ordinary = closeable(httpsConnection(server, clientContext(null, null)))) {
+                    assertThat(ordinary.value().getResponseCode()).isEqualTo(200);
+                }
 
                 clients.getFirst().reset();
                 streams.getFirst().closed().get(5, TimeUnit.SECONDS);
@@ -637,8 +651,9 @@ class JettyHTTPServerTest {
             SSLContext clientContext) throws Exception {
         JettyHTTPServer server = startHttps(material, mode, clientRoots);
         try {
-            assertThat(httpsConnection(server, clientContext).getResponseCode())
-                    .isEqualTo(HttpURLConnection.HTTP_OK);
+            try (var connection = closeable(httpsConnection(server, clientContext))) {
+                assertThat(connection.value().getResponseCode()).isEqualTo(HttpURLConnection.HTTP_OK);
+            }
         } finally {
             server.onStop();
         }
@@ -651,8 +666,10 @@ class JettyHTTPServerTest {
             SSLContext clientContext) throws Exception {
         JettyHTTPServer server = startHttps(material, mode, clientRoots);
         try {
-            assertThatThrownBy(() -> httpsConnection(server, clientContext).getResponseCode())
-                    .isInstanceOf(IOException.class);
+            try (var connection = closeable(httpsConnection(server, clientContext))) {
+                assertThatThrownBy(connection.value()::getResponseCode)
+                        .isInstanceOf(IOException.class);
+            }
         } finally {
             server.onStop();
         }
@@ -725,6 +742,11 @@ class JettyHTTPServerTest {
         connection.setConnectTimeout(2_000);
         connection.setReadTimeout(2_000);
         return connection;
+    }
+
+    private static <T extends HttpURLConnection> CloseableHttpConnection<T> closeable(T connection) {
+        connection.setRequestProperty("Connection", "close");
+        return new CloseableHttpConnection<>(connection);
     }
 
     private static SSLContext clientContext(KeyPair keyPair, X509Certificate certificate) throws Exception {
@@ -894,6 +916,13 @@ class JettyHTTPServerTest {
         @Override
         protected OrionHttpResponse doGet(jakarta.servlet.http.HttpServletRequest req) {
             return OrionHttpResponse.text(HttpURLConnection.HTTP_OK, "OK");
+        }
+    }
+
+    private record CloseableHttpConnection<T extends HttpURLConnection>(T value) implements AutoCloseable {
+        @Override
+        public void close() {
+            value.disconnect();
         }
     }
 
