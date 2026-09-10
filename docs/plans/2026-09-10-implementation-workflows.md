@@ -48,8 +48,10 @@ provide the staged user-review gate.
 **Step 2: Write the minimal skill**
 
 Require current-worktree implementation, no routing task or plan, proportional verification, staging only the owned
-change, user review of the staged diff, and a commit only after explicit approval. Preserve separate milestone
-documentation commits owned by a surrounding review workflow.
+checkpoint, self-review, user review of the staged diff, and a commit only after explicit approval. Choose coherent
+checkpoints during the task and give every subject one stable task-name prefix plus its checkpoint summary so the
+commits can be found and squashed together. Preserve separate milestone documentation commits owned by a surrounding
+review workflow.
 
 **Step 3: Validate behavior and structure**
 

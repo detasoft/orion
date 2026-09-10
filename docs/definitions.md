@@ -26,26 +26,38 @@ An example does not qualify automatically. Use the change workflow when the
 work materially changes a public, wire or persisted contract; crosses uncertain
 module, ownership, lifecycle or concurrency boundaries; adds a dependency,
 service or durable state; has unresolved design choices; or cannot be reviewed
-confidently as one staged current-worktree change. Within `orion-review`, prefer
-the simple workflow for every repair that satisfies this boundary.
+confidently as a sequence of staged current-worktree checkpoints. Within
+`orion-review`, prefer the simple workflow for every repair that satisfies this
+boundary.
 
 The primary agent performs the simple workflow directly in the current
 worktree and branch:
 
 1. Inspect the repository state and preserve unrelated changes.
-2. Implement the bounded change and its tests without creating or claiming a
-   task, writing a plan merely for routing, launching a worker, or creating a
-   branch or worktree.
-3. Run the verification required by `AGENTS.md` and review the complete change.
-4. Include ordinary product documentation changed with the implementation in
-   the same change.
-5. Stage only files and hunks owned by the change, show the staged result and
-   verification outcome to the user, and ask for review. Do not commit yet.
-6. If the user requests corrections, update the implementation and its staged
-   result, verify and review it again, and repeat the user gate.
-7. After explicit approval, verify that the staged result is the reviewed
-   result, commit it with a single-line subject, and run the required
-   post-commit verification.
+2. Derive one concise, stable task name from the user request. This name is a
+   commit prefix, not a task-tree node or claim.
+3. Identify logical implementation checkpoints as the work proceeds. Each
+   checkpoint must be an independently coherent, reviewable change that leaves
+   the repository working; do not fragment by file or hide a real checkpoint
+   merely to reduce the number of user reviews.
+4. Implement and verify one checkpoint without creating or claiming a task,
+   writing a plan merely for routing, launching a worker, or creating a branch
+   or worktree. Include ordinary product documentation for that checkpoint.
+5. Stage only files and hunks owned by the checkpoint. Self-review the staged
+   result, show it and the verification outcome to the user, and ask for review.
+   Do not commit yet.
+6. If the user requests corrections, update, verify, stage and self-review the
+   checkpoint again, then repeat the user gate.
+7. After explicit approval, verify that the index is the reviewed result and
+   commit it using `<task name>: <imperative checkpoint summary>`. Keep the task
+   name byte-for-byte identical in every checkpoint subject so the commits can
+   be found and squashed together later.
+8. Run the post-commit verification required by `AGENTS.md`, then continue with
+   the next logical checkpoint through the same stage, review and approval loop.
+
+A task with one logical checkpoint produces one commit. Do not rewrite or
+squash approved checkpoint commits unless the user requests it. If post-commit
+verification requires a fix commit, follow the same-subject rule in `AGENTS.md`.
 
 The simple workflow creates no routing documentation. A surrounding workflow
 may still own documentation whose truth changes before or after the simple

@@ -6,11 +6,14 @@ configuration files are changed.
 ## Simple workflow
 
 Use the simple workflow for a bounded, predictable change whose implementation
-and review can safely happen in the current worktree. The primary agent makes
-the change, verifies it, stages only the relevant files, and asks the user to
-review the staged result. It commits only after explicit user approval. It does
-not create or claim a task, write an implementation plan merely for routing,
-launch a worker, or create a branch or worktree.
+and review can safely happen in the current worktree. The primary agent chooses
+coherent checkpoints as the work proceeds. At each checkpoint it makes the
+change, verifies and self-reviews it, stages only the relevant files, and asks
+the user to review the staged result. It commits only after explicit user
+approval. All checkpoint subjects use `<task name>: <imperative checkpoint
+summary>` with one stable task-name prefix so they can be found and squashed
+together later. It does not create or claim a task, write an implementation
+plan merely for routing, launch a worker, or create a branch or worktree.
 
 Ordinary documentation changed as part of the implementation stays with that
 implementation and is included in the staged commit. Independent workflow-control
@@ -41,8 +44,8 @@ commit unless repository rules explicitly assign it to the primary agent.
 
 ## Skill structure
 
-- `orion-simple-workflow` owns direct current-worktree implementation and its
-  staged user-review gate.
+- `orion-simple-workflow` owns direct current-worktree implementation, logical
+  checkpoint selection, and each checkpoint's staged user-review gate.
 - `orion-change-workflow` owns task-backed worker execution, coordinator review,
   the integration gate, and cleanup.
 - `orion-task-runner` owns only task-tree modeling, selection, and state edits;
