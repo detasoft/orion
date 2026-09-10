@@ -1,7 +1,5 @@
 # Repository and Mirror Configuration Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Extend Orion XML v2 with immutable repository policy and provider-neutral remote definitions needed by primary upstream synchronization.
 
 **Architecture:** Keep desired repository and remote configuration in `core/schema` and operational synchronization state outside the XML model. Add small validated value types for aliases, refs, secret references, roles, triggers, mappings, and update policy; map them deterministically through the existing JAXB v2 DTO without introducing a Git runtime dependency into schema.
@@ -128,14 +126,6 @@ make run-test MODULE=core/schema TEST='RepositoryConfigurationTest,OrionDocument
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion \
-  core/schema/src/test/java/pro/deta/orion/schema/orion
-git commit -m "Define repository and remote configuration"
-```
-
 ### Task 2: Extend the Orion XML v2 wire model
 
 **Files:**
@@ -204,14 +194,6 @@ make run-test MODULE=core/schema TEST='OrionV2MapperTest'
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion/v2 \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/v2
-git commit -m "Map repository remotes through Orion XML v2"
-```
-
 ### Task 3: Verify XML validation and deterministic round trips
 
 **Files:**
@@ -276,13 +258,6 @@ Expected: every module passes except the separately tracked pre-existing
 `MinaSshOperationTest#wholeOperationWatchdogClosesAStalledSession` baseline
 failure if it remains unresolved.
 
-**Step 6: Commit verification corrections**
-
-```bash
-git add core/schema
-git commit -m "Verify repository remote XML configuration"
-```
-
 ### Task 4: Prepare the synchronization implementation slice
 
 **Files:**
@@ -306,16 +281,3 @@ Complete the dedicated-worktree leaf cleanup required by `AGENTS.md`. Move the
 external synchronization parent to current work, add the approved primary
 upstream implementation leaf, and retain branch filtering as a later child.
 The primary-upstream leaf depends on this completed configuration task.
-
-**Step 3: Finish through the dedicated-worktree workflow**
-
-Squash all repository-configuration commits into one logical commit, delete
-the completed leaf task directory and parent link in that squash, cherry-pick
-the result to `main`, run `make test` on `main`, and remove this worktree and
-branch only after transfer and cleanup are verified.
-
-Expected squashed subject:
-
-```text
-Add repository and mirror configuration [task: hierarchical-orion-configuration/repository-and-mirror-configuration]
-```

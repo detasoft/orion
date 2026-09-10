@@ -1,7 +1,5 @@
 # Descendant Absence Confirmation Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Keep the session host alive until three consecutive process-table observations confirm that no PTY descendants remain.
 
 **Architecture:** Add a small private confirmation state machine beside `wait_for_descendants`. The wait loop feeds each successful liveness observation into it; live observations reset the count, while the third consecutive empty observation completes the wait. Platform-specific descendant discovery and signaling remain unchanged.
@@ -124,20 +122,3 @@ git diff -- session-host/src/platform/unix.rs
 ```
 
 Expected: only the confirmation policy and its deterministic test are present.
-
-**Step 3: Commit the implementation**
-
-```bash
-git add session-host/src/platform/unix.rs
-git commit -m "Confirm descendant absence before session host exit"
-```
-
-**Step 4: Run the required post-commit test suite**
-
-Run outside the sandbox:
-
-```bash
-make test
-```
-
-Expected: the full project test suite passes.

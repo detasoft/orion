@@ -1,7 +1,5 @@
 # Session Host Rust Toolchain Pin Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Make `session-host/rust-toolchain.toml` the only exact Rust compiler
 version declaration used by every session-host build entry point.
 
@@ -70,10 +68,3 @@ The existing baseline may fail only in
 `keeps_detached_pty_descendant_controllable_after_its_leader_exits`; report it
 separately and verify that toolchain preparation, compilation, and all other
 session-host tests complete as before.
-
-**Step 6: Commit the implementation**
-
-```bash
-git add session-host/Makefile session-host/pom.xml session-host/README.md
-git commit -m "Consolidate session host Rust toolchain pin"
-```

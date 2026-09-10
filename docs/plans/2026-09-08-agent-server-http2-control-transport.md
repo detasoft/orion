@@ -4,10 +4,6 @@ Task: `current-work/agent-session-server/control-and-registries/http2-control-tr
 Pool: [Server agent registration](current-work/03_agent-session-server/01_control-and-registries/TASK.md)
 Protocol: [Agent protocol](../../agent-protocol/protocol/README.md)
 
-This ordinary implementation plan is owned by the change-workflow coordinator on
-`main`. The task worker reports material gaps and waits for a committed plan
-correction; it does not edit this plan in its task worktree.
-
 ## Verified Current Model
 
 - `net/http-core` owns `JettyHTTPServer`, the HTTPS listener, TLS material,
@@ -114,22 +110,13 @@ The implementation worker owns all Maven execution, outside the sandbox.
   progressing while multiple control peers are slow. Reuse existing TLS test
   material and route fixtures where appropriate.
 - Use `make run-test MODULE=<module> TEST='<test-locator>'` for focused Maven
-  runs, `mvn verify -Pdev -T 4` for required development verification, and
-  `make test` after every implementation commit per `AGENTS.md`.
+  runs and `mvn verify -Pdev -T 4` for development verification.
 - Inspect the resulting dependent-module compilation and Dagger wiring. Do not
   add a production dependency on `agentd` just to reuse its test peer.
 
 ## Review and Completion
 
-Apply `orion-minimal-implementation` before and during implementation, then perform
-its final self-review of the changed subsystem and its HTTP/TLS/runtime
-callers. Retain complexity only for verified full-duplex I/O, ordering,
-boundedness, deadlines, and lifecycle ownership.
+Review the changed subsystem and its HTTP/TLS/runtime callers. Retain complexity only for verified
+full-duplex I/O, ordering, boundedness, deadlines, and lifecycle ownership.
 
-Return a committed implementation for change-workflow review. After review fixes,
-the worker prepares one squashed task commit, removes the completed leaf and
-its queue links, and updates next-task references. Keep this ordinary plan as
-the implementation record under its stable task identifier.
-
-Do not transfer to `main` or remove the worktree before the change workflow's
-per-task user gate. The next server task is durable agent and launch records.
+The next server task is durable agent and launch records.

@@ -1,7 +1,5 @@
 # Typed Agent Protocol Stream Decoding Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Consolidate incremental CBOR Sequence parsing in `agent-protocol`, produce typed inbound messages, skip and log structurally bounded semantic failures, and disconnect only when a trustworthy next boundary cannot be found.
 
 **Architecture:** A package-private generic sequence engine owns one reusable bounded input buffer and invokes a typed item decoder as soon as it finds a complete CBOR span. Public Agent and journal decoders return decoded values, recoverable item failures, and an optional terminal structural failure without losing an accepted prefix. Jetty consumes those results before releasing its borrowed `ByteBuffer`, logs recoverable failures, and closes only after ordered delivery of any valid prefix when structural synchronization is lost.
@@ -68,14 +66,6 @@ item. A terminal issue describes pending bytes and the structural failure.
 Document at package level that callers must handle every issue and that a
 terminal result poisons the decoder until reset.
 
-**Step 5: Commit the contract**
-
-Commit with:
-
-```text
-Define typed sequence decode results
-```
-
 ### Task 2: Build one bounded generic sequence engine
 
 **Files:**
@@ -127,14 +117,6 @@ incremental buffer implementation.
 **Step 4: Run the focused tests**
 
 Run the command from Task 1 and confirm all decoder tests pass.
-
-**Step 5: Commit the unified sequence engine**
-
-Commit with:
-
-```text
-Unify typed CBOR sequence parsing
-```
 
 ### Task 3: Decode buffer ranges without transient item arrays
 
@@ -190,14 +172,6 @@ mvn test -Pdev -T 4 -q -pl agent-protocol -am
 ```
 
 Expected: PASS, including compatibility fixtures.
-
-**Step 5: Commit the range-aware codecs**
-
-Commit with:
-
-```text
-Decode protocol items from bounded ranges
-```
 
 ### Task 4: Replace AgentD raw inbound parsing with typed messages
 
@@ -276,14 +250,6 @@ The structural cases formerly tested there must exist in the new
 
 Run the command from Step 2 and confirm it passes.
 
-**Step 7: Commit the AgentD migration**
-
-Commit with:
-
-```text
-Consume typed protocol messages in AgentD
-```
-
 ### Task 5: Verify recovery over a live HTTP/2 peer
 
 **Files:**
@@ -337,14 +303,6 @@ mvn test -Pdev -T 4 -q -pl agentd -am \
 
 Expected: PASS.
 
-**Step 6: Commit live recovery and documentation**
-
-Commit with:
-
-```text
-Verify resilient protocol stream decoding
-```
-
 ### Task 6: Verify the complete change
 
 **Files:**
@@ -392,8 +350,3 @@ raw opaque values remain byte-for-byte stable, and every class-level `@AiRule`
 touched by the implementation still holds.
 
 **Step 4: Prepare review and integration**
-
-Request code review using `docs/reviews/RULES.md`. After fixes and verification,
-squash the task branch, delete this completed leaf task and its parent link in
-the squashed commit, cherry-pick it to `main`, run the required post-commit
-`make test`, and remove the worktree and task branch.

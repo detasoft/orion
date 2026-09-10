@@ -1,7 +1,5 @@
 # Shallow History Protocol Surface Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add safe protocol v2 shallow-history wire and API surface for
 `shallow`, `deepen-since`, `deepen-not`, `deepen-relative`, and `unshallow`
 without adding the full Git history walker in this task.

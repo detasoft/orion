@@ -1,7 +1,5 @@
 # Source-Aware Session Controls Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Let `SERVER` and `MANUAL` commands share the native session-control path while applying replay protection only to server commands.
 
 **Architecture:** Replace operation payload schema 2 with one current schema-3 layout carrying an explicit source. Keep the existing host-owned execution serialization and journal order; branch only at admission, where `SERVER` advances the session high-water mark and every valid `MANUAL` delivery is admitted without retained sequence state. Persist a source-aware `COMMAND_RESULT` and consume the same fixtures from Rust and Java without a legacy codec path.
@@ -93,13 +91,6 @@ make -n test
 Expected: the Rust suite passes, and the dry run shows the Rust test command
 before the unchanged Maven test command.
 
-**Step 4: Commit the build slice**
-
-```bash
-git add Makefile
-git commit -m "Run session host tests through root Make"
-```
-
 ### Task 1: Replace the Rust wire and journal model
 
 **Files:**
@@ -155,7 +146,7 @@ cd session-host
 
 Delete the two superseded operation fixtures and their generator/test references. Keep `command-events-v1.hex` because journal format version 1 remains current, but replace its bytes with source-aware server and manual results.
 
-**Step 6: Verify and commit the Rust contract slice**
+**Step 6: Verify**
 
 Run outside the sandbox:
 
@@ -164,13 +155,6 @@ make session-host-test
 ```
 
 Expected: all Rust tests pass.
-
-Commit:
-
-```bash
-git add session-host
-git commit -m "Define source-aware native control records"
-```
 
 ### Task 2: Apply source-specific host admission
 
@@ -214,7 +198,7 @@ both   -> register the active operation or reject finalizing state
 
 After `RECEIVED`, execute and append the same `JournalEvent::CommandResult` for either source. Do not add connection-owned or durable manual state.
 
-**Step 4: Verify and commit host behavior**
+**Step 4: Verify**
 
 Run outside the sandbox:
 
@@ -223,13 +207,6 @@ make session-host-test
 ```
 
 Expected: all Rust unit and real-host tests pass.
-
-Commit:
-
-```bash
-git add session-host/src/platform/unix.rs session-host/tests/unix_process_host.rs
-git commit -m "Apply source-specific control admission"
-```
 
 ### Task 3: Decode source-aware command results in the shared Java protocol
 
@@ -266,7 +243,7 @@ Expected: new command-result decode assertions fail until the codec recognizes e
 
 Extend the existing `SessionEventCodec` switch and payload helpers; do not add a second journal reader or CBOR implementation. Add the narrow package-private unsigned-`long` CBOR support needed to preserve the full `u64` sequence.
 
-**Step 5: Verify and commit the shared journal slice**
+**Step 5: Verify**
 
 Run outside the sandbox:
 
@@ -275,13 +252,6 @@ make run-test MODULE=agent-protocol TEST='SessionEventCodecTest'
 ```
 
 Expected: the focused test passes.
-
-Commit:
-
-```bash
-git add agent-protocol
-git commit -m "Decode source-aware session command results"
-```
 
 ### Task 4: Replace the AgentD operation model and codec
 
@@ -315,7 +285,7 @@ Expected: new schema/source assertions fail until `NativeControlCodec` writes th
 
 Use one `OPERATION_PAYLOAD_SCHEMA = 3` constant and one operation-frame function for both sources. Write source, reserved zero, optional server-envelope length/bytes, and the unchanged effect. Remove schema-2 names and text from AgentD; do not decode or emit the old layout.
 
-**Step 5: Verify and commit the AgentD codec slice**
+**Step 5: Verify**
 
 Run outside the sandbox:
 
@@ -324,13 +294,6 @@ make run-test MODULE=agentd TEST='NativeControlCodecTest,SessionControlClientTes
 ```
 
 Expected: focused tests pass and `rg -n -i 'schema.?2|schema two|control-idempotency-v2' agentd` returns no matches.
-
-Commit:
-
-```bash
-git add agentd
-git commit -m "Encode source-aware native controls"
-```
 
 ### Task 5: Prove Java/Rust interoperability and perform current-only cleanup
 
@@ -355,14 +318,9 @@ make run-test MODULE=agentd TEST='NativeControlLivePeerTest'
 
 Expected: the Java client interoperates with the newly built native host and the live journal decodes through the shared typed codec.
 
-**Step 3: Remove legacy-only assertions in a separate work commit**
+**Step 3: Remove legacy-only assertions**
 
-After the replacement behavior passes, remove remaining tests that exist only to exercise or reject the old operation payloads. Do not add source-scanning tests; use repository search as a review check. Commit this cleanup separately during implementation so its intent is reviewable; the change workflow will still prepare the single final queued-task commit required by `AGENTS.md`.
-
-```bash
-git add session-host agentd agent-protocol
-git commit -m "Remove superseded native operation coverage"
-```
+After the replacement behavior passes, remove remaining tests that exist only to exercise or reject the old operation payloads. Do not add source-scanning tests; use repository search as a review check.
 
 **Step 4: Run complete verification**
 
@@ -376,16 +334,7 @@ git diff --check
 
 Expected: every command succeeds. Inspect the complete branch diff and confirm there is one source enum per language, one operation decoder/encoder per language, one host handler/effect path, only the server high-water mark, no new persistent state, and no schema-2 operation reference.
 
-**Step 5: Prepare the queued-task commit**
+## Documentation alignment
 
-Squash all task-unique implementation commits into one clean commit with the required subject:
-
-```text
-Add source-aware session controls [task: 05_native-session-host/07_source-aware-controls.md]
-```
-
-Leave the task leaf and claim unchanged in the worker branch and return the final SHA for coordinator review. Do not integrate into `main` or delete the worktree before the user gate.
-
-## Coordinator follow-up after integration
-
-After the reviewed implementation is authorized, transferred, and verified on `main`, update `session-host/protocol/README.md`, the reconciled native-control design/record, and affected AgentD/local-terminal/command-orchestration plans to describe only the current source-aware contract. Commit those documentation-only edits directly on `main` without tests, then perform task-tree completion cleanup through `orion-task-runner`.
+Update `session-host/protocol/README.md`, the reconciled native-control design/record, and affected
+AgentD/local-terminal/command-orchestration plans to describe only the current source-aware contract.

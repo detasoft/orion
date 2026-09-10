@@ -1,8 +1,5 @@
 # Bootstrap Proxy Runtime Integration Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to
-> implement this plan task-by-task.
-
 **Goal:** Load `orion.xml` and the encrypted PKCS12 material store through one
 proxy-aware native Git provider before constructing the ACL and public
 transports.

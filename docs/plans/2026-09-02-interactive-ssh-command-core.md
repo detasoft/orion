@@ -1,7 +1,5 @@
 # Interactive SSH Command Core Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a reusable `core/command` pipeline and route every non-Git SSH exec request through it while
 preserving existing Git and administrative command behavior.
 
@@ -89,13 +87,6 @@ Run the command from Step 2.
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add bom/pom.xml core/pom.xml core/command
-git commit -m "Add transport-independent command model"
-```
-
 ### Task 2: Implement deterministic Orion command parsing
 
 **Files:**
@@ -155,13 +146,6 @@ mvn test -Pdev -T 4 -q -pl core/command -am
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/command/src
-git commit -m "Parse Orion command lines"
-```
-
 ### Task 3: Add ACL-aware scoped resource resolution
 
 **Files:**
@@ -214,13 +198,6 @@ mvn test -Pdev -T 4 -q -pl core/command -am
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/command/src
-git commit -m "Resolve scoped command resources"
-```
 
 ### Task 4: Build the hierarchical dispatcher and audit wrapper
 
@@ -299,13 +276,6 @@ mvn test -Pdev -T 4 -q -pl core/command -am
 
 Expected: PASS.
 
-**Step 7: Commit**
-
-```bash
-git add core/command/src
-git commit -m "Dispatch and audit Orion commands"
-```
-
 ### Task 5: Add the stable plain renderer
 
 **Files:**
@@ -348,13 +318,6 @@ mvn test -Pdev -T 4 -q -pl core/command -am
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/command/src
-git commit -m "Render stable plain command output"
-```
 
 ### Task 6: Register compatibility commands and Dagger wiring
 
@@ -408,13 +371,6 @@ mvn test -Pdev -T 4 -q -pl net/transport -am \
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add net/git-transport/pom.xml net/git-transport/src net/transport/src
-git commit -m "Register SSH compatibility commands"
-```
 
 ### Task 7: Route non-Git SSH exec through the command pipeline
 
@@ -484,13 +440,6 @@ mvn test -Pdev -T 4 -q -pl core/command,net/git-transport,net/transport -am \
 
 Expected: PASS.
 
-**Step 6: Commit**
-
-```bash
-git add net/git-transport/src tests/integration-test/src
-git commit -m "Route SSH exec through command dispatcher"
-```
-
 ### Task 8: Review, verify, and finish the task node
 
 **Files:**
@@ -519,15 +468,3 @@ make test
 ```
 
 Expected: BUILD SUCCESS.
-
-**Step 4: Finish with the dedicated-worktree workflow**
-
-Remove the completed leaf task directory and its parent link. Squash all task-branch commits into one commit:
-
-```text
-Implement the interactive SSH command core [task: interactive-ssh-shell/command-core-and-exec]
-```
-
-Cherry-pick that commit onto current `main`, resolve only genuine overlaps while preserving newer `main` work,
-run `make test` on `main`, then remove this worktree and its branch. Confirm `main` is clean and the completed
-worktree no longer appears in `git worktree list` before reporting completion.

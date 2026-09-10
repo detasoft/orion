@@ -1,7 +1,5 @@
 # Landlock Capability Fallback Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Start requested build sessions with a warning when Landlock ABI 9 is unavailable, while keeping
 invalid policies and rule-application failures fatal.
 
@@ -185,13 +183,6 @@ Then invoke the built host with a valid compiled policy and `/usr/bin/true`. Exp
 exit code 0, one warning in stderr, and metadata with `requested: true`, `enforcement: none`, and
 `unavailablePolicy: run-unsandboxed`.
 
-**Step 6: Commit the coupled native change**
-
-```bash
-git add session-host
-git commit -m "Fall back when Landlock is unavailable"
-```
-
 ### Task 3: Remove the mode from AgentD launch specifications
 
 **Files:**
@@ -253,14 +244,6 @@ make run-test MODULE=agentd TEST='NativeRuntimeTest'
 
 Expected: all `NativeRuntimeTest` cases pass.
 
-**Step 5: Commit the AgentD change**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/runtime \
-  agentd/src/test/java/pro/deta/orion/agentd/runtime/NativeRuntimeTest.java
-git commit -m "Remove AgentD Landlock fallback selection"
-```
-
 ### Task 4: Remove transition-only negative checks
 
 **Files:**
@@ -286,14 +269,7 @@ make run-test MODULE=agentd TEST='NativeRuntimeTest'
 
 Expected: both suites pass.
 
-**Step 3: Commit the negative-test cleanup separately**
-
-```bash
-git add session-host/src/cli.rs agentd/src/test/java/pro/deta/orion/agentd/runtime/NativeRuntimeTest.java
-git commit -m "Remove legacy Landlock mode checks"
-```
-
-### Task 5: Verify, squash, transfer, and close the task
+### Task 5: Verify the completed implementation
 
 **Files:**
 
@@ -320,29 +296,4 @@ Confirm the diff contains only the capability fallback, removed selectors, fixed
 tests, and documentation. Verify no policy parse, expansion, path validation, rule construction, or child
 restriction failure was changed into a fallback.
 
-**Step 3: Squash the task worktree**
-
-Squash task-only commits into one commit with this subject:
-
-```text
-Fall back when Landlock is unavailable [task: native-session-host/landlock-capability-fallback]
-```
-
-In that same commit, remove the completed leaf task directory and its link from the parent task node. Keep the
-ordinary design and implementation plan documents.
-
-**Step 4: Transfer to main and run post-commit tests**
-
-Cherry-pick the squashed commit to `main`, then run outside the sandbox:
-
-```bash
-make test
-```
-
-Expected: the regular project test suite passes. If it fails only because of unrelated working-tree changes, report
-that failure without modifying them.
-
 **Step 5: Remove the completed worktree and branch**
-
-Remove the worktree and delete its task branch only after the cherry-pick and post-commit test are confirmed. Verify
-that `git worktree list` no longer contains the completed worktree before reporting completion.

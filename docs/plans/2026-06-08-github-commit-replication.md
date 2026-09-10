@@ -1,7 +1,5 @@
 # GitHub Commit Replication Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add the first GitHub synchronization candidate that can replicate selected commits from Orion to GitHub and receive selected commits from GitHub into Orion.
 
 **Architecture:** Build provider-neutral Git mirror core with a GitHub transport profile that supports HTTPS and SSH remotes from the first candidate. Treat bidirectional sync as two explicit one-way flows sharing one config, queue, worker, source attribution, and fast-forward conflict rules; do not add automatic merge/rebase behavior in the first candidate.
@@ -178,15 +176,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitMirrorModuleTest
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/pom.xml core/git-mirror
-git commit -m "feat: add git mirror module"
-```
-
----
-
 ### Task 2: Define Mirror Configuration and RefSpec Validation
 
 **Files:**
@@ -319,15 +308,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitMirrorConfigValidatorTest
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/config core/git-mirror/src/test/java/pro/deta/orion/git/mirror/config
-git commit -m "feat: add git mirror configuration model"
-```
-
----
-
 ### Task 3: Add a Durable Mirror Config Store
 
 **Files:**
@@ -399,15 +379,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=FileGitMirrorConfigStoreTest
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/config core/git-mirror/src/test/java/pro/deta/orion/git/mirror/config
-git commit -m "feat: add durable git mirror config store"
-```
-
----
 
 ### Task 4: Add Queue and Run Record Storage
 
@@ -496,15 +467,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=FileGitMirrorQueueStoreTest
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/queue core/git-mirror/src/test/java/pro/deta/orion/git/mirror/queue
-git commit -m "feat: add durable git mirror queue"
-```
-
----
-
 ### Task 5: Enqueue Outbound Work from Local Receive Events
 
 **Files:**
@@ -575,15 +537,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitMirrorReceiveEventHandlerTes
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/event core/git-mirror/src/test/java/pro/deta/orion/git/mirror/event
-git commit -m "feat: enqueue outbound mirror work from git receive events"
-```
-
----
 
 ### Task 6: Define Remote Git Replication Client Boundary
 
@@ -667,15 +620,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitRemoteReplicationClientContr
 
 Expected: PASS using the scripted test client.
 
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/remote core/git-mirror/src/test/java/pro/deta/orion/git/mirror/remote
-git commit -m "feat: define remote git replication client boundary"
-```
-
----
-
 ### Task 7: Add Local Repository Protocol Bridge
 
 **Files:**
@@ -749,15 +693,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitRepositoryLocalReplicationBr
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/local core/git-mirror/src/test/java/pro/deta/orion/git/mirror/local
-git commit -m "feat: add local git replication bridge"
-```
-
----
 
 ### Task 8: Implement Outbound Push Worker Logic
 
@@ -863,15 +798,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitMirrorOutboundPushWorkerTest
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/worker core/git-mirror/src/test/java/pro/deta/orion/git/mirror/worker
-git commit -m "feat: add outbound github mirror worker"
-```
-
----
-
 ### Task 9: Implement Inbound Fetch Worker Logic
 
 **Files:**
@@ -949,15 +875,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitMirrorInboundFetchWorkerTest
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/worker core/git-mirror/src/test/java/pro/deta/orion/git/mirror/worker
-git commit -m "feat: add inbound github mirror worker"
-```
-
----
 
 ### Task 10: Add GitHub HTTPS and SSH Credential Profile
 
@@ -1059,15 +976,6 @@ mvn test -Pdev -q -pl core/git-mirror -am -Dtest=GitHubMirrorProfileTest
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/github core/git-mirror/src/test/java/pro/deta/orion/git/mirror/github
-git commit -m "feat: add github mirror transport profile"
-```
-
----
-
 ### Task 11: Add Manual Sync API and GitHub Webhook Intake
 
 **Files:**
@@ -1155,15 +1063,6 @@ mvn test -Pdev -q -pl core/git-mirror,net/http-core -am -Dtest=GitHubWebhookVeri
 
 Expected: PASS.
 
-**Step 6: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror/webhook core/git-mirror/src/test/java/pro/deta/orion/git/mirror/webhook net/http-core/src/main/java/pro/deta/orion/transport/http/OrionGitHubMirrorWebhookRoute.java net/http-core/src/main/java/pro/deta/orion/transport/http/OrionHttpModule.java net/http-core/src/test/java/pro/deta/orion/transport/http/OrionGitHubMirrorWebhookRouteTest.java
-git commit -m "feat: enqueue github mirror fetches from webhooks"
-```
-
----
-
 ### Task 12: Wire Mirror Runtime and Lifecycle
 
 **Files:**
@@ -1236,15 +1135,6 @@ mvn test -Pdev -q -pl core/git-mirror,core/bootstrap -am -Dtest=GitMirrorService
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/git-mirror/src/main/java/pro/deta/orion/git/mirror core/git-mirror/src/test/java/pro/deta/orion/git/mirror core/bootstrap/pom.xml core/bootstrap/src/main/java/pro/deta/orion/component/OrionRuntimeModule.java core/bootstrap/src/main/java/pro/deta/orion/component/OrionRuntimeStateMachine.java core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java
-git commit -m "feat: wire git mirror runtime"
-```
-
----
 
 ### Task 13: Add End-to-End Local Replication Tests
 
@@ -1322,15 +1212,6 @@ mvn test -Pdev -q -pl tests/integration-test -am -Dtest=GitMirrorReplicationIT
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add tests/integration-test/src/test/java/pro/deta/orion/test/integration/git/GitMirrorReplicationIT.java tests/integration-test/pom.xml
-git commit -m "test: cover github mirror replication flows"
-```
-
----
-
 ### Task 14: Final Verification
 
 **Files:**
@@ -1389,13 +1270,6 @@ Expected: no committed private keys, no raw known-hosts content in production
 config, and no SSH trust-all behavior. Test-only fixture names such as
 `known_hosts` are acceptable only when they refer to a temporary file or test
 resource with non-secret fixture data.
-
-**Step 5: Commit fixes if needed**
-
-If verification fixes are required, commit with a single-line message matching
-the logical change.
-
----
 
 ## Follow-Up Plans
 

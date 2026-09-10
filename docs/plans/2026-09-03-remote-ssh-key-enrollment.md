@@ -1,7 +1,5 @@
 # Remote SSH Key Enrollment Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Enroll a purpose-selected Orion SSH client key idempotently with one wipeable bootstrap-password attempt and verify it in a fresh public-key session.
 
 **Architecture:** Extend the existing isolated Apache MINA operation with explicit public-key-only and password-only authentication modes. Add an `SSH_CLIENT` key-material capability, direct-buffer password ownership, and a typed `SshKeyEnroller` that sends a canonical public key to one fixed POSIX enrollment command before fresh key verification.
@@ -80,17 +78,6 @@ make run-test MODULE=core/key-material TEST='pro.deta.orion.keymaterial.KeyMater
 
 Expected: PASS.
 
-**Step 5: Commit and run the required post-commit suite**
-
-```bash
-git add core/key-material/src/main/java/pro/deta/orion/keymaterial/KeyMaterialPurpose.java \
-  core/key-material/src/main/java/pro/deta/orion/keymaterial/SshClientKeyCapability.java \
-  core/key-material/src/main/java/pro/deta/orion/keymaterial/KeyMaterialCapabilities.java \
-  core/key-material/src/test/java/pro/deta/orion/keymaterial/KeyMaterialCapabilitiesTest.java
-git commit -m "Add SSH client key material capability"
-make test
-```
-
 ### Task 2: Own and clear the bootstrap password
 
 **Files:**
@@ -142,15 +129,6 @@ including data in errors. Mark test-only inspection methods with `@TestOnly`.
 
 Run the Task 2 command again. Expected: PASS.
 
-**Step 5: Commit and verify**
-
-```bash
-git add agent-provisioning/src/main/java/pro/deta/orion/provisioning/BootstrapPassword.java \
-  agent-provisioning/src/test/java/pro/deta/orion/provisioning/BootstrapPasswordTest.java
-git commit -m "Add wipeable bootstrap password ownership"
-make test
-```
-
 ### Task 3: Add one isolated password-only SSH authentication mode
 
 **Files:**
@@ -196,16 +174,6 @@ make run-test MODULE=agent-provisioning \
 ```
 
 Expected: PASS, including existing timeout and identity-isolation tests.
-
-**Step 5: Commit and verify**
-
-```bash
-git add agent-provisioning/src/main/java/pro/deta/orion/provisioning/MinaSshOperation.java \
-  agent-provisioning/src/test/java/pro/deta/orion/provisioning/MinaSshOperationTest.java \
-  agent-provisioning/src/test/java/pro/deta/orion/provisioning/TestSshServer.java
-git commit -m "Add isolated SSH password authentication"
-make test
-```
 
 ### Task 4: Enroll and verify the selected public key
 
@@ -287,19 +255,6 @@ make run-test MODULE=agent-provisioning \
   TEST='pro.deta.orion.provisioning.SshKeyEnrollerTest#existingKeyNeedsNoPasswordAuthentication'
 ```
 
-**Step 6: Commit and verify**
-
-```bash
-git add agent-provisioning/pom.xml \
-  agent-provisioning/src/main/java/pro/deta/orion/provisioning/EnrollmentFailure.java \
-  agent-provisioning/src/main/java/pro/deta/orion/provisioning/SshKeyEnrollmentException.java \
-  agent-provisioning/src/main/java/pro/deta/orion/provisioning/SshKeyEnroller.java \
-  agent-provisioning/src/test/java/pro/deta/orion/provisioning/SshKeyEnrollerTest.java \
-  agent-provisioning/src/test/java/pro/deta/orion/provisioning/TestSshServer.java
-git commit -m "Enroll and verify remote SSH client keys"
-make test
-```
-
 ### Task 5: Complete typed failure and secret non-disclosure coverage
 
 **Files:**
@@ -364,21 +319,7 @@ git diff --check
 
 Expected: PASS and no whitespace errors.
 
-**Step 5: Commit and run required verification**
-
-```bash
-git add agent-provisioning/src/main/java/pro/deta/orion/provisioning/SshKeyEnroller.java \
-  agent-provisioning/src/main/java/pro/deta/orion/provisioning/EnrollmentFailure.java \
-  agent-provisioning/src/test/java/pro/deta/orion/provisioning/SshKeyEnrollerTest.java \
-  agent-provisioning/src/test/java/pro/deta/orion/provisioning/TestSshServer.java
-git commit -m "Harden SSH key enrollment failure handling"
-make test
-mvn verify -Pdev -T 4
-```
-
-Expected: both full-project commands finish with `BUILD SUCCESS`.
-
-### Task 6: Review the unsquashed implementation and prepare the gate handoff
+### Task 6: Verify the completed implementation
 
 **Files:**
 - Review only: all changes from the real base SHA through branch `HEAD`
@@ -401,8 +342,3 @@ git diff --stat 44b31cd4d16bfcc32c88ce9aded1f531634ae350..HEAD
 Expected: clean worktree, no whitespace errors, and only task-owned commits/files.
 
 **Step 3: Request primary-agent review**
-
-Report the real base/head SHAs, commit list, change summary, exact RED/GREEN and
-verification results, risks, and clean status. Do not squash, delete the leaf,
-cherry-pick to `main`, remove the branch/worktree, or begin another task until the
-explicit integration gate is received.

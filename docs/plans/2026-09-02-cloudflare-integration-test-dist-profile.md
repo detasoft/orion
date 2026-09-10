@@ -1,7 +1,5 @@
 # Cloudflare Integration Test Dist Profile Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Run the state-mutating Cloudflare integration test only when Maven profile `dist` is active.
 
 **Architecture:** A JUnit system-property condition protects the test class. The integration-test POM supplies a

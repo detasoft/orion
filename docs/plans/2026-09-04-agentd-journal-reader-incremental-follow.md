@@ -1,7 +1,5 @@
 # Incremental AgentD Journal Follow Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Extend the completed filesystem journal reader with bounded pages, disposable seek positions, and
 100 millisecond fallback wakeups so live active segments are not rescanned from their beginning.
 
@@ -12,9 +10,6 @@ server event IDs remain the recovery authority and invalidate the hint after rep
 **Tech Stack:** Java 21, NIO channels and WatchService, agent-protocol CBOR decoding, zstd-jni, JUnit 5, AssertJ.
 
 ---
-
-Follow @superpowers:test-driven-development per task. Use @superpowers:requesting-code-review after each task and
-@superpowers:verification-before-completion before final task-tree cleanup and transfer.
 
 ### Task 1: Reconcile dependencies and native record limits after rebase
 
@@ -33,7 +28,7 @@ Follow @superpowers:test-driven-development per task. Use @superpowers:requestin
    `AgentProtocolLimits.journalDefaults()`.
 4. Remove the duplicate Commons Compress and unversioned `zstd-jni` additions from the rebased branch. Keep the
    completed reader's direct `${zstd-jni.version}` dependency and root version 1.5.7-11.
-5. Run the focused reader test, `git diff --check`, commit, then run post-commit `make test`.
+5. Run the focused reader test.
 
 ### Task 2: Add bounded pages and reusable physical positions
 
@@ -97,8 +92,3 @@ Follow @superpowers:test-driven-development per task. Use @superpowers:requestin
    `make run-test MODULE=agentd TEST='pro.deta.orion.agentd.journal.*Test'`.
 3. Run `mvn verify -Pdev -T 4` and request a final whole-range code review under `docs/reviews/RULES.md`.
 4. Fix every Critical or Important finding and repeat affected verification.
-5. Squash task-branch commits to
-   `Follow AgentD session journals incrementally [task: agentd/journal-reader-incremental-follow]`, deleting the leaf
-   task and parent link in that commit.
-6. Rebase onto current `main`, cherry-pick the squashed commit to `main`, run post-commit `make test`, then remove the
-   worktree and branch only after verifying a clean result.

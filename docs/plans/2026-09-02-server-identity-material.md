@@ -80,6 +80,3 @@ not exercise identity operations may bind the explicit unavailable capability.
   and `core/bootstrap` with reactor dependencies.
 - Compile integration-test sources after updating component construction.
 - Run `mvn verify -Pdev -T 4` and `git diff --check`.
-- Request independent code review against `docs/reviews/RULES.md`.
-- Finish as one task commit, remove this leaf from the task tree, cherry-pick to
-  `main`, run `make test`, and remove the task worktree and branch.

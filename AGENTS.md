@@ -14,6 +14,10 @@
   `orion-review` maintains and commits requested module reports.
 - Preserve unrelated staged and unstaged changes. Never stage, discard, or
   commit work not produced by the current request.
+- Execution plans contain requirements, design, dependencies, and result
+  verification. Do not put skill or execution-workflow references, staging,
+  commit, review-gate, or branch-integration recipes in plans. These instructions
+  belong in `AGENTS.md`, `docs/definitions.md`, and repository skills.
 
 ## Commits and verification
 

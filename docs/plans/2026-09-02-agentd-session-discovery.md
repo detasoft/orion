@@ -1,7 +1,5 @@
 # AgentD Session Discovery Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Rebuild AgentD's immutable local-session cache from durable session directories and reconcile it after filesystem notification loss.
 
 **Architecture:** Parse metadata into a deliberately narrow manifest that excludes journal-derived, lifecycle, and operation-sequence state. Build complete snapshots using injected host/journal probes, atomically replace the registry, and use `WatchService` notifications and periodic polling only to trigger full rescans.
@@ -67,9 +65,6 @@
 **Files:**
 - Review every file above and `agentd/src/main/java/pro/deta/orion/agentd/session/package-info.java`.
 
-1. Check changed class-level `@AiRule` comments if any and keep lines within repository limits.
-2. Run `mvn test -Pdev -T 4 -q -pl agentd -am -Dtest='*Session*Discovery*,JsonSessionManifestReaderTest' -Dsurefire.failIfNoSpecifiedTests=false`.
-3. Commit the implementation in logical single-line commits.
-4. Run `mvn verify -Pdev -T 4` outside the sandbox.
-5. Run the required post-commit `make test` outside the sandbox.
-6. Record exact results and leave the branch/worktree intact for review.
+1. Check changed class-level `@AiRule` comments and keep lines within repository limits.
+2. Run focused tests for session discovery and `JsonSessionManifestReaderTest` with reactor dependencies.
+3. Run `mvn verify -Pdev -T 4`.

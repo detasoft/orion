@@ -1,7 +1,5 @@
 # Durable Session Journal Storage Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a central-server module that stores one byte-preserving, durable CBOR Sequence journal per
 session and exposes only filesystem-confirmed cursors.
 
@@ -111,13 +109,6 @@ Run the Task 1 focused command.
 
 Expected: PASS.
 
-**Step 6: Commit the module contract**
-
-```shell
-git add pom.xml bom/pom.xml agent-session-server
-git commit -m "Define session journal storage contracts"
-```
-
 ### Task 2: Rebuild an uncompressed session journal from disk
 
 **Files:**
@@ -189,13 +180,6 @@ Run the Task 2 command.
 
 Expected: PASS.
 
-**Step 7: Commit disk reconstruction and reads**
-
-```shell
-git add agent-session-server
-git commit -m "Rebuild session journals from segment files"
-```
-
 ### Task 3: Append batches behind a filesystem durability barrier
 
 **Files:**
@@ -264,13 +248,6 @@ Run the Task 3 command.
 
 Expected: PASS.
 
-**Step 7: Commit durable append**
-
-```shell
-git add agent-session-server
-git commit -m "Persist session journal batches durably"
-```
-
 ### Task 4: Make retry overlap idempotent and conflict-safe
 
 **Files:**
@@ -315,13 +292,6 @@ remaining ID to remain strictly increasing and append them normally.
 Run the Task 4 command.
 
 Expected: PASS.
-
-**Step 6: Commit idempotent retry handling**
-
-```shell
-git add agent-session-server
-git commit -m "Make journal replication retries idempotent"
-```
 
 ### Task 5: Rotate segments and recover active tails
 
@@ -375,13 +345,6 @@ and cursor values derived from complete decoded records.
 Run the Task 5 command.
 
 Expected: PASS.
-
-**Step 7: Commit rotation and recovery**
-
-```shell
-git add agent-session-server
-git commit -m "Rotate and recover session journal segments"
-```
 
 ### Task 6: Compress closed segments without delaying acknowledgement
 
@@ -446,13 +409,6 @@ Run the Task 6 command.
 
 Expected: PASS.
 
-**Step 8: Commit compression maintenance**
-
-```shell
-git add pom.xml agent-session-server
-git commit -m "Compress closed journal segments safely"
-```
-
 ### Task 7: Verify concurrency and session failure isolation
 
 **Files:**
@@ -499,13 +455,6 @@ make run-test MODULE=agent-session-server TEST='*Test'
 
 Expected: PASS.
 
-**Step 7: Commit concurrency coverage**
-
-```shell
-git add agent-session-server
-git commit -m "Isolate concurrent session journal operations"
-```
-
 ### Task 8: Review and verify the complete implementation
 
 **Files:**
@@ -526,9 +475,8 @@ Expected: PASS.
 
 **Step 2: Review against repository rules**
 
-Invoke `superpowers:requesting-code-review`. Read `docs/reviews/RULES.md`, inspect all changes unique to the
-task branch, and fix every blocking issue. In particular, confirm that no code path publishes a cursor before
-the force barrier, no record is re-encoded, and one session's failure cannot stop another session.
+Confirm that no code path publishes a cursor before the force barrier, no record is re-encoded,
+and one session's failure cannot stop another session.
 
 **Step 3: Re-run focused and development verification after fixes**
 
@@ -538,15 +486,3 @@ mvn verify -Pdev -T 4
 ```
 
 Expected: PASS.
-
-**Step 4: Commit review fixes if needed**
-
-Use one concise logical message for each distinct fix. Do not mix unrelated working-tree changes.
-
-**Step 5: Finish the dedicated worktree task**
-
-Invoke `superpowers:verification-before-completion` and `superpowers:finishing-a-development-branch`. Follow
-`AGENTS.md`: squash task-branch commits into
-`Implement durable session journal storage [task: agent-session-server/journal-storage]`, delete the completed
-leaf task directory and its parent link in that squashed commit, cherry-pick the result to `main`, run
-post-commit `make test` on `main`, and remove the task worktree and branch only after a clean transfer.

@@ -1,7 +1,5 @@
 # Read-Only Domain Commands Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add structured, ACL-filtered read-only Orion commands with safe scoped resolution and explicit behavior
 for domain services that are not available yet.
 
@@ -110,13 +108,6 @@ Expected: FAIL because catalogs can currently return only a list and navigation 
 Use ordinary `switch`/loops and exhaustive sealed-type handling. Do not log or render failure causes from the command
 core. Repeat the focused command and require all selected tests to pass.
 
-**Step 6: Commit**
-
-```sh
-git add core/command
-git commit -m "Propagate command resource availability"
-```
-
 ### Task 2: Define immutable operator views and established runtime adapters
 
 **Files:**
@@ -196,14 +187,6 @@ Expected: FAIL because no operator query contracts or adapters exist.
 
 Implement the minimal records and adapters, including stable recursive lifecycle ordering. Repeat the focused command
 and require all selected tests to pass.
-
-**Step 6: Commit**
-
-```sh
-git add net/git-transport/src/main/java/pro/deta/orion/transport/git/command/read \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/command/read
-git commit -m "Add operator domain read sources"
-```
 
 ### Task 3: Add ACL-filtered read-only command catalog
 
@@ -296,13 +279,6 @@ Repeat the focused command. If authorization-core changes were necessary, also r
 make run-test MODULE=core/authorization TEST='AccessRulesTest'
 ```
 
-**Step 8: Commit**
-
-```sh
-git add net/git-transport core/authorization
-git commit -m "Add ACL-filtered domain commands"
-```
-
 ### Task 4: Compose the catalog and verify frontend parity
 
 **Files:**
@@ -371,16 +347,3 @@ mvn verify -Pdev -T 4
 
 Require success, or report and reproduce any pre-existing/environmental integration failure on the exact worker base
 before claiming it is unrelated.
-
-**Step 6: Commit**
-
-```sh
-git add net/git-transport tests/integration-test README.md
-git commit -m "Compose read-only SSH domain commands"
-```
-
-**Step 7: Prepare change-workflow handoff**
-
-Return the task path, branch/worktree, exact base and head SHAs, commit list, changed-file summary, focused test
-results, full verification result, and known unavailable production sources. Do not squash, delete the task node,
-cherry-pick to `main`, or clean up until the change workflow completes review and the user passes the integration gate.

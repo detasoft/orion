@@ -1,7 +1,5 @@
 # ACME and HTTPS Material Migration Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Make the protected PKCS12 store the only owner of ACME and HTTPS key material, while moving all HTTPS
 desired-state configuration into the versioned `orion.xml` document.
 
@@ -284,5 +282,3 @@ private key, and TLS sends the leaf and intermediate certificates without the ro
    roots remain role-separated.
 5. Run all affected focused tests through `make run-test`, then run `git diff --check`.
 6. Run `mvn verify -Pdev -T 4` in the dedicated task worktree and inspect the complete result.
-7. Commit any final implementation/docs slice and run `make test` after the commit as required by `AGENTS.md`.
-8. Return the unsquashed branch for independent review. Do not integrate into `main` until the mandatory user gate.

@@ -1,7 +1,5 @@
 # AgentD Session Runtime and Control Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a native session runtime and bounded local-control client that hand off durable sessions without making AgentD their lifetime owner.
 
 **Architecture:** Keep immutable runtime contracts in `agentd.runtime` and native control framing/transports in `agentd.session`. `NativeRuntime` composes the existing manifest and journal probes with STATUS, while an injected tentative-process boundary makes pre-handoff cleanup precise and post-handoff ownership impossible.
@@ -102,4 +100,3 @@
 2. Run `mvn test -Pdev -T 4 -q -pl agentd -am` outside the sandbox.
 3. Run `mvn verify -Pdev -T 4` outside the sandbox.
 4. Run `git diff --check` and inspect `git status --short` plus the complete branch diff from `2de6bb4`.
-5. Commit any final scoped cleanup with a single-line message, then request primary review without squashing, deleting the task node, or integrating to main.

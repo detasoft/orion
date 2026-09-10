@@ -4,8 +4,6 @@
 > `2026-09-03-password-authenticated-key-enrollment-design.md` replaces that mechanism with password-first,
 > same-connection enrollment. This file remains as historical context for proof-aware public-key authentication.
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add named-user SSH public-key authentication and one-time keyboard-interactive key enrollment while
 preserving key-derived Git-over-SSH identity.
 
@@ -142,5 +140,3 @@ prove one of the stored keys.
 
 5. Run `mvn verify -Pdev -T 4`, inspect `git diff --check`, and review all changed `@AiRule` classes against their
    class-level rules.
-6. Complete the task-tree/worktree workflow: squash task commits, delete the completed leaf and its parent link,
-   cherry-pick the single task commit to `main`, run `make test` on `main`, and remove the worktree and task branch.

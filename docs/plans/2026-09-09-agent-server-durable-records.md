@@ -4,9 +4,6 @@ Task pool: `current-work/03_agent-session-server/01_control-and-registries/01_ag
 Pool: [Server agent registration](current-work/03_agent-session-server/01_control-and-registries/TASK.md)
 Design: [Server-launched identity](2026-09-02-agentd-server-launched-identity-design.md)
 
-This ordinary implementation plan is owned by the change-workflow coordinator on
-`main`. The worker reports material gaps before changing this plan.
-
 ## Verified Current Model
 
 - `agent-protocol` owns AgentId, AgentGeneration, AgentLaunchId,
@@ -118,19 +115,10 @@ The implementation worker owns tests, all outside the sandbox.
 - Cover truncated/corrupt records, size bounds, ignored temporary files, and
   exclusive-root ownership/release. Use narrow `@TestOnly` hooks as needed.
 - Use `make run-test MODULE=:agent-session-server TEST='<test-locator>'`,
-  `mvn verify -Pdev -T 4`, and post-commit `make test` under AGENTS.md.
+  and `mvn verify -Pdev -T 4`.
   Known unrelated Git-configuration fixture and SSH PTY failures have separate
   upcoming task nodes and are outside this task pool.
 
 ## Review and Completion
 
-Apply `orion-minimal-implementation` before and during implementation and perform
-its final self-review of the subsystem. Preserve the atomicity, durability,
-generation, credential, and ownership guarantees that justify local complexity.
-
-Return each committed implementation for change-workflow review. After fixes and
-clean review, squash its task branch and remove the completed leaf under the
-task workflow. Remove the composite and update next-task references to
-launch-and-reconnect-authentication only after all children are integrated.
-Keep this ordinary plan. Do not transfer to main or remove a worktree or branch
-before the per-task user gate.
+Preserve the atomicity, durability, generation, credential, and ownership guarantees that justify local complexity.

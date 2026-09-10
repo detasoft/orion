@@ -1,7 +1,5 @@
 # Orion Git Engine Adapters Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add reusable test-only Orion Git client and server adapters and prove the required Orion-facing engine transfers.
 
 **Architecture:** Create a dedicated adapter module above the engine-neutral workflow contracts and production Orion
@@ -104,11 +102,6 @@ Git control client/server.
 
 ### Task 6: Commit and verify the task branch
 
-1. Run `mvn test -Pdev -T 4 -q -pl tests/git-engine-orion-adapters -am
-   -Dsurefire.failIfNoSpecifiedTests=false` outside the sandbox.
-2. Inspect `git diff --check`, the complete change set, and source line lengths; commit the logical implementation with
-   a one-line subject.
-3. Run the required post-commit `make test` outside the sandbox.
-4. Run `mvn verify -Pdev -T 4` outside the sandbox.
-5. Apply the blocking rules in `docs/reviews/RULES.md`, inspect branch history/status, and prepare the complete review
-   packet without squashing, deleting task-tree nodes, transferring to main, or cleaning up the worktree.
+1. Run focused tests for `tests/git-engine-orion-adapters` with reactor dependencies.
+2. Inspect the changed APIs and source line lengths.
+3. Run `mvn verify -Pdev -T 4`.

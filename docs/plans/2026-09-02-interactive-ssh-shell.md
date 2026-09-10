@@ -1,7 +1,5 @@
 # Interactive SSH Shell Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Turn Orion's existing Apache Mina SSHD endpoint into a safe operator shell and future session-host
 PTY gateway while preserving Git-over-SSH behavior.
 

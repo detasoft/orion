@@ -1,7 +1,5 @@
 # Interactive Orion Terminal Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Replace Orion's informational SSH shell with a safe interactive PTY terminal over the shared command
 dispatcher, including navigation, editing, authorized completion, resize handling, cancellation, and bounded
 virtual-thread lifecycle.
@@ -81,15 +79,6 @@ mvn test -Pdev -T 4 -q -pl core/command -am
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/command/src
-git commit -m "Navigate visible Orion command scopes"
-```
-
-Run `make test` after the commit as required by `AGENTS.md`.
-
 ### Task 2: Implement the transport-independent editor and terminal renderer
 
 **Files:**
@@ -143,15 +132,6 @@ mvn test -Pdev -T 4 -q -pl core/command -am
 
 Expected: PASS.
 
-**Step 7: Commit**
-
-```bash
-git add core/command/src
-git commit -m "Add Orion terminal editing and rendering"
-```
-
-Run `make test` after the commit.
-
 ### Task 3: Build the interactive terminal session state machine
 
 **Files:**
@@ -199,15 +179,6 @@ mvn test -Pdev -T 4 -q -pl core/command -am
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/command/src
-git commit -m "Run interactive Orion terminal sessions"
-```
-
-Run `make test` after the commit.
 
 ### Task 4: Replace the Mina informational shell with the virtual-thread adapter
 
@@ -272,15 +243,6 @@ mvn test -Pdev -T 4 -q -pl core/command,net/git-transport,net/transport -am \
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add net/git-transport/src net/transport/src
-git commit -m "Serve interactive Orion SSH terminals"
-```
-
-Run `make test` after the commit.
-
 ### Task 5: Add real SSH acceptance coverage and verify compatibility
 
 **Files:**
@@ -310,15 +272,6 @@ mvn verify -Pdev -T 4 -q -pl tests/integration-test -am \
 
 Expected final result: PASS.
 
-**Step 3: Commit acceptance coverage**
-
-```bash
-git add tests/integration-test/src net/git-transport/src/test
-git commit -m "Verify interactive SSH terminal boundaries"
-```
-
-Run `make test` after the commit.
-
 ### Task 6: Review and verify the complete leaf
 
 **Files:**
@@ -347,7 +300,3 @@ make test
 Expected: `BUILD SUCCESS`.
 
 **Step 4: Report for primary review**
-
-Return base/head SHAs, every logical commit, changed files, exact verification results, and residual risks. Leave the
-task owner, leaf directory, worktree, and branch in place. Do not squash, integrate into main, or clean up until the
-primary review and explicit user gate.

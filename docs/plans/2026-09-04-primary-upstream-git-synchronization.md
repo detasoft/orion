@@ -1,7 +1,5 @@
 # Primary Upstream Git Synchronization Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a provider-neutral service that attaches an Orion native repository to one GitHub HTTPS
 `upstream`, reconciles all compatible branches on start, and then mirrors Orion branch changes outbound.
 
@@ -56,14 +54,6 @@ an empty merge base when histories are unrelated or incomplete. Keep existing fe
 
 Run the command from Step 2. Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/upload/NativeObjectClosure.java \
-  git/git-native-storage/src/test/java/pro/deta/orion/git/nativestorage/upload/NativeObjectClosureTest.java
-git commit -m "Expose native Git commit relationships"
-```
-
 ### Task 2: Create the sync module and pure all-branch planner
 
 **Files:**
@@ -109,13 +99,6 @@ anything.
 **Step 4: Run the planner test**
 
 Run the command from Step 2. Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add git/pom.xml git/git-sync
-git commit -m "Add primary upstream attach planner"
-```
 
 ### Task 3: Add provider-neutral remote mechanics and the GitHub profile
 
@@ -176,13 +159,6 @@ make run-test MODULE=git/git-sync TEST='GitHubRemoteProfileTest,SmartHttpGitRemo
 
 Expected: PASS.
 
-**Step 6: Commit**
-
-```bash
-git add git/git-sync
-git commit -m "Implement GitHub Smart HTTP remote gateway"
-```
-
 ### Task 4: Execute atomic attachment and conflict preservation
 
 **Files:**
@@ -218,13 +194,6 @@ publication; never replay a stored mutation plan.
 **Step 4: Run the attachment tests**
 
 Run the command from Step 2. Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add git/git-sync
-git commit -m "Reconcile primary upstream attachment"
-```
 
 ### Task 5: Persist mirror state and coalesced outbound work
 
@@ -265,13 +234,6 @@ atomically replaces the durable file. Treat an in-flight item as pending after r
 **Step 4: Run the store tests**
 
 Run the command from Step 2. Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add git/git-sync
-git commit -m "Persist primary upstream synchronization state"
-```
 
 ### Task 6: Add serialized outbound processing, retry, and minute audits
 
@@ -314,13 +276,6 @@ execution gate, and read the current desired tip before every push. Keep the rep
 
 Run the command from Step 2. Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add git/git-sync
-git commit -m "Coordinate durable outbound Git synchronization"
-```
-
 ### Task 7: Expose service lifecycle, status, and explicit retry
 
 **Files:**
@@ -355,13 +310,6 @@ credentials or unsanitized failures.
 **Step 4: Run the service tests**
 
 Run the command from Step 2. Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add git/git-sync
-git commit -m "Expose primary upstream synchronization service"
-```
 
 ### Task 8: Verify module contracts and end-to-end behavior
 
@@ -401,13 +349,3 @@ mvn verify -Pdev -T 4
 ```
 
 Expected: BUILD SUCCESS.
-
-**Step 4: Request code review and resolve blocking findings**
-
-Apply `superpowers:requesting-code-review`, then handle findings through
-`superpowers:receiving-code-review`. Repeat the affected focused tests and `mvn verify -Pdev -T 4`.
-
-**Step 5: Finish the task branch**
-
-Follow the repository worktree completion rules: remove the completed leaf/link in the squashed task commit,
-cherry-pick that commit to `main`, run `make test` on `main`, and remove the worktree and task branch.

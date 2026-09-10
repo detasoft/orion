@@ -9,8 +9,6 @@
 > admitted operation has a pending or missing result. Reconcile affected steps
 > with that document before implementing the remaining orchestration work.
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Route server session commands through stateless, bounded per-session orchestration whose durable
 outcomes and recovery state come exclusively from session journals.
 
@@ -27,10 +25,6 @@ discovery, local-control, journal-reader, and journal-sync boundaries.
 
 ## Scope Rules
 
-- Work only in the dedicated command-orchestration worktree until the review gate.
-- Follow @superpowers:test-driven-development for every production behavior below.
-- Run every Maven command outside the sandbox. Use `make run-test` for focused tests and `make test` after
-  each commit, as required by `AGENTS.md`.
 - Do not implement journal file reading, HTTP/2 journal pumping, `ACK_JOURNAL`, journal retention, or native
   host operation deduplication in this leaf.
 - Do not add `hostInstanceId`; retain and document the approved SessionId/endpoint/PID correlation risk.
@@ -207,18 +201,6 @@ make run-test MODULE=agentd \
 
 Expected: PASS.
 
-**Step 9: Commit the exact-envelope boundary**
-
-```bash
-git add agent-protocol/src agentd/src/main/java/pro/deta/orion/agentd/transport \
-  agentd/src/test/java/pro/deta/orion/agentd/transport
-git commit -m "Preserve exact inbound Agent protocol items"
-```
-
-Run: `make test`
-
-Expected: PASS for the full regular Maven test suite.
-
 ### Task 2: Add recovery sequence and Java journal-event contracts
 
 **Files:**
@@ -307,17 +289,6 @@ Run: `make run-test MODULE=agent-protocol TEST='pro.deta.orion.agent.protocol.*T
 
 Expected: PASS with legacy fixtures readable and the new shared native fixtures byte-identical.
 
-**Step 9: Commit the shared Java contracts**
-
-```bash
-git add agent-protocol/src
-git commit -m "Define Agent command recovery protocol contracts"
-```
-
-Run: `make test`
-
-Expected: PASS.
-
 ### Task 3: Reconstruct command state from the local journal suffix
 
 **Files:**
@@ -378,19 +349,6 @@ Run: `make run-test MODULE=agentd TEST='pro.deta.orion.agentd.session.CommandJou
 
 Expected: PASS.
 
-**Step 9: Commit recovery scanning**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/session/CommandJournalScanner.java \
-  agentd/src/main/java/pro/deta/orion/agentd/session/SessionCommandState.java \
-  agentd/src/test/java/pro/deta/orion/agentd/session/CommandJournalScannerTest.java
-git commit -m "Recover AgentD command state from session journals"
-```
-
-Run: `make test`
-
-Expected: PASS.
-
 ### Task 4: Add bounded per-session serial lanes
 
 **Files:**
@@ -441,19 +399,6 @@ and never sends termination to a host.
 Run: `make run-test MODULE=agentd TEST='pro.deta.orion.agentd.session.SessionCommandSchedulerTest'`
 
 Expected: PASS for FIFO, cross-session concurrency, capacity, recovery gating, isolated failure, and close.
-
-**Step 8: Commit the scheduler**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/session/ServerSessionCommand.java \
-  agentd/src/main/java/pro/deta/orion/agentd/session/SessionCommandScheduler.java \
-  agentd/src/test/java/pro/deta/orion/agentd/session/SessionCommandSchedulerTest.java
-git commit -m "Add bounded AgentD session command lanes"
-```
-
-Run: `make test`
-
-Expected: PASS.
 
 ### Task 5: Route established-session controls through the host contract
 
@@ -525,17 +470,6 @@ make run-test MODULE=agentd \
 ```
 
 Expected: PASS; no test observes a direct successful `COMMAND_RESULT`.
-
-**Step 8: Commit established-session routing**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/session agentd/src/test/java/pro/deta/orion/agentd/session
-git commit -m "Route sequenced AgentD controls to session hosts"
-```
-
-Run: `make test`
-
-Expected: PASS.
 
 ### Task 6: Route START and create failure-only journals
 
@@ -618,22 +552,6 @@ make run-test MODULE=agentd TEST="$agentd_start_tests"
 
 Expected: PASS for journaled outcomes, failure-only record, exact bound, reconnect, and no local persistence.
 
-**Step 10: Commit START routing**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/session \
-  agentd/src/main/java/pro/deta/orion/agentd/journal/SyntheticSessionJournal.java \
-  agentd/src/main/java/pro/deta/orion/agentd/runtime/SessionSpec.java \
-  agentd/src/test/java/pro/deta/orion/agentd/session \
-  agentd/src/test/java/pro/deta/orion/agentd/journal \
-  agentd/src/test/java/pro/deta/orion/agentd/runtime/SessionContractsTest.java
-git commit -m "Route AgentD session starts through journal outcomes"
-```
-
-Run: `make test`
-
-Expected: PASS.
-
 ### Task 7: Observe live journal lifecycle and command results
 
 **Files:**
@@ -675,18 +593,6 @@ Run:
 make run-test MODULE=agentd \
   TEST='pro.deta.orion.agentd.session.SessionJournalObserverTest,pro.deta.orion.agentd.session.SessionCommandSchedulerTest'
 ```
-
-Expected: PASS.
-
-**Step 6: Commit journal observation**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/session \
-  agentd/src/test/java/pro/deta/orion/agentd/session
-git commit -m "Observe AgentD command outcomes from session journals"
-```
-
-Run: `make test`
 
 Expected: PASS.
 
@@ -750,20 +656,6 @@ make run-test MODULE=agentd \
 
 Expected: PASS.
 
-**Step 9: Commit transport dispatch**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/core \
-  agentd/src/main/java/pro/deta/orion/agentd/session \
-  agentd/src/test/java/pro/deta/orion/agentd/core \
-  agentd/src/test/java/pro/deta/orion/agentd/session
-git commit -m "Dispatch server commands through AgentD orchestration"
-```
-
-Run: `make test`
-
-Expected: PASS.
-
 ### Task 9: Assemble lifecycle, shutdown, and recovery services
 
 **Files:**
@@ -813,18 +705,6 @@ agentd_assembly_tests='pro.deta.orion.agentd.core.AgentAssemblyTest,'\
 'pro.deta.orion.agentd.core.AgentLifecycleTest'
 make run-test MODULE=agentd TEST="$agentd_assembly_tests"
 ```
-
-Expected: PASS.
-
-**Step 7: Commit production assembly**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/core \
-  agentd/src/test/java/pro/deta/orion/agentd/core
-git commit -m "Assemble AgentD command orchestration lifecycle"
-```
-
-Run: `make test`
 
 Expected: PASS.
 
@@ -878,17 +758,6 @@ make run-test MODULE=agentd TEST="$agentd_flow_tests"
 
 Expected: PASS.
 
-**Step 6: Commit end-to-end coverage**
-
-```bash
-git add agentd/src/test/java/pro/deta/orion/agentd
-git commit -m "Cover AgentD command orchestration recovery"
-```
-
-Run: `make test`
-
-Expected: PASS.
-
 ### Task 11: Align protocol and architecture documentation
 
 **Files:**
@@ -921,20 +790,6 @@ rewrite unrelated AgentD sections.
 Run: `git diff --check`
 
 Expected: no output and exit zero.
-
-**Step 5: Commit documentation alignment**
-
-```bash
-git add agent-protocol/protocol/README.md \
-  agentd/src/main/java/pro/deta/orion/agentd/session/package-info.java \
-  docs/plans/2026-09-02-agentd.md \
-  docs/plans/2026-09-03-agentd-command-orchestration-design.md
-git commit -m "Align AgentD command orchestration documentation"
-```
-
-Run: `make test`
-
-Expected: PASS because the commit includes a Java package source even though its behavioral content is comments.
 
 ### Task 12: Final verification and review preparation
 
@@ -1003,6 +858,4 @@ positive contract tests and the reviewed diff.
 
 **Step 6: Hand off for review**
 
-Report the task path, rebased base SHA, branch/head, commit list, changed files, focused and full verification,
-the host-incarnation risk, and the still-required diagnostic-redaction/server-projection follow-ups. Do not
-squash, delete the task node, cherry-pick, or clean up until the change-workflow review and user gate request it.
+Record the host-incarnation risk and the still-required diagnostic-redaction/server-projection follow-ups.

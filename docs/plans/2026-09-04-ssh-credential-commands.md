@@ -1,7 +1,5 @@
 # SSH Credential Commands Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add `/auth/key ls`, `add`, and `rm` commands that atomically manage only the authenticated user's SSH
 credentials, including explicit forced lockout and safe root-generation handling.
 
@@ -54,14 +52,9 @@ In the pre-`where` argument loop, recognize only a token with the shape `--<nonb
 the existing named-parameter map with value `true`. Use the same duplicate-name failure as `name=value`. Do not add
 short flags, negated flags, bundled flags, or a second boolean type to the command model.
 
-**Step 5: Verify GREEN and commit**
+**Step 5: Verify GREEN**
 
-Repeat the focused command, then commit the parser and its tests:
-
-```sh
-git add core/command
-git commit -m "Parse boolean command flags"
-```
+Repeat the focused command
 
 ### Task 2: Define typed SSH credential contracts
 
@@ -122,7 +115,7 @@ SshCredentialUpdateResult removeSshCredential(String userId, String fingerprintP
 Keep the existing enrollment methods. Later implementation makes the legacy `addSshKeysToUser` delegate to the
 same mutation path rather than duplicating writes.
 
-**Step 4: Run authorization tests and commit**
+**Step 4: Run authorization tests**
 
 Run outside the sandbox:
 
@@ -130,13 +123,6 @@ Run outside the sandbox:
 mvn test -Pdev -T 4 -q -pl core/authorization -am \
   -Dtest='*SecurityContextTest,*SshCredential*Test' \
   -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-Commit only these contracts and tests:
-
-```sh
-git add core/authorization
-git commit -m "Define SSH credential management contracts"
 ```
 
 ### Task 3: Enforce native ACL snapshot versions
@@ -209,14 +195,9 @@ path and translate the native stale exception to `AccessControlConcurrentUpdateE
 retain the existing unconditional path for initial creation and versionless storage behavior. Other Git/storage
 failures retain their current failure boundary.
 
-**Step 5: Verify GREEN and commit**
+**Step 5: Verify GREEN**
 
-Repeat the Task 3 focused tests, then:
-
-```sh
-git add git/git-native-storage core/acl connectors/acl-storage
-git commit -m "Enforce native ACL snapshot versions"
-```
+Repeat the Task 3 focused tests.
 
 ### Task 4: Implement atomic credential listing and addition
 
@@ -278,14 +259,9 @@ and ACL object, and save with the loaded version. Apply the same snapshot/versio
 synchronization. Leave only initial creation and intentional whole-file replacement on a versionless save path;
 remove or stop calling cached whole-ACL read-modify-write helpers.
 
-**Step 5: Verify GREEN and commit**
+**Step 5: Verify GREEN**
 
-Repeat the Task 4 focused tests, then:
-
-```sh
-git add core/acl core/bootstrap/src/test/java/pro/deta/orion/component/InternalConfigurationRepositoryLifecycleTest.java
-git commit -m "Add atomic SSH credential queries and additions"
-```
+Repeat the Task 4 focused tests.
 
 ### Task 5: Implement removal and durable root lock
 
@@ -335,13 +311,6 @@ Use the same Task 4 commands. Generate and clear the random marker preimage exac
 use a distinct reserved locked-generation key-ID prefix so the marker is never mistaken for the printable recovery
 password shape.
 
-**Step 5: Commit**
-
-```sh
-git add core/acl core/bootstrap/src/test/java/pro/deta/orion/component/InternalConfigurationRepositoryLifecycleTest.java
-git commit -m "Add safe SSH credential removal"
-```
-
 ### Task 6: Carry current-key and proved-candidate facts into commands
 
 **Files:**
@@ -388,14 +357,9 @@ strings in `auditMetadata`.
 Read and preserve the class-level `@AiRule` in `OrionShell`: add no blocking platform thread, Mina future wait, or
 intrinsic terminal lock.
 
-**Step 5: Verify GREEN and commit**
+**Step 5: Verify GREEN**
 
-Repeat the focused command, then:
-
-```sh
-git add net/git-transport core/authorization
-git commit -m "Expose SSH authentication facts to commands"
-```
+Repeat the focused command.
 
 ### Task 7: Add the `/auth/key` command catalog
 
@@ -447,11 +411,6 @@ make run-test MODULE=net/git-transport \
 
 Then commit:
 
-```sh
-git add net/git-transport core/command
-git commit -m "Add SSH credential commands"
-```
-
 ### Task 8: Prove exec, terminal, persistence, and isolation behavior
 
 **Files:**
@@ -495,13 +454,6 @@ make run-test MODULE=tests/integration-test \
 
 Expected: PASS. If exact method names differ, keep two focused scenarios and report their final names verbatim.
 
-**Step 4: Commit acceptance coverage and docs**
-
-```sh
-git add README.md net/git-transport/src/test tests/integration-test/src/integration-test
-git commit -m "Verify SSH credential management"
-```
-
 ### Task 9: Verify and return for orchestrated review
 
 **Files:**
@@ -523,7 +475,7 @@ Expected: no whitespace errors and only task-owned files.
 
 Run every focused command from Tasks 1 through 8 outside the sandbox. Expected: PASS.
 
-**Step 3: Run development and commit verification**
+**Step 3: Run development**
 
 Run outside the sandbox:
 
@@ -533,10 +485,6 @@ make test
 ```
 
 Report any known environment-only integration failure separately, but do not classify a failure as unrelated
-without evidence. `make test` must pass after the final implementation commit under `AGENTS.md`.
+without evidence. `make test` must pass.
 
 **Step 4: Return the branch for review**
-
-Report task path, worktree, branch, exact base/head SHAs, changed-file summary, all commands/results, and residual
-risks. Do not edit ordinary plan documents, squash, cherry-pick to `main`, delete the completed task node, or remove
-the worktree until the change-workflow coordinator requests final preparation.

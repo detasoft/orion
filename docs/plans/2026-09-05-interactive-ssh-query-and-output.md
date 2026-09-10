@@ -1,7 +1,5 @@
 # Interactive SSH Query and Output Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add typed, ACL-safe filtering, column projection, bounded pagination, and stable plain, terse, JSON, and
 interactive-table output to Orion list commands.
 
@@ -89,13 +87,6 @@ make run-test MODULE=net/git-transport \
 
 Expected: all selected tests pass with the single typed API.
 
-**Step 5: Commit**
-
-```sh
-git add core/command net/git-transport
-git commit -m "Add typed command result values"
-```
-
 ### Task 2: Declare query capabilities and apply them after authorized handlers
 
 **Files:**
@@ -162,13 +153,6 @@ not consult domain rows.
 
 Repeat the focused command-core tests and require all selected tests to pass.
 
-**Step 6: Commit**
-
-```sh
-git add core/command net/git-transport/src/main/java/pro/deta/orion/transport/git/command/SshCommandModule.java
-git commit -m "Apply authorized command row queries"
-```
-
 ### Task 3: Add stable terse and typed JSON rendering
 
 **Files:**
@@ -224,13 +208,6 @@ there is no continuation.
 
 Repeat the renderer suite and require all selected tests to pass.
 
-**Step 5: Commit**
-
-```sh
-git add core/command
-git commit -m "Add stable command automation renderers"
-```
-
 ### Task 4: Enable query metadata on ACL-filtered domain list commands
 
 **Files:**
@@ -271,14 +248,6 @@ the existing source availability and per-item ACL checks.
 **Step 4: Run GREEN**
 
 Repeat the focused catalog tests and require all selected tests to pass.
-
-**Step 5: Commit**
-
-```sh
-git add net/git-transport/src/main/java/pro/deta/orion/transport/git/command \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/command
-git commit -m "Enable ACL-safe SSH list queries"
-```
 
 ### Task 5: Verify SSH frontends and document the stable automation contract
 
@@ -326,14 +295,7 @@ mvn verify -Pdev -T 4
 
 Expected: `BUILD SUCCESS`.
 
-**Step 5: Commit**
-
-```sh
-git add README.md net/git-transport/src/test tests/integration-test/src/integration-test
-git commit -m "Verify SSH query automation behavior"
-```
-
-### Task 6: Review, squash, transfer, and clean up the task
+### Task 6: Verify the completed implementation
 
 **Files:**
 
@@ -343,30 +305,6 @@ git commit -m "Verify SSH query automation behavior"
 
 **Step 1: Review the complete diff**
 
-Use `superpowers:requesting-code-review`, apply `docs/reviews/RULES.md`, fix blocking findings, and rerun affected
-focused tests. Run `git diff --check` and confirm the worktree contains no unrelated changes.
-
 **Step 2: Verify before completion**
 
-Use `superpowers:verification-before-completion` and rerun `mvn verify -Pdev -T 4` outside the sandbox. Record the
-exact base/head SHAs and verification output.
-
-**Step 3: Create the single task commit**
-
-Squash every commit unique to the task branch, including claim/design/plan commits and review fixes. In the same
-commit, delete the completed leaf directory and remove its parent link. Use exactly:
-
-```text
-Add interactive SSH queries and automation output [task: current-work/interactive-ssh-shell/query-and-output]
-```
-
-**Step 4: Transfer to main and run post-commit tests**
-
-Cherry-pick the squashed commit onto current `main`, never merge. Run `make test` outside the sandbox. If a task bug
-causes failure, fix it in a follow-up commit with the exact same subject so it can be squashed.
-
-**Step 5: Finish the branch**
-
-Use `superpowers:finishing-a-development-branch`. Remove the completed worktree and delete its branch only after the
-main cherry-pick, successful post-commit tests, and clean main status. Confirm `git worktree list` no longer contains
-the task worktree before reporting completion.
+Run `mvn verify -Pdev -T 4`.

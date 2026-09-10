@@ -1,7 +1,5 @@
 # Native Git Virtual Thread Transport Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Enable the native Git TCP transport with virtual-thread-per-connection handling and suppress the noisy Apache SSHD NIO2 factory INFO line.
 
 **Architecture:** Keep the Git protocol logic in `GitBlockingWireSession`. `GitNativeTransportService` owns only socket lifecycle, native Git request parsing, connection virtual threads, and service diagnostics. `LogInitializer` suppresses the specific Apache SSHD startup logger at WARN.

@@ -1,7 +1,5 @@
 # Session Host Asynchronous Journal Retention Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Complete the schema-2 `ACK_JOURNAL` effect after durable watermark publication while physical
 retention runs asynchronously and scans only the oldest segment prefix needed for a deletion decision.
 
@@ -151,9 +149,3 @@ Cargo tests, Maven reactor.
    the ordinary command-result path.
 6. Run `git diff --check` and the repository line-length check.
 7. Run `make session-host-test` outside the sandbox.
-8. Create the logical implementation commit, then run `make test` outside the sandbox as required by
-   `AGENTS.md`. If a task-caused fix is needed after the commit, use the same commit subject so orchestration
-   can squash the branch cleanly.
-
-The change workflow owns final review, user approval, task-node deletion, squash, cherry-pick to `main`, the
-post-integration `make test`, and branch/worktree cleanup.

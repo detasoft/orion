@@ -1,7 +1,5 @@
 # Session Host Worktree Cache Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Make direct session-host Make targets reuse the same worktree-local cache as Maven across `clean`.
 
 **Architecture:** Define a worktree-local `.orion-cache` root in `session-host/Makefile`. Derive the default Rust toolchain and Cargo target directories from it while preserving command-line overrides used by Maven and CI.

@@ -1,7 +1,5 @@
 # Project Codex Permissions Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Track Orion-specific Codex command permissions in the repository.
 
 **Architecture:** Add one project-local `.rules` file using existing Codex
@@ -54,13 +52,6 @@ git status --short
 
 Expected: only `.codex/rules/default.rules` is changed in the implementation
 worktree and no whitespace errors are reported.
-
-**Step 4: Commit**
-
-```bash
-git add -- .codex/rules/default.rules
-git commit -m "Track project-scoped Codex permissions"
-```
 
 ### Task 2: Remove duplicated user rules after integration
 

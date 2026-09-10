@@ -1,7 +1,5 @@
 # Server-Launched AgentD Identity Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Authenticate a server-launched AgentD with a single-use permit, keep its reconnect token only in
 memory, and prevent concurrent AgentD processes with a kernel-backed lock beside session metadata.
 
@@ -18,18 +16,8 @@ JUnit 5, AssertJ, Maven reactor.
 
 ## Execution Notes
 
-- Work in `.worktrees/agentd-identity-registration-6a91f2` on
-  `codex/agentd-identity-registration-6a91f2`.
-- The branch contains an earlier persistent-identity prototype. Introduce the
-  approved launch-authentication behavior first, then remove the obsolete
-  identity and credential files in a separate commit.
-- Use `@superpowers:test-driven-development` for every behavior change and
-  `@superpowers:verification-before-completion` before declaring the task done.
-- Run every Maven command outside the sandbox because AgentD transport tests
-  bind loopback sockets.
-- After every non-documentation commit, run `make test`. If a failure needs a
-  follow-up fix commit, reuse the exact subject of the commit that introduced
-  it so the commits can be squashed later.
+- Replace the earlier persistent-identity prototype with the approved
+  launch-authentication behavior and remove obsolete identity and credential files.
 - Do not implement SSH access, server-side token persistence, retry scheduling,
   or SHA-256 deployment in this leaf. Their updated task nodes now consume the
   contracts created here.
@@ -159,17 +147,6 @@ Run the command from Step 2.
 Expected: all `AgentProtocolCodecTest` and `AgentProtocolFixtureTest` tests pass
 and `agent-hello-v1.hex` remains unchanged.
 
-**Step 7: Commit and run the project test suite**
-
-```bash
-git add agent-protocol
-git commit -m "Extend Agent protocol with launch authentication"
-make test
-```
-
-Expected: the commit succeeds and `make test` reports every regular Maven
-module successful.
-
 ### Task 2: Parse server launch identity and the stdin-only permit
 
 **Files:**
@@ -272,17 +249,6 @@ Run the command from Step 3.
 
 Expected: all selected tests pass.
 
-**Step 6: Commit and run the project test suite**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/core \
-  agentd/src/test/java/pro/deta/orion/agentd/core
-git commit -m "Accept server-assigned AgentD launch context"
-make test
-```
-
-Expected: the commit and all regular Maven tests succeed.
-
 ### Task 3: Enforce one local AgentD with a kernel-backed file lock
 
 **Files:**
@@ -363,17 +329,6 @@ Run the command from Step 2.
 
 Expected: all lock tests pass, including reacquisition with the stale file
 still present.
-
-**Step 5: Commit and run the project test suite**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/core \
-  agentd/src/test/java/pro/deta/orion/agentd/core/AgentProcessLockTest.java
-git commit -m "Lock AgentD beside session metadata"
-make test
-```
-
-Expected: the commit and all regular Maven tests succeed.
 
 ### Task 4: Authenticate the control stream and retain only an in-memory reconnect token
 
@@ -463,17 +418,6 @@ token so `platform-status-and-resilience` can consume it.
 Run the command from Step 3.
 
 Expected: all selected tests pass.
-
-**Step 6: Commit and run the project test suite**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/core \
-  agentd/src/test/java/pro/deta/orion/agentd/core
-git commit -m "Authenticate the AgentD control handshake"
-make test
-```
-
-Expected: the commit and all regular Maven tests succeed.
 
 ### Task 5: Wire lock and authenticated handshake into production startup
 
@@ -569,16 +513,6 @@ mvn test -Pdev -T 4 -q -pl agentd -am \
 Expected: the production assembly test, live HTTP/2 handshake, existing
 transport tests, and all AgentD tests pass.
 
-**Step 7: Commit and run the project test suite**
-
-```bash
-git add agentd/src/main agentd/src/test
-git commit -m "Wire AgentD launch authentication into startup"
-make test
-```
-
-Expected: the commit and all regular Maven tests succeed.
-
 ### Task 6: Remove the abandoned persistent-identity prototype
 
 The behavior replacement is complete in the preceding commits. Remove the
@@ -632,16 +566,6 @@ mvn test -Pdev -T 4 -q -pl agent-protocol,agentd -am \
 
 Expected: both modules and their reactor dependencies pass without the
 `key-material` AgentD runtime dependency.
-
-**Step 4: Commit and run the project test suite**
-
-```bash
-git add agentd/pom.xml agentd/src/main agentd/src/test
-git commit -m "Remove persistent AgentD identity storage"
-make test
-```
-
-Expected: the cleanup commit and all regular Maven tests succeed.
 
 ### Task 7: Verify the complete task and request review
 
@@ -705,21 +629,3 @@ Read `docs/reviews/RULES.md` completely. Verify in particular that:
   messages;
 - expected authentication failures use normal handshake/result flow;
 - closing AgentD cannot terminate a native session-host process.
-
-Use `@superpowers:requesting-code-review` for the primary review checkpoint.
-Address every blocking finding and repeat Steps 1 through 4 after fixes.
-
-**Step 6: Hand completion back to the Orion change workflow**
-
-Do not merge the branch. The change workflow must squash every task-branch commit
-to:
-
-```text
-Authenticate server-launched AgentD [task: agentd/identity-and-registration]
-```
-
-The squash must delete
-`docs/plans/current-work/agentd/identity-and-registration/` and remove its link
-from `docs/plans/current-work/04_agentd/TASK.md`. The change workflow then
-cherry-picks the squashed commit to `main`, runs the required post-commit
-`make test`, and removes the worktree and branch before reporting completion.

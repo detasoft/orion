@@ -1,7 +1,5 @@
 # Git Wire Architecture Simplification Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Finish the blocking Git wire migration, make object and repository
 identity explicit, separate wire parsing from Orion storage, and provide one
 global veto for advertised capabilities.
@@ -166,11 +164,10 @@ be deleted.
 6. Remove session-side nullable response variables and `finally` blocks; the
    invoked `send...` method is the sole producer owner.
 7. Rerun the focused tests and expect GREEN.
-8. Run `orion-minimal-implementation` in read-only review mode on the resulting output path.
+8. Audit the resulting output path.
    Record additional safe removals as separate task nodes, or record that none
    were found. Do not remove further helpers or the `GitWireError` classification
-   in this commit; server diagnostics still use structured error kinds.
-9. Commit the one-shot response migration and tests.
+   in this migration; server diagnostics still use structured error kinds.
 
 ### Task 4: Establish the parser/storage module boundary
 
@@ -322,7 +319,7 @@ be deleted.
    ownership, action-specific authorization, and default byte compatibility.
 6. Complete the read-only task at
    `docs/plans/upcoming-work/02_git-wire-architecture-simplification/06_post-simplification-review.md`
-   with `orion-minimal-implementation` in read-only review mode after all five implementation tasks are done.
+   without implementation changes after all five implementation tasks are done.
 7. Update
    `docs/reviews/2026-09-03-git-parser-architecture-simplification.md` with a
    dated `resolved`, `remaining`, or `regressed` conclusion and evidence for

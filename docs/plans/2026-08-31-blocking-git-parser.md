@@ -1,7 +1,5 @@
 # Blocking Git Parser Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Replace the production Git parser continuation graph with a direct blocking parser path backed by timeout-aware `BufferedByteInput` and `BufferedByteOutput`.
 
 **Architecture:** Introduce a direct blocking Git wire session API, cover every Git server flow with direct session tests, then move SSH/HTTP callers to it in one cutover that removes `GitByteBufTransportAdapter`. The blocking session reads pkt-lines from `BufferedByteInput`, writes responses through `GitNativeClientOutput`, and uses ordinary loops/method calls for v0/v1 and v2 protocol state.
@@ -121,17 +119,6 @@ mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=QueueBufferedByteInputTest
 
 Expected: pass.
 
-**Step 5: Commit**
-
-```bash
-git add git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/QueueBufferedByteInput.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/QueueBufferedByteInputTest.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/RecordingBufferedByteOutput.java
-git commit -m "Add blocking Git parser queue test IO"
-```
-
----
-
 ### Task 2: Blocking Byte I/O Contracts
 
 **Files:**
@@ -178,16 +165,6 @@ mvn test -Pdev -T 4 -q -pl net/net-core
 ```
 
 Expected: pass.
-
-**Step 3: Commit**
-
-```bash
-git add net/net-core/src/main/java/pro/deta/orion/net/io/BufferedByteInput.java \
-    net/net-core/src/main/java/pro/deta/orion/net/io/BufferedByteOutput.java
-git commit -m "Document blocking byte IO timeout contracts"
-```
-
----
 
 ### Task 3: Blocking Session Entry Point For Advertisement And V2 Ls-Refs
 
@@ -293,16 +270,6 @@ mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitBlockingWireSessionTest
 
 Expected: pass.
 
-**Step 6: Commit**
-
-```bash
-git add git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java
-git commit -m "Serve Git v2 ls-refs with blocking parser"
-```
-
----
-
 ### Task 4: Protocol V2 Fetch
 
 **Files:**
@@ -342,16 +309,6 @@ mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitBlockingWireSessionTest,Prot
 ```
 
 Expected: pass.
-
-**Step 4: Commit**
-
-```bash
-git add git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java
-git commit -m "Serve Git v2 fetch with blocking parser"
-```
-
----
 
 ### Task 5: Legacy Upload-Pack
 
@@ -396,16 +353,6 @@ mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitBlockingWireSessionTest
 ```
 
 Expected: pass.
-
-**Step 4: Commit**
-
-```bash
-git add git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java
-git commit -m "Serve legacy upload-pack with blocking parser"
-```
-
----
 
 ### Task 6: Legacy Receive-Pack And Pack Ingestion
 
@@ -461,16 +408,6 @@ mvn test -Pdev -T 4 -q -pl git/git-parser -Dtest=GitBlockingWireSessionTest
 ```
 
 Expected: pass.
-
-**Step 4: Commit**
-
-```bash
-git add git/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitBlockingWireSession.java \
-    git/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitBlockingWireSessionTest.java
-git commit -m "Serve legacy receive-pack with blocking parser"
-```
-
----
 
 ### Task 7: Cut Over Production Git Path And Remove Continuations
 
@@ -538,15 +475,6 @@ mvn test -Pdev -T 4 -q -pl git/git-parser,net/http-core,net/git-transport
 ```
 
 Expected: pass.
-
-**Step 6: Commit**
-
-```bash
-git add git/git-parser net/http-core net/git-transport
-git commit -m "Remove production Git wire continuations"
-```
-
----
 
 ### Task 8: Development Verification
 

@@ -1,7 +1,5 @@
 # AgentD Local Interactive Terminal Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add explicit `daemon` and local POSIX `terminal` modes to the AgentD executable so developers can
 launch or attach to `session-host` through production journal and control paths without an Orion server.
 
@@ -99,13 +97,6 @@ make run-test MODULE=agent-provisioning TEST='pro.deta.orion.provisioning.Remote
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```text
-git add agentd/src agent-provisioning/src
-git commit -m "Route AgentD through explicit daemon and terminal modes"
-```
-
 ### Task 2: Define and validate the terminal CLI contract
 
 **Files:**
@@ -191,14 +182,6 @@ make run-test MODULE=agentd \
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```text
-git add agentd/src/main/java/pro/deta/orion/agentd/terminal \
-  agentd/src/test/java/pro/deta/orion/agentd/terminal
-git commit -m "Define AgentD local terminal commands"
-```
-
 ### Task 3: Isolate POSIX terminal ownership
 
 **Files:**
@@ -271,14 +254,6 @@ make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.JlinePosixTermi
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```text
-git add pom.xml agentd/pom.xml agentd/src/main/java/pro/deta/orion/agentd/terminal \
-  agentd/src/test/java/pro/deta/orion/agentd/terminal
-git commit -m "Add POSIX terminal ownership to AgentD"
-```
-
 ### Task 4: Resolve launch and attach targets
 
 **Files:**
@@ -342,14 +317,6 @@ make run-test MODULE=agentd \
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```text
-git add agentd/src/main/java/pro/deta/orion/agentd/terminal \
-  agentd/src/test/java/pro/deta/orion/agentd/terminal
-git commit -m "Launch and attach local AgentD terminal sessions"
-```
-
 ### Task 5: Replay and follow terminal output from the journal
 
 **Files:**
@@ -404,14 +371,6 @@ make run-test MODULE=agentd \
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```text
-git add agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalJournalFollower.java \
-  agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalJournalFollowerTest.java
-git commit -m "Follow local session output from the durable journal"
-```
 
 ### Task 6: Forward interactive input and resize controls
 
@@ -477,14 +436,6 @@ make run-test MODULE=agentd \
 
 Expected: PASS. If the prerequisite integrated equivalent test names differ, include those exact classes instead.
 
-**Step 5: Commit**
-
-```text
-git add agentd/src/main/java/pro/deta/orion/agentd/terminal \
-  agentd/src/test/java/pro/deta/orion/agentd/terminal
-git commit -m "Forward local terminal input through session control"
-```
-
 ### Task 7: Add explicit journal acknowledgement and assemble terminal mode
 
 **Files:**
@@ -537,14 +488,6 @@ make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.*,pro.deta.orio
 ```
 
 Expected: PASS.
-
-**Step 5: Commit**
-
-```text
-git add agentd/src/main/java/pro/deta/orion/agentd/terminal \
-  agentd/src/test/java/pro/deta/orion/agentd/terminal agentd/src/main/java/pro/deta/orion/agentd/AgentdMain.java
-git commit -m "Assemble AgentD local interactive terminal"
-```
 
 ### Task 8: Verify against the real native host and document usage
 
@@ -622,26 +565,13 @@ mvn verify -Pdev -T 4
 
 Expected: PASS.
 
-**Step 5: Commit implementation and documentation**
-
-```text
-git add agentd/pom.xml agentd/src/test/java/pro/deta/orion/agentd/terminal/LocalTerminalEndToEndTest.java \
-  agentd/README.md
-git commit -m "Verify AgentD terminal against the native host"
-```
-
-### Task 9: Review, squash, transfer, and close the task
+### Task 9: Verify the completed implementation
 
 **Files:**
 
 - Delete: `docs/plans/current-work/04_agentd/07_local-terminal.md`
 - Modify: `docs/plans/current-work/04_agentd/TASK.md`
 - Review: every file changed by the task branch
-
-**Step 1: Request code review**
-
-Use `superpowers:requesting-code-review`. Apply `docs/reviews/RULES.md`, inspect all task-branch changes, and fix
-every blocking finding. Re-run the focused test owning each fix.
 
 **Step 2: Run final branch verification**
 
@@ -653,32 +583,3 @@ git diff --check
 ```
 
 Expected: PASS and no whitespace errors.
-
-**Step 3: Finish the dedicated worktree according to repository rules**
-
-Use `orion-change-workflow` for final review and the user integration gate.
-The implementation worker squashes all task-unique commits while retaining
-the task leaf and claim. The primary coordinator deletes the completed numbered
-leaf file, removes the task from active plans, and amends that same commit in
-the dedicated task worktree. Only the coordinator performs this completion
-cleanup. It removes empty
-composite ancestor directories in full only when their aggregate acceptance
-and remaining scope are satisfied; preserve parents with unfinished siblings
-and the queue roots. Remove this task's outstanding-work entries from active
-plans and replace still-needed dependency links with verified completion
-evidence. Preserve this subject in the squash and coordinator amendment:
-
-```text
-Run AgentD as a local interactive terminal [task: 04_agentd/07_local-terminal.md]
-```
-
-After the user permits integration of the reviewed commit, cherry-pick it to
-`main`; never merge. On `main`, run the required post-commit verification:
-
-```text
-make test
-```
-
-If a test failure is fixed after the commit, make the follow-up commit with the exact same subject for later
-squashing. Remove the completed worktree and branch only after the cherry-pick, tests, and clean-tree checks all
-succeed. Confirm `git worktree list` no longer contains the task worktree before reporting completion.

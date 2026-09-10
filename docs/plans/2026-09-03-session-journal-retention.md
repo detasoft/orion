@@ -1,7 +1,5 @@
 # Session Journal Segmentation, Compression, and Retention Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Bound each native session journal with configurable segment rotation,
 background Zstandard compression, crash-safe replacement, and `DROP_OLDEST`
 retention without delaying terminal writes.
@@ -16,10 +14,6 @@ retention races while deriving all ranges from segment contents.
 CBOR Sequence parser, Maven/Make Rust bootstrap.
 
 ---
-
-Run every test command in this plan outside the sandbox as required by
-`AGENTS.md`. Use @superpowers:test-driven-development for every behavior change
-and @superpowers:systematic-debugging for any unexpected failure.
 
 ### Task 1: Expose Journal Limits Through the CLI
 
@@ -126,13 +120,6 @@ duplicate coverage.
 Run `make run-test MODULE=session-host TEST='*'`.
 
 Expected: all session-host Rust tests pass.
-
-**Step 6: Commit**
-
-```bash
-git add session-host/src/cli.rs session-host/src/main.rs
-git commit -m "Expose session journal size limits"
-```
 
 ### Task 2: Rotate Automatically at CBOR Item Boundaries
 
@@ -257,13 +244,6 @@ Run `make run-test MODULE=session-host TEST='*'`.
 Expected: all session-host tests pass, including existing golden-byte and
 partial-tail tests.
 
-**Step 6: Commit**
-
-```bash
-git add session-host/src/journal.rs
-git commit -m "Rotate session journal segments automatically"
-```
-
 ### Task 3: Compress Closed Segments in the Background
 
 **Files:**
@@ -348,13 +328,6 @@ Run `make run-test MODULE=session-host TEST='*'`.
 
 Expected: compression tests and all existing reader tests pass.
 
-**Step 6: Commit**
-
-```bash
-git add session-host/src/journal.rs
-git commit -m "Compress closed session journal segments"
-```
-
 ### Task 4: Recover Interrupted Compression Safely
 
 **Files:**
@@ -402,13 +375,6 @@ Run `make run-test MODULE=session-host TEST='*'`.
 
 Expected: all crash-window, duplicate-view, compressed-reader, and recovery
 tests pass.
-
-**Step 5: Commit**
-
-```bash
-git add session-host/src/journal.rs
-git commit -m "Recover interrupted journal compression"
-```
 
 ### Task 5: Enforce Physical `DROP_OLDEST` Retention
 
@@ -476,13 +442,6 @@ Run `make run-test MODULE=session-host TEST='*'`.
 
 Expected: all retention, failure-retry, and existing CBOR tests pass.
 
-**Step 6: Commit**
-
-```bash
-git add session-host/src/journal.rs
-git commit -m "Retain bounded session journal history"
-```
-
 ### Task 6: Make Reads Resilient to Concurrent Maintenance
 
 **Files:**
@@ -523,13 +482,6 @@ not add a lock shared with the writer.
 Run `make run-test MODULE=session-host TEST='*'`.
 
 Expected: concurrent maintenance tests and all reader/recovery tests pass.
-
-**Step 5: Commit**
-
-```bash
-git add session-host/src/journal.rs
-git commit -m "Handle journal maintenance read races"
-```
 
 ### Task 7: Integrate Limits and Maintenance With the Unix Host
 
@@ -596,14 +548,6 @@ git diff --check
 Expected: every command exits zero; Maven reports `BUILD SUCCESS`; protocol
 fixtures remain unchanged.
 
-**Step 6: Commit**
-
-```bash
-git add session-host/src/platform/unix.rs session-host/tests/unix_process_host.rs \
-  session-host/README.md session-host/protocol/README.md
-git commit -m "Integrate bounded session journals"
-```
-
 ### Task 8: Finish the Dedicated Task Worktree
 
 **Files:**
@@ -633,27 +577,4 @@ Expected: all commands succeed with no unreviewed blocking issue.
 Delete the leaf directory and remove its link from the parent `TASK.md`. Keep
 the approved design and this implementation plan under `docs/plans/`.
 
-**Step 4: Squash unique task commits**
-
-Squash every commit after `origin/main` into exactly one commit with this
-single-line subject:
-
-```text
-Add bounded session journal retention [task: native-session-host/journal-retention]
-```
-
-Verify that the squashed commit includes the claim history's net task-tree
-completion, implementation, tests, and documentation, but no unrelated files.
-
-**Step 5: Transfer and verify on `main`**
-
-Cherry-pick the squashed commit onto `main`, never merge. Run `make test` on
-`main` outside the sandbox. If a task-related failure is fixed, create a
-follow-up commit using the exact same subject so it can be squashed later.
-
 **Step 6: Remove the completed worktree and branch**
-
-After the cherry-pick and `make test` succeed, remove
-`.worktrees/session-journal-retention-32cbac98` and delete
-`codex/session-journal-retention-32cbac98`. Confirm with `git worktree list`
-that the worktree is absent and with `git status --short` that `main` is clean.

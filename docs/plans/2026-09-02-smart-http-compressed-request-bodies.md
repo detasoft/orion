@@ -1,7 +1,5 @@
 # Smart HTTP Compressed Request Bodies Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Accept JGit Smart HTTP POST requests whose pkt-line body is gzip encoded.
 
 **Architecture:** Add a package-private streaming request-body decoder at the HTTP boundary and pass its decoded
@@ -175,16 +173,3 @@ mvn verify -Pdev -T 4
 
 Expected: PASS except for independently diagnosed Docker availability failures or still-unmigrated remote proxy
 integration tests. Record such failures precisely; do not weaken or disable them in this task.
-
-**Step 4: Commit the gzip implementation**
-
-```bash
-git add net/http-core/src/main/java/pro/deta/orion/transport/http/GitHttpRequestBody.java \
-  net/http-core/src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java \
-  net/http-core/src/test/java/pro/deta/orion/transport/http/GitHttpRequestBodyTest.java \
-  net/http-core/src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java
-git commit -m "Accept gzip Smart HTTP request bodies"
-make test
-```
-
-Expected: commit succeeds and the mandatory post-commit `make test` passes.

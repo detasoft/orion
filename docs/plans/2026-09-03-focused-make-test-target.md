@@ -1,7 +1,5 @@
 # Focused Make Test Target Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a validated `make run-test` shortcut that accepts a Maven module and test locator in named or positional form.
 
 **Architecture:** Parse positional values only when `run-test` is the first Make goal, and handle otherwise unknown positional values with a scoped fallback rule. Reject values that collide with another Make goal, resolve both interfaces to one quoted Maven command, and document the named interface as the required agent workflow.

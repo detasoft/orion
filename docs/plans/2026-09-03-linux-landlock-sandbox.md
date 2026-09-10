@@ -1,7 +1,5 @@
 # Linux Landlock Sandbox Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Compile an ordered user policy DSL in AgentD and enforce its positive
 CBOR form on the Linux PTY child tree with Landlock.
 
@@ -97,14 +95,6 @@ checks belong to snapshot compilation.
 
 Run the command from Step 2. Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/sandbox \
-  agentd/src/test/java/pro/deta/orion/agentd/sandbox/SourcePolicyParserTest.java
-git commit -m "Parse AgentD Landlock policy DSL"
-```
-
 ### Task 2: Compile precedence and deny regions against a snapshot
 
 **Files:**
@@ -181,14 +171,6 @@ make run-test MODULE=agentd TEST='pro.deta.orion.agentd.sandbox.*Test'
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/sandbox \
-  agentd/src/test/java/pro/deta/orion/agentd/sandbox/LandlockPolicyCompilerTest.java
-git commit -m "Compile AgentD deny policies to Landlock grants"
-```
-
 ### Task 3: Freeze the canonical CBOR handoff
 
 **Files:**
@@ -230,15 +212,6 @@ read/write permissions.
 Add the fixed array layout, ABI 9 bit table, canonical ordering, bounds, and
 rejection rules to `session-host/protocol/README.md`. Run the Step 2 command;
 expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/sandbox/CompiledPolicyWriter.java \
-  agentd/src/test/java/pro/deta/orion/agentd/sandbox/CompiledPolicyWriterTest.java \
-  session-host/protocol/fixtures/sandbox-policy-v1.hex session-host/protocol/README.md
-git commit -m "Define compiled Landlock CBOR policy"
-```
 
 ### Task 4: Preprocess policy files during AgentD launch
 
@@ -296,14 +269,6 @@ make run-test MODULE=agentd \
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/runtime \
-  agentd/src/test/java/pro/deta/orion/agentd/runtime/NativeRuntimeTest.java
-git commit -m "Preprocess sandbox policies in AgentD"
-```
-
 ### Task 5: Decode and validate compiled policies in Rust
 
 **Files:**
@@ -353,13 +318,6 @@ Return `HostError::Policy` with field-oriented details.
 **Step 4: Run `make session-host-test`**
 
 Expected: PASS on the development platform.
-
-**Step 5: Commit**
-
-```bash
-git add session-host/src/sandbox.rs session-host/src/lib.rs
-git commit -m "Decode compiled Landlock policies"
-```
 
 ### Task 6: Prepare and apply Landlock only to the PTY child
 
@@ -441,14 +399,6 @@ ABI-below-9 skip. On macOS, add the Linux std target to the pinned toolchain and
 run a Cargo `check --target x86_64-unknown-linux-gnu`; expected: PASS without
 linking.
 
-**Step 7: Commit**
-
-```bash
-git add session-host/Cargo.toml session-host/Cargo.lock \
-  session-host/src/platform session-host/tests/linux_landlock.rs
-git commit -m "Enforce Landlock in the session child"
-```
-
 ### Task 7: Persist the effective granular sandbox description
 
 **Files:**
@@ -490,15 +440,6 @@ immutable records. Keep unknown future JSON fields skippable.
 Run `make session-host-fixtures`, inspect only intended fixture changes, then
 run both commands from Step 2. Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add session-host/src session-host/protocol \
-  agentd/src/main/java/pro/deta/orion/agentd/session \
-  agentd/src/test/java/pro/deta/orion/agentd/session/JsonSessionManifestReaderTest.java
-git commit -m "Record effective Landlock policy metadata"
-```
-
 ### Task 8: Verify the complete launch boundary
 
 **Files:**
@@ -539,19 +480,3 @@ git diff --check
 Expected: BUILD SUCCESS and no whitespace errors.
 
 **Step 4: Request review and address only verified findings**
-
-Use `superpowers:requesting-code-review`, apply `docs/reviews/RULES.md`, fix
-blocking findings, and repeat the smallest relevant tests after every fix.
-
-**Step 5: Prepare the dedicated-worktree completion commit**
-
-Follow the repository worktree rules: remove this leaf directory and its link
-from `docs/plans/current-work/05_native-session-host/TASK.md`, squash all unique
-task commits, and use exactly:
-
-```text
-Enforce Linux Landlock sandbox [task: native-session-host/linux-sandbox]
-```
-
-Cherry-pick the single commit to `main`, run `make test` there, and remove the
-worktree and task branch only after the main worktree is clean and verified.

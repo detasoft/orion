@@ -1,7 +1,5 @@
 # Root Password Startup Recovery Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a one-shot `--reset-root-pass` startup option that rotates an existing root password or recreates a
 missing fully privileged root user before Orion exposes any transport.
 
@@ -67,21 +65,6 @@ defaults in every test fixture that constructs `DaggerOrionComponent.Builder` di
 
 Repeat the command from Step 2. Expected: PASS.
 
-**Step 5: Commit the option plumbing**
-
-```sh
-git add core/schema/src/main/java/pro/deta/orion/schema/config/OrionRuntimeOptions.java \
-  core/bootstrap/src/main/java/pro/deta/orion/AppOptions.java \
-  core/bootstrap/src/main/java/pro/deta/orion/App.java \
-  core/bootstrap/src/main/java/pro/deta/orion/component/OrionComponent.java \
-  core/bootstrap/src/test/java/pro/deta/orion/AppOptionsTest.java \
-  core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java \
-  tests/integration-test/src/integration-test/java/pro/deta/orion/test/GitSshTransportEndToEndIT.java \
-  tests/integration-test/src/integration-test/java/pro/deta/orion/test/OrionStartupIT.java \
-  tests/integration-test/src/integration-test/java/pro/deta/orion/test/RuntimeHttpTestSupport.java
-git commit -m "Add root password recovery startup option"
-```
-
 ### Task 2: Rotate the password of an existing root user
 
 **Files:**
@@ -128,14 +111,6 @@ must print only its one generated password.
 
 Repeat the command from Step 2. Expected: PASS.
 
-**Step 5: Commit existing-root recovery**
-
-```sh
-git add core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java \
-  core/bootstrap/src/test/java/pro/deta/orion/component/InternalConfigurationRepositoryLifecycleTest.java
-git commit -m "Rotate the root password during ACL startup"
-```
-
 ### Task 3: Recreate a missing root with full privileges
 
 **Files:**
@@ -168,14 +143,6 @@ Reject multiple case-insensitive root users before saving.
 **Step 4: Run the lifecycle test and verify GREEN**
 
 Repeat the focused lifecycle command. Expected: PASS.
-
-**Step 5: Commit root recreation**
-
-```sh
-git add core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java \
-  core/bootstrap/src/test/java/pro/deta/orion/component/InternalConfigurationRepositoryLifecycleTest.java
-git commit -m "Recreate a missing privileged root user"
-```
 
 ### Task 4: Expose the recovery option through the development launcher
 
@@ -212,14 +179,6 @@ comment showing `make run-server ORION_ARGS=--reset-root-pass`.
 
 Repeat the command from Step 2. Expected: PASS.
 
-**Step 5: Commit launcher support**
-
-```sh
-git add make/server.mk core/bootstrap/pom.xml \
-  tests/test-support/src/test/java/pro/deta/orion/makefile/ServerMakeTargetsTest.java
-git commit -m "Forward Orion startup recovery arguments"
-```
-
 ### Task 5: Verify behavior and consolidate the feature
 
 **Files:**
@@ -247,17 +206,3 @@ git status --short
 ```
 
 Confirm that no secret values, unrelated files, or lines over the project limit were introduced.
-
-**Step 3: Squash the implementation branch**
-
-Squash the design, plan, and implementation commits into one logical commit before transferring it to `main`:
-
-```sh
-git reset --soft <branch-base>
-git commit -m "Add root password startup recovery"
-```
-
-**Step 4: Cherry-pick and run the required main-branch tests**
-
-Cherry-pick the squashed commit to `main`, run `make test` outside the sandbox, and only then remove the feature
-worktree and branch. Preserve any unrelated main-worktree changes unstaged.

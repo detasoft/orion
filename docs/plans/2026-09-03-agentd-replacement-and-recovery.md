@@ -1,7 +1,5 @@
 # AgentD Replacement and Recovery Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Safely replace one remotely provisioned AgentD on Linux, adopt recoverable partial launches, preserve session-host processes, and bound offline/startup retry behavior.
 
 **Architecture:** Extend the existing `agent-provisioning` SSH transaction with strict process metadata and generation-scoped native identity records. A remote reconciler performs fail-closed inspect/signal/adopt/launch transitions, while a transport-independent recovery loop owns sustained-offline and startup waits plus capped retry backoff.
@@ -55,13 +53,6 @@ ownership explicit and every diagnostic representation secret-free.
 
 Run the Step 2 command. Expected: all contract tests pass.
 
-**Step 5: Commit**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Define AgentD recovery contracts"
-```
-
 ### Task 2: Publish exact process-owned executable metadata
 
 **Files:**
@@ -94,14 +85,6 @@ ASCII-safe validated fields and keep the existing atomic kernel-lock lifetime.
 **Step 4: Run the focused test and confirm GREEN**
 
 Run the Step 2 command. Expected: all process-lock tests pass.
-
-**Step 5: Commit and verify the project**
-
-```bash
-git add agentd/src
-git commit -m "Record the exact AgentD executable in lock metadata"
-make test
-```
 
 ### Task 3: Discover, encode, and verify remote process identity
 
@@ -144,14 +127,6 @@ both plus the live process to agree.
 
 Run the Step 2 command. Expected: all record/control tests pass.
 
-**Step 5: Commit and verify the project**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Verify remote AgentD process identity"
-make test
-```
-
 ### Task 4: Terminate exactly one proven AgentD
 
 **Files:**
@@ -188,14 +163,6 @@ identity uncertainty, privilege failure, and confirmation timeout.
 
 Run the Step 2 command. Expected: all process-control tests pass and the child sentinel
 remains alive.
-
-**Step 5: Commit and verify the project**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Terminate only a verified remote AgentD"
-make test
-```
 
 ### Task 5: Reconcile launch and atomic version state
 
@@ -246,14 +213,6 @@ make run-test MODULE=agent-provisioning TEST='*Test'
 
 Expected: all provisioning tests pass.
 
-**Step 5: Commit and verify the project**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Reconcile remote AgentD launch state"
-make test
-```
-
 ### Task 6: Bound offline recovery, startup, and retries
 
 **Files:**
@@ -296,13 +255,3 @@ make run-test MODULE=agent-provisioning TEST='*Test'
 ```
 
 Expected: all provisioning tests pass.
-
-**Step 5: Commit and verify**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Bound AgentD offline recovery retries"
-make test
-mvn verify -Pdev -T 4
-git diff --check
-```

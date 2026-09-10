@@ -1,7 +1,5 @@
 # Session Event Record Byte Ownership Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Preserve exact immutable session-event bytes while allocating only one encoded-record backing array
 per decoded record and avoiding a defensive encoded-payload copy before typed decoding.
 

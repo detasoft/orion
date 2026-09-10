@@ -87,9 +87,7 @@ tests cover canonical metadata across reopen and fail-fast behavior for invalid 
 verification confirms that `acl-storage` adds no direct dependency on or source import from `git-parser` and that
 the shared contract has no transport dependency.
 
-Focused tests run through the repository `make run-test` target. Routine development verification uses
-`mvn verify -Pdev -T 4`; after the implementation commit is integrated on `main`, `make test` provides the required
-post-commit project check.
+Focused tests run through `make run-test`. Development verification uses `mvn verify -Pdev -T 4`.
 
 ## Non-goals
 

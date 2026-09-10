@@ -1,7 +1,5 @@
 # Stalled SSH Operation Watchdog Baseline Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Make the real-SSH watchdog test reliably reach the stalled command while preserving the production
 whole-operation deadline.
 
@@ -62,8 +60,3 @@ make test
 ```
 
 Expected: `BUILD SUCCESS` with no failures or errors.
-
-**Step 5: Complete task tracking and commit**
-
-Mark the parent task entry complete, set the leaf task status to complete, and remove its owner line. Stage
-only the test, plan, and task-tree files, then create a single-line logical implementation commit.

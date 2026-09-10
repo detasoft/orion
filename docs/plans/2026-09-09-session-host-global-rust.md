@@ -1,7 +1,5 @@
 # Session Host Global Rust Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Replace the custom per-checkout Rust bootstrap with one Make goal that installs and reuses the standard global Rustup and Cargo directories.
 
 **Architecture:** `session-host-install-rust` owns first-time Rustup installation in `$HOME/.rustup` and `$HOME/.cargo`. All session-host Cargo commands depend on that goal and run inside `session-host`, where `rust-toolchain.toml` selects the one pinned project toolchain; Maven only delegates to Make.
@@ -154,15 +152,8 @@ Expected: BUILD SUCCESS.
 
 **Step 3: Self-review the complete diff**
 
-Apply `orion-minimal-implementation` and `docs/reviews/RULES.md`. Confirm there
-is one installation goal, one exact toolchain pin, no custom Rust cache model,
-no Maven toolchain logic, no compatibility alias, and no unrelated change.
-
-**Step 4: Commit the direct implementation**
-
-Stage only the implementation and executable behavior tests and create one
-descriptive single-line commit. Leave the dedicated worktree in place for the
-change workflow's review and integration gate.
+Confirm there is one installation goal, one exact toolchain pin, no custom Rust cache model,
+no Maven toolchain logic, and no compatibility alias.
 
 ### Task 5: Align user documentation after integration
 
@@ -175,8 +166,3 @@ After the reviewed implementation is integrated, update the Build section to
 state that `make session-host-install-rust` installs standard global Rustup,
 that all worktrees reuse `$HOME/.cargo` and `$HOME/.rustup`, and that
 `rust-toolchain.toml` owns the exact project toolchain.
-
-**Step 2: Commit documentation separately**
-
-Stage only `session-host/README.md` and create a one-line documentation-only
-commit. Do not run tests after this commit.

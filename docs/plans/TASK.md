@@ -21,10 +21,4 @@ file does not prove release or completion. The
 [dependency and coordination audit](2026-09-09-task-stream-order.md)
 records cross-task gates; its snapshot labels are not a separate queue order.
 
-Use `orion-task-runner` for selection, planning, task descriptions, ordering,
-composition, dependencies, claims, and lifecycle state. Executing a leaf uses
-Change workflow; do not encode workflow instructions in task content.
-Insert planned tasks by their intended local ordinal. Delete completed leaves
-and completed empty compositions after verification and review; retain these
-queue roots. Keep detailed designs and completion evidence in ordinary
-`docs/plans/` documents. Do not maintain a second task list in `TASKS.md`.
+Detailed designs and completion evidence belong in ordinary `docs/plans/` documents.

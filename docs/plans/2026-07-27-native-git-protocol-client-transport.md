@@ -1,7 +1,5 @@
 # Native Git Protocol Client Transport Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a dedicated JGit-free module that defines transport/session and independent ref/content repository boundaries used by future native Git fetch and push clients.
 
 **Architecture:** `core/git-protocol-client` depends on `git-common`, `git-parser`, and Netty buffers. Transport contracts exchange caller-owned `ByteBuf` chunks; `GitRepositoryRefs` owns listing, resolution, and CAS ref updates while `GitRepositoryContents` streams packs independently. Test-only scripted and in-memory implementations exercise the contracts without introducing a real transport or repository backend.

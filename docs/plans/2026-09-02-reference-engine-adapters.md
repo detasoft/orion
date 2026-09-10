@@ -1,7 +1,5 @@
 # Reference Git Engine Adapters Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add deterministic reusable JGit and canonical Git adapters and prove all four reference control pairs.
 
 **Architecture:** Extend the existing workflow contracts only where the planned scenarios need ref operations and
@@ -81,4 +79,3 @@ diagnostics. Reuse one bounded canonical Git process runner, and keep each serve
 1. Run `mvn test -Pdev -T 4 -q -pl tests/git-engine-test-support -am` outside the sandbox.
 2. Run `mvn verify -Pdev -T 4` outside the sandbox.
 3. Inspect `git diff --check`, task-branch history, status, and changed files.
-4. Report results for review without squashing, transferring, or cleaning up the task worktree.

@@ -1,7 +1,5 @@
 # Configuration Secret Cryptography Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add strict, context-bound envelope encryption for secret values
 stored in versioned Orion configuration.
 
@@ -72,14 +70,6 @@ the schema version, and every nullable UTF-8 field with a four-byte length (`-1`
 **Step 4: Run the test and verify GREEN**
 
 Run the command from Step 2. Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add core/key-material/src/main/java/pro/deta/orion/keymaterial/ConfigurationSecretContext.java \
-  core/key-material/src/test/java/pro/deta/orion/keymaterial/ConfigurationSecretContextTest.java
-git commit -m "Define authenticated configuration secret context"
-```
 
 ### Task 2: Define a strict versioned envelope representation
 
@@ -174,16 +164,6 @@ parsed value, and require exact equality to reject non-canonical input.
 **Step 5: Run the tests and verify GREEN**
 
 Run the command from Step 2. Expected: PASS.
-
-**Step 6: Commit**
-
-```bash
-git add core/key-material/src/main/java/pro/deta/orion/keymaterial/ConfigurationSecretEnvelope.java \
-  core/key-material/src/main/java/pro/deta/orion/keymaterial/ConfigurationSecretException.java \
-  core/key-material/src/main/java/pro/deta/orion/keymaterial/ConfigurationSecretEnvelopeCodec.java \
-  core/key-material/src/test/java/pro/deta/orion/keymaterial/ConfigurationSecretEnvelopeCodecTest.java
-git commit -m "Define versioned configuration secret envelopes"
-```
 
 ### Task 3: Replace direct AES-GCM values with envelope encryption
 
@@ -294,16 +274,6 @@ mvn test -Pdev -T 4 -q -pl core/key-material -am \
 
 Expected: PASS.
 
-**Step 9: Commit**
-
-```bash
-git add core/key-material/src/main/java/pro/deta/orion/keymaterial/ConfigurationCipherCapability.java \
-  core/key-material/src/main/java/pro/deta/orion/keymaterial/KeyMaterialCapabilities.java \
-  core/key-material/src/main/java/pro/deta/orion/keymaterial/EncryptedConfigurationValue.java \
-  core/key-material/src/test/java/pro/deta/orion/keymaterial/KeyMaterialCapabilitiesTest.java
-git commit -m "Encrypt configuration secrets with context-bound envelopes"
-```
-
 ### Task 4: Verify the configuration cryptography slice
 
 **Files:**
@@ -335,21 +305,4 @@ mvn verify -Pdev -T 4 -q -pl core/key-material -am
 
 Expected: PASS.
 
-**Step 3: Review task diff and commit any verification fix**
-
-Run:
-
-```bash
-git status --short
-git diff main...HEAD
-```
-
-If a fix is required, follow a fresh RED/GREEN cycle and commit it with a concise single-line subject. Do not
-touch the unrelated baseline failure in `session-host`.
-
 **Step 4: Prepare branch completion**
-
-Invoke `superpowers:requesting-code-review`, address blocking findings, rerun verification, then invoke
-`superpowers:finishing-a-development-branch`. Follow the repository rule to squash unique task commits, delete
-the completed leaf task directory and its parent link in the squashed commit, cherry-pick to `main`, run the
-required post-commit `make test`, and remove the worktree and task branch before reporting completion.

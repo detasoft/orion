@@ -1,7 +1,5 @@
 # Native Session-Host Start-Outcome Contract Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Guarantee one durable native journal outcome for every session start that reaches journal creation.
 
 **Architecture:** Extend the shared journal format with a bounded `SESSION_START_FAILED` record and carry the
@@ -97,15 +95,6 @@ Run: `make session-host-test`
 
 Expected: PASS.
 
-**Step 7: Commit the protocol slice**
-
-```bash
-git add session-host/src/protocol.rs session-host/src/journal.rs \
-  session-host/src/bin/generate_protocol_fixtures.rs session-host/protocol \
-  agent-protocol/protocol
-git commit -m "Define native session start outcome records"
-```
-
 ### Task 2: Carry the start CommandId to the native host
 
 **Files:**
@@ -152,13 +141,6 @@ Run:
 `make run-test MODULE=agentd TEST='pro.deta.orion.agentd.runtime.SessionContractsTest,pro.deta.orion.agentd.runtime.NativeRuntimeTest'`
 
 Expected: PASS.
-
-**Step 5: Commit the identity seam**
-
-```bash
-git add session-host/src/cli.rs session-host/src/main.rs agentd/src
-git commit -m "Pass start command identity to session host"
-```
 
 ### Task 3: Resolve every native post-journal start attempt
 
@@ -220,14 +202,6 @@ fmt --manifest-path session-host/Cargo.toml -- --check
 Expected: tests and format check PASS. If the host triple differs, use the cache path selected by
 `make session-host-prepare` rather than the literal Darwin path.
 
-**Step 5: Commit native outcome resolution**
-
-```bash
-git add session-host/src/platform/unix.rs session-host/src/host.rs \
-  session-host/tests/unix_process_host.rs
-git commit -m "Persist native session start outcomes"
-```
-
 ### Task 4: Preserve failed journals during AgentD handoff
 
 **Files:**
@@ -259,14 +233,6 @@ Run:
 
 Expected: PASS.
 
-**Step 5: Commit AgentD preservation**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/runtime/NativeRuntime.java \
-  agentd/src/test/java/pro/deta/orion/agentd/runtime/NativeRuntimeTest.java
-git commit -m "Preserve journaled native start failures"
-```
-
 ### Task 5: Verify, review, and integrate the completed leaf
 
 **Files:**
@@ -281,26 +247,6 @@ Run:
 `make run-test MODULE=agentd TEST='pro.deta.orion.agentd.runtime.SessionContractsTest,pro.deta.orion.agentd.runtime.NativeRuntimeTest'`
 
 Run: `mvn verify -Pdev -T 4`
-
-Expected: PASS.
-
-**Step 2: Request code review and apply only verified blocking fixes**
-
-Use `superpowers:requesting-code-review`. Read `docs/reviews/RULES.md`, review the complete task diff against
-the approved design, and apply any blocking correctness or contract fixes. Repeat affected focused tests.
-
-**Step 3: Squash the task branch**
-
-Remove the completed leaf directory and its parent link. Squash every task-branch commit into one commit with:
-
-```text
-Guarantee durable native session start outcomes [task: native-session-host/start-outcome-contract]
-```
-
-**Step 4: Transfer to main and run the required post-commit test**
-
-Cherry-pick the squashed commit onto `main`, then run `make test` outside the sandbox. If a task-caused failure
-is fixed, use the exact same commit subject for the follow-up commit so it can be squashed later.
 
 Expected: PASS.
 

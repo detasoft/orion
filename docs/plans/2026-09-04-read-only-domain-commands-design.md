@@ -155,5 +155,4 @@ Focused tests cover result immutability, source availability, repository and lif
 stable field order, per-item ACL filtering, cross-organization collisions, self/admin visibility, missing and
 ambiguous selectors, unavailable and failed sources, completion leakage, and exec/interactive result parity.
 
-The implementation worker runs the focused command, authorization, lifecycle, and transport suites plus
-`mvn verify -Pdev -T 4`. The final squashed commit is followed by `make test` under the repository workflow.
+Run the focused command, authorization, lifecycle, and transport suites plus `mvn verify -Pdev -T 4`.

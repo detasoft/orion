@@ -1,7 +1,5 @@
 # Rust Maven Plugin and Session Host Integration Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Build and test `session-host` inside the Maven lifecycle through an independently releasable Rust
 Maven plugin while using Maven Build Cache for content-based up-to-date checks.
 
@@ -107,15 +105,6 @@ mvn verify -f build-tools/rust-maven-plugin/pom.xml
 
 Expected: both builds pass and the generated JAR contains `META-INF/maven/plugin.xml`.
 
-**Step 7: Stage and review the plugin checkpoint**
-
-Stage only `build-tools/rust-maven-plugin`. Inspect the staged diff and required checks, then request the Simple
-workflow commit with subject:
-
-```text
-Integrate session-host into Maven lifecycle: Add independent Rust Maven plugin
-```
-
 ### Task 2: Integrate session-host with Maven lifecycle and cache
 
 **Files:**
@@ -182,12 +171,5 @@ Expected: the second unchanged test build reports a cache hit; touching a copied
 checkout causes a miss; `clean test` executes Cargo tests; the dist package contains the native session host; and
 the full project passes.
 
-**Step 7: Stage, self-review, and request the integration commit**
-
-Review that Maven Build Cache is the only module-level freshness owner, Cargo is the only compiler-level cache,
-the plugin remains independently releasable, and no Orion release configuration was introduced. Request the
-Simple workflow commit with subject:
-
-```text
-Integrate session-host into Maven lifecycle: Bind Rust build to Maven lifecycle
-```
+Confirm that Maven Build Cache is the only module-level freshness owner, Cargo is the only compiler-level cache,
+and the plugin remains independently releasable without Orion release configuration.

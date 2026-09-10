@@ -1,7 +1,5 @@
 # Hierarchical Orion XML v2 Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Introduce stable hierarchical identities and a strict, deterministic Orion XML v2 document while reading
 legacy ACL v1 documents explicitly.
 
@@ -72,14 +70,6 @@ Run the command from Step 2.
 
 Expected: PASS.
 
-**Step 5: Commit the identity slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/OrionHierarchyIdentityTest.java
-git commit -m "Define hierarchical Orion identities"
-```
-
 ### Task 2: Add the immutable Orion document model
 
 **Files:**
@@ -131,14 +121,6 @@ Run the command from Step 2.
 
 Expected: PASS.
 
-**Step 5: Commit the document slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion/OrionDocument.java \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/OrionDocumentTest.java
-git commit -m "Model the immutable Orion configuration document"
-```
-
 ### Task 3: Add isolated JAXB v2 DTOs and canonical mapping
 
 **Files:**
@@ -189,14 +171,6 @@ Do not use streams for the mapping loops.
 Run the command from Step 2.
 
 Expected: PASS.
-
-**Step 6: Commit the v2 mapping slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion/v2 \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/v2
-git commit -m "Map the Orion XML v2 wire model"
-```
 
 ### Task 4: Add secure version dispatch and strict generated-schema validation
 
@@ -267,15 +241,6 @@ Run the command from Step 2.
 
 Expected: PASS.
 
-**Step 7: Commit the XML API slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/OrionXmlTest.java \
-  core/schema/src/test/resources/pro/deta/orion/schema/orion/orion-v2.xml
-git commit -m "Introduce strict Orion XML v2 serialization"
-```
-
 ### Task 5: Make ACL compatibility paths write v2 and publish the v2 schema
 
 **Files:**
@@ -333,16 +298,6 @@ mvn test -Pdev -T 4 -q -pl net/http-core -am -DskipTests
 
 Expected: PASS.
 
-**Step 5: Commit the compatibility migration**
-
-```bash
-git add core/schema core/acl/src/main/java/pro/deta/orion/acl/XmlService.java \
-  core/acl/src/test/java/pro/deta/orion/acl/XmlServiceTest.java \
-  net/http-core/src/main/java/pro/deta/orion/transport/http/OrionAccessControlSchemaRoute.java \
-  tests/integration-test/src/integration-test/java/pro/deta/orion/test/OrionStartupIT.java
-git commit -m "Make Orion XML v2 the writable configuration shape"
-```
-
 ### Task 6: Verify and finish the task branch
 
 **Files:**
@@ -366,19 +321,3 @@ Expected: BUILD SUCCESS.
 
 Check line length, deterministic ordering, secure XML parser settings, exception messages, generated XSD behavior,
 and `git diff --check`. Confirm no unrelated files are staged.
-
-**Step 3: Finish task tracking**
-
-Delete the two completed leaf task directories, remove their parent links, and replace external dependency links
-with concise completed-dependency text so no Markdown link points at a deleted task node.
-
-**Step 4: Squash and transfer**
-
-Squash every commit unique to the task branch into one commit with subject:
-
-```text
-Introduce hierarchical Orion XML v2 [task: hierarchical-orion-configuration/xml-schema-v2]
-```
-
-Cherry-pick that commit onto `main`, run `make test` on `main`, and only then remove the worktree and branch. Do not
-merge. Confirm `git worktree list` no longer contains this worktree and the branch no longer exists.

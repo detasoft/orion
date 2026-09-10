@@ -115,5 +115,4 @@ Tests cover:
   outcome shape;
 - AgentD passing the CommandId to the CLI and preserving a readable failed
   journal instead of deleting it;
-- focused Rust and AgentD tests followed by the repository verification and
-  post-commit `make test` required by the task workflow.
+- focused Rust and AgentD tests.

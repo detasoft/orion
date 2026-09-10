@@ -11,7 +11,7 @@ capability policy tasks are complete.
 
 ## Scope
 
-- Re-run `orion-minimal-implementation` in read-only review mode over `git-parser`, `git-client`,
+- Audit `git-parser`, `git-client`,
   `net/git-transport`, and the native Git HTTP integration. Reuse the native
   storage review and inspect `git-native-storage` here only where needed to
   verify cross-module integration and regressions.

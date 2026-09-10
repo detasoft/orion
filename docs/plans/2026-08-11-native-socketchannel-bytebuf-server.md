@@ -1,7 +1,5 @@
 # Native SocketChannel ByteBuf Server Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a separate native Git server backend that listens on its own port, handles each connection in a virtual thread, reads blocking `SocketChannel` data directly into Netty `ByteBuf` memory through `ByteBuf.nioBuffer()`, and drives `GitMinimalWireMachine`.
 
 **Architecture:** Keep `ByteBuf` as the protocol memory model while replacing the Netty event-loop transport path with a blocking `ServerSocketChannel` listener. The server owns accept, connection lifecycle, read/write loops, and timeout handling; `GitMinimalWireMachine` remains the protocol engine and receives caller-owned `ByteBuf` chunks.
@@ -90,7 +88,7 @@ public final class SocketChannelByteBufIO {
 
 Add a test that writes a `ByteBuf` through `writeFrom(...)` into a loopback socket and verifies the client receives the same bytes. The helper should leave unread bytes in the source if the channel writes only part of the buffer.
 
-**Step 5: Run focused tests and commit**
+**Step 5: Run focused tests**
 
 Run:
 
@@ -98,15 +96,6 @@ Run:
 mvn test -Pdev -T 4 -q -pl core/git-parser -am \
   -Dtest=SocketChannelByteBufIOTest \
   -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-Then commit:
-
-```bash
-git add \
-  core/git-parser/src/main/java/pro/deta/orion/git/parser/wire/SocketChannelByteBufIO.java \
-  core/git-parser/src/test/java/pro/deta/orion/git/parser/wire/SocketChannelByteBufIOTest.java
-git commit -m "Add SocketChannel ByteBuf IO helpers"
 ```
 
 ### Task 2: Extract a Reusable Wire Machine Driver
@@ -152,7 +141,7 @@ Keep ownership unchanged: `drive(...)` must release the caller-owned input `Byte
 
 Replace private `drive(...)`, `handleFlow(...)`, `runTask(...)`, and `terminalError(...)` copies with a `GitWireMachineDriver` field. Keep `InputStream` transport behavior unchanged.
 
-**Step 5: Run focused parser tests and commit**
+**Step 5: Run focused parser tests**
 
 Run:
 
@@ -160,17 +149,6 @@ Run:
 mvn test -Pdev -T 4 -q -pl core/git-parser -am \
   -Dtest=GitWireMachineDriverTest,GitByteBufTransportAdapterTest \
   -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-Commit:
-
-```bash
-git add \
-  core/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitWireMachineDriver.java \
-  core/git-parser/src/main/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapter.java \
-  core/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitWireMachineDriverTest.java \
-  core/git-parser/src/test/java/pro/deta/orion/git/parser/wire/GitByteBufTransportAdapterTest.java
-git commit -m "Extract Git wire machine driver"
 ```
 
 ### Task 3: Add Blocking SocketChannel Git Server
@@ -230,16 +208,9 @@ Thread.ofVirtual().name("orion-git-socketchannel-accept-", 0)
 
 Store accepted `SocketChannel`s in a concurrent set so `stop()` can close them. `stop()` must close the server channel first, then all accepted channels, then interrupt/join the accept thread if needed.
 
-**Step 4: Run lifecycle test and commit**
+**Step 4: Run lifecycle test**
 
-Run the focused test. Commit:
-
-```bash
-git add \
-  net/git-transport/src/main/java/pro/deta/orion/transport/git/SocketChannelGitNativeServer.java \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/SocketChannelGitNativeServerTest.java
-git commit -m "Add blocking SocketChannel Git server"
-```
+Run the focused test.
 
 ### Task 4: Drive GitMinimalWireMachine From SocketChannel
 
@@ -312,7 +283,7 @@ private final class SocketChannelByteBufWrite implements GitNativeClientWrite {
 
 Because the channel is blocking and the connection runs in a virtual thread, this write path may block without consuming a platform thread.
 
-**Step 5: Run focused tests and commit**
+**Step 5: Run focused tests**
 
 Run:
 
@@ -320,15 +291,6 @@ Run:
 mvn test -Pdev -T 4 -q -pl net/git-transport -am \
   -Dtest=SocketChannelGitNativeServerTest \
   -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-Commit:
-
-```bash
-git add \
-  net/git-transport/src/main/java/pro/deta/orion/transport/git/SocketChannelGitNativeServer.java \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/SocketChannelGitNativeServerTest.java
-git commit -m "Drive native Git wire machine from SocketChannel"
 ```
 
 ### Task 5: Wire Server Behind a Separate Port
@@ -389,7 +351,7 @@ Start the service and assert:
 - upload-pack request gets native advertisement;
 - stop closes the listener.
 
-**Step 5: Run focused service tests and commit**
+**Step 5: Run focused service tests**
 
 Run:
 
@@ -397,19 +359,6 @@ Run:
 mvn test -Pdev -T 4 -q -pl net/git-transport -am \
   -Dtest=GitNativeTransportServiceTest,SocketChannelGitNativeServerTest \
   -Dsurefire.failIfNoSpecifiedTests=false
-```
-
-Commit:
-
-```bash
-git add \
-  core/configuration/src/main/java/pro/deta/orion/config/schema/GitTransportConfig.java \
-  core/configuration/src/test/java/pro/deta/orion/config/OrionConfigurationBootstrapShapeTest.java \
-  net/git-transport/src/main/java/pro/deta/orion/transport/git/GitNativeTransportService.java \
-  net/git-transport/src/main/java/pro/deta/orion/transport/git/SocketChannelGitNativeServer.java \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/GitNativeTransportServiceTest.java \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/SocketChannelGitNativeServerTest.java
-git commit -m "Expose SocketChannel native Git transport"
 ```
 
 ### Task 6: Verification and Task Tracking
@@ -423,16 +372,6 @@ Run:
 
 ```bash
 mvn verify -Pdev -T 4 -pl core/git-parser,net/git-transport -am
-```
-
-Expected: `BUILD SUCCESS`.
-
-**Step 2: Run routine development verification if requested before commit**
-
-Run:
-
-```bash
-mvn verify -Pdev -T 4
 ```
 
 Expected: `BUILD SUCCESS`.

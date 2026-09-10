@@ -28,6 +28,5 @@ blocking `BufferedByteOutput` writes now complete synchronously.
 
 ## Follow-Up Review
 
-After implementation, use `orion-minimal-implementation` in read-only review mode
-on the output path and record any further safe removals as separate tasks; do
-not fold them into this migration opportunistically.
+After implementation, audit the output path without modifying it and record
+any further safe removals as separate tasks; do not fold them into this migration.

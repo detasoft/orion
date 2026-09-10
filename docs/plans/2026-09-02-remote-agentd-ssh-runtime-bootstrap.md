@@ -1,7 +1,5 @@
 # Remote AgentD SSH Runtime Bootstrap Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Upload a platform-compatible AgentD and session-host bundle over verified SSH and launch AgentD detached with its permit supplied only through SSH channel input.
 
 **Architecture:** Add a narrow `agent-provisioning` Maven module with transport-independent validated records and an Apache MINA sshd implementation. One SSH session selects the exact requested platform/version bundle, uploads and verifies it, launches from the verified release, and atomically switches `current` only after launch acknowledgement. A whole-operation watchdog closes the session on timeout.
@@ -58,13 +56,6 @@ returns an actionable unavailable-bundle failure.
 
 Run the Step 2 command. Expected: all contract tests pass.
 
-**Step 5: Commit**
-
-```bash
-git add pom.xml agent-provisioning
-git commit -m "Define remote AgentD bootstrap contracts"
-```
-
 ### Task 2: Implement a bounded verified SSH operation
 
 **Files:**
@@ -116,13 +107,6 @@ or `TIMEOUT` without retaining unrestricted output or secrets.
 
 Run the Step 2 command. Expected: all SSH and quoting tests pass.
 
-**Step 5: Commit**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Connect to provisioning targets over verified SSH"
-```
-
 ### Task 3: Upload and verify versioned runtime bundles
 
 **Files:**
@@ -168,13 +152,6 @@ mvn test -Pdev -T 4 -q -pl agent-provisioning -am \
 ```
 
 Expected: all provisioning module tests pass.
-
-**Step 5: Commit**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Install verified AgentD runtime bundles"
-```
 
 ### Task 4: Launch AgentD detached and prove the session-host boundary
 
@@ -233,14 +210,7 @@ mvn test -Pdev -T 4 -q -pl agent-provisioning -am \
 Expected: the detached fixture survives SSH closure, invokes session-host, and
 all module tests pass.
 
-**Step 5: Commit**
-
-```bash
-git add agent-provisioning/src
-git commit -m "Launch provisioned AgentD independently of SSH"
-```
-
-### Task 5: Review, verify, and squash the completed leaf
+### Task 5: Verify the completed implementation
 
 **Files:**
 - Review: `docs/reviews/RULES.md`
@@ -263,26 +233,6 @@ mvn verify -Pdev -T 4
 Expected: `BUILD SUCCESS` for the complete reactor.
 
 **Step 3: Prepare dedicated-worktree completion state**
-
-Delete the completed leaf directory and remove its parent link. Keep the three
-remaining sibling tasks. Squash every task-branch commit after the real base
-into one commit with this exact subject:
-
-```text
-Bootstrap remote AgentD runtime over SSH [task: remote-machine-provisioning/ssh-runtime-bootstrap]
-```
-
-Do not cherry-pick to `main`, delete the branch, or remove the worktree until a
-future explicit user gate.
-
-**Step 4: Run post-commit tests**
-
-```bash
-make test
-```
-
-Expected: `BUILD SUCCESS`. If a fix is required, commit it with the exact same
-subject so it can be included in the final squash.
 
 **Step 5: Record the handoff**
 

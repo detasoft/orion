@@ -101,7 +101,3 @@ Use `make run-test MODULE=<module> TEST='<locator>'` for focused Maven checks, o
 The implementation worker owns development verification (`mvn verify -Pdev -T 4`) and `make test` after
 code commits. Keep logs and exact verification outcomes. Update the module review to distinguish fixed
 findings from still-pending streaming/session attachment work; document actual terminal syntax.
-
-The orchestrator owns this ordinary plan on main; the worker must report material gaps instead of
-editing it. One implementation worker owns the entire leaf in its dedicated worktree. After review,
-squash the leaf, remove its task node/link, and await the change workflow's user gate before transfer.

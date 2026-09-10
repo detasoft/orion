@@ -7,7 +7,6 @@ Depends on: 01_single-session-request-planning.md,
 04_session-inactivity-timeouts.md,
 05_smart-http-ssh-behavior.md,
 ../02_git-wire-architecture-simplification/03_parser-storage-boundary.md
-Required skill: `orion-minimal-implementation` in read-only review mode
 
 Repeat the read-only Git client simplification review after the four preceding
 changes and the parser/storage boundary are complete. Record already removed

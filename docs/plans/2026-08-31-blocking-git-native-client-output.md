@@ -1,7 +1,5 @@
 # Blocking Git Native Client Output Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Replace the continuation-aware native Git client output path with a blocking writer suitable for virtual-thread transports.
 
 **Architecture:** Keep Git wire serialization in `GitNativeClientOutput`, but write synchronously to `BufferedByteOutput`. Remove the async output buffer coordinator and `SendResult`; continuation classes translate output exceptions into `ContinuationFlow` errors at their boundary.

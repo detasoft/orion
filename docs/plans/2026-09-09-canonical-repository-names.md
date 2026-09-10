@@ -1,7 +1,5 @@
 # Canonical Repository Names Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Make every Orion repository ingress resolve percent-encoded and transport-decorated spellings to one
 strict canonical repository identity before authorization, provider selection, or persistence.
 
@@ -16,12 +14,6 @@ authorization-, and route-local repository-name normalizers are removed.
 
 ## Execution constraints
 
-- Execute the queued leaf through `orion-change-workflow`; its implementation worker must apply
-  `orion-minimal-implementation` and the repository test rules.
-- Do not edit this plan, `MODULE_REVIEW.md`, or task-tree files in the implementation worktree.
-- Run every test command outside the sandbox. Use `make run-test` for focused tests.
-- Intermediate slice commits are allowed, but before the integration gate squash the worker branch to
-  `Use canonical repository names [task: 12_acl-storage-hardening/03_canonical-repository-names.md]`.
 - Do not add migration, aliases, fallback parsing, dual-read behavior, or a second repository-name policy.
 
 ### Task 1: Define the shared canonical value
@@ -90,14 +82,6 @@ make run-test MODULE=core/schema TEST='RepositoryNameTest,OrionHierarchyIdentity
 
 Expected: PASS; existing organization/team/repository ID behavior remains green.
 
-**Step 5: Commit the slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion/RepositoryName.java \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/RepositoryNameTest.java
-git commit -m "Define canonical repository names"
-```
-
 ### Task 2: Enforce canonical identity at native storage boundaries
 
 **Files:**
@@ -155,17 +139,6 @@ make run-test MODULE=git/git-native-storage \
 ```
 
 Expected: PASS.
-
-**Step 5: Commit the slice**
-
-```bash
-git add git/git-native-storage/pom.xml \
-  git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/FileNativeGitRepositoryProvider.java \
-  git/git-native-storage/src/main/java/pro/deta/orion/git/nativestorage/InMemoryNativeGitRepositoryProvider.java \
-  git/git-native-storage/src/test/java/pro/deta/orion/git/nativestorage/FileNativeGitRepositoryProviderTest.java \
-  git/git-native-storage/src/test/java/pro/deta/orion/git/nativestorage/InMemoryNativeGitRepositoryProviderTest.java
-git commit -m "Enforce canonical native repository identities"
-```
 
 ### Task 3: Make Git parsing and authorization share the canonical name
 
@@ -228,21 +201,6 @@ make run-test MODULE=net/git-transport \
 
 Expected: PASS.
 
-**Step 5: Commit the behavior change**
-
-```bash
-git add core/authorization/src/main/java/pro/deta/orion/auth/check/resource/RepositoryResource.java \
-  git/git-parser/pom.xml git/git-parser/src/main git/git-parser/src/test \
-  net/git-transport/src/main/java/pro/deta/orion/transport/git/auth/AuthenticatedRepositoryAccessHook.java \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/auth/AuthenticatedRepositoryAccessHookTest.java \
-  net/git-transport/src/test/java/pro/deta/orion/transport/git/DefaultGitNativeRepositoryServiceTest.java \
-  net/http-core/src/main/java/pro/deta/orion/transport/http/OrionGitRoute.java
-git commit -m "Use canonical names for Git authorization"
-```
-
-If an existing test only asserted the removed permissive/strict split and has no canonical behavior to preserve,
-remove that legacy-only test in a separate follow-up commit after this behavior commit, as required by `AGENTS.md`.
-
 ### Task 4: Canonicalize bootstrap, proxy, and ACL repository identity
 
 **Files:**
@@ -293,15 +251,6 @@ make run-test MODULE=connectors/acl-storage TEST='NativeGitAccessControlStorageT
 ```
 
 Expected: PASS, with the resolved ACL identity stored as `team/repo`.
-
-**Step 5: Commit the slice**
-
-```bash
-git add git/git-native-proxy/src/main/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProvider.java \
-  git/git-native-proxy/src/test/java/pro/deta/orion/git/proxy/ProxyAwareNativeGitRepositoryProviderTest.java \
-  connectors/acl-storage/src/test/java/pro/deta/orion/acl/storage/NativeGitAccessControlStorageTest.java
-git commit -m "Canonicalize bootstrap repository identities"
-```
 
 ### Task 5: Unify HTTP routes and remove the final old consumer
 
@@ -377,18 +326,6 @@ make run-test MODULE=tests/git-engine-orion-adapters TEST='OrionGitServerTest,Or
 
 Expected: PASS.
 
-**Step 7: Commit the slice**
-
-```bash
-git add net/http-core/src/main net/http-core/src/test \
-  net/frontend/ui/src/lib/orion-api.js net/frontend/ui/src/lib/orion-api.test.js \
-  net/frontend/ui/src/App.vue net/frontend/ui/src/App.test.js \
-  tests/git-engine-orion-adapters/pom.xml \
-  tests/git-engine-orion-adapters/src/main \
-  tests/git-engine-orion-adapters/src/test
-git commit -m "Use canonical repository names at HTTP ingress"
-```
-
 ### Task 6: Verify one production path and prepare the reviewed commit
 
 **Files:**
@@ -439,15 +376,3 @@ test to classify it; do not change unrelated code.
 Confirm the complete branch diff has one shared contract, no migration/fallback/dual mode, no new configuration or
 persistent state, no transport dependency below `schema`, and no authorization/provider spelling mismatch. Verify
 that `RepositoryAddress` and repository-content path validators remain separate because their contracts differ.
-
-**Step 5: Squash and verify the prepared commit**
-
-Squash all change-unique commits into:
-
-```text
-Use canonical repository names [task: 12_acl-storage-hardening/03_canonical-repository-names.md]
-```
-
-Run `git diff --check`, confirm the worktree is clean, and return the exact base SHA, prepared SHA, branch, worktree,
-focused-test results, dependency checks, and `mvn verify` result to the coordinator. Do not integrate before the
-mandatory user gate.

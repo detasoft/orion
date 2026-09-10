@@ -1,7 +1,5 @@
 # Organization Users and Scoped Roles Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add organization-local users and locally owned roles and grants at organization, team, and repository
 scope to the immutable Orion document and deterministic XML v2 format.
 
@@ -100,14 +98,6 @@ helper.
 
 Run the command from Step 2. Expected: PASS.
 
-**Step 5: Commit the identity slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/ScopedIdentityTest.java
-git commit -m "Define scoped role and grant identities"
-```
-
 ### Task 2: Model organization users and credentials
 
 **Files:**
@@ -162,15 +152,6 @@ null, but ids and collection values may not.
 **Step 4: Run the focused test**
 
 Run the command from Step 2. Expected: PASS.
-
-**Step 5: Commit the user-model slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion/OrganizationUser.java \
-  core/schema/src/main/java/pro/deta/orion/schema/orion/UserCredential.java \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/OrganizationUserTest.java
-git commit -m "Model organization-local users"
-```
 
 ### Task 3: Model scoped roles, grants, and the complete graph
 
@@ -272,14 +253,6 @@ validator package-private unless a production caller requires it.
 
 Run the command from Step 3. Expected: PASS.
 
-**Step 7: Commit the domain graph slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion \
-  core/schema/src/test/java/pro/deta/orion/schema/orion
-git commit -m "Validate organization users and scoped definitions"
-```
-
 ### Task 4: Extend the isolated JAXB v2 wire model
 
 **Files:**
@@ -324,14 +297,6 @@ schema-required for read compatibility with already persisted v2 documents.
 
 Run the command from Step 2. Expected: existing and new DTO tests PASS.
 
-**Step 5: Commit the wire-model slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion/v2/OrionV2.java \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/v2/OrionV2MapperTest.java
-git commit -m "Extend the Orion v2 identity wire model"
-```
-
 ### Task 5: Map users and scoped definitions canonically
 
 **Files:**
@@ -369,14 +334,6 @@ wire input boundary; domain output contains no null identifiers.
 **Step 5: Run the mapper tests**
 
 Run the command from Task 4 Step 2. Expected: PASS.
-
-**Step 6: Commit the mapper slice**
-
-```bash
-git add core/schema/src/main/java/pro/deta/orion/schema/orion/v2/OrionV2Mapper.java \
-  core/schema/src/test/java/pro/deta/orion/schema/orion/v2/OrionV2MapperTest.java
-git commit -m "Map scoped Orion identities deterministically"
-```
 
 ### Task 6: Verify the strict XML contract
 
@@ -427,13 +384,6 @@ pro.deta.orion.schema.orion.OrionXmlTest'
 
 Expected: PASS.
 
-**Step 6: Commit the XML contract slice**
-
-```bash
-git add core/schema/src/test docs/plans/2026-09-03-hierarchical-orion-xml-v2-design.md
-git commit -m "Publish organization users and scoped roles in Orion XML"
-```
-
 ### Task 7: Verify and prepare the task branch
 
 **Files:**
@@ -472,20 +422,3 @@ mvn verify -Pdev -T 4
 ```
 
 Expected: BUILD SUCCESS.
-
-**Step 4: Commit any task-caused verification fixes**
-
-Use the exact same subject as the commit that introduced the issue so final branch squashing remains
-straightforward. Do not modify unrelated working-tree changes.
-
-**Step 5: Request code review**
-
-Use `superpowers:requesting-code-review` against the task branch. Apply `docs/reviews/RULES.md` and address all
-blocking findings before completion.
-
-**Step 6: Finish the dedicated worktree**
-
-Use `superpowers:finishing-a-development-branch`. Squash all task-branch commits, remove both completed task
-directories and their parent links in the squashed commit, cherry-pick the result to `main`, run the required
-post-commit `make test` on `main`, then remove the worktree and branch. Do not mark either task complete before
-the transfer and cleanup are verified.

@@ -1,7 +1,5 @@
 # AgentD Journal Surface Simplification Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Remove unused AgentD journal APIs and make bounded reading and availability notification expose only
 the state required by the future replication pump.
 
@@ -66,15 +64,6 @@ Run:
 
 Expected: PASS with no record returned at `GAP` and no scan past `PAGE_LIMIT`.
 
-**Step 6: Commit the page contract**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/journal/JournalReadPage.java \
-  agentd/src/main/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReader.java \
-  agentd/src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java
-git commit -m "Stop AgentD journal reads at page boundaries"
-```
-
 ### Task 2: Delete the snapshot reader and redundant interface
 
 **Files:**
@@ -120,13 +109,6 @@ make run-test MODULE=agentd TEST='pro.deta.orion.agentd.journal.FileSystemSessio
 
 Expected: `rg` finds nothing and the focused tests PASS.
 
-**Step 5: Commit the single reader path**
-
-```bash
-git add agentd/src/main agentd/src/test/java/pro/deta/orion/agentd/journal
-git commit -m "Remove the AgentD journal snapshot reader"
-```
-
 ### Task 3: Coalesce journal availability wake-ups
 
 **Files:**
@@ -168,14 +150,6 @@ Run:
 `make run-test MODULE=agentd TEST='pro.deta.orion.agentd.journal.*Test'`
 
 Expected: PASS.
-
-**Step 5: Commit the monitor simplification**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/journal/JournalAvailabilityMonitor.java \
-  agentd/src/test/java/pro/deta/orion/agentd/journal/JournalAvailabilityMonitorTest.java
-git commit -m "Coalesce AgentD journal availability wakeups"
-```
 
 ### Task 4: Verify the AgentD journal surface
 

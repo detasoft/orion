@@ -1,7 +1,5 @@
 # Session Host Explicit Journal Durability Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task by task.
-
 **Goal:** Replace the unused writer-wide durability mode with three explicit journal operations and make the
 authoritative process-exit record survive a machine crash before normal host completion.
 
@@ -163,9 +161,3 @@ reactor.
    configuration.
 6. Run `git diff --check`.
 7. Run `make session-host-test` outside the sandbox.
-8. Create the logical implementation commit, then run `make test` outside the sandbox as required by `AGENTS.md`.
-   If a task-caused fix is needed after the commit, use the same commit subject for the follow-up so orchestration
-   can squash the branch cleanly.
-
-The change workflow owns final review, user approval, task-node deletion, squash, cherry-pick to `main`, the
-post-integration `make test`, and branch/worktree cleanup.

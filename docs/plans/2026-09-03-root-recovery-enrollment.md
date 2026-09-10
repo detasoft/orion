@@ -1,7 +1,5 @@
 # One-Time Root Recovery Enrollment Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Recreate only root as a canonical recovery identity whose generated password can enroll one SSH key,
 then require that key for JWT issue while immediately revoking prior root credentials and tokens.
 
@@ -64,15 +62,6 @@ make run-test MODULE=core/acl TEST='JwtAccessTokenServiceTest,OrionAccessControl
 Expected: FAIL because reset preserves the old root object and credentials, synchronization restores internal
 keys, and JWTs carry only their subject and expiration.
 
-**Step 4: Commit the failing specification**
-
-```sh
-git add core/bootstrap/src/test/java/pro/deta/orion/component/InternalConfigurationRepositoryLifecycleTest.java \
-  core/acl/src/test/java/pro/deta/orion/acl/JwtAccessTokenServiceTest.java \
-  core/acl/src/test/java/pro/deta/orion/acl/OrionAccessControlServiceImplTest.java
-git commit -m "Specify canonical root recovery state"
-```
-
 ### Task 2: Recreate root and bind its JWTs to an authentication generation
 
 **Files:**
@@ -113,13 +102,6 @@ behavior until an explicit reset and keep all non-root token behavior unchanged.
 **Step 5: Run focused tests to verify GREEN**
 
 Repeat the Task 1 commands. Expected: PASS.
-
-**Step 6: Commit the implementation**
-
-```sh
-git add core/acl core/schema/src/main/java/pro/deta/orion/schema/acl/ACLUtil.java
-git commit -m "Recreate canonical root recovery state"
-```
 
 ### Task 3: Add the atomic root password-to-key transition
 
@@ -163,13 +145,6 @@ activate the updated ACL once. Preserve the generation in each enrolled credenti
 **Step 4: Run the focused test to verify GREEN**
 
 Repeat the Task 3 command. Expected: PASS.
-
-**Step 5: Commit the service transition**
-
-```sh
-git add core/authorization core/acl
-git commit -m "Add atomic root key enrollment"
-```
 
 ### Task 4: Restrict recovery SSH sessions to a dedicated command
 
@@ -229,13 +204,6 @@ locks to the terminal path.
 
 Repeat the Task 4 command. Expected: PASS.
 
-**Step 6: Commit the protocol boundary**
-
-```sh
-git add net/git-transport
-git commit -m "Restrict root recovery to key enrollment"
-```
-
 ### Task 5: Separate interactive enrollment from public-key token issue
 
 **Files:**
@@ -283,15 +251,6 @@ superseded for recovered root only; retain it for ordinary users.
 
 Repeat the Task 5 command. Expected: PASS.
 
-**Step 6: Commit commands and documentation**
-
-```sh
-git add make tests/test-support/src/test/java/pro/deta/orion/makefile/ServerMakeTargetsTest.java README.md \
-  docs/plans/2026-09-03-password-authenticated-key-enrollment-design.md \
-  docs/plans/2026-09-03-password-authenticated-key-enrollment.md
-git commit -m "Separate root enrollment from token issue"
-```
-
 ### Task 6: Prove the complete root-only recovery sequence
 
 **Files:**
@@ -315,13 +274,6 @@ make run-test MODULE=tests/integration-test TEST='GitSshTransportEndToEndIT'
 
 Expected RED: the reset retains root credentials and the enrollment session can run `issue-token`. Expected GREEN:
 the full sequence passes without changing non-root behavior.
-
-**Step 3: Commit acceptance coverage**
-
-```sh
-git add tests/integration-test/src/integration-test/java/pro/deta/orion/test/GitSshTransportEndToEndIT.java
-git commit -m "Verify one-time root recovery enrollment"
-```
 
 ### Task 7: Verify and prepare orchestrated review
 
@@ -353,7 +305,3 @@ mvn verify -Pdev -T 4
 Expected: BUILD SUCCESS.
 
 **Step 4: Return the branch for orchestrated review**
-
-Report task path, worktree, branch, base and head SHAs, changed files, exact verification results, and residual risks.
-Do not edit the primary-owned plans, squash, cherry-pick, or remove the worktree until the review loop and user
-gate request those actions.

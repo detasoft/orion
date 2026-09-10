@@ -1,7 +1,5 @@
 # Orion Git Adapter Deduplication Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Replace Orion adapter copies of parser, pack-ingestion, pack-production, and advertisement behavior with
 small production-owned APIs while preserving the reviewed interoperability behavior.
 
@@ -60,5 +58,3 @@ have two real callers.
 
 1. Run focused tests for parser, native storage, client, transport, and Orion adapters with `-Pdev -T 4 -am`.
 2. Run `mvn verify -Pdev -T 4`, `git diff --check`, and the source line-length audit.
-3. Amend/squash the branch to one commit with the existing required task subject and unchanged task-tree deletion.
-4. Run post-commit `make test`, confirm one commit and a clean worktree, and stop before integration.

@@ -1,7 +1,5 @@
 # Legacy Upload-Pack Multi ACK Detailed Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Make legacy upload-pack `multi_ack_detailed` negotiation emit protocol-correct ACK status lines before serving the pack.
 
 **Architecture:** Keep parsing in `GitBlockingWireSession`. Track common `have` objects during the legacy negotiation loop, emit ACK lines according to negotiated capability, then reuse the existing `LegacyUploadNegotiation` pack response path.

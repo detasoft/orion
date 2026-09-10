@@ -1,7 +1,5 @@
 # Password-Authenticated SSH Key Enrollment Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Authenticate named-user SSH enrollment with the user's Orion password, conditionally select proven keys
 in a second keyboard-interactive round, and continue the requested command on the same connection.
 
@@ -54,13 +52,6 @@ make run-test MODULE=net/git-transport TEST='OrionSshAuthenticatorTest'
 Expected: FAIL because the current single challenge prints candidates before asking for the enrollment token,
 requires two responses at once, disconnects after persistence, and cannot continue the same authentication attempt.
 
-**Step 5: Commit the executable specification**
-
-```sh
-git add net/git-transport/src/test/java/pro/deta/orion/transport/git/auth/OrionSshAuthenticatorTest.java
-git commit -m "Specify password-first SSH key enrollment"
-```
-
 ### Task 2: Implement the password-first two-round user-auth state machine
 
 **Files:**
@@ -109,15 +100,6 @@ make run-test MODULE=net/git-transport TEST='OrionSshAuthenticatorTest'
 
 Expected: PASS, including a successful same-session two-round exchange and password-first failure regression.
 
-**Step 5: Commit the protocol implementation**
-
-```sh
-git add net/git-transport/src/main/java/pro/deta/orion/transport/git/auth/PasswordKeyboardInteractiveAuthFactory.java \
-  net/git-transport/src/main/java/pro/deta/orion/transport/git/auth/OrionSshAuthenticator.java \
-  net/git-transport/src/main/java/pro/deta/orion/transport/git/GitSshTransportService.java
-git commit -m "Authenticate SSH key enrollment with Orion passwords"
-```
-
 ### Task 3: Remove enrollment-token lifecycle and runtime plumbing
 
 **Files:**
@@ -143,7 +125,7 @@ Delete token-store construction/startup and injection, the `--regenerate-ssh-enr
 the one-field runtime options object and Dagger binding, plus builder arguments that existed only for that binding.
 Leave `issue-token`, `authenticateUserAndIssueToken`, and application-token tests unchanged.
 
-**Step 2: Remove legacy token-specific tests in this separate cleanup commit**
+**Step 2: Remove legacy token-specific tests**
 
 Delete token-store tests, option-regeneration tests, startup-state assertions, startup-token parsing, consumed-token
 cases, and reconnect-after-enrollment expectations. Do not replace them with negative tests whose only purpose is
@@ -160,13 +142,6 @@ make run-test MODULE=net/git-transport TEST='GitSshTransportStateMachineTest,Ori
 
 Expected: PASS with no remaining production or test dependency on `OrionRuntimeOptions` or
 `SshEnrollmentTokenStore`.
-
-**Step 4: Commit the removal**
-
-```sh
-git add core/schema core/bootstrap net/git-transport tests/integration-test
-git commit -m "Remove one-time SSH enrollment tokens"
-```
 
 ### Task 4: Prove current-command continuation and real ACL persistence
 
@@ -198,14 +173,6 @@ make run-test MODULE=tests/integration-test TEST='GitSshTransportEndToEndIT'
 
 Expected RED: current fixtures still expect token/disconnect behavior. After updating only the required fixtures,
 run both commands again and expect PASS.
-
-**Step 4: Commit integration coverage**
-
-```sh
-git add net/git-transport/src/test/java/pro/deta/orion/transport/git/GitSshTransportStateMachineTest.java \
-  tests/integration-test/src/integration-test/java/pro/deta/orion/test/GitSshTransportEndToEndIT.java
-git commit -m "Verify same-session SSH key enrollment"
-```
 
 ### Task 5: Update local enrollment support and operator documentation
 
@@ -257,15 +224,6 @@ make run-test MODULE=tests/test-support TEST='ServerMakeTargetsTest'
 
 Expected: PASS.
 
-**Step 6: Commit helper and documentation changes**
-
-```sh
-git add make README.md docs/plans/2026-09-02-interactive-ssh-shell.md \
-  docs/plans/2026-09-02-interactive-ssh-authentication.md \
-  tests/test-support/src/test/java/pro/deta/orion/makefile/ServerMakeTargetsTest.java
-git commit -m "Use the Orion root password for SSH key enrollment"
-```
-
 ### Task 6: Verify the complete change for review
 
 **Files:**
@@ -304,6 +262,3 @@ mvn verify -Pdev -T 4
 Expected: BUILD SUCCESS.
 
 **Step 4: Record review handoff state**
-
-Report the exact base and head SHAs, branch and worktree, changed files, each command result, and residual risks.
-Leave the task node, worktree, and branch in place for orchestrated review; do not squash, cherry-pick, or clean up.

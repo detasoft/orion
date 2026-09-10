@@ -70,5 +70,4 @@ path and no unavailable-policy option. CLI tests reject the removed option and
 show that no mode is required for a requested policy.
 
 Run focused Java tests locally and compile the Rust host for Linux. Exercise
-the real unsupported-kernel path on the available Linux 5.4 Xen guest, then
-run the broader project verification required by the repository workflow.
+the real unsupported-kernel path on the available Linux 5.4 Xen guest.

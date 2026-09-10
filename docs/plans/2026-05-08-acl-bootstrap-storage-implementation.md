@@ -1,7 +1,5 @@
 # ACL Bootstrap Storage Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Finish the ACL bootstrap storage migration so ACL is loaded from deployment-configured storage without using Orion network transports or volatile bootstrap users.
 
 **Architecture:** Make the new `bootstrap`, `storage`, and `transport` configuration shape the only supported runtime shape. Resolve ACL storage by URI scheme, route `local:` through an internal repository storage API whose provider is available before ACL loads, and start transports only after ACL is loaded. Keep `GitBackedInternalStorage` and `VolatileUserAdded` for non-bootstrap storage-area paths only.
@@ -34,8 +32,6 @@ Main gaps at the start of the plan:
 ## Commit Strategy
 
 Make one commit per task or per pair of tightly coupled tasks. Use focused Maven tests before each commit and run `mvn test -Pdev` after the final commit in this sequence.
-
-Do not squash during implementation. If a later fix belongs to the same logical change, make a follow-up commit with the same message so it can be squashed later.
 
 ## Task 1: Add New Deployment Configuration Shape
 
@@ -162,7 +158,7 @@ Support `file:` URIs and plain relative paths.
 
 Change `core/bootstrap/src/main/resources/config.yml` to the new target shape with transports disabled/enabled exactly as the current defaults require for local startup.
 
-**Step 6: Run tests and commit**
+**Step 6: Run tests**
 
 Run:
 
@@ -171,13 +167,6 @@ mvn test -Pdev -pl core/configuration,core/bootstrap -am -Dtest=OrionConfigurati
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/configuration/src/main/java/pro/deta/orion/config/schema/OrionConfiguration.java core/common/src/main/java/pro/deta/orion/util/ConfigurationContext.java core/bootstrap/src/main/resources/config.yml core/configuration/src/test/java/pro/deta/orion/config/OrionConfigurationBootstrapShapeTest.java
-git commit -m "feat: add bootstrap storage configuration shape"
-```
 
 ## Task 2: Introduce Repository Storage API
 
@@ -270,7 +259,7 @@ public Result<GitFileSnapshot> load(String branch, List<String> paths)
 
 Keep the existing single-path overload and delegate to the list overload.
 
-**Step 5: Run tests and commit**
+**Step 5: Run tests**
 
 Run:
 
@@ -279,13 +268,6 @@ mvn test -Pdev -pl core/git-storage -Dtest=LocalRepositoryStorageTest -Dsurefire
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/git-storage/src/main/java/pro/deta/orion/git/storage core/git-storage/src/test/java/pro/deta/orion/git/storage/LocalRepositoryStorageTest.java
-git commit -m "feat: introduce repository storage api"
-```
 
 ## Task 3: Route Git Repository Provider Through Storage Configuration
 
@@ -319,7 +301,7 @@ Keep `FileGitRepositoryProvider` local-file backed for this task, but make it co
 
 If `createOnPush=false` is implemented here, add a constructor parameter or effective config access. If it creates too much churn, document it as enforced in Task 4 through `LocalRepositoryStorage`.
 
-**Step 4: Run tests and commit**
+**Step 4: Run tests**
 
 Run:
 
@@ -328,13 +310,6 @@ mvn test -Pdev -pl core/git-engine -am -Dtest=FileGitRepositoryProviderTest,Basi
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/git-engine/src/main/java/pro/deta/orion/git/FileGitRepositoryProvider.java core/git-engine/src/test/java/pro/deta/orion/git/FileGitRepositoryProviderTest.java core/common/src/main/java/pro/deta/orion/GitRepositoryProvider.java
-git commit -m "feat: use deployment storage config for repositories"
-```
 
 ## Task 4: Resolve ACL Storage By URI Scheme
 
@@ -388,7 +363,7 @@ Replace the `AccessControlStorage` provider that switches on the previous ACL st
 
 Do not keep bootstrap fallback wiring for the previous top-level ACL configuration.
 
-**Step 5: Run tests and commit**
+**Step 5: Run tests**
 
 Run:
 
@@ -397,13 +372,6 @@ mvn test -Pdev -pl core/bootstrap,core/acl -am -Dtest=OrionRuntimeModuleTest,Acc
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/acl/src/main/java/pro/deta/orion/acl/storage/AccessControlStorageResolver.java core/bootstrap/src/main/java/pro/deta/orion/component/OrionRuntimeModule.java core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java
-git commit -m "feat: resolve acl storage by locator scheme"
-```
 
 ## Task 5: Complete Local File ACL Storage
 
@@ -451,7 +419,7 @@ Implementation rules:
 - return snapshot with all files in configured order;
 - save all files from the snapshot.
 
-**Step 4: Run tests and commit**
+**Step 4: Run tests**
 
 Run:
 
@@ -460,13 +428,6 @@ mvn test -Pdev -pl core/acl -am -Dtest=AccessControlStorageTest -Dsurefire.failI
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/acl/src/main/java/pro/deta/orion/acl/storage/LocalFileAccessControlStorage.java core/acl/src/main/java/pro/deta/orion/acl/storage/LocalAccessControlStorage.java core/acl/src/test/java/pro/deta/orion/acl/storage/AccessControlStorageTest.java
-git commit -m "feat: support multi-file local acl storage"
-```
 
 ## Task 6: Implement Git-Over-Repository ACL Storage
 
@@ -512,7 +473,7 @@ Expected: FAIL because `local:` still uses direct repository path wiring.
 
 Use `LocalGitAccessControlStorage` for independent file-backed Git repositories if still needed by direct tests or future wiring. Do not use it for `local:`.
 
-**Step 5: Run tests and commit**
+**Step 5: Run tests**
 
 Run:
 
@@ -521,13 +482,6 @@ mvn test -Pdev -pl core/acl,core/bootstrap -am -Dtest=AccessControlStorageTest,O
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/acl/src/main/java/pro/deta/orion/acl/storage/GitOverRepositoryStorageAccessControlStorage.java core/acl/src/main/java/pro/deta/orion/acl/storage/LocalGitAccessControlStorage.java core/acl/src/test/java/pro/deta/orion/acl/storage/AccessControlStorageTest.java core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java
-git commit -m "feat: load local acl through repository storage"
-```
 
 ## Task 7: Honor createDefaultIfMissing
 
@@ -566,7 +520,7 @@ Rules:
 - if `load()` returns `GENERAL`, fail startup and preserve the original error;
 - never print root password unless default ACL is actually created.
 
-**Step 4: Run tests and commit**
+**Step 4: Run tests**
 
 Run:
 
@@ -575,13 +529,6 @@ mvn test -Pdev -pl core/acl,core/bootstrap -am -Dtest=AccessControlStorageTest,O
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java core/acl/src/test/java/pro/deta/orion/acl/storage/AccessControlStorageTest.java core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java
-git commit -m "feat: honor acl default creation policy"
-```
 
 ## Task 8: Implement Remote Git ACL Storage
 
@@ -634,7 +581,7 @@ Auth mapping:
 
 Do not support raw secret values unless there is an explicit reason. Prefer `env:` and `file:`.
 
-**Step 4: Run tests and commit**
+**Step 4: Run tests**
 
 Run:
 
@@ -643,13 +590,6 @@ mvn test -Pdev -pl core/acl -am -Dtest=RemoteGitAccessControlStorageTest,AccessC
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/acl/src/main/java/pro/deta/orion/acl/storage/RemoteGitAccessControlStorage.java core/acl/src/test/java/pro/deta/orion/acl/storage/RemoteGitAccessControlStorageTest.java core/acl/src/main/java/pro/deta/orion/acl/storage/AccessControlStorageResolver.java core/git-storage/src/main/java/pro/deta/orion/git/storage/jgit/JGitAuth.java core/git-storage/src/main/java/pro/deta/orion/git/storage/auth/Auth.java
-git commit -m "feat: add remote git acl bootstrap storage"
-```
 
 ## Task 9: Enforce Startup Order
 
@@ -703,7 +643,7 @@ registrar.task(ApplicationState.STARTING, OrionLifecycleTasks.ACL_LOAD, this::on
 Make HTTP, Git, and SSH transport start tasks depend on `TRANSPORTS_START`, and make `TRANSPORTS_START`
 depend on `ACL_LOAD`.
 
-**Step 4: Run tests and commit**
+**Step 4: Run tests**
 
 Run:
 
@@ -712,13 +652,6 @@ mvn test -Pdev -pl core/bootstrap,net/http-core,net/git-transport -am -Dtest=Boo
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/acl/src/main/java/pro/deta/orion/acl/OrionAccessControlServiceImpl.java net/http-core/src/main/java/pro/deta/orion/transport/http/JettyHTTPServer.java net/git-transport/src/main/java/pro/deta/orion/transport/git/GitNativeTransportService.java net/git-transport/src/main/java/pro/deta/orion/transport/git/GitSshTransportService.java core/bootstrap/src/test/java/pro/deta/orion/component/BootstrapStartupOrderTest.java
-git commit -m "fix: start transports after acl bootstrap"
-```
 
 ## Task 10: Remove Bootstrap Coupling From ACL Path
 
@@ -757,7 +690,7 @@ Rules:
 - `VolatileUserAdded`, `assignUserGrants(...)`, and `GitBackedInternalStorage.registerArea(...)` remain available for non-bootstrap storage areas;
 - remove any README or comments that imply ACL bootstrap uses temporary users.
 
-**Step 4: Run tests and commit**
+**Step 4: Run tests**
 
 Run:
 
@@ -766,13 +699,6 @@ mvn test -Pdev -pl core/acl,core/bootstrap,core/git-storage -am -Dtest=AccessCon
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/acl/src/main/java/pro/deta/orion/acl/storage/GitAccessControlStorage.java core/bootstrap/src/main/java/pro/deta/orion/component/OrionRuntimeModule.java core/git-storage/src/main/java/pro/deta/orion/git/storage/GitBackedInternalStorage.java core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java core/acl/src/test/java/pro/deta/orion/acl/storage/AccessControlStorageTest.java
-git commit -m "refactor: isolate git storage areas from acl bootstrap"
-```
 
 ## Task 11: Add End-to-End Bootstrap Test With Transports Disabled
 
@@ -806,7 +732,7 @@ Expected: FAIL until all wiring supports the new config end to end.
 
 Only fix issues found by the test. Do not add new storage types in this task.
 
-**Step 4: Run tests and commit**
+**Step 4: Run tests**
 
 Run:
 
@@ -815,13 +741,6 @@ mvn test -Pdev -pl core/bootstrap -am -Dtest=AclBootstrapLifecycleTest,OrionRunt
 ```
 
 Expected: PASS.
-
-Commit:
-
-```bash
-git add core/bootstrap/src/test/java/pro/deta/orion/component/AclBootstrapLifecycleTest.java core/bootstrap/src/test/java/pro/deta/orion/component/OrionRuntimeModuleTest.java
-git commit -m "test: cover acl bootstrap with transports disabled"
-```
 
 ## Task 12: Update Documentation
 
@@ -862,13 +781,6 @@ rg -n "accessControl\\.type|accessControl\\.url|git\\.storagePath|VolatileUserAd
 ```
 
 Expected: no active documentation for the removed top-level config fields remains.
-
-**Step 4: Commit**
-
-```bash
-git add README.md docs/acl-bootstrap-storage-plan.md core/bootstrap/src/main/resources/config.yml core/bootstrap/src/main/resources/config.toml
-git commit -m "docs: document acl bootstrap storage configuration"
-```
 
 ## Task 13: Final Verification
 

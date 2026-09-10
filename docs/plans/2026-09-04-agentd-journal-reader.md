@@ -1,7 +1,5 @@
 # AgentD Session Journal Reader Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Add a bounded JVM reader that returns exact session-host journal records after an unsigned event-ID
 cursor across raw and Zstandard-compressed CBOR Sequence segments.
 
@@ -73,14 +71,6 @@ non-increasing values, and retain only records greater than the cursor while sti
 
 Run the command from Step 2. Expected: PASS.
 
-**Step 6: Commit the first slice**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/journal
-git add agentd/src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java
-git commit -m "Read raw AgentD journal segments"
-```
-
 ### Task 2: Add ordered segments, cursors, ranges, and retention gaps
 
 **Files:**
@@ -117,14 +107,6 @@ even when no records follow the cursor.
 
 Run the Task 1 command. Expected: PASS.
 
-**Step 5: Commit the cursor slice**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/journal
-git add agentd/src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java
-git commit -m "Add AgentD journal cursor ranges"
-```
-
 ### Task 3: Read compressed segments and compression overlap
 
 **Files:**
@@ -158,15 +140,6 @@ and close every layer with try-with-resources. Prefer the raw candidate whenever
 
 Run the Task 1 command. Expected: PASS.
 
-**Step 6: Commit the compression slice**
-
-```bash
-git add pom.xml agentd/pom.xml
-git add agentd/src/main/java/pro/deta/orion/agentd/journal
-git add agentd/src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java
-git commit -m "Read compressed AgentD journal segments"
-```
-
 ### Task 4: Distinguish active crash tails from corruption
 
 **Files:**
@@ -194,14 +167,6 @@ terminal issues to `JournalReadIssue`, stop at the first damage, and retain reco
 **Step 4: Run the focused test and verify it passes**
 
 Run the Task 1 command. Expected: PASS.
-
-**Step 5: Commit the recovery slice**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/journal
-git add agentd/src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java
-git commit -m "Recover valid AgentD journal prefixes"
-```
 
 ### Task 5: Verify concurrent append, replacement, retention, and restart reads
 
@@ -237,14 +202,6 @@ for iteration in {1..20}; do make run-test MODULE=agentd TEST='pro.deta.orion.ag
 
 Expected: all 20 iterations PASS without intermittent failures.
 
-**Step 5: Commit the concurrency slice**
-
-```bash
-git add agentd/src/main/java/pro/deta/orion/agentd/journal
-git add agentd/src/test/java/pro/deta/orion/agentd/journal/FileSystemSessionJournalReaderTest.java
-git commit -m "Handle concurrent AgentD journal maintenance"
-```
-
 ### Task 6: Verify the task and prepare dedicated-worktree completion
 
 **Files:**
@@ -275,25 +232,3 @@ Expected: BUILD SUCCESS.
 
 Run `git diff main...HEAD`, `git diff --check`, and inspect the changed APIs for exact-byte ownership, unsigned
 comparisons, bounded allocation, path diagnostics, and the design's corruption policy.
-
-**Step 4: Request code review**
-
-Use `superpowers:requesting-code-review`, read `docs/reviews/RULES.md`, and resolve every blocking finding. Repeat
-the focused test after each code change and rerun `mvn verify -Pdev -T 4` after the last review fix.
-
-**Step 5: Complete the task tree**
-
-Remove the completed journal-reader leaf directory and remove its link from the AgentD parent task. Keep the
-design and implementation plan as historical documentation.
-
-**Step 6: Squash and transfer to main**
-
-Follow the dedicated-worktree rules in `AGENTS.md` and `superpowers:finishing-a-development-branch`: squash every
-task-branch commit into exactly:
-
-```text
-Implement AgentD session journal reader [task: agentd/journal-reader]
-```
-
-Cherry-pick that commit to `main`, run `make test` there, then remove the completed worktree and delete its branch.
-Do not report completion until `git worktree list` no longer contains this worktree.

@@ -1,7 +1,5 @@
 # Session Host Metadata Manifest Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
-
 **Goal:** Reduce `session-host` metadata to a stable session manifest and stop rewriting it for journal-only
 events.
 
@@ -132,11 +130,3 @@ Expected: formatting and all module tests pass.
 Run: `mvn verify -Pdev -T 4`
 
 Expected: the complete development build passes.
-
-**Step 4: Finish the dedicated worktree task**
-
-- Review the diff against the approved metadata-manifest design.
-- Squash task-branch commits into one commit named
-  `Reduce session metadata to a manifest [task: native-session-host/metadata-manifest]`.
-- Remove `docs/plans/current-work/native-session-host/metadata-manifest/` and its parent link in that commit.
-- Cherry-pick the squashed commit to `main`, run `make test`, then remove the worktree and task branch.

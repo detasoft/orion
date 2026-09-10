@@ -145,14 +145,6 @@ Run the command from Step 2.
 
 Expected: PASS.
 
-**Step 5: Commit**
-
-```bash
-git add core/git-protocol-client/src/main/java/pro/deta/orion/git/client/machine \
-  core/git-protocol-client/src/test/java/pro/deta/orion/git/client/machine
-git commit -m "Add native Git client machine actions"
-```
-
 ### Task 2: Drive a client machine through one protocol session
 
 **Files:**
@@ -257,15 +249,6 @@ transport exception merely to change its message.
 Run the command from Step 2.
 
 Expected: PASS.
-
-**Step 9: Commit**
-
-```bash
-git add core/git-protocol-client/src/main/java/pro/deta/orion/git/client/machine \
-  core/git-protocol-client/src/test/java/pro/deta/orion/git/client/machine \
-  core/git-protocol-client/src/test/java/pro/deta/orion/git/client/ScriptedGitProtocolTransport.java
-git commit -m "Drive native Git clients through session machine"
-```
 
 ### Task 3: Add the upload-pack client machine
 
@@ -382,14 +365,6 @@ mvn test -Pdev -q -pl core/git-protocol-client -am \
 
 Expected: PASS.
 
-**Step 10: Commit**
-
-```bash
-git add core/git-protocol-client/src/main/java/pro/deta/orion/git/client/uploadpack \
-  core/git-protocol-client/src/test/java/pro/deta/orion/git/client/uploadpack
-git commit -m "Add native upload-pack client machine"
-```
-
 ### Task 4: Add the receive-pack client machine
 
 **Prerequisite:** The active wire-core task must provide the final typed v1
@@ -497,14 +472,6 @@ mvn test -Pdev -q -pl core/git-protocol-client -am \
 
 Expected: PASS.
 
-**Step 10: Commit**
-
-```bash
-git add core/git-protocol-client/src/main/java/pro/deta/orion/git/client/receivepack \
-  core/git-protocol-client/src/test/java/pro/deta/orion/git/client/receivepack
-git commit -m "Add native receive-pack client machine"
-```
-
 ### Task 5: Verify the module and finish task tracking
 
 **Files:**
@@ -560,11 +527,3 @@ git status --short
 
 Expected: no whitespace errors. Unrelated files owned by other active tasks
 remain unstaged.
-
-**Step 6: Commit task tracking**
-
-Stage only this task node's `TASK.md` changes and commit:
-
-```bash
-git commit -m "Complete native Git client state machines"
-```

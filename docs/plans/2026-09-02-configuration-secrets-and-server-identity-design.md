@@ -149,8 +149,3 @@ Server identity tests cover:
 - missing, conflicting, wrong-purpose, wrong-scope, and wrong-version material;
 - JWT issue and verification through capability-backed interfaces;
 - bootstrap wiring without any legacy filesystem dependency.
-
-Each slice is developed test-first in its own task worktree. After focused
-tests and full development verification pass, its task commit is squashed,
-transferred to `main` by cherry-pick, verified on `main`, and its worktree and
-branch are removed before the task is reported complete.

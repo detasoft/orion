@@ -1,7 +1,5 @@
 # Session Host Journal Writer API Simplification Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task by task.
-
 **Goal:** Reduce the Rust journal runtime to one writer lifecycle and the minimum scanner needed by production,
 while preserving persisted CBOR Sequence bytes and the cross-process protocol.
 
@@ -83,9 +81,7 @@ decoding and cursor reads move to integration-test support instead of remaining 
 2. Keep deterministic event-ID injection only as a private `#[cfg(test)]` seam if unit tests require it. Rename it
    to make test-only scope explicit and remove schema/flags parameters from it.
 3. Update every production and test caller. Preserve control-protocol schema/flags and signal payload flags.
-4. First commit the behavior/API replacement with its positive and edge-case coverage. Then remove legacy-only
-   rejection tests in a separate development commit, as required by `AGENTS.md`; the task branch will be squashed
-   before integration.
+4. Remove legacy-only rejection tests after the replacement has positive and edge-case coverage.
 5. Run `make session-host-test` outside the sandbox.
 
 ## Task 4: Delete the runtime reader and reduce the production scanner
@@ -127,9 +123,3 @@ decoding and cursor reads move to integration-test support instead of remaining 
 3. Compare fixture hashes with the Task 1 baseline; every checked-in byte must be identical.
 4. Run `git diff --check`.
 5. Run `make session-host-test` outside the sandbox.
-6. Create the logical implementation commit, then run `make test` outside the sandbox as required by `AGENTS.md`.
-   If a fix is needed after that commit, use the same commit subject for the follow-up so orchestration can squash
-   the task branch cleanly.
-
-The change workflow owns final review, user approval, task-node deletion, squash, cherry-pick to `main`, the
-post-integration `make test`, and branch/worktree cleanup.
