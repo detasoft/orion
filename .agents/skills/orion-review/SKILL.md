@@ -57,7 +57,11 @@ For each finding, record:
 8. **Priority signals:** importance and repair ease, each with evidence.
 
 Finding numbers are stable identifiers. Never renumber existing findings or
-reuse gaps; assign each new finding one above the current maximum.
+reuse gaps. Assign each new finding one above the highest number ever used in
+that report, considering both its current contents and Git history (including
+renames, deleted findings, and deletion or recreation of the report). Deleting
+the highest finding or all findings does not reset the sequence. Recover missing
+history before assigning a number when the historical maximum cannot be established.
 
 Apart from a minimal title, the report contains active findings only. Do not add
 status/date/count boilerplate, general summaries, progress notes, or resolved
