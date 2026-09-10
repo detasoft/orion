@@ -22,6 +22,8 @@
   verification. Do not put skill or execution-workflow references, staging,
   commit, review-gate, or branch-integration recipes in plans. These instructions
   belong in `AGENTS.md`, `docs/definitions.md`, and repository skills.
+- Create a standalone design or plan document only when the user explicitly
+  requests that document or the selected task names it as a deliverable.
 
 ## Commits and verification
 

@@ -53,6 +53,15 @@ sibling order and select the first dependency-ready leaf without an `Owner:`
 entry. An explicit user task or subtree narrows the candidates but does not
 bypass dependencies or ownership.
 
+A task locator is an exact path from the task root written as two-digit numeric
+segments separated by `/`, for example `04/02`. Resolve each segment against the
+unique sibling file or directory whose name starts with that numeric prefix.
+Every intermediate segment must resolve to a composite directory; the final
+segment may resolve to either a composite or an executable leaf. A composite
+locator narrows selection to that subtree. Reject non-canonical locators such as
+`4/2`, missing or ambiguous segments, and any attempt to descend through a leaf;
+do not fall back to fuzzy name matching or ignore unmatched segments.
+
 Only an `Owner:` entry in the executable leaf's body is a claim. Ignore
 `Status:`, ownership prose, review findings, and parent-composite owner markers
 when deciding whether that leaf is claimed. Never take over an existing leaf
