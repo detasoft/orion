@@ -3,6 +3,10 @@
 Status: todo
 Depends on: completed HTTP/2 control transport and durable agent/launch records,
 whose final observation checkpoint is committed in `73ad78bb`.
+- Owner: codex, session 01a08b49-d013-74c3-98ee-4a7f0ed6d032,
+  branch `codex/agent-launch-auth-01a08b49`,
+  worktree `.worktrees/agent-launch-auth-01a08b49`,
+  started 2026-09-10 14:58 Europe/Amsterdam.
 
 Authenticate each control stream against the server-owned launch before making
 the connection available to other server operations.
