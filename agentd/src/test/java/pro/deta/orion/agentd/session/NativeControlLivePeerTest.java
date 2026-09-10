@@ -16,6 +16,11 @@ import pro.deta.orion.agentd.journal.FileSystemSessionJournalReader;
 import pro.deta.orion.agentd.journal.JournalReadLimits;
 import pro.deta.orion.agentd.journal.JournalReadPage;
 
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -129,6 +134,19 @@ class NativeControlLivePeerTest {
             assertReceived(client.send(endpoint, acknowledgement), 2);
             awaitCommandResults(sessionDirectory, List.of(2L), 5);
 
+            try (SocketChannel stale = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+                stale.connect(UnixDomainSocketAddress.of(sessionDirectory.resolve("control.sock")));
+                assertThat(client.send(endpoint, new ControlCommand.ClaimServerControl(OptionalLong.of(43))))
+                        .isEqualTo(new ControlResult.ServerControlClaimed(
+                                OptionalLong.of(43), OptionalLong.of(acknowledgedEventId)));
+
+                ControlCommand.Resize fenced = new ControlCommand.Resize(
+                        44, SessionCommandSource.SERVER, SERVER_ENVELOPE, 102, 32);
+                writeFully(stale, new NativeControlCodec().encode(fenced));
+                assertThat(new NativeControlCodec().decode(fenced, readFrame(stale)))
+                        .isInstanceOf(ControlResult.Rejected.class);
+            }
+
             ControlCommand.Terminate terminate = new ControlCommand.Terminate(
                     3, SessionCommandSource.MANUAL, Optional.empty(), AgentMessage.TerminationMode.FORCE);
             assertReceived(client.send(endpoint, terminate), 3);
@@ -211,6 +229,31 @@ class NativeControlLivePeerTest {
 
     private static int continueSignal() {
         return System.getProperty("os.name").startsWith("Mac") ? 19 : 18;
+    }
+
+    private static byte[] readFrame(SocketChannel channel) throws Exception {
+        ByteBuffer header = ByteBuffer.allocate(NativeControlCodec.HEADER_LENGTH);
+        readFully(channel, header);
+        int payloadLength = ByteBuffer.wrap(header.array()).order(ByteOrder.LITTLE_ENDIAN).getInt(24);
+        ByteBuffer frame = ByteBuffer.allocate(NativeControlCodec.HEADER_LENGTH + payloadLength);
+        frame.put(header.array());
+        readFully(channel, frame.slice());
+        return frame.array();
+    }
+
+    private static void readFully(SocketChannel channel, ByteBuffer target) throws Exception {
+        while (target.hasRemaining()) {
+            if (channel.read(target) < 0) {
+                throw new AssertionError("session-host closed an incomplete control response");
+            }
+        }
+    }
+
+    private static void writeFully(SocketChannel channel, byte[] bytes) throws Exception {
+        ByteBuffer source = ByteBuffer.wrap(bytes);
+        while (source.hasRemaining()) {
+            channel.write(source);
+        }
     }
 
     private static void assertReceived(ControlResult result, long sequence) {

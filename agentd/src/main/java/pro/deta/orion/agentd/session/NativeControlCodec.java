@@ -72,6 +72,11 @@ public final class NativeControlCodec {
                     acknowledgement.serverCommandEnvelope(),
                     effect.array());
         }
+        if (command instanceof ControlCommand.ClaimServerControl claim) {
+            ByteBuffer recovery = payload(Long.BYTES);
+            recovery.putLong(claim.observedServerSequenceFloor().orElse(0));
+            return frame(9, QUERY_SEQUENCE, recovery.array());
+        }
         return frame(command instanceof ControlCommand.ListProcesses ? 8 : 5, QUERY_SEQUENCE, new byte[0]);
     }
 
@@ -94,6 +99,7 @@ public final class NativeControlCodec {
                 case 0x8002 -> rejection(operationSequence, payload);
                 case 0x8003 -> status(command, payload);
                 case 0x8004 -> processes(command, payload);
+                case 0x8005 -> serverControlClaimed(command, payload);
                 default -> failed(operationSequence, "unsupported response message type " + type);
             };
         } catch (IllegalArgumentException error) {
@@ -290,6 +296,21 @@ public final class NativeControlCodec {
                 exitSignal == -1 ? OptionalInt.empty() : OptionalInt.of(exitSignal),
                 journalVersion,
                 controlVersion));
+    }
+
+    private static ControlResult serverControlClaimed(ControlCommand command, ByteBuffer payload) {
+        if (!(command instanceof ControlCommand.ClaimServerControl) || payload.remaining() != 16) {
+            throw new IllegalArgumentException(
+                    "SERVER_CONTROL_CLAIMED response payload or request is invalid");
+        }
+        long acceptedSequence = payload.getLong();
+        long acknowledgedEventId = payload.getLong();
+        return new ControlResult.ServerControlClaimed(
+                optionalUnsigned(acceptedSequence), optionalUnsigned(acknowledgedEventId));
+    }
+
+    private static OptionalLong optionalUnsigned(long value) {
+        return value == 0 ? OptionalLong.empty() : OptionalLong.of(value);
     }
 
     private static ControlResult failed(OptionalLong operationSequence, String detail) {

@@ -4,8 +4,8 @@ Status: todo
 Depends on: completed AgentD HTTP/2 transport, session discovery, and session
 runtime/control; completed journal-reader (02e74a3a); 02_journal-sync.md;
 completed native-control-contract (`c298ad34`); completed source-aware controls
-(`09ed12c0`, `b3c8953c`);
-[SERVER sequence recovery](../05_native-session-host/08_server-operation-sequence-recovery.md); and the
+(`09ed12c0`, `b3c8953c`); completed native SERVER sequence recovery (`d2ad19d6`)
+and its AgentD sealed codec/client contract; and the
 [native control-journal contract](03_session-host-contract-alignment/TASK.md)
 
 - [ ] Route server session commands.
@@ -41,8 +41,8 @@ from each session journal.
 
 ## AgentD Command Orchestration Design
 
-> Recovery update, 2026-09-10: the
-> [SERVER sequence recovery contract](../05_native-session-host/08_server-operation-sequence-recovery.md)
+> Recovery update, 2026-09-10: the implemented
+> [native control protocol](../../../../session-host/protocol/README.md#control-responses)
 > defines the atomic host claim, recorded lower bound, connection fence, and
 > retention-watermark observation consumed below.
 

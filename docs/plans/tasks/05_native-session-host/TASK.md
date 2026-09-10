@@ -103,6 +103,11 @@ every valid manual delivery executes. Input IDs remain journal data and do not
 provide another deduplication mechanism. The protocol must not expose
 Unix-domain-socket or named-pipe details.
 
+The schema-1 `CLAIM_SERVER_CONTROL` recovery barrier atomically fences older
+connections and returns the host's accepted `SERVER` sequence high-water mark
+and applied journal-acknowledgement watermark. AgentD uses the first value for
+its next in-memory allocation and the second only for retention reconciliation.
+
 ### Session Storage
 
 Each session uses one directory:

@@ -123,6 +123,19 @@ public sealed interface ControlCommand {
     record ListProcesses() implements ControlCommand {
     }
 
+    record ClaimServerControl(OptionalLong observedServerSequenceFloor) implements ControlCommand {
+        public ClaimServerControl {
+            observedServerSequenceFloor = Objects.requireNonNull(
+                    observedServerSequenceFloor, "observedServerSequenceFloor");
+            if (observedServerSequenceFloor.isPresent()
+                    && (observedServerSequenceFloor.getAsLong() == 0
+                    || observedServerSequenceFloor.getAsLong() == -1)) {
+                throw new IllegalArgumentException(
+                        "observed server sequence floor must be between 1 and u64::MAX - 1");
+            }
+        }
+    }
+
     private static Optional<ProtocolBytes> requireOperation(
             long sequence,
             SessionCommandSource source,

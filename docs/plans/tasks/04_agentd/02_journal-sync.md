@@ -13,8 +13,9 @@ forward durable commit acknowledgements to `session-host` for safe retention.
 - Completed paged journal reader.
 - Native-host `ACK_JOURNAL` compatibility contract from
   the [control-journal contract](03_session-host-contract-alignment/TASK.md).
-- Atomic host claim and sequence recovery from the
-  [SERVER sequence recovery contract](../05_native-session-host/08_server-operation-sequence-recovery.md).
+- Completed atomic host claim and sequence recovery (`d2ad19d6`) from the
+  [native control protocol](../../../../session-host/protocol/README.md#control-responses),
+  with its AgentD sealed codec/client contract.
 
 Control integration: consume the authenticated connection lifecycle from
 [AgentD control connection work](01_control-connection-lifecycle/TASK.md).
