@@ -20,12 +20,13 @@ public final class TestLoggingConfigurer implements TestExecutionListener {
     }
 
     static void configureFromProperties() {
+        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
         if (!Boolean.parseBoolean(System.getProperty(DEBUG_PROPERTY, "false"))) {
+            context.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME).setLevel(Level.INFO);
             return;
         }
 
         Level defaultLevel = parseLevel(System.getProperty(LEVEL_PROPERTY, DEFAULT_LEVEL));
-        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
         for (String entry : categories()) {
             if (entry.isBlank()) {
                 continue;
