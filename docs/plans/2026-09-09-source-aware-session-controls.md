@@ -8,6 +8,8 @@
 
 **Tech Stack:** Rust 2024, Unix domain sockets, CBOR Sequence journals, Java 21, JUnit 5, AssertJ, Maven, Make.
 
+**Build integration:** [Session host test Make target design](2026-09-10-session-host-test-make-target-design.md)
+
 ---
 
 ## Behavioral delta
@@ -45,6 +47,59 @@ The current journal payload is:
 
 No schema-1/schema-2 operation reader, writer, fixture, fallback, migration mode, or negative compatibility test remains. STATUS, responses, and unrelated payloads keep their existing schemas.
 
+### Task 0: Restore the root session-host test target
+
+**Files:**
+
+- Modify: `Makefile`
+
+**Step 1: Verify that the target is absent**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+```
+
+Expected: Make fails with `No rule to make target 'session-host-test'`.
+
+**Step 2: Add the minimal root target**
+
+Add `session-host-test` to `RUN_TEST_RESERVED_GOALS` and `.PHONY`. Make it
+depend on the existing `rust-install` target and run:
+
+```make
+session-host-test: rust-install
+	cd session-host && $(HOME)/.cargo/bin/cargo test --locked
+```
+
+Make the existing Maven target depend on it without changing the Maven recipe:
+
+```make
+test: session-host-test
+```
+
+Do not restore `session-host/Makefile` or add another script or wrapper.
+
+**Step 3: Verify the dedicated target and composed ordering**
+
+Run outside the sandbox:
+
+```bash
+make session-host-test
+make -n test
+```
+
+Expected: the Rust suite passes, and the dry run shows the Rust test command
+before the unchanged Maven test command.
+
+**Step 4: Commit the build slice**
+
+```bash
+git add Makefile
+git commit -m "Run session host tests through root Make"
+```
+
 ### Task 1: Replace the Rust wire and journal model
 
 **Files:**
@@ -80,8 +135,7 @@ Update the test journal decoder to expose source before sequence so real-host as
 Run outside the sandbox:
 
 ```bash
-cd session-host
-"$HOME/.cargo/bin/cargo" test --locked
+make session-host-test
 ```
 
 Expected: the new source-aware assertions fail until the codec and journal encoder implement the replacement layouts; the crate must compile.
@@ -106,8 +160,7 @@ Delete the two superseded operation fixtures and their generator/test references
 Run outside the sandbox:
 
 ```bash
-cd session-host
-"$HOME/.cargo/bin/cargo" test --locked
+make session-host-test
 ```
 
 Expected: all Rust tests pass.
@@ -144,8 +197,7 @@ Reuse the existing lost-receipt, effect-failure, and result-append-failure cover
 Run outside the sandbox:
 
 ```bash
-cd session-host
-"$HOME/.cargo/bin/cargo" test --locked
+make session-host-test
 ```
 
 Expected: the new repeated/interleaved `MANUAL` tests fail because the global high-water mark still applies to every operation.
@@ -167,8 +219,7 @@ After `RECEIVED`, execute and append the same `JournalEvent::CommandResult` for 
 Run outside the sandbox:
 
 ```bash
-cd session-host
-"$HOME/.cargo/bin/cargo" test --locked
+make session-host-test
 ```
 
 Expected: all Rust unit and real-host tests pass.
@@ -318,9 +369,6 @@ git commit -m "Remove superseded native operation coverage"
 Run outside the sandbox:
 
 ```bash
-cd session-host
-"$HOME/.cargo/bin/cargo" test --locked
-cd ..
 make test
 mvn verify -Pdev -T 4
 git diff --check
