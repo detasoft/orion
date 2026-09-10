@@ -1,7 +1,7 @@
 # Persist Launch Generations and Permits
 
 Status: todo
-Depends on: 01_agent-registration-records.md
+Depends on: registered-agent registry foundation committed in `6648e57c`.
 Design: ../../../../2026-09-02-agentd-server-launched-identity-design.md
 Plan: ../../../../2026-09-09-agent-server-durable-records.md
 
