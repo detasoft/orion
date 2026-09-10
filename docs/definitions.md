@@ -29,6 +29,12 @@ request safely. Otherwise choose by the shape of the work, not by file type:
 | Several sequential checkpoints, or a requested staged user review | Simple |
 | Execution of a task-tree leaf, or work requiring an isolated worker | Change |
 
+Every workflow may update task status and completion state through
+`orion-task-runner`. Recording the verified result of Quick or Simple in the
+task tree does not require Change. Completion must satisfy the workflow that
+performed the work; Change's integration and cleanup gates apply only to work
+executed through Change.
+
 Escalate to a workflow with stronger mechanics when inspection reveals that the
 selected one cannot safely contain the work. Do not silently carry partial edits
 into another workflow: preserve and report the current state first.
@@ -103,8 +109,9 @@ commits.
 4. Stage only its verified files and hunks, then inspect the staged diff.
 5. Commit immediately with a descriptive single-line subject.
 
-Quick does not create or claim a task, launch a worker, create a worktree, or add
-a staged user-review gate. If the request contains several independently
+Quick does not launch a worker, create a worktree, or add a staged user-review
+gate. It may update task-tree state in scope through `orion-task-runner` without
+starting task-tree implementation. If the request contains several independently
 committable results, use Simple rather than splitting them inside Quick.
 
 ### Simple workflow
@@ -130,8 +137,9 @@ short result, and `command -> passed/failed` verification summary. Remove raw
 tool and test output, detailed investigation, local decisions, rejected
 alternatives, and discussion that cannot affect remaining work.
 
-Simple has no task claims, task lifecycle, governing-state commits, worker, or
-dedicated worktree. When repairing a `MODULE_REVIEW.md` finding, update or remove
+Simple has no dedicated worker or worktree. It may update task status and
+completion state in scope through `orion-task-runner`, including in the same
+checkpoint as the verified result. When repairing a `MODULE_REVIEW.md` finding, update or remove
 that finding in the same checkpoint commit as the verified repair.
 
 ### Change workflow

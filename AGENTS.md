@@ -9,6 +9,8 @@
 - Use `orion-task-runner` for every task-tree operation. Executing a task-tree
   leaf uses Change workflow; planning, status, and task-tree edits alone do not
   start or claim implementation.
+  Any workflow may update task status and completion state through that skill
+  when the update is supported by verified work within the request's scope.
 - Use `orion-minimal-implementation` for every implementation or review.
   Review, status, and explanation requests are read-only except that
   `orion-review` maintains and commits requested module reports.

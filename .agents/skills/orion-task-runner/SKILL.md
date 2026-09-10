@@ -18,6 +18,9 @@ candidate leaves, then inspect `git status --short`. Preserve unrelated work.
 Planning, triage, explanation, and status requests do not claim or start work.
 Only Change creates an implementation claim. A requested task-tree edit may
 still add, reorder, or rewrite nodes because that edit is itself the result.
+Any workflow may update task status and completion state when supported by
+verified work within the request's scope. State bookkeeping alone does not
+select Change or authorize implementation.
 
 ## Task model
 
@@ -95,8 +98,9 @@ pause, and completion state governing its task as read-only.
 
 ## Pause and completion
 
-An incomplete worker reports its next step without editing the task tree. The
-primary agent updates the existing leaf claim and commits it directly on `main`:
+For an incomplete Change execution, the worker reports its next step without
+editing the task tree. The primary agent updates the existing leaf claim and
+commits it directly on `main`:
 
 ```markdown
 - Owner: codex, session SESSION_ID, branch `codex/CHANGE_SLUG`,
@@ -104,11 +108,18 @@ primary agent updates the existing leaf claim and commits it directly on `main`:
   next: brief next step.
 ```
 
-Complete task state only after Change has integrated and verified the task and
-removed its worktree and branch. The primary agent then deletes the leaf,
-removes eligible empty ancestors, updates outstanding-work and dependency
-references with completion evidence, and commits that coherent state directly
-on `main`.
+Complete task state only when the requested scope and acceptance have been
+satisfied with the verification and review required by the workflow that
+performed the work. For Change, integration, verification on `main`, and removal
+of its worktree and branch must also be complete before the primary agent
+commits completion state directly on `main`.
+
+Quick and Simple may record completion in their current worktree and branch,
+including in the same commit as their verified result; they do not acquire
+Change's worktree or integration requirements. Delete the completed leaf,
+remove eligible empty ancestors, and update outstanding-work and dependency
+references with completion evidence. Preserve claims owned by other executions;
+do not release or take them over merely to synchronize status.
 
 Preserve unfinished siblings and claimed state. Do not renumber after completion
 or retain completed task nodes as history.

@@ -22,9 +22,10 @@ independently committable results, needs staged user review, or requires an
 isolated worker, stop before expanding the edit and report that Quick no longer
 fits.
 
-Quick never creates or claims a task, launches a worker, creates a worktree, or
-switches branches. Use `orion-task-runner` only when changing task-tree content
-is itself the requested result.
+Quick never launches a worker, creates a worktree, or switches branches. It may
+update task status and completion state through `orion-task-runner` when that
+update records verified work in scope or is itself the requested result. Such
+bookkeeping does not start task-tree implementation or select Change.
 
 ## Execute
 
