@@ -5,7 +5,7 @@ import pro.deta.orion.agentd.core.AgentConfiguration;
 import pro.deta.orion.agentd.core.AgentLaunchContext;
 import pro.deta.orion.agentd.core.LaunchPermit;
 import pro.deta.orion.agentd.core.LaunchPermitReader;
-import pro.deta.orion.agentd.terminal.LocalSessionLauncher;
+import pro.deta.orion.agentd.terminal.LocalTerminalCommand;
 
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -16,6 +16,7 @@ public final class AgentdMain {
             Usage: java -jar agentd.jar --server HTTPS_URI [options]
                    java -jar agentd.jar terminal start --session-host PATH
                        --state-dir PATH [options] -- COMMAND...
+                   java -jar agentd.jar terminal attach --session-dir PATH
 
             Options:
               --state-dir PATH       persistent AgentD state directory
@@ -54,12 +55,7 @@ public final class AgentdMain {
             Launcher launcher
     ) {
         if (args.length > 0 && "terminal".equals(args[0])) {
-            if (args.length < 2 || !"start".equals(args[1])) {
-                errors.println("Usage: agentd terminal start [options] -- COMMAND...");
-                return 2;
-            }
-            return LocalSessionLauncher.run(
-                    Arrays.copyOfRange(args, 2, args.length), output, errors);
+            return LocalTerminalCommand.run(Arrays.copyOfRange(args, 1, args.length), output, errors);
         }
         if (args.length == 1 && "--help".equals(args[0])) {
             output.print(USAGE);

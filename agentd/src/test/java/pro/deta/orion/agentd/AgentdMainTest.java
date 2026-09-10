@@ -28,7 +28,7 @@ class AgentdMainTest {
 
         assertThat(exitCode).isZero();
         assertThat(output.toString(StandardCharsets.UTF_8))
-                .contains("Usage:", "--server", "terminal start");
+                .contains("Usage:", "--server", "terminal start", "terminal attach");
         assertThat(errors.toString(StandardCharsets.UTF_8)).isEmpty();
     }
 
@@ -78,6 +78,27 @@ class AgentdMainTest {
 
         assertThat(exit).isEqualTo(2);
         assertThat(errors.toString(StandardCharsets.UTF_8)).contains("terminal start");
+    }
+
+    @Test
+    void routesLocalSessionAttachWithoutReadingTheDaemonPermit() {
+        InputStream forbidden = new InputStream() {
+            @Override
+            public int read() {
+                throw new AssertionError("terminal attach must not read the daemon permit");
+            }
+        };
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+
+        int exit = AgentdMain.run(
+                new String[]{"terminal", "attach"},
+                forbidden,
+                new PrintStream(new ByteArrayOutputStream()),
+                new PrintStream(errors));
+
+        assertThat(exit).isEqualTo(2);
+        assertThat(errors.toString(StandardCharsets.UTF_8))
+                .contains("terminal attach", "--session-dir");
     }
 
     @Test

@@ -9,7 +9,6 @@ import pro.deta.orion.agentd.runtime.SessionSpec;
 import pro.deta.orion.agentd.runtime.WorkspaceReference;
 
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -21,38 +20,56 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-public final class LocalSessionLauncher {
+final class LocalSessionLauncher {
     private static final String USAGE = """
             Usage: agentd terminal start --session-host PATH --state-dir PATH
                    [--session-id ID] [--cwd PATH] -- COMMAND...
             """;
-    private static final int MAX_DIAGNOSTIC_BYTES = 512;
 
-    private LocalSessionLauncher() {
-    }
+    private final Map<String, String> environment;
+    private final RuntimeFactory runtimes;
+    private final LocalTerminalCommand.Attacher attacher;
 
-    public static int run(String[] arguments, PrintStream output, PrintStream errors) {
-        return run(arguments, output, errors, System.getenv(),
+    private LocalSessionLauncher(LocalTerminalCommand.Attacher attacher) {
+        this(System.getenv(),
                 (executable, sessionsDirectory) -> new NativeRuntime(
                         executable,
                         sessionsDirectory,
                         Duration.ofSeconds(10),
                         Duration.ofSeconds(2),
-                        Duration.ofSeconds(2)));
+                        Duration.ofSeconds(2)),
+                attacher);
+    }
+
+    LocalSessionLauncher(
+            Map<String, String> environment,
+            RuntimeFactory runtimes,
+            LocalTerminalCommand.Attacher attacher
+    ) {
+        this.environment = Map.copyOf(environment);
+        this.runtimes = java.util.Objects.requireNonNull(runtimes, "runtimes");
+        this.attacher = java.util.Objects.requireNonNull(attacher, "attacher");
     }
 
     static int run(
             String[] arguments,
             PrintStream output,
             PrintStream errors,
-            Map<String, String> environment,
-            RuntimeFactory runtimes
+            LocalTerminalCommand.Attacher attacher
+    ) {
+        return new LocalSessionLauncher(attacher).execute(arguments, output, errors);
+    }
+
+    int execute(
+            String[] arguments,
+            PrintStream output,
+            PrintStream errors
     ) {
         LaunchRequest request;
         try {
             request = parse(arguments, environment);
         } catch (IllegalArgumentException error) {
-            errors.println(bounded(error.getMessage()));
+            errors.println(TerminalDiagnostics.bounded(error.getMessage()));
             errors.print(USAGE);
             return 2;
         }
@@ -62,10 +79,10 @@ public final class LocalSessionLauncher {
         SessionLaunchResult result = runtime.launch(request.spec());
         if (result instanceof SessionLaunchResult.Started started) {
             output.println("session=" + started.sessionId().value() + " directory=" + started.directory());
-            return 0;
+            return attacher.attach(started.directory(), errors);
         }
         SessionLaunchResult.Failed failed = (SessionLaunchResult.Failed) result;
-        errors.println(failed.kind() + ": " + bounded(failed.detail()));
+        errors.println(TerminalDiagnostics.bounded(failed.kind() + ": " + failed.detail()));
         return 1;
     }
 
@@ -145,23 +162,7 @@ public final class LocalSessionLauncher {
                 && !value.isEmpty()
                 && value.indexOf('=') < 0
                 && value.indexOf('\0') < 0
-                && value.getBytes(StandardCharsets.UTF_8).length <= 128;
-    }
-
-    private static String bounded(String detail) {
-        String value = detail == null ? "unknown failure" : detail;
-        if (value.getBytes(StandardCharsets.UTF_8).length <= MAX_DIAGNOSTIC_BYTES) {
-            return value;
-        }
-        int end = value.length();
-        while (end > 0
-                && value.substring(0, end).getBytes(StandardCharsets.UTF_8).length > MAX_DIAGNOSTIC_BYTES) {
-            end--;
-        }
-        if (end > 0 && Character.isHighSurrogate(value.charAt(end - 1))) {
-            end--;
-        }
-        return value.substring(0, end);
+                && value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 128;
     }
 
     private record LaunchRequest(Path sessionHost, Path stateDirectory, SessionSpec spec) {

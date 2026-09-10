@@ -26,23 +26,28 @@ class LocalSessionLauncherTest {
         Path state = temporaryDirectory.resolve("state");
         Path workspace = temporaryDirectory.resolve("workspace");
         AtomicReference<SessionSpec> launched = new AtomicReference<>();
+        AtomicReference<Path> attached = new AtomicReference<>();
         SessionRuntime runtime = spec -> {
             launched.set(spec);
             return new SessionLaunchResult.Started(spec.sessionId(), state.resolve("sessions/session-one"));
         };
         ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-        int exit = LocalSessionLauncher.run(new String[]{
+        int exit = new LocalSessionLauncher(
+                Map.of("TERM", "screen", "COLORTERM", "truecolor"),
+                (host, sessions) -> runtime,
+                (directory, errors) -> {
+                    attached.set(directory);
+                    return 9;
+                }).execute(new String[]{
                 "--session-host", executable.toString(),
                 "--state-dir", state.toString(),
                 "--session-id", "session-one",
                 "--cwd", workspace.toString(),
                 "--", "/bin/sh", "-l"
-        }, new PrintStream(output), new PrintStream(new ByteArrayOutputStream()),
-                Map.of("TERM", "screen", "COLORTERM", "truecolor"),
-                (host, sessions) -> runtime);
+        }, new PrintStream(output), new PrintStream(new ByteArrayOutputStream()));
 
-        assertThat(exit).isZero();
+        assertThat(exit).isEqualTo(9);
         assertThat(launched.get().sessionId().value()).isEqualTo("session-one");
         assertThat(launched.get().startCommandId().value()).startsWith("local-start-");
         assertThat(launched.get().command()).containsExactly("/bin/sh", "-l");
@@ -57,6 +62,7 @@ class LocalSessionLauncherTest {
         assertThat(output.toString(StandardCharsets.UTF_8))
                 .isEqualTo("session=session-one directory="
                         + state.resolve("sessions/session-one").toAbsolutePath().normalize() + "\n");
+        assertThat(attached.get()).isEqualTo(state.resolve("sessions/session-one"));
     }
 
     @Test
@@ -67,13 +73,14 @@ class LocalSessionLauncherTest {
             return new SessionLaunchResult.Started(spec.sessionId(), temporaryDirectory.resolve("session"));
         };
 
-        int exit = LocalSessionLauncher.run(new String[]{
+        int exit = new LocalSessionLauncher(
+                Map.of("TERM", "bad=value", "COLORTERM", "x".repeat(129)),
+                (host, sessions) -> runtime,
+                (directory, errors) -> 0).execute(new String[]{
                 "--session-host", temporaryDirectory.resolve("session-host").toString(),
                 "--state-dir", temporaryDirectory.resolve("state").toString(),
                 "--", "/bin/cat"
-        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()),
-                Map.of("TERM", "bad=value", "COLORTERM", "x".repeat(129)),
-                (host, sessions) -> runtime);
+        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
 
         assertThat(exit).isZero();
         assertThat(launched.get().sessionId().value()).startsWith("local-session-");
@@ -86,21 +93,29 @@ class LocalSessionLauncherTest {
     @Test
     void separatesUsageErrorsFromBoundedLaunchFailures() {
         ByteArrayOutputStream usageErrors = new ByteArrayOutputStream();
-        int invalid = LocalSessionLauncher.run(
-                new String[]{"--state-dir", temporaryDirectory.toString()},
-                new PrintStream(new ByteArrayOutputStream()), new PrintStream(usageErrors), Map.of(),
+        int invalid = new LocalSessionLauncher(
+                Map.of(),
                 (host, sessions) -> spec -> {
                     throw new AssertionError("invalid input must not launch");
-                });
+                },
+                (directory, errors) -> {
+                    throw new AssertionError("invalid input must not attach");
+                }).execute(
+                new String[]{"--state-dir", temporaryDirectory.toString()},
+                new PrintStream(new ByteArrayOutputStream()), new PrintStream(usageErrors));
 
         ByteArrayOutputStream launchErrors = new ByteArrayOutputStream();
-        int failed = LocalSessionLauncher.run(new String[]{
+        int failed = new LocalSessionLauncher(
+                Map.of(),
+                (host, sessions) -> spec -> SessionLaunchResult.failed(
+                        SessionLaunchResult.FailureKind.INITIALIZATION_FAILED, "x".repeat(700)),
+                (directory, errors) -> {
+                    throw new AssertionError("failed launch must not attach");
+                }).execute(new String[]{
                 "--session-host", temporaryDirectory.resolve("session-host").toString(),
                 "--state-dir", temporaryDirectory.resolve("state").toString(),
                 "--", "/bin/secret-command"
-        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(launchErrors), Map.of(),
-                (host, sessions) -> spec -> SessionLaunchResult.failed(
-                        SessionLaunchResult.FailureKind.INITIALIZATION_FAILED, "x".repeat(700)));
+        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(launchErrors));
 
         assertThat(invalid).isEqualTo(2);
         assertThat(usageErrors.toString(StandardCharsets.UTF_8)).contains("terminal start");
