@@ -16,7 +16,6 @@ import pro.deta.orion.agentd.journal.FileSystemSessionJournalReader;
 import pro.deta.orion.agentd.journal.JournalReadLimits;
 import pro.deta.orion.agentd.journal.JournalReadPage;
 
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -163,25 +162,12 @@ class NativeControlLivePeerTest {
     }
 
     private Path extractSessionHost() throws Exception {
-        String resource = "META-INF/orion/native/session-host/" + nativeTarget() + "/session-host";
+        Path builtExecutable = Path.of("../session-host/target/debug/session-host");
+        assertThat(builtExecutable).isRegularFile().isExecutable();
         Path executable = temporaryDirectory.resolve("session-host");
-        try (InputStream input = NativeControlLivePeerTest.class.getClassLoader()
-                .getResourceAsStream(resource)) {
-            assertThat(input).as(resource).isNotNull();
-            Files.copy(input, executable);
-        }
+        Files.copy(builtExecutable, executable);
         assertThat(executable.toFile().setExecutable(true)).isTrue();
         return executable;
-    }
-
-    private static String nativeTarget() {
-        String architecture = System.getProperty("os.arch");
-        String machine = architecture.equals("aarch64") || architecture.equals("arm64")
-                ? "aarch64"
-                : "x86_64";
-        return machine + (System.getProperty("os.name").startsWith("Mac")
-                ? "-apple-darwin"
-                : "-unknown-linux-gnu");
     }
 
     private static int continueSignal() {
