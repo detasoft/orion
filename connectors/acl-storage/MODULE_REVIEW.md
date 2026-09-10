@@ -19,11 +19,9 @@ The split-file service test
 [`atomicallyAddsCanonicalKeysAndPreservesTheOtherAclFile`](../../core/acl/src/test/java/pro/deta/orion/acl/OrionAccessControlServiceImplTest.java#L153)
 uses an in-memory store and cannot expose filesystem publication failure.
 
-**Documented behavior.** The SSH credential plan requires changing only the owning draft, preserving every other
-file, and activating only after successful persistence in
-[`snapshot-aware query and mutation helpers`](../../docs/plans/2026-09-04-ssh-credential-commands.md#L260).
-The queued
-[`saved snapshot contract`](../../docs/plans/upcoming-work/01_acl-storage-hardening/05_exact-snapshot-save.md)
+**Documented behavior.** The integrated SSH credential behavior in `56e16093` requires changing only the owning draft, preserving every
+other file, and activating only after successful persistence. The queued
+[`saved snapshot contract`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/05_exact-snapshot-save.md)
 requires an explicit Local publication guarantee but leaves multi-file atomicity as a decision.
 
 **Contract.** A normal single-document mutation must not require write access to byte-identical documents, must
@@ -69,7 +67,7 @@ combines `NOFOLLOW_LINKS` existence with following operations. The current
 covers ordinary files only.
 
 **Documented behavior.** The queued
-[`physical containment`](../../docs/plans/upcoming-work/01_acl-storage-hardening/04_local-path-containment.md)
+[`physical containment`](../../docs/plans/tasks/02_hierarchical-orion-configuration/04_acl-storage-hardening/04_local-path-containment.md)
 task explicitly requires protection against intermediate and final symlinks and containment through use.
 
 **Contract.** The configured root is trusted, but control of a descendant link must not grant Orion's process

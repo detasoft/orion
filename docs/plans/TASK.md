@@ -1,24 +1,8 @@
 # Orion Task Tree
 
-Status: active
+The task tree is rooted at [tasks/TASK.md](tasks/TASK.md). There is one ordered
+task space; `current-work` and `upcoming-work` are not separate queues.
 
-This filesystem tree is the source of truth for current and upcoming Orion work.
-The unnumbered queue roots are [current work](current-work/TASK.md) and
-[upcoming work](upcoming-work/TASK.md).
-
-Below either queue, `NN_slug/` is a composite task with its own `TASK.md`,
-and `NN_slug.md` is an executable leaf. Composites may nest to any depth.
-Numeric prefixes are local to each directory, unique across sibling files and
-directories, and may have gaps. Directory entries alone define child membership
-and order; parent files describe aggregate scope, dependencies, and acceptance.
-
-For the next task, traverse current work recursively in numeric sibling order
-and select the first unclaimed, dependency-ready leaf. Use upcoming work if no
-current leaf is ready, including required prerequisites. Check the leaf,
-other worktrees, and branch history for ownership and integration evidence;
-check ancestors for dependencies and scope. An old owner timestamp or missing
-file does not prove release or completion. The
-[dependency and coordination audit](2026-09-09-task-stream-order.md)
-records cross-task gates; its snapshot labels are not a separate queue order.
-
-Detailed designs and completion evidence belong in ordinary `docs/plans/` documents.
+Task requirements, design, implementation steps, and acceptance criteria live
+inside their numbered task node. Completed tasks and their embedded planning
+content are removed, with Git history serving as completion evidence.

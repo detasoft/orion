@@ -19,8 +19,8 @@ These are distinct storage identities. Frontend creation introduces another norm
 [canonical advertised pack URI](src/test/java/pro/deta/orion/transport/http/OrionGitRouteNativeTest.java#L93).
 
 **Documented behavior.** The
-[Smart HTTP plan](../../docs/plans/2026-05-15-git-smart-http-transport-adapters.md#L141)
-requires repository decoding and normalization once, before authorization.
+[typed matching task](../../docs/plans/tasks/12_http-core-hardening/02_typed-route-matching.md)
+requires one canonical repository identity before authorization.
 
 **Contract.** Repository and branch authorization must refer to exactly the repository opened or modified.
 Preserve ordinary nested names and established single-suffix aliases without silently merging distinct
@@ -62,7 +62,7 @@ handler. Git and pack routes overlap and depend on non-asterisk character count 
 [current synthetic overlap coverage](src/test/java/pro/deta/orion/transport/http/OrionHttpRouteServletRoutingTest.java#L39).
 
 **Documented behavior.** The
-[typed-matching task](../../docs/plans/upcoming-work/11_http-core-hardening/02_typed-route-matching.md)
+[typed-matching task](../../docs/plans/tasks/12_http-core-hardening/02_typed-route-matching.md)
 requires segment boundaries, shared captures and explicit ownership of /r/.
 
 **Contract.** Preserve deterministic exact-route precedence, nested repository paths, the current frontend
@@ -103,11 +103,9 @@ committed.
 [gzip conversion](src/main/java/pro/deta/orion/transport/http/GitHttpRequestBody.java#L24), and
 [current gzip tests](src/test/java/pro/deta/orion/transport/http/GitHttpRequestBodyTest.java#L49).
 
-**Documented behavior.** The
-[Smart HTTP failure contract](../../docs/plans/2026-05-15-git-smart-http-transport-adapters.md#L214)
-distinguishes malformed requests, denied access, missing repositories and failures after streaming.
-The [gzip plan](../../docs/plans/2026-09-02-smart-http-compressed-request-bodies.md#L64) explicitly required the
-current broad I/O wrapping; narrowing that classification changes that documented implementation decision.
+**Documented behavior.** The integrated Smart HTTP and gzip implementations distinguish malformed requests,
+denied access, missing repositories, failures after streaming, and broad source I/O wrapping. Narrowing that
+classification changes the behavior established by `1818c028` and the current tests.
 
 **Contract.** Malformed client input, absence, authorization failure and backend failure must remain distinct.
 An unexpected internal failure must not expose incidental exception text as a client error. Setting status 200

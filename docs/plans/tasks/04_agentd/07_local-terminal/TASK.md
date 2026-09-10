@@ -1,0 +1,760 @@
+# Run AgentD as a Local Terminal
+
+Status: todo
+
+The focused design governs `01_launch.md`; the broader design governs the
+interactive follow-up.
+
+Provide a local AgentD path for starting and later attaching to an independent
+`session-host` without an Orion server.
+
+The first child delivers a launch-only vertical slice through the existing
+native runtime. Interactive attachment, journal rendering, input, resize, and
+manual control remain in the second child and retain their broader dependencies.
+
+## Boundary
+
+- Local mode does not read a server launch permit or initialize AgentD's HTTP/2
+  transport.
+- `session-host` and its child remain independent after the launching AgentD
+  command exits.
+- Server command orchestration and journal replication remain in their existing
+  tasks.
+
+---
+
+## AgentD Local Interactive Terminal Design
+
+Status: approved on 2026-09-04.
+
+### Context
+
+Developers need to exercise `session-host` locally without starting the Orion
+server. Directly reading the child PTY would bypass the production boundary:
+`session-host` owns the PTY, publishes output through its durable journal, and
+accepts input and terminal changes through its control endpoint. The local tool
+must use those same paths so it remains useful for protocol, retention, restart,
+and recovery testing.
+
+AgentD already owns the Java implementations needed to launch and discover
+native sessions, read segmented journals, decode known events, and deliver
+native controls. The local tool therefore belongs in the existing AgentD
+executable rather than a separate module or a second protocol implementation.
+
+### Selected Architecture
+
+`AgentdMain` becomes an explicit command router with two top-level modes:
+
+```text
+agentd daemon --server HTTPS_URI [daemon options]
+agentd terminal start [terminal and session options] -- COMMAND...
+agentd terminal attach --session-dir PATH [terminal options]
+```
+
+`daemon` is the only mode that parses server configuration, consumes the
+single-use launch permit from stdin, constructs `Agent`, or initializes the
+HTTP/2 transport. The former subcommand-free daemon syntax is intentionally
+removed. Remote provisioning, launch fixtures, tests, and user-facing examples
+must pass `daemon` explicitly.
+
+`terminal` constructs only local AgentD components. `start` maps CLI values to
+a `SessionSpec`, generates a session ID and start CommandId when the caller does
+not supply them, launches the native executable through `NativeRuntime`, and
+then attaches to the resulting session directory. `attach` validates the
+existing manifest and live control endpoint without launching a process.
+
+The first release supports interactive POSIX terminals on macOS and Linux.
+Windows Console support is out of scope. A narrow terminal adapter owns raw
+mode, byte input/output, the current window size, resize notifications, and
+restoration. The orchestration layer depends on that adapter rather than on
+global streams so deterministic tests do not require a real TTY.
+
+### Journal and Control Flow
+
+The terminal controller starts with no private durable cursor. It reads the
+oldest retained journal record through the stable tail, renders each
+`PTY_OUTPUT` payload byte-for-byte, and observes command and lifecycle records
+needed to recover the next operation sequence. Unknown event types do not
+affect the screen but still advance the in-memory journal cursor. After catch-up
+the existing journal availability monitor wakes bounded incremental reads of
+the active tail. Polling remains a safety net for missed or overflowed
+filesystem notifications.
+
+The input side sends bounded stdin chunks as `INPUT` operations. The current
+terminal dimensions initialize the session and subsequent POSIX window changes
+become ordered `RESIZE` operations. Every established-session operation uses a
+fresh CommandId, the canonical Agent protocol command envelope, and the next
+operation sequence recovered from journal history. The tool uses the same
+control codec, retry identity, and serial ordering as daemon mode; it does not
+add a simplified testing-only native protocol.
+
+Terminal control bytes such as Ctrl-C are passed to the child PTY as input, so
+the remote line discipline retains normal behavior. `Ctrl-] d` is a local
+detach escape and never stops the host. Two consecutive Ctrl-] bytes send one
+literal Ctrl-] to the child. EOF, local termination, and orchestration failure
+also detach without sending `TERMINATE`.
+
+`PROCESS_EXITED` is the authoritative end of the interactive session. The tool
+drains all journal records through that event, restores the local terminal, and
+uses the recorded child exit code as its own exit code where the platform can
+represent it.
+
+### Journal Acknowledgement
+
+Terminal mode sends no journal acknowledgement by default and persists no
+server cursor. This keeps normal local inspection non-destructive and permits a
+later invocation to recover solely from retained session state.
+
+The explicit `--ack-journal` option enables a testing aid. After the tool has
+fully decoded and delivered a contiguous journal page, it sends that page's
+last EventId through `ACK_JOURNAL`. It never acknowledges an incomplete record,
+a gap, a corrupt page, or output that failed to reach the local terminal.
+Watermarks remain monotonic for the lifetime of the invocation.
+
+Unlike the real server, terminal mode does not persist a durable replica.
+Usage text must therefore warn that `--ack-journal` may make old segments
+eligible for deletion and can prevent a later stateless attach from recovering
+the command prefix. If required history is no longer available, the tool may
+replay the retained output but must not guess an operation sequence or send new
+controls.
+
+### Failure Handling and Lifecycle
+
+Raw terminal state is an acquired resource. It is restored through structured
+close handling and a shutdown hook covering normal process exit, detach,
+interrupt, journal/control failure, and unexpected runtime exceptions. Closing
+the Java tool never closes the native PTY or kills `session-host`.
+
+Launch failures and journaled `SESSION_START_FAILED` diagnostics are reported
+without leaving a raw terminal behind. An invalid manifest, unreachable control
+endpoint, journal gap, corrupt complete record, or unsafe recovery boundary is
+a session-local terminal error. The diagnostic identifies the session and
+boundary without dumping arbitrary journal payloads or command input.
+
+An incomplete active-tail record is not an error; the follower retains its
+position and waits for more data. Segment rotation, compression, file
+replacement, watch overflow, and timeouts reuse the journal reader's existing
+resume rules. A control rejection or ambiguous delivery is reported and stops
+accepting additional local input, but the output side may drain already durable
+events before the tool exits. ACK failure disables further acknowledgements and
+is reported without stopping the host.
+
+### Testing
+
+Pure Java tests use fake terminal, journal, monitor, runtime, and control seams
+to cover:
+
+- top-level `daemon` and `terminal` dispatch without reading the wrong stdin;
+- terminal `start` and `attach` validation and component assembly;
+- retained replay followed by live output without duplicates;
+- bounded input, operation ordering, resize coalescing, and detach escaping;
+- default no-ACK behavior and opt-in monotonic acknowledgement;
+- incomplete tails, rotation, replacement, watch overflow, gaps, corrupt
+  records, control failures, and output failures;
+- restoration of the original terminal state on every exit path; and
+- migration of remote AgentD provisioning to the explicit `daemon` command.
+
+A POSIX integration test launches the real `session-host`, interacts through a
+pseudo-terminal, verifies journal-derived output and live input/resize, detaches
+without killing the host, reattaches, and observes the final process exit. A
+second scenario enables `--ack-journal` and verifies the native durable
+acknowledgement watermark. No central or in-process HTTP server participates.
+
+### Non-Goals
+
+- Implementing an Orion server, HTTP endpoint, or server journal store.
+- Persisting a local replication cursor or server-authoritative command state.
+- Providing a terminal emulator, ANSI parser, screen model, scrollback store,
+  or web UI.
+- Supporting Windows Console, multiple simultaneous viewers, collaborative
+  input, file transfer, or harness-specific event rendering.
+- Changing `session-host` ownership of PTY processes, journal durability, or
+  control idempotency.
+
+---
+
+## AgentD Local Interactive Terminal Implementation Plan
+
+**Goal:** Add explicit `daemon` and local POSIX `terminal` modes to the AgentD executable so developers can
+launch or attach to `session-host` through production journal and control paths without an Orion server.
+
+**Architecture:** Keep `AgentdMain` as a small command router. The daemon branch retains server bootstrap,
+while the terminal branch composes `NativeRuntime`, session discovery/control, bounded journal following, and a
+POSIX terminal adapter without constructing `Agent` or Jetty. Reuse the completed command-orchestration and
+journal-sync seams for operation recovery and `ACK_JOURNAL`; do not create a second command ledger or cursor.
+
+**Tech Stack:** Java 21, Agent protocol CBOR, AgentD journal/control components, JLine 3 POSIX terminal support,
+JUnit 5, AssertJ, native Rust `session-host` test artifact.
+
+---
+
+### Prerequisite checkpoint
+
+Do this work only after these task nodes are complete and their task worktrees have been integrated:
+
+- `docs/plans/tasks/04_agentd/02_journal-sync.md`
+- `docs/plans/tasks/04_agentd/04_command-orchestration.md`
+- the native control-journal idempotency and start-outcome contracts referenced by those nodes
+
+Before editing, read the final shared APIs in `agentd/journal`, `agentd/session`, and the command-orchestration
+package. The class names below follow the approved prerequisite plans. If integration renamed a seam, use the
+integrated equivalent rather than adding an adapter whose only purpose is to preserve this plan's provisional
+name. Read every `@AiRule` class comment in a class before changing it.
+
+Execute the task in a dedicated worktree. Claim
+`docs/plans/tasks/04_agentd/07_local-terminal/02_attach.md` first and commit the claim without running tests.
+
+#### Task 1: Make the AgentD top-level mode explicit
+
+**Files:**
+
+- Modify: `agentd/src/main/java/pro/deta/orion/agentd/AgentdMain.java`
+- Modify: `agentd/src/test/java/pro/deta/orion/agentd/AgentdMainTest.java`
+- Modify: `agent-provisioning/src/main/java/pro/deta/orion/provisioning/RemoteAgentdProvisioner.java`
+- Modify: `agent-provisioning/src/test/java/pro/deta/orion/provisioning/RemoteAgentdProvisionerTest.java`
+
+**Step 1: Add failing top-level routing tests**
+
+Change `AgentdMainTest` so the existing daemon cases pass `daemon` before all options. Add cases asserting:
+
+```java
+assertThat(run(new String[]{"--server", "https://agent.test"}, forbiddenInput, daemon, terminal))
+        .isEqualTo(2);
+assertThat(run(new String[]{"daemon", "--help"}, forbiddenInput, daemon, terminal)).isZero();
+assertThat(run(new String[]{"terminal", "--help"}, forbiddenInput, daemon, terminal)).isZero();
+```
+
+The old subcommand-free syntax must print top-level usage and must not consume the launch permit. A terminal
+request must be delegated without reading stdin in the daemon permit reader. Keep the two launch seams narrow
+and package-private for tests.
+
+Update `RemoteAgentdProvisionerTest` to expect `daemon` as the first generated argument.
+
+**Step 2: Run focused tests and verify the new expectations fail**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.AgentdMainTest'
+make run-test MODULE=agent-provisioning TEST='pro.deta.orion.provisioning.RemoteAgentdProvisionerTest'
+```
+
+Expected: FAIL because `AgentdMain` does not dispatch subcommands and provisioning omits `daemon`.
+
+**Step 3: Implement the command router and provisioning migration**
+
+Give `AgentdMain` top-level usage shaped like:
+
+```text
+Usage: agentd COMMAND [options]
+
+Commands:
+  daemon    connect this machine to an Orion server
+  terminal  launch or attach to a local session-host
+```
+
+Dispatch on the first argument and pass only the remaining arguments to the selected mode. Keep the existing
+daemon parse, permit, redaction, shutdown-hook, and exit-code behavior under `daemon`. Reject a missing or
+unknown command with exit code 2. `agentd --help`, `agentd daemon --help`, and `agentd terminal --help` must all
+return zero and read no permit.
+
+Prepend `daemon` in `RemoteAgentdProvisioner.agentdArguments(...)`. Do not retain an undocumented compatibility
+alias for the old invocation.
+
+**Step 4: Run both focused test classes**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.AgentdMainTest'
+make run-test MODULE=agent-provisioning TEST='pro.deta.orion.provisioning.RemoteAgentdProvisionerTest'
+```
+
+Expected: PASS.
+
+#### Task 2: Define and validate the terminal CLI contract
+
+**Files:**
+
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalOptions.java`
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalMain.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalOptionsTest.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalMainTest.java`
+
+**Step 1: Write failing parser tests**
+
+Freeze these forms:
+
+```text
+agentd terminal start --session-host PATH --sessions-dir PATH [--session-id ID]
+    [--cwd PATH] [--term VALUE] [--colorterm VALUE]
+    [--sandbox-policy PATH] [--sandbox-unavailable fail|run-unsandboxed]
+    [--ack-journal] -- COMMAND...
+
+agentd terminal attach --session-dir PATH [--ack-journal]
+```
+
+Test a minimal start, all optional start fields, and attach. Assert that `ackJournal` is false when omitted and
+true only when the flag is present. Use the current directory as the default `--cwd`; use the attached terminal's
+environment for `TERM` and optional `COLORTERM`, with `xterm-256color` only when `TERM` is absent.
+
+Reject unknown/duplicate options, missing values, empty commands, positional data before `--`, attach-only
+options on start, start-only options on attach, non-POSIX platforms, invalid IDs, non-directory workspaces, and
+non-executable host paths. Keep terminal dimensions out of `TerminalOptions`; they are sampled from the acquired
+TTY immediately before launch.
+
+Generate absent identifiers in the forms `local-session-<UUID>` and `local-start-<UUID>`, both validated by the
+shared `SessionId` and `CommandId` constructors.
+
+**Step 2: Run the parser tests and verify they fail**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd \
+  TEST='pro.deta.orion.agentd.terminal.TerminalOptionsTest,pro.deta.orion.agentd.terminal.TerminalMainTest'
+```
+
+Expected: FAIL because the terminal package does not exist.
+
+**Step 3: Implement immutable options and help**
+
+Use a sealed options model rather than a nullable bag:
+
+```java
+sealed interface TerminalOptions {
+    boolean ackJournal();
+
+    record Start(
+            Path sessionHost,
+            Path sessionsDirectory,
+            SessionId sessionId,
+            CommandId startCommandId,
+            List<String> command,
+            Path workingDirectory,
+            String terminalType,
+            Optional<String> colorTerminal,
+            SessionSpec.Sandbox sandbox,
+            boolean ackJournal
+    ) implements TerminalOptions { }
+
+    record Attach(Path sessionDirectory, boolean ackJournal) implements TerminalOptions { }
+}
+```
+
+Copy collections and normalize paths in compact constructors. `TerminalMain` owns terminal-specific help and
+maps parse/validation failures to exit code 2 without acquiring raw mode. Keep `--ack-journal` description
+explicit: it may authorize native retention without preserving a local server replica.
+
+**Step 4: Run the terminal parser tests**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd \
+  TEST='pro.deta.orion.agentd.terminal.TerminalOptionsTest,pro.deta.orion.agentd.terminal.TerminalMainTest'
+```
+
+Expected: PASS.
+
+#### Task 3: Isolate POSIX terminal ownership
+
+**Files:**
+
+- Modify: `pom.xml`
+- Modify: `agentd/pom.xml`
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalDevice.java`
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/JlinePosixTerminal.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/JlinePosixTerminalTest.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/FakeTerminalDevice.java`
+
+**Step 1: Write failing terminal-resource tests**
+
+Introduce the smallest orchestration-facing contract:
+
+```java
+interface TerminalDevice extends AutoCloseable {
+    InputStream input();
+    OutputStream output();
+    TerminalSize size();
+    void onResize(Runnable listener);
+    void enterRawMode();
+    @Override void close();
+}
+```
+
+`TerminalSize` validates dimensions in `1..65535`. Tests must prove raw mode is entered once, the original
+attributes are restored once even after repeated close, resize callbacks observe the latest size, and acquisition
+failure leaves no half-registered shutdown hook. Do not require the Surefire process itself to own a TTY; wrap a
+fake JLine terminal/backend.
+
+**Step 2: Run the focused test and verify it fails**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.JlinePosixTerminalTest'
+```
+
+Expected: FAIL because the terminal abstraction and JLine dependency do not exist.
+
+**Step 3: Add JLine and implement the adapter**
+
+Add the root property and direct AgentD dependency:
+
+```xml
+<jline.version>3.24.1</jline.version>
+
+<dependency>
+    <groupId>org.jline</groupId>
+    <artifactId>jline</artifactId>
+    <version>${jline.version}</version>
+</dependency>
+```
+
+Use JLine's system terminal, raw-mode attributes, and `WINCH` signal callback. Reject dumb/non-system terminals
+for interactive execution instead of silently treating redirected stdin as a TTY.
+
+Register a restoration hook only after terminal acquisition succeeds. Normal close restores attributes and
+removes the hook; a JVM shutdown racing with close remains idempotent. Do not expose JLine types outside
+`JlinePosixTerminal`.
+
+**Step 4: Run terminal-resource tests**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.JlinePosixTerminalTest'
+```
+
+Expected: PASS.
+
+#### Task 4: Resolve launch and attach targets
+
+**Files:**
+
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalTarget.java`
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalTargetResolver.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalTargetResolverTest.java`
+
+**Step 1: Write failing start and attach tests**
+
+For start, verify the resolver samples the terminal size, builds an equivalent `SessionSpec`, calls
+`NativeRuntime.launch(...)`, and returns the launched directory only for `SessionLaunchResult.Started`.
+
+For attach, create a valid manifest fixture and assert the resolver:
+
+- reads it through `JsonSessionManifestReader`;
+- verifies the directory's journal is readable;
+- calls `STATUS` through the shared host/control probe;
+- requires the POSIX Unix-domain endpoint and a live host; and
+- returns the manifest session ID and exact control endpoint.
+
+Cover a start failure, malformed manifest, session ID/directory mismatch, missing journal, unsupported named
+pipe, unreachable host, and an already exited child whose journal remains replayable. The last case may attach
+for replay but must not accept controls.
+
+**Step 2: Run the resolver test and verify it fails**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.TerminalTargetResolverTest'
+```
+
+Expected: FAIL because the resolver does not exist.
+
+**Step 3: Implement one shared target model**
+
+Use one result after either path:
+
+```java
+record TerminalTarget(
+        SessionId sessionId,
+        Path sessionDirectory,
+        ControlEndpoint controlEndpoint,
+        boolean acceptsControl
+) { }
+```
+
+Map `TerminalOptions.Start` into `SessionSpec` with the sampled dimensions and existing workspace/sandbox
+types. Do not launch `Agent`, acquire the AgentD process lock, or create any server transport. Attach must inspect
+one explicit directory rather than scanning or claiming all local sessions.
+
+**Step 4: Run resolver and existing runtime/discovery tests**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd \
+  TEST='TerminalTargetResolverTest,NativeRuntimeTest,SessionDiscoveryTest'
+```
+
+Expected: PASS.
+
+#### Task 5: Replay and follow terminal output from the journal
+
+**Files:**
+
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalJournalFollower.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalJournalFollowerTest.java`
+
+**Step 1: Write failing follower tests**
+
+Drive the follower with the shared `SessionJournalReader` and a monitor factory. Cover:
+
+- replay from an empty cursor through the stable retained tail;
+- `PTY_OUTPUT` payloads written byte-for-byte and flushed in journal order;
+- unknown records advancing the cursor without producing terminal bytes;
+- live records after `INCOMPLETE_TAIL`, page limits, rotation, file replacement, watch overflow, and timeout;
+- no duplicate bytes when a disposable read position is invalidated and scanning resumes by EventId;
+- `PROCESS_EXITED` delivered only after all preceding output;
+- output failure, a journal issue, and a required-history gap stopping the follower with a typed result; and
+- no acknowledgement calls anywhere in the default follower path.
+
+Use small page limits in tests. Do not duplicate compressed-segment or CBOR framing tests already owned by
+`FileSystemSessionJournalReaderTest`.
+
+**Step 2: Run the follower test and verify it fails**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.TerminalJournalFollowerTest'
+```
+
+Expected: FAIL because the follower does not exist.
+
+**Step 3: Implement bounded journal consumption**
+
+Keep an in-memory EventId cursor and disposable `JournalReadPosition`. Decode known payloads with the shared
+`SessionEventCodec`; pass each record to the command-orchestration journal observer before moving the cursor.
+This supplies the recovered lifecycle and operation-sequence prefix used by the input lane. Unknown records are
+not re-encoded.
+
+Treat `INCOMPLETE_TAIL` as a wait boundary. Treat `PAGE_LIMIT` as immediate continued work before awaiting a
+filesystem trigger. On gap or corrupt complete data, return a typed failure containing bounded location/detail
+and never guess a replacement cursor.
+
+**Step 4: Run follower and journal-reader tests**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd \
+  TEST='pro.deta.orion.agentd.terminal.TerminalJournalFollowerTest,pro.deta.orion.agentd.journal.FileSystemSessionJournalReaderTest'
+```
+
+Expected: PASS.
+
+#### Task 6: Forward interactive input and resize controls
+
+**Files:**
+
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalInput.java`
+- Create: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalSession.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalInputTest.java`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalSessionTest.java`
+
+**Step 1: Write failing input and coordination tests**
+
+Test input chunking at the shared protocol limit and escape parsing across arbitrary read boundaries:
+
+```text
+Ctrl-] d       detach locally and send neither byte
+Ctrl-] Ctrl-]  send one literal Ctrl-]
+Ctrl-] X       send both bytes when X is any other byte
+```
+
+Verify ordinary bytes, including Ctrl-C, remain `INPUT` payload. Verify the initial terminal size is used for
+start and each changed size becomes an ordered `RESIZE`; repeated notifications with the same dimensions do
+nothing.
+
+Use the completed command scheduler/lane from the prerequisite task. Assert every generated message has a fresh
+CommandId, exact bytes from `AgentProtocolCodec.encode(...)`, and a recovered monotonic operation sequence.
+Controls must wait until journal catch-up establishes a safe sequence. A gap or corrupt suffix keeps output
+diagnostics available but sends no control.
+
+Cover detach, EOF, interrupted reads, rejected control, ambiguous delivery, `PROCESS_EXITED`, and concurrent
+resize/input. Assert close never sends `TERMINATE` and always closes the terminal device once.
+
+**Step 2: Run terminal session tests and verify they fail**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd \
+  TEST='pro.deta.orion.agentd.terminal.TerminalInputTest,pro.deta.orion.agentd.terminal.TerminalSessionTest'
+```
+
+Expected: FAIL because the input parser and session coordinator do not exist.
+
+**Step 3: Implement the input lane and lifecycle coordinator**
+
+Run journal following and terminal input in two owned virtual threads. Feed all input and resize messages to one
+bounded serial command lane so their operation sequence matches delivery order. Stop admitting input after
+detach, exit, unsafe recovery, or control failure. The journal remains the source of durable command results and
+process exit; a direct native acknowledgement is delivery evidence, not terminal output.
+
+Coordinate completion through structured close state rather than `System.exit` inside worker threads. Normal
+detach returns zero. A recorded process exit returns the child's exit code after journal drain. Internal errors
+return one; CLI errors remain two.
+
+**Step 4: Run terminal and prerequisite orchestration tests**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd \
+  TEST='TerminalInputTest,TerminalSessionTest,SessionCommandSchedulerTest,SessionJournalObserverTest'
+```
+
+Expected: PASS. If the prerequisite integrated equivalent test names differ, include those exact classes instead.
+
+#### Task 7: Add explicit journal acknowledgement and assemble terminal mode
+
+**Files:**
+
+- Modify: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalJournalFollower.java`
+- Modify: `agentd/src/main/java/pro/deta/orion/agentd/terminal/TerminalMain.java`
+- Modify: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalJournalFollowerTest.java`
+- Modify: `agentd/src/test/java/pro/deta/orion/agentd/terminal/TerminalMainTest.java`
+
+**Step 1: Write failing ACK and assembly tests**
+
+Verify no `ACK_JOURNAL` is sent for default start or attach. With `--ack-journal`, assert exactly one monotonic
+watermark is sent after each fully consumed page and only after its terminal output write succeeds. Do not ACK
+an incomplete tail, gap, issue, failed output, or a page whose records were only partially observed.
+
+Cover repeated/lower native acknowledgement responses, a rejected watermark, and delivery failure. After the
+first ACK failure, report it once, disable later ACK attempts, and continue journal output until detach or process
+exit. Never terminate the host because acknowledgement failed.
+
+Add an assembly test proving terminal mode constructs no `Agent`, `AgentLaunchContext`, launch permit reader,
+Jetty transport, or listening server.
+
+**Step 2: Run ACK and main tests and verify they fail**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd \
+  TEST='TerminalJournalFollowerTest,TerminalMainTest,AgentdMainTest'
+```
+
+Expected: FAIL because terminal assembly and optional ACK are incomplete.
+
+**Step 3: Wire terminal components and ACK policy**
+
+Pass one acknowledgement policy from parsed options into the follower. Reuse the shared schema-2
+`ACK_JOURNAL` operation and its journaled `COMMAND_RESULT` introduced by journal-sync. The watermark is the
+last EventId of the fully consumed contiguous page and is never persisted by AgentD terminal mode.
+
+Make `TerminalMain` acquire the terminal, resolve the target, construct observer/command lane/follower, enter raw
+mode only after preflight succeeds, run `TerminalSession`, and close resources in reverse order. Error messages
+must name the session or path and bounded failure kind without echoing input or arbitrary payload bytes.
+
+**Step 4: Run all AgentD terminal tests**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.*,pro.deta.orion.agentd.AgentdMainTest'
+```
+
+Expected: PASS.
+
+#### Task 8: Verify against the real native host and document usage
+
+**Files:**
+
+- Modify: `agentd/pom.xml`
+- Create: `agentd/src/test/java/pro/deta/orion/agentd/terminal/LocalTerminalEndToEndTest.java`
+- Create: `agentd/README.md`
+
+**Step 1: Write a failing native end-to-end test**
+
+Add `session-host` as a test dependency:
+
+```xml
+<dependency>
+    <groupId>pro.deta.orion</groupId>
+    <artifactId>session-host</artifactId>
+    <version>${revision}</version>
+    <scope>test</scope>
+</dependency>
+```
+
+Copy the current-platform executable resource to a temporary executable file. Drive `TerminalSession` with the
+fake terminal device while all runtime, filesystem journal, and Unix control components remain real.
+
+The main scenario must:
+
+1. start a shell command that prints a marker, reads one line, prints it and waits;
+2. observe the first marker only through journal replay/tail;
+3. send input and a changed terminal size through native control;
+4. detach and prove both host and child remain alive;
+5. attach again with a fresh terminal, replay each retained record exactly once in that invocation, send the
+   final input, and observe `PROCESS_EXITED`; and
+6. assert the returned exit code and restored terminal state.
+
+Add a second scenario with `--ack-journal` and small native segment limits. Verify the durable
+`control-retention-state` advances only in the opt-in run. The default scenario must leave that sidecar absent.
+No Jetty server or central-server fixture may appear in either test.
+
+**Step 2: Run the native test and verify it fails**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.LocalTerminalEndToEndTest'
+```
+
+Expected: FAIL until the native fixture and complete terminal assembly are connected.
+
+**Step 3: Complete the fixture and write concise user documentation**
+
+Document:
+
+```text
+java -jar agentd.jar daemon --server ...
+java -jar agentd.jar terminal start --session-host ./session-host \
+  --sessions-dir ./target/local-sessions -- /bin/zsh
+java -jar agentd.jar terminal attach \
+  --session-dir ./target/local-sessions/local-session-...
+```
+
+Explain raw-terminal requirements, `Ctrl-] d`, literal Ctrl-], replay behavior, independent host lifetime, exit
+codes, POSIX-only scope, and the destructive/recovery tradeoff of `--ack-journal`. Do not rewrite historical
+approved design documents merely because their examples predate the `daemon` subcommand.
+
+**Step 4: Run focused and full development verification**
+
+Run outside the sandbox:
+
+```text
+make run-test MODULE=agentd TEST='pro.deta.orion.agentd.terminal.*'
+make run-test MODULE=agent-provisioning TEST='pro.deta.orion.provisioning.RemoteAgentdProvisionerTest'
+mvn verify -Pdev -T 4
+```
+
+Expected: PASS.
+
+#### Task 9: Verify the completed implementation
+
+**Files:**
+
+- Delete: `docs/plans/tasks/04_agentd/07_local-terminal/02_attach.md`
+- Modify: `docs/plans/tasks/04_agentd/TASK.md`
+- Review: every file changed by the task branch
+
+**Step 2: Run final branch verification**
+
+Run outside the sandbox:
+
+```text
+mvn verify -Pdev -T 4
+git diff --check
+```
+
+Expected: PASS and no whitespace errors.

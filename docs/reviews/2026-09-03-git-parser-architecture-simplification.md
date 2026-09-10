@@ -2,7 +2,7 @@
 
 Date: 2026-09-03
 Status: baseline saved; re-review pending
-Follow-up task: [Re-audit the simplified Git wire architecture](../plans/upcoming-work/02_git-wire-architecture-simplification/06_post-simplification-review.md)
+Follow-up task: [Re-audit the simplified Git wire architecture](../plans/tasks/11_git/01_wire-architecture-simplification/06_post-simplification-review.md)
 
 ## Review Scope
 
@@ -21,7 +21,7 @@ review verifies the resulting code and dependency graph.
 ### 1. `git-parser` mixes wire core with the Orion storage-backed server
 
 Status: accepted; implementation pending
-Task: [Separate `git-parser` from native storage](../plans/upcoming-work/02_git-wire-architecture-simplification/03_parser-storage-boundary.md)
+Task: [Separate `git-parser` from native storage](../plans/tasks/11_git/01_wire-architecture-simplification/03_parser-storage-boundary.md)
 
 Evidence:
 
@@ -47,7 +47,7 @@ Accepted direction:
 ### 2. Capability advertisement has multiple sources of truth
 
 Status: accepted; implementation pending
-Task: [Add a global capability advertisement policy](../plans/upcoming-work/02_git-wire-architecture-simplification/05_global-capability-advertisement-policy.md)
+Task: [Add a global capability advertisement policy](../plans/tasks/11_git/01_wire-architecture-simplification/05_global-capability-advertisement-policy.md)
 
 Evidence:
 
@@ -71,7 +71,7 @@ Accepted direction:
 ### 3. Blocking output retains resumable serialization state
 
 Status: accepted with deliberately narrow scope; implementation pending
-Task: [Complete blocking output migration](../plans/upcoming-work/02_git-wire-architecture-simplification/02_blocking-output-migration.md)
+Task: [Complete blocking output migration](../plans/tasks/11_git/01_wire-architecture-simplification/02_blocking-output-migration.md)
 
 Evidence:
 
@@ -99,7 +99,7 @@ Accepted direction:
 ### 4. One repository command repeatedly reconstructs invariant context
 
 Status: accepted; implementation pending
-Task: [Reuse one repository command context](../plans/upcoming-work/02_git-wire-architecture-simplification/04_repository-command-context.md)
+Task: [Reuse one repository command context](../plans/tasks/11_git/01_wire-architecture-simplification/04_repository-command-context.md)
 
 Evidence:
 
@@ -123,7 +123,7 @@ Accepted direction:
 ### 5. `GitObjectId` does not own its own identity rules
 
 Status: accepted; implementation pending
-Task: [Make `GitObjectId` canonical](../plans/upcoming-work/02_git-wire-architecture-simplification/01_canonical-git-object-id.md)
+Task: [Make `GitObjectId` canonical](../plans/tasks/11_git/01_wire-architecture-simplification/01_canonical-git-object-id.md)
 
 Evidence:
 

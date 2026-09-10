@@ -28,7 +28,7 @@ uses one `cgroup.kill` write when available, or signals the current fallback
 set once. Timing, retries, and escalation belong to callers. Descendants that
 fork after a fallback signal require another explicit control. Foreground
 signals are restricted to owned pidfds in the observed foreground group.
-See the [reconciliation notes](../docs/plans/2026-09-10-linux-process-control-reconciliation.md).
+See the [reconciliation notes](../docs/plans/tasks/05_native-session-host/01_linux-process-tree-control.md).
 
 ### macOS
 
@@ -174,5 +174,5 @@ operation result path and creates a `COMMAND_RESULT` when the journal is writabl
 
 The current Java control client still uses a different operation wrapper and
 response model, and has no `ACK_JOURNAL` command. See the
-[implementation comparison](../docs/plans/2026-09-03-native-control-journal-idempotency-design.md)
+[implementation comparison](../docs/plans/tasks/04_agentd/03_session-host-contract-alignment/TASK.md)
 for the current boundary and pending integration work.

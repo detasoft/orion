@@ -97,9 +97,9 @@ arguments, and tokens containing supplementary Unicode characters.
 
 ## Remaining integration work
 
-- [Streaming and monitoring](../../docs/plans/current-work/08_interactive-ssh-shell/02_streaming-monitoring.md)
+- [Streaming and monitoring](../../docs/plans/tasks/08_interactive-ssh-shell/02_streaming-monitoring.md)
   remains pending: bounded streams, backpressure, cancellation, and per-event authorization.
-- [The session-host PTY gateway](../../docs/plans/current-work/08_interactive-ssh-shell/03_session-host-pty-gateway.md)
+- [The session-host PTY gateway](../../docs/plans/tasks/08_interactive-ssh-shell/03_session-host-pty-gateway.md)
   remains pending: authorized attachment, binary input/output forwarding, resize, and detach without
   terminating the host session.
 - [DefaultOperatorDomainSource] currently returns `Unavailable` for organizations, organization users

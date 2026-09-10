@@ -2,7 +2,7 @@
 name: orion-task-runner
 description: >-
   Use for selecting, planning, describing, ordering, claiming, pausing, or
-  completing work in the task tree rooted at docs/plans/TASK.md.
+  completing work in the task tree rooted at docs/plans/tasks/TASK.md.
 ---
 
 # Orion Task Runner
@@ -14,8 +14,8 @@ own implementation, tests, or review.
 
 ## Startup
 
-Read `AGENTS.md`, `docs/plans/TASK.md`, relevant ancestor `TASK.md` files and
-candidate leaves, then inspect `git status --short`. Preserve unrelated work.
+Read `AGENTS.md`, `docs/plans/tasks/TASK.md`, relevant ancestor `TASK.md` files
+and candidate leaves, then inspect `git status --short`. Preserve unrelated work.
 
 Planning, triage, explanation, and status requests do not claim or start work.
 A requested task-tree edit may still add, reorder, or rewrite nodes because that edit is itself the result.
@@ -24,8 +24,8 @@ verified work within the request's scope.
 
 ## Task model
 
-`docs/plans/TASK.md` is the root. `current-work/` and `upcoming-work/` are
-unnumbered queue roots with their own `TASK.md`.
+`docs/plans/tasks/TASK.md` is the only task root. There are no current/upcoming
+queues or implicit status tiers.
 
 - `NN_slug.md` is an executable leaf.
 - `NN_slug/` is a composite described by `NN_slug/TASK.md`; composites may
@@ -35,19 +35,23 @@ unnumbered queue roots with their own `TASK.md`.
 - Filesystem entries are the only source of child membership and order. Parent
   files describe aggregate scope, dependencies, and acceptance, but do not
   duplicate child checklists.
-- Detailed designs belong in ordinary `docs/plans/` documents. `TASKS.md`, if
-  present, is only a pointer to the root task.
+- Every executable leaf contains its requirements, design decisions,
+  implementation plan, dependencies, and acceptance criteria. A composite's
+  `TASK.md` contains its aggregate design and acceptance boundary.
+- Do not create separate plan, design, status, or completion files inside or
+  beside the task tree. `docs/plans/TASK.md`, if present, is only a pointer to
+  the root task.
 
 Completion removes the executable leaf instead of adding a completed status.
 Remove an empty composite only when its aggregate acceptance and remaining scope
-are satisfied. Never remove queue roots or the root task.
+are satisfied. Never remove the root task.
 
 ## Selection
 
-For a generic next-task request, traverse `current-work/` recursively in
-numeric sibling order, then `upcoming-work/` if no current leaf is ready. Select
-the first dependency-ready leaf without an `Owner:` entry. An explicit user task
-or pool narrows the candidates but does not bypass dependencies or ownership.
+For a generic next-task request, traverse the single root recursively in numeric
+sibling order and select the first dependency-ready leaf without an `Owner:`
+entry. An explicit user task or subtree narrows the candidates but does not
+bypass dependencies or ownership.
 
 Only an `Owner:` entry in the executable leaf's body is a claim. Ignore
 `Status:`, ownership prose, review findings, and parent-composite owner markers
@@ -68,8 +72,10 @@ renumbering, change only necessary siblings and update their references
 together.
 
 Use a leaf for one bounded executable task and a composite for aggregate scope.
-When splitting a leaf, move all executable scope into numbered children and keep
-only aggregate context in the composite. Do not leave executable scope in both.
+Write the task's design and execution plan directly in that node. When splitting
+a leaf, move all executable scope into numbered children and keep only aggregate
+context in the composite. Do not leave executable scope in both, and do not
+create a sibling design or implementation-plan document.
 
 Do not create speculative siblings, duplicate production paths, or task nodes
 merely to route a Quick or Simple change. When the canonical workflow selection
@@ -116,10 +122,11 @@ commits completion state directly on `main`.
 
 Quick and Simple may record completion in their current worktree and branch,
 including in the same commit as their verified result; they do not acquire
-Change's worktree or integration requirements. Delete the completed leaf,
-remove eligible empty ancestors, and update outstanding-work and dependency
-references with completion evidence. Preserve claims owned by other executions;
-do not release or take them over merely to synchronize status.
+Change's worktree or integration requirements. Delete the completed leaf so its
+embedded design and plan are removed with it, remove eligible empty ancestors,
+and update outstanding-work and dependency references with completion evidence.
+Preserve claims owned by other executions; do not release or take them over
+merely to synchronize status.
 
 Preserve unfinished siblings and claimed state. Do not renumber after completion
 or retain completed task nodes as history.

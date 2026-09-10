@@ -25,7 +25,7 @@ All five primary findings in the
 [2026-09-03 baseline](../../docs/reviews/2026-09-03-git-parser-architecture-simplification.md) remain
 present. This document records current evidence and qualifications, especially around repository refresh
 semantics. It does not mark the existing
-[simplification tasks](../../docs/plans/upcoming-work/02_git-wire-architecture-simplification/TASK.md)
+[simplification tasks](../../docs/plans/tasks/11_git/01_wire-architecture-simplification/TASK.md)
 complete or claim that their post-implementation review has happened.
 
 ## Current conceptual model
@@ -84,7 +84,7 @@ uses packet and byte-stream operations. Its [POM](../git-client/pom.xml) inherit
 parser dependency. The concrete repository service already lives in `net/git-transport`.
 
 **Why it likely exists.** The
-[blocking migration design](../../docs/plans/2026-08-31-blocking-git-parser-io-design.md) deliberately
+[parser/storage task](../../docs/plans/tasks/11_git/01_wire-architecture-simplification/03_parser-storage-boundary.md) records that the blocking migration deliberately
 placed the server session, including receive-pack ingestion, in the parser during the execution-model
 replacement. That placement now couples shared protocol machinery to one server implementation.
 

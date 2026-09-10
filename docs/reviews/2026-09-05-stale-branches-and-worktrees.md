@@ -152,7 +152,7 @@ require deletion or modification of that remote ref.
 `codex/primary-upstream-sync-6e3b` and its worktree
 `.worktrees/primary-upstream-sync-6e3b` are integrated through `949644e6`.
 The foundation includes attach planning, sync state and remote gateway code in
-`git/git-sync`. The [primary-upstream task](../plans/current-work/07_external-git-repository-sync/01_primary-upstream.md)
+`git/git-sync`. The [primary-upstream task](../plans/tasks/07_external-git-repository-sync/01_primary-upstream.md)
 still belongs to session `6e3b`, paused 2026-09-04 01:25; outbound serialization,
 retry and minute audits remain unfinished. The worktree has no tracked changes
 or untracked non-ignored files, but contains ignored `.orion-cache/`, build
@@ -162,7 +162,7 @@ short status alone.
 `codex/agentd-command-orchestration-d8e4` and its worktree
 `.worktrees/agentd-command-orchestration-d8e4` are integrated through `72941080`.
 Design `de5a3ebf` and plan `013298c9` are already on main. The
-[command-orchestration task](../plans/current-work/04_agentd/04_command-orchestration.md)
+[command-orchestration task](../plans/tasks/04_agentd/04_command-orchestration.md)
 remains owned by session `command-orchestration-d8e4`, paused 2026-09-03 19:51
 on journal/control prerequisites. This worktree has no tracked, untracked, or
 ignored status entries at inspection. Its pause commit is not task completion.
