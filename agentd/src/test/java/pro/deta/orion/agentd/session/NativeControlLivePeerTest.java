@@ -7,14 +7,16 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.SessionCommandOutcome;
+import pro.deta.orion.agent.protocol.SessionCommandSource;
+import pro.deta.orion.agent.protocol.SessionEventCodec;
+import pro.deta.orion.agent.protocol.SessionEventPayload;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agentd.journal.FileSystemSessionJournalReader;
 import pro.deta.orion.agentd.journal.JournalReadLimits;
 import pro.deta.orion.agentd.journal.JournalReadPage;
 
 import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -33,6 +35,9 @@ class NativeControlLivePeerTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final ProtocolBytes ENVELOPE =
             ProtocolBytes.copyOf(new byte[]{(byte) 0x84, 1, 2, 3, 0x66, 'f', 'u', 't', 'u', 'r', 'e'});
+    private static final Optional<ProtocolBytes> SERVER_ENVELOPE = Optional.of(ENVELOPE);
+    private static final SessionEventCodec EVENT_CODEC =
+            new SessionEventCodec(AgentProtocolLimits.journalDefaults());
     private static final JournalReadLimits READ_LIMITS =
             new JournalReadLimits(100, AgentProtocolLimits.HARD_MAX_JOURNAL_RECORD_BYTES);
 
@@ -40,7 +45,7 @@ class NativeControlLivePeerTest {
     Path temporaryDirectory;
 
     @Test
-    void exchangesEstablishedOperationsWithTheRealSessionHost() throws Exception {
+    void interleavesServerAndRepeatedManualOperationsWithTheRealSessionHost() throws Exception {
         Path executable = extractSessionHost();
         Path sessionDirectory = Files.createDirectory(temporaryDirectory.resolve("session"));
         Path log = temporaryDirectory.resolve("session-host.log");
@@ -53,38 +58,53 @@ class NativeControlLivePeerTest {
             SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
             awaitStatus(client, endpoint, host, log);
 
-            assertReceived(client.send(endpoint, new ControlCommand.Input(
-                    1,
-                    ENVELOPE,
+            ControlCommand.Input serverInput = new ControlCommand.Input(
+                    42,
+                    SessionCommandSource.SERVER,
+                    SERVER_ENVELOPE,
                     UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"),
-                    ProtocolBytes.copyOf(new byte[]{'o', 'k', '\n'}))), 1);
-            assertReceived(client.send(endpoint, new ControlCommand.Resize(2, ENVELOPE, 100, 30)), 2);
-            assertReceived(client.send(endpoint, new ControlCommand.Signal(
-                    3, ENVELOPE, AgentMessage.SignalKind.PLATFORM, continueSignal())), 3);
+                    ProtocolBytes.copyOf(new byte[]{'o', 'k', '\n'}));
+            ControlCommand.Resize firstManualResize = new ControlCommand.Resize(
+                    1, SessionCommandSource.MANUAL, Optional.empty(), 100, 30);
+            ControlCommand.Signal serverSignal = new ControlCommand.Signal(
+                    43, SessionCommandSource.SERVER, SERVER_ENVELOPE,
+                    AgentMessage.SignalKind.PLATFORM, continueSignal());
+            ControlCommand.Resize repeatedManualResize = new ControlCommand.Resize(
+                    1, SessionCommandSource.MANUAL, Optional.empty(), 101, 31);
+            assertReceived(client.send(endpoint, serverInput), 42);
+            assertReceived(client.send(endpoint, firstManualResize), 1);
+            assertReceived(client.send(endpoint, serverSignal), 43);
+            assertReceived(client.send(endpoint, repeatedManualResize), 1);
+            assertThat(client.send(endpoint, serverSignal)).isInstanceOf(ControlResult.Rejected.class);
 
-            JournalReadPage effects = awaitCommandResults(sessionDirectory, List.of(1L, 2L, 3L));
+            JournalReadPage effects = awaitCommandResults(
+                    sessionDirectory, List.of(42L, 1L, 43L), 4);
+            assertCommandResult(
+                    effects.records(), SessionCommandSource.SERVER, 42, ENVELOPE.toByteArray());
+            assertCommandResult(
+                    effects.records(), SessionCommandSource.MANUAL, 1, operationPayload(firstManualResize));
+            assertCommandResult(
+                    effects.records(), SessionCommandSource.MANUAL, 1, operationPayload(repeatedManualResize));
             long acknowledgedEventId = effects.records().getLast().eventId().value();
-            long acknowledgementSequence = Long.MIN_VALUE;
-            assertReceived(client.send(endpoint, new ControlCommand.AckJournal(
-                    acknowledgementSequence, ENVELOPE, acknowledgedEventId)), acknowledgementSequence);
-            awaitCommandResults(sessionDirectory, List.of(acknowledgementSequence));
+            ControlCommand.AckJournal acknowledgement = new ControlCommand.AckJournal(
+                    2, SessionCommandSource.MANUAL, Optional.empty(), acknowledgedEventId);
+            assertReceived(client.send(endpoint, acknowledgement), 2);
+            awaitCommandResults(sessionDirectory, List.of(2L), 5);
 
-            long terminateSequence = Long.MIN_VALUE + 1;
-            assertReceived(client.send(endpoint, new ControlCommand.Terminate(
-                    terminateSequence, ENVELOPE, AgentMessage.TerminationMode.FORCE)), terminateSequence);
+            ControlCommand.Terminate terminate = new ControlCommand.Terminate(
+                    3, SessionCommandSource.MANUAL, Optional.empty(), AgentMessage.TerminationMode.FORCE);
+            assertReceived(client.send(endpoint, terminate), 3);
             assertThat(host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)).isTrue();
             assertThat(host.exitValue()).as(Files.readString(log)).isZero();
 
             JournalReadPage completed = awaitCommandResults(
-                    sessionDirectory, List.of(1L, 2L, 3L, acknowledgementSequence, terminateSequence));
+                    sessionDirectory, List.of(42L, 1L, 43L, 2L, 3L), 6);
             assertThat(completed.issue()).isEmpty();
             assertSignal(completed.records(), 3, 9);
-            for (SessionEventRecord record : completed.records()) {
-                if (record.eventType() == 0x0002) {
-                    assertThat(record.encodedPayload().toByteArray())
-                            .containsSubsequence(ENVELOPE.toByteArray());
-                }
-            }
+            assertCommandResult(
+                    completed.records(), SessionCommandSource.MANUAL, 2, operationPayload(acknowledgement));
+            assertCommandResult(
+                    completed.records(), SessionCommandSource.MANUAL, 3, operationPayload(terminate));
         } finally {
             if (host.isAlive()) {
                 host.destroyForcibly();
@@ -108,7 +128,8 @@ class NativeControlLivePeerTest {
             awaitStatus(client, endpoint, host, log);
 
             assertReceived(client.send(endpoint, new ControlCommand.Terminate(
-                    1, ENVELOPE, AgentMessage.TerminationMode.GRACEFUL)), 1);
+                    1, SessionCommandSource.SERVER,
+                    SERVER_ENVELOPE, AgentMessage.TerminationMode.GRACEFUL)), 1);
             assertThat(host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)).isTrue();
             assertThat(host.exitValue()).as(Files.readString(log)).isZero();
 
@@ -173,13 +194,18 @@ class NativeControlLivePeerTest {
 
     private static JournalReadPage awaitCommandResults(Path directory, List<Long> expected)
             throws Exception {
+        return awaitCommandResults(directory, expected, expected.size());
+    }
+
+    private static JournalReadPage awaitCommandResults(
+            Path directory, List<Long> expected, int minimumResultCount) throws Exception {
         FileSystemSessionJournalReader reader = new FileSystemSessionJournalReader();
         Instant deadline = Instant.now().plus(TIMEOUT);
         JournalReadPage page;
         do {
             page = reader.readPage(directory, Optional.empty(), Optional.empty(), READ_LIMITS);
             List<Long> sequences = commandResultSequences(page.records());
-            if (sequences.containsAll(expected)) {
+            if (sequences.containsAll(expected) && sequences.size() >= minimumResultCount) {
                 return page;
             }
             Thread.sleep(10);
@@ -187,28 +213,44 @@ class NativeControlLivePeerTest {
         throw new AssertionError("timed out waiting for COMMAND_RESULT records");
     }
 
-    private static List<Long> commandResultSequences(List<SessionEventRecord> records) {
+    private static byte[] operationPayload(ControlCommand command) {
+        byte[] frame = new NativeControlCodec().encode(command);
+        return Arrays.copyOfRange(frame, NativeControlCodec.HEADER_LENGTH, frame.length);
+    }
+
+    private static void assertCommandResult(
+            List<SessionEventRecord> records,
+            SessionCommandSource source,
+            long sequence,
+            byte[] sourceEnvelope
+    ) throws Exception {
+        List<SessionEventPayload.CommandResult> results = new ArrayList<>();
+        for (SessionEventRecord record : records) {
+            if (record.eventType() == 0x0002) {
+                results.add((SessionEventPayload.CommandResult)
+                        EVENT_CODEC.decodeKnownPayload(record).orElseThrow());
+            }
+        }
+        assertThat(results).anySatisfy(result -> {
+            assertThat(result.source()).isEqualTo(source);
+            assertThat(result.operationSequence()).isEqualTo(sequence);
+            assertThat(result.sourceEnvelope().toByteArray()).containsExactly(sourceEnvelope);
+            assertThat(result.outcome()).isEqualTo(SessionCommandOutcome.SUCCEEDED);
+            assertThat(result.detail()).isEmpty();
+        });
+    }
+
+    private static List<Long> commandResultSequences(List<SessionEventRecord> records) throws Exception {
         List<Long> sequences = new ArrayList<>();
         for (SessionEventRecord record : records) {
             if (record.eventType() != 0x0002) {
                 continue;
             }
-            ByteBuffer payload = ByteBuffer.wrap(record.encodedPayload().toByteArray())
-                    .order(ByteOrder.BIG_ENDIAN);
-            assertThat(Byte.toUnsignedInt(payload.get())).isEqualTo(0x84);
-            int sequencePrefix = Byte.toUnsignedInt(payload.get());
-            long sequence = sequencePrefix <= 23
-                    ? sequencePrefix
-                    : unsignedLong(payload, sequencePrefix);
-            int envelopePrefix = Byte.toUnsignedInt(payload.get());
-            assertThat(envelopePrefix).isEqualTo(0x40 + ENVELOPE.toByteArray().length);
-            byte[] envelope = new byte[ENVELOPE.toByteArray().length];
-            payload.get(envelope);
-            assertThat(envelope).isEqualTo(ENVELOPE.toByteArray());
-            assertThat(Byte.toUnsignedInt(payload.get())).isEqualTo(1);
-            assertThat(Byte.toUnsignedInt(payload.get())).isEqualTo(0x60);
-            assertThat(payload.hasRemaining()).isFalse();
-            sequences.add(sequence);
+            SessionEventPayload.CommandResult result = (SessionEventPayload.CommandResult)
+                    EVENT_CODEC.decodeKnownPayload(record).orElseThrow();
+            assertThat(result.outcome()).isEqualTo(SessionCommandOutcome.SUCCEEDED);
+            assertThat(result.detail()).isEmpty();
+            sequences.add(result.operationSequence());
         }
         return sequences;
     }
@@ -224,11 +266,6 @@ class NativeControlLivePeerTest {
             }
         }
         assertThat(found).as("SIGNAL payload for kind %s and platform code %s", kind, platformCode).isTrue();
-    }
-
-    private static long unsignedLong(ByteBuffer payload, int prefix) {
-        assertThat(prefix).isEqualTo(0x1b);
-        return payload.getLong();
     }
 
     private static void awaitStatus(

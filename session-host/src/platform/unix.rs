@@ -947,7 +947,7 @@ fn serve_connection(
 ) -> Result<(), HostError> {
     while let Some(frame) = host::read_control_frame(&mut stream)? {
         stream.set_write_timeout(Some(CONTROL_RESPONSE_WRITE_TIMEOUT))?;
-        if is_operation_control(frame.message_type) && frame.payload_schema_version == 2 {
+        if is_operation_control(frame.message_type) && frame.payload_schema_version == 3 {
             handle_operation(&mut stream, &frame, &state)?;
         } else if let Some((message_type, sequence, payload)) = handle_request(&frame, &state) {
             host::write_control_frame(&mut stream, message_type, sequence, &payload)?;
@@ -977,11 +977,11 @@ fn handle_request(
         | control_message::SIGNAL
         | control_message::TERMINATE
         | control_message::ACK_JOURNAL => {
-            if frame.payload_schema_version != 2 {
+            if frame.payload_schema_version != 3 {
                 Some(response_error(
                     frame.sequence,
                     ERROR_UNSUPPORTED_SCHEMA,
-                    "operation controls require schema 2",
+                    "operation controls require schema 3",
                 ))
             } else {
                 unreachable!("operation controls are handled by serve_connection")
@@ -1033,7 +1033,11 @@ fn handle_operation(
 ) -> Result<(), HostError> {
     let operation_sequence = frame.sequence;
     if operation_sequence == 0 || operation_sequence == u64::MAX {
-        return send_operation_rejection(stream, frame, "operation sequence must be positive");
+        return send_operation_rejection(
+            stream,
+            frame,
+            "operation sequence must be between 1 and u64::MAX - 1",
+        );
     }
     let operation = match protocol::decode_operation_control_payload(
         frame.message_type,
@@ -1053,9 +1057,10 @@ fn handle_operation(
     }
     let admission = match lock_state(shared) {
         Ok(mut state) => {
-            if state
-                .accepted_sequence_high_watermark
-                .is_some_and(|watermark| operation_sequence <= watermark)
+            if operation.source == protocol::OperationSource::Server
+                && state
+                    .accepted_sequence_high_watermark
+                    .is_some_and(|watermark| operation_sequence <= watermark)
             {
                 Err((
                     ERROR_INVALID_REQUEST,
@@ -1064,7 +1069,9 @@ fn handle_operation(
             } else {
                 match state.operations.register_operation() {
                     Ok(Some(active_operation)) => {
-                        state.accepted_sequence_high_watermark = Some(operation_sequence);
+                        if operation.source == protocol::OperationSource::Server {
+                            state.accepted_sequence_high_watermark = Some(operation_sequence);
+                        }
                         Ok((Arc::clone(&state.operation_order), active_operation))
                     }
                     Ok(None) => Err((
@@ -1119,8 +1126,9 @@ fn handle_operation(
             }
         };
         if let Err(error) = state.append_durable(JournalEvent::CommandResult {
+            source: operation.source,
             operation_sequence,
-            command_envelope: operation.command_envelope,
+            source_envelope: operation.result_envelope,
             outcome,
             detail,
         }) {
@@ -2067,6 +2075,106 @@ mod tests {
     }
 
     #[test]
+    fn command_result_append_failure_does_not_authorize_server_replay() {
+        let directory = std::env::temp_dir().join(format!(
+            "session-host-command-result-failure-{}-{}",
+            std::process::id(),
+            epoch_millis().unwrap()
+        ));
+        let options = SessionOptions {
+            session_id: "command-result-failure".to_owned(),
+            start_command_id: "command.start".to_owned(),
+            session_dir: directory.clone(),
+            cwd: PathBuf::from("/tmp"),
+            cols: 80,
+            rows: 24,
+            term: "xterm-256color".to_owned(),
+            colorterm: None,
+            sandbox_policy: None,
+            journal_segment_bytes: 1024,
+            journal_max_bytes: 1024 * 1024,
+            command: ["/bin/sh", "-c", "sleep 0.2"]
+                .into_iter()
+                .map(OsString::from)
+                .collect(),
+        };
+        let prepared = PreparedCommand::validate(&options).unwrap();
+        let sandbox = PreparedSandbox::prepare(&options).unwrap();
+        let mut journal = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
+        let final_event_id = journal.finish_durably(0).unwrap();
+        let journal_before_operation = fs::read(directory.join("00000001.cbor")).unwrap();
+        let acknowledgement = JournalAcknowledgement::open(&directory).unwrap();
+        let metadata = initial_metadata(&options, &sandbox, epoch_millis().unwrap()).unwrap();
+        let (child_pid, master, descendants) = spawn_pty(&prepared, 80, 24, sandbox).unwrap();
+        let state = Arc::new(Mutex::new(SharedState {
+            journal,
+            metadata,
+            master,
+            accepted_sequence_high_watermark: None,
+            operation_order: Arc::new(Mutex::new(())),
+            operations: Arc::new(OperationCoordinator::new()),
+            acknowledgement,
+            descendants: Arc::new(Mutex::new(descendants)),
+            child_live: true,
+            exit_code: i32::MIN,
+            exit_signal: -1,
+        }));
+        let sequence = 42;
+        let payload = protocol::encode_operation_control_payload(
+            control_message::ACK_JOURNAL,
+            protocol::OperationSource::Server,
+            Some(&[0x80]),
+            &final_event_id.to_le_bytes(),
+        )
+        .unwrap();
+        let frame = OwnedControlFrame {
+            message_type: control_message::ACK_JOURNAL,
+            payload_schema_version: 3,
+            sequence,
+            payload,
+        };
+        let (mut host_stream, mut client_stream) = UnixStream::pair().unwrap();
+
+        handle_operation(&mut host_stream, &frame, &state).unwrap();
+        let received = host::read_control_frame(&mut client_stream)
+            .unwrap()
+            .unwrap();
+        assert_eq!(received.message_type, control_message::RECEIVED);
+        assert_eq!(received.sequence, sequence);
+        assert!(received.payload.is_empty());
+        {
+            let state = lock_state(&state).unwrap();
+            assert_eq!(state.accepted_sequence_high_watermark, Some(sequence));
+            assert_eq!(
+                state.acknowledgement.acknowledged_event_id(),
+                Some(final_event_id)
+            );
+        }
+        assert_eq!(
+            fs::read(directory.join("00000001.cbor")).unwrap(),
+            journal_before_operation
+        );
+
+        handle_operation(&mut host_stream, &frame, &state).unwrap();
+        let rejected = host::read_control_frame(&mut client_stream)
+            .unwrap()
+            .unwrap();
+        assert_eq!(rejected.message_type, control_message::RECEIVED);
+        assert_eq!(rejected.sequence, sequence);
+        assert_eq!(host::u32_at(&rejected.payload[0..4]), ERROR_INVALID_REQUEST);
+        assert_eq!(
+            fs::read(directory.join("00000001.cbor")).unwrap(),
+            journal_before_operation
+        );
+
+        assert!(libc::WIFEXITED(wait_for_child(child_pid).unwrap()));
+        drop(host_stream);
+        drop(client_stream);
+        drop(state);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn validates_portable_and_platform_signals() {
         assert_eq!(
             parse_signal(&host::signal_payload(1, -1)),
@@ -2120,7 +2228,7 @@ mod tests {
             .unwrap();
         let frame = OwnedControlFrame {
             message_type: control_message::INPUT,
-            payload_schema_version: 2,
+            payload_schema_version: 3,
             sequence: 1,
             payload: Vec::new(),
         };

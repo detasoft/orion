@@ -214,8 +214,9 @@ impl From<io::Error> for JournalError {
 #[derive(Debug)]
 pub(crate) enum JournalEvent {
     CommandResult {
+        source: protocol::OperationSource,
         operation_sequence: u64,
-        command_envelope: Vec<u8>,
+        source_envelope: Vec<u8>,
         outcome: protocol::CommandOutcome,
         detail: String,
     },
@@ -850,14 +851,16 @@ fn create_segment(
 fn encode_event(event_id: u64, event: JournalEvent) -> Result<Vec<u8>, JournalError> {
     let encoded = match event {
         JournalEvent::CommandResult {
+            source,
             operation_sequence,
-            command_envelope,
+            source_envelope,
             outcome,
             detail,
         } => protocol::encode_command_result(
             event_id,
+            source,
             operation_sequence,
-            &command_envelope,
+            &source_envelope,
             outcome,
             &detail,
         ),
@@ -2566,7 +2569,7 @@ mod tests {
     fn command_records_encode_the_expected_sequence() {
         let directory = temporary_directory("command-records");
         let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
-        let sequence = u64::MAX;
+        let sequence = u64::MAX - 1;
         let envelope = hex_bytes(concat!(
             "8619810167636f6d6d616e646773657373696f6e",
             "50707172737475767778797a7b7c7d7e7f410066667574757265",
@@ -2584,16 +2587,24 @@ mod tests {
                 .append_at_for_test(
                     event_id,
                     JournalEvent::CommandResult {
+                        source: protocol::OperationSource::Server,
                         operation_sequence: sequence,
-                        command_envelope: envelope.clone(),
+                        source_envelope: envelope.clone(),
                         outcome,
                         detail: detail.to_owned(),
                     },
                 )
                 .unwrap();
             expected_records.push(
-                protocol::encode_command_result(event_id, sequence, &envelope, outcome, detail)
-                    .unwrap(),
+                protocol::encode_command_result(
+                    event_id,
+                    protocol::OperationSource::Server,
+                    sequence,
+                    &envelope,
+                    outcome,
+                    detail,
+                )
+                .unwrap(),
             );
         }
         assert_eq!(
@@ -2630,26 +2641,37 @@ mod tests {
         let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
         let invalid_writes = [
             JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
                 operation_sequence: 0,
-                command_envelope: vec![0x80],
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Failed,
                 detail: "failed".to_owned(),
             },
             JournalEvent::CommandResult {
-                operation_sequence: 1,
-                command_envelope: vec![],
+                source: protocol::OperationSource::Server,
+                operation_sequence: u64::MAX,
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Failed,
                 detail: "failed".to_owned(),
             },
             JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
                 operation_sequence: 1,
-                command_envelope: vec![0x80],
+                source_envelope: vec![],
+                outcome: protocol::CommandOutcome::Failed,
+                detail: "failed".to_owned(),
+            },
+            JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
+                operation_sequence: 1,
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Succeeded,
                 detail: "detail".to_owned(),
             },
             JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
                 operation_sequence: 1,
-                command_envelope: vec![0x80],
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Failed,
                 detail: "x".repeat(4_097),
             },
@@ -2685,8 +2707,9 @@ mod tests {
 
         writer
             .append_durable(JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
                 operation_sequence: 1,
-                command_envelope: vec![0x80],
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Succeeded,
                 detail: String::new(),
             })
@@ -2925,8 +2948,9 @@ mod tests {
 
         writer
             .append_durable(JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
                 operation_sequence: 1,
-                command_envelope: vec![0x80],
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Succeeded,
                 detail: String::new(),
             })
@@ -2983,8 +3007,9 @@ mod tests {
         ));
         assert!(matches!(
             writer.append_durable(JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
                 operation_sequence: 1,
-                command_envelope: vec![0x80],
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Succeeded,
                 detail: String::new(),
             }),
@@ -3125,8 +3150,9 @@ mod tests {
 
         writer
             .append_durable(JournalEvent::CommandResult {
+                source: protocol::OperationSource::Server,
                 operation_sequence: 1,
-                command_envelope: vec![0x80],
+                source_envelope: vec![0x80],
                 outcome: protocol::CommandOutcome::Succeeded,
                 detail: String::new(),
             })
@@ -3147,8 +3173,9 @@ mod tests {
             JournalWriter::create_with_record_file_sync(&directory, JournalConfig::default(), sync)
                 .unwrap();
         let event = || JournalEvent::CommandResult {
+            source: protocol::OperationSource::Server,
             operation_sequence: 1,
-            command_envelope: vec![0x80],
+            source_envelope: vec![0x80],
             outcome: protocol::CommandOutcome::Succeeded,
             detail: String::new(),
         };

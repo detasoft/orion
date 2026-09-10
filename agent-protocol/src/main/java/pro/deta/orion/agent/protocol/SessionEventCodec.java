@@ -26,6 +26,15 @@ public final class SessionEventCodec {
         writer.array(3);
         writer.unsigned(eventId);
         switch (payload) {
+            case SessionEventPayload.CommandResult value -> {
+                writer.unsigned(SessionEventType.COMMAND_RESULT);
+                writer.array(5);
+                writer.unsigned(value.source().wireCode());
+                writer.unsigned(value.operationSequence());
+                writer.bytes(value.sourceEnvelope());
+                writer.unsigned(value.outcome().wireCode());
+                writer.text(value.detail());
+            }
             case SessionEventPayload.PtyOutput value -> {
                 writer.unsigned(SessionEventType.PTY_OUTPUT);
                 writer.bytes(value.bytes());
@@ -109,6 +118,8 @@ public final class SessionEventCodec {
             throws AgentProtocolException {
         Objects.requireNonNull(event, "event");
         return switch (event.eventType()) {
+            case SessionEventType.COMMAND_RESULT -> Optional.of(
+                    decodeCommandResult(payloadArray(event, "COMMAND_RESULT")));
             case SessionEventType.PTY_OUTPUT -> Optional.of(
                     new SessionEventPayload.PtyOutput(
                             ProtocolBytes.copyOf(bytes(payload(event), "PTY_OUTPUT"))));
@@ -118,6 +129,44 @@ public final class SessionEventCodec {
                     decodeProcessExited(payloadArray(event, "PROCESS_EXITED")));
             default -> Optional.empty();
         };
+    }
+
+    private SessionEventPayload.CommandResult decodeCommandResult(List<CborReader.Value> fields)
+            throws AgentProtocolException {
+        requireFields(fields, 5, "COMMAND_RESULT");
+        SessionCommandSource source = SessionCommandSource.fromWireCode(
+                unsignedShort(fields.get(0), "COMMAND_RESULT source"));
+        if (source == null) {
+            throw new AgentProtocolException(INVALID_FIELD, "COMMAND_RESULT source is invalid");
+        }
+        long operationSequence = unsignedLong(fields.get(1), "COMMAND_RESULT operationSequence");
+        if (operationSequence == 0 || operationSequence == -1) {
+            throw new AgentProtocolException(
+                    INVALID_FIELD,
+                    "COMMAND_RESULT operationSequence must be between 1 and u64::MAX - 1");
+        }
+        byte[] sourceEnvelope = bytes(fields.get(2), "COMMAND_RESULT sourceEnvelope");
+        if (sourceEnvelope.length == 0) {
+            throw new AgentProtocolException(INVALID_FIELD, "COMMAND_RESULT sourceEnvelope must not be empty");
+        }
+        SessionCommandOutcome outcome = SessionCommandOutcome.fromWireCode(
+                unsignedShort(fields.get(3), "COMMAND_RESULT outcome"));
+        if (outcome == null) {
+            throw new AgentProtocolException(INVALID_FIELD, "COMMAND_RESULT outcome is invalid");
+        }
+        String detail = text(fields.get(4), "COMMAND_RESULT detail");
+        if (detail.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 4096) {
+            throw new AgentProtocolException(LIMIT_EXCEEDED, "COMMAND_RESULT detail exceeds 4096 UTF-8 bytes");
+        }
+        if (outcome == SessionCommandOutcome.SUCCEEDED && !detail.isEmpty()) {
+            throw new AgentProtocolException(INVALID_FIELD, "successful COMMAND_RESULT detail must be empty");
+        }
+        return new SessionEventPayload.CommandResult(
+                source,
+                operationSequence,
+                ProtocolBytes.copyOf(sourceEnvelope),
+                outcome,
+                detail);
     }
 
     private SessionEventPayload.PtyInput decodePtyInput(List<CborReader.Value> fields)
@@ -177,6 +226,15 @@ public final class SessionEventCodec {
             throw new AgentProtocolException(INVALID_FIELD, name + " must fit an unsigned 16-bit integer");
         }
         return integer.value().intValue();
+    }
+
+    private static long unsignedLong(CborReader.Value value, String name) throws AgentProtocolException {
+        if (!(value instanceof CborReader.IntegerValue integer)
+                || integer.value().signum() < 0
+                || integer.value().bitLength() > Long.SIZE) {
+            throw new AgentProtocolException(INVALID_FIELD, name + " must fit an unsigned 64-bit integer");
+        }
+        return integer.value().longValue();
     }
 
     private static int signedInt(CborReader.Value value, String name) throws AgentProtocolException {

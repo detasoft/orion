@@ -1,11 +1,15 @@
 package pro.deta.orion.agentd.session;
 
+import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.SessionCommandSource;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.zip.CRC32C;
@@ -15,6 +19,7 @@ public final class NativeControlCodec {
     public static final int MAX_PAYLOAD_LENGTH = 16 * 1024 * 1024;
     private static final byte[] MAGIC = {'O', 'R', 'C', 'T'};
     private static final int VERSION = 1;
+    private static final int OPERATION_PAYLOAD_SCHEMA = 3;
     private static final long STATUS_SEQUENCE = 1;
 
     public byte[] encode(ControlCommand command) {
@@ -24,24 +29,31 @@ public final class NativeControlCodec {
             effect.putLong(input.inputId().getMostSignificantBits());
             effect.putLong(input.inputId().getLeastSignificantBits());
             effect.put(bytes);
-            return operationFrame(1, input.sequence(), input.commandEnvelope().toByteArray(), effect.array());
+            return operationFrame(
+                    1, input.sequence(), input.source(), input.serverCommandEnvelope(), effect.array());
         }
         if (command instanceof ControlCommand.Resize resize) {
             ByteBuffer effect = payload(8);
             effect.putInt(resize.columns()).putInt(resize.rows());
-            return operationFrame(2, resize.sequence(), resize.commandEnvelope().toByteArray(), effect.array());
+            return operationFrame(
+                    2, resize.sequence(), resize.source(), resize.serverCommandEnvelope(), effect.array());
         }
         if (command instanceof ControlCommand.Signal signal) {
             ByteBuffer effect = payload(8);
             effect.putShort((short) signal.kind().wireCode()).putShort((short) 0);
             effect.putInt(signal.platformCode());
-            return operationFrame(3, signal.sequence(), signal.commandEnvelope().toByteArray(), effect.array());
+            return operationFrame(
+                    3, signal.sequence(), signal.source(), signal.serverCommandEnvelope(), effect.array());
         }
         if (command instanceof ControlCommand.Terminate terminate) {
             ByteBuffer effect = payload(4);
             effect.putShort((short) terminate.mode().wireCode()).putShort((short) 0);
             return operationFrame(
-                    4, terminate.sequence(), terminate.commandEnvelope().toByteArray(), effect.array());
+                    4,
+                    terminate.sequence(),
+                    terminate.source(),
+                    terminate.serverCommandEnvelope(),
+                    effect.array());
         }
         if (command instanceof ControlCommand.AckJournal acknowledgement) {
             ByteBuffer effect = payload(8);
@@ -49,7 +61,8 @@ public final class NativeControlCodec {
             return operationFrame(
                     7,
                     acknowledgement.sequence(),
-                    acknowledgement.commandEnvelope().toByteArray(),
+                    acknowledgement.source(),
+                    acknowledgement.serverCommandEnvelope(),
                     effect.array());
         }
         return frame(5, STATUS_SEQUENCE, new byte[0]);
@@ -102,19 +115,33 @@ public final class NativeControlCodec {
         return encoded.array();
     }
 
-    private static byte[] operationPayload(byte[] envelope, byte[] effect) {
-        if (envelope.length > MAX_PAYLOAD_LENGTH - Integer.BYTES - effect.length) {
+    private static byte[] operationPayload(
+            SessionCommandSource source,
+            Optional<ProtocolBytes> serverCommandEnvelope,
+            byte[] effect
+    ) {
+        byte[] envelope = serverCommandEnvelope.map(ProtocolBytes::toByteArray).orElseGet(() -> new byte[0]);
+        if (envelope.length > MAX_PAYLOAD_LENGTH - 2 * Short.BYTES - Integer.BYTES - effect.length) {
             throw new IllegalArgumentException("control payload exceeds 16 MiB");
         }
-        ByteBuffer encoded = payload(Integer.BYTES + envelope.length + effect.length);
+        ByteBuffer encoded = payload(2 * Short.BYTES + Integer.BYTES + envelope.length + effect.length);
+        encoded.putShort((short) source.wireCode());
+        encoded.putShort((short) 0);
         encoded.putInt(envelope.length);
         encoded.put(envelope);
         encoded.put(effect);
         return encoded.array();
     }
 
-    private static byte[] operationFrame(int type, long sequence, byte[] envelope, byte[] effect) {
-        return frame(type, 2, sequence, operationPayload(envelope, effect));
+    private static byte[] operationFrame(
+            int type,
+            long sequence,
+            SessionCommandSource source,
+            Optional<ProtocolBytes> serverCommandEnvelope,
+            byte[] effect
+    ) {
+        return frame(type, OPERATION_PAYLOAD_SCHEMA, sequence,
+                operationPayload(source, serverCommandEnvelope, effect));
     }
 
     private static ByteBuffer payload(int length) {

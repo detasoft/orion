@@ -56,8 +56,34 @@ pub struct ControlFrame<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationControlPayload {
-    pub command_envelope: Vec<u8>,
+    pub source: OperationSource,
+    pub result_envelope: Vec<u8>,
     pub effect: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationSource {
+    Server,
+    Manual,
+}
+
+impl OperationSource {
+    pub const fn wire_code(self) -> u16 {
+        match self {
+            Self::Server => 1,
+            Self::Manual => 2,
+        }
+    }
+
+    fn from_wire_code(code: u16) -> Result<Self, EncodeError> {
+        match code {
+            1 => Ok(Self::Server),
+            2 => Ok(Self::Manual),
+            _ => Err(EncodeError::InvalidPayload(
+                "operation control source is invalid",
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,13 +145,15 @@ pub fn encode_control_frame(frame: ControlFrame<'_>) -> Result<Vec<u8>, EncodeEr
 
 pub fn encode_operation_control_payload(
     message_type: u16,
-    command_envelope: &[u8],
+    source: OperationSource,
+    server_envelope: Option<&[u8]>,
     effect: &[u8],
 ) -> Result<Vec<u8>, EncodeError> {
-    validate_command_envelope(command_envelope)?;
+    let server_envelope = server_envelope.unwrap_or_default();
+    validate_source_envelope(source, server_envelope)?;
     validate_operation_effect(message_type, effect)?;
-    let payload_length = 4_usize
-        .checked_add(command_envelope.len())
+    let payload_length = 8_usize
+        .checked_add(server_envelope.len())
         .and_then(|length| length.checked_add(effect.len()))
         .ok_or(EncodeError::PayloadTooLarge {
             actual: usize::MAX,
@@ -133,13 +161,15 @@ pub fn encode_operation_control_payload(
         })?;
     validate_payload_length(payload_length)?;
     let envelope_length =
-        u32::try_from(command_envelope.len()).map_err(|_| EncodeError::PayloadTooLarge {
-            actual: command_envelope.len(),
+        u32::try_from(server_envelope.len()).map_err(|_| EncodeError::PayloadTooLarge {
+            actual: server_envelope.len(),
             maximum: MAX_PAYLOAD_LENGTH,
         })?;
     let mut payload = Vec::with_capacity(payload_length);
+    payload.extend_from_slice(&source.wire_code().to_le_bytes());
+    payload.extend_from_slice(&0_u16.to_le_bytes());
     payload.extend_from_slice(&envelope_length.to_le_bytes());
-    payload.extend_from_slice(command_envelope);
+    payload.extend_from_slice(server_envelope);
     payload.extend_from_slice(effect);
     Ok(payload)
 }
@@ -150,13 +180,20 @@ pub fn decode_operation_control_payload(
     payload: &[u8],
 ) -> Result<OperationControlPayload, EncodeError> {
     validate_payload_length(payload.len())?;
-    if payload.len() < 4 {
+    if payload.len() < 8 {
         return Err(EncodeError::InvalidPayload(
             "operation control payload is truncated before the command envelope",
         ));
     }
-    let envelope_length = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
-    let envelope_end = 4_usize
+    let source =
+        OperationSource::from_wire_code(u16::from_le_bytes(payload[0..2].try_into().unwrap()))?;
+    if u16::from_le_bytes(payload[2..4].try_into().unwrap()) != 0 {
+        return Err(EncodeError::InvalidPayload(
+            "operation control reserved bytes must be zero",
+        ));
+    }
+    let envelope_length = u32::from_le_bytes(payload[4..8].try_into().unwrap()) as usize;
+    let envelope_end = 8_usize
         .checked_add(envelope_length)
         .ok_or(EncodeError::InvalidPayload(
             "operation control command envelope length overflows",
@@ -166,12 +203,17 @@ pub fn decode_operation_control_payload(
             "operation control command envelope is truncated",
         ));
     }
-    let command_envelope = &payload[4..envelope_end];
+    let server_envelope = &payload[8..envelope_end];
     let effect = &payload[envelope_end..];
-    validate_operation_identity(operation_sequence, command_envelope)?;
+    validate_operation_sequence(operation_sequence)?;
+    validate_source_envelope(source, server_envelope)?;
     validate_operation_effect(message_type, effect)?;
     Ok(OperationControlPayload {
-        command_envelope: command_envelope.to_vec(),
+        source,
+        result_envelope: match source {
+            OperationSource::Server => server_envelope.to_vec(),
+            OperationSource::Manual => payload.to_vec(),
+        },
         effect: effect.to_vec(),
     })
 }
@@ -317,13 +359,14 @@ pub fn encode_signal(event_id: u64, kind: u16, platform_code: i32) -> Result<Vec
 
 pub fn encode_command_result(
     event_id: u64,
+    source: OperationSource,
     operation_sequence: u64,
-    command_envelope: &[u8],
+    source_envelope: &[u8],
     outcome: CommandOutcome,
     detail: &str,
 ) -> Result<Vec<u8>, EncodeError> {
     validate_operation_sequence(operation_sequence)?;
-    validate_command_envelope(command_envelope)?;
+    validate_result_envelope(source_envelope)?;
     if detail.len() > 4096 {
         return Err(EncodeError::InvalidPayload(
             "command result detail exceeds 4096 bytes",
@@ -335,9 +378,10 @@ pub fn encode_command_result(
         ));
     }
     let mut encoded = event_prefix(event_id, event_type::COMMAND_RESULT);
-    cbor_array(&mut encoded, 4);
+    cbor_array(&mut encoded, 5);
+    cbor_unsigned(&mut encoded, u64::from(source.wire_code()));
     cbor_unsigned(&mut encoded, operation_sequence);
-    cbor_bytes(&mut encoded, command_envelope);
+    cbor_bytes(&mut encoded, source_envelope);
     cbor_unsigned(&mut encoded, outcome.wire_code());
     cbor_text(&mut encoded, detail);
     Ok(encoded)
@@ -355,18 +399,10 @@ pub fn valid_signal(kind: u16, platform_code: i32) -> bool {
     }
 }
 
-fn validate_operation_identity(
-    operation_sequence: u64,
-    command_envelope: &[u8],
-) -> Result<(), EncodeError> {
-    validate_operation_sequence(operation_sequence)?;
-    validate_command_envelope(command_envelope)
-}
-
 fn validate_operation_sequence(operation_sequence: u64) -> Result<(), EncodeError> {
-    if operation_sequence == 0 {
+    if operation_sequence == 0 || operation_sequence == u64::MAX {
         return Err(EncodeError::InvalidPayload(
-            "operation sequence must be nonzero",
+            "operation sequence must be between 1 and u64::MAX - 1",
         ));
     }
     Ok(())
@@ -388,6 +424,28 @@ fn validate_command_envelope(command_envelope: &[u8]) -> Result<(), EncodeError>
         ));
     }
     validate_payload_length(command_envelope.len())
+}
+
+fn validate_source_envelope(
+    source: OperationSource,
+    server_envelope: &[u8],
+) -> Result<(), EncodeError> {
+    match source {
+        OperationSource::Server => validate_command_envelope(server_envelope),
+        OperationSource::Manual if server_envelope.is_empty() => Ok(()),
+        OperationSource::Manual => Err(EncodeError::InvalidPayload(
+            "manual operation must not contain a server command envelope",
+        )),
+    }
+}
+
+fn validate_result_envelope(source_envelope: &[u8]) -> Result<(), EncodeError> {
+    if source_envelope.is_empty() {
+        return Err(EncodeError::InvalidPayload(
+            "command result source envelope must not be empty",
+        ));
+    }
+    validate_payload_length(source_envelope.len())
 }
 
 pub fn valid_command_id(command_id: &[u8]) -> bool {
@@ -609,20 +667,12 @@ mod tests {
     }
 
     #[test]
-    fn checked_in_control_fixture_is_stable() {
-        assert_eq!(
-            include_bytes!("../protocol/fixtures/control-v1.bin").as_slice(),
-            protocol_fixture::control().as_slice(),
-        );
-    }
-
-    #[test]
-    fn checked_in_idempotent_control_fixture_is_stable() {
+    fn checked_in_source_aware_control_fixture_is_stable() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("protocol/fixtures/control-idempotency-v2.bin");
+            .join("protocol/fixtures/control-source-aware.bin");
         assert_eq!(
             std::fs::read(path).unwrap(),
-            protocol_fixture::control_idempotency_v2()
+            protocol_fixture::control_source_aware()
         );
     }
 
@@ -648,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_two_operation_controls_round_trip_envelopes_and_effects() {
+    fn source_aware_operation_controls_round_trip_all_effects() {
         let input_id = [0x5a; 16];
         let cases = [
             (
@@ -671,40 +721,68 @@ mod tests {
                 control_message::TERMINATE,
                 concat_slices(&[&0_u16.to_le_bytes(), &0_u16.to_le_bytes()]),
             ),
+            (
+                control_message::ACK_JOURNAL,
+                ((i64::MAX as u64) + 6).to_le_bytes().to_vec(),
+            ),
         ];
 
-        for (index, (message_type, effect)) in cases.into_iter().enumerate() {
-            let sequence = (i64::MAX as u64) + 1 + index as u64;
-            let envelope = [
-                0x84, 0x01, 0x02, 0x03, 0x66, b'f', b'u', b't', b'u', b'r', b'e',
-            ];
-            let mut encoded =
-                encode_operation_control_payload(message_type, &envelope, &effect).unwrap();
+        for source in [OperationSource::Server, OperationSource::Manual] {
+            for (index, (message_type, effect)) in cases.iter().enumerate() {
+                let sequence = (i64::MAX as u64) + 1 + index as u64;
+                let envelope = [
+                    0x84, 0x01, 0x02, 0x03, 0x66, b'f', b'u', b't', b'u', b'r', b'e',
+                ];
+                let server_envelope =
+                    (source == OperationSource::Server).then_some(envelope.as_slice());
+                let encoded = encode_operation_control_payload(
+                    *message_type,
+                    source,
+                    server_envelope,
+                    effect,
+                )
+                .unwrap();
 
-            let decoded =
-                decode_operation_control_payload(message_type, sequence, &encoded).unwrap();
-            encoded.fill(0);
+                let decoded =
+                    decode_operation_control_payload(*message_type, sequence, &encoded).unwrap();
 
-            assert_eq!(decoded.command_envelope, envelope);
-            assert_eq!(decoded.effect, effect);
+                assert_eq!(decoded.source, source);
+                assert_eq!(
+                    decoded.result_envelope,
+                    if source == OperationSource::Server {
+                        envelope.to_vec()
+                    } else {
+                        encoded
+                    }
+                );
+                assert_eq!(decoded.effect, *effect);
+            }
         }
     }
 
     #[test]
-    fn schema_two_operation_controls_reject_empty_envelopes() {
+    fn operation_controls_apply_source_specific_envelope_rules() {
         let effect = [0_u8; 16];
         assert_invalid_operation_payload(
             control_message::INPUT,
-            1,
-            &[],
+            OperationSource::Server,
+            None,
             &effect,
             "command envelope must not be empty",
+        );
+        assert_invalid_operation_payload(
+            control_message::INPUT,
+            OperationSource::Manual,
+            Some(&[0x80]),
+            &effect,
+            "manual operation must not contain",
         );
     }
 
     #[test]
-    fn schema_two_operation_controls_reject_truncated_and_oversized_envelopes() {
-        let mut truncated = operation_prefix(3);
+    fn operation_controls_reject_invalid_prefixes_and_envelopes() {
+        let effect = [0_u8; 16];
+        let mut truncated = operation_prefix(OperationSource::Server, 3);
         truncated.extend_from_slice(&[0x80, 0x81]);
         assert!(
             decode_operation_control_payload(control_message::INPUT, 1, &truncated)
@@ -719,7 +797,7 @@ mod tests {
             Err(EncodeError::PayloadTooLarge { .. })
         ));
 
-        let mut declared_oversized = operation_prefix(u32::MAX);
+        let mut declared_oversized = operation_prefix(OperationSource::Server, u32::MAX);
         declared_oversized.push(0x80);
         assert!(
             decode_operation_control_payload(control_message::INPUT, 1, &declared_oversized)
@@ -727,10 +805,58 @@ mod tests {
                 .to_string()
                 .contains("command envelope")
         );
+
+        let mut invalid_source = encode_operation_control_payload(
+            control_message::INPUT,
+            OperationSource::Manual,
+            None,
+            &effect,
+        )
+        .unwrap();
+        invalid_source[0..2].copy_from_slice(&3_u16.to_le_bytes());
+        assert!(
+            decode_operation_control_payload(control_message::INPUT, 1, &invalid_source)
+                .unwrap_err()
+                .to_string()
+                .contains("source")
+        );
+
+        let mut reserved = encode_operation_control_payload(
+            control_message::INPUT,
+            OperationSource::Manual,
+            None,
+            &effect,
+        )
+        .unwrap();
+        reserved[2] = 1;
+        assert!(
+            decode_operation_control_payload(control_message::INPUT, 1, &reserved)
+                .unwrap_err()
+                .to_string()
+                .contains("reserved")
+        );
     }
 
     #[test]
-    fn schema_two_operation_controls_validate_each_effect_shape() {
+    fn operation_controls_reject_reserved_sequences() {
+        let encoded = encode_operation_control_payload(
+            control_message::INPUT,
+            OperationSource::Manual,
+            None,
+            &[0_u8; 16],
+        )
+        .unwrap();
+
+        for sequence in [0, u64::MAX] {
+            assert!(
+                decode_operation_control_payload(control_message::INPUT, sequence, &encoded)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn source_aware_operation_controls_validate_each_effect_shape() {
         let invalid_cases = [
             (control_message::INPUT, vec![0_u8; 15]),
             (
@@ -751,16 +877,23 @@ mod tests {
             ),
         ];
         for (message_type, effect) in invalid_cases {
-            assert_invalid_operation_payload(message_type, 1, &[0x80], &effect, "effect payload");
+            assert_invalid_operation_payload(
+                message_type,
+                OperationSource::Server,
+                Some(&[0x80]),
+                &effect,
+                "effect payload",
+            );
         }
     }
 
     #[test]
-    fn acknowledgement_is_a_schema_two_operation_effect() {
+    fn acknowledgement_is_a_source_aware_operation_effect() {
         let watermark = (i64::MAX as u64) + 1;
         let encoded = encode_operation_control_payload(
             control_message::ACK_JOURNAL,
-            &[0x81, 0x07],
+            OperationSource::Server,
+            Some(&[0x81, 0x07]),
             &watermark.to_le_bytes(),
         )
         .unwrap();
@@ -774,8 +907,8 @@ mod tests {
     fn acknowledgement_effect_must_contain_one_event_id() {
         assert_invalid_operation_payload(
             control_message::ACK_JOURNAL,
-            1,
-            &[0x81, 0x07],
+            OperationSource::Server,
+            Some(&[0x81, 0x07]),
             &[0_u8; 7],
             "effect payload",
         );
@@ -792,22 +925,69 @@ mod tests {
         assert_eq!(CommandOutcome::Rejected.wire_code(), 3);
         assert_eq!(CommandOutcome::Ambiguous.wire_code(), 4);
         assert_eq!(
-            encode_command_result(2, sequence, &envelope, CommandOutcome::Succeeded, "").unwrap(),
+            encode_command_result(
+                2,
+                OperationSource::Server,
+                sequence,
+                &envelope,
+                CommandOutcome::Succeeded,
+                "",
+            )
+            .unwrap(),
             [
-                0x83, 0x02, 0x02, 0x84, 0x1b, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x4b,
-                0x84, 0x01, 0x02, 0x03, 0x66, b'f', b'u', b't', b'u', b'r', b'e', 0x01, 0x60,
+                0x83, 0x02, 0x02, 0x85, 0x01, 0x1b, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06,
+                0x4b, 0x84, 0x01, 0x02, 0x03, 0x66, b'f', b'u', b't', b'u', b'r', b'e', 0x01, 0x60,
             ],
         );
     }
 
     #[test]
     fn command_events_reject_invalid_identity_and_detail() {
-        assert!(encode_command_result(2, 0, &[0x80], CommandOutcome::Failed, "failed").is_err());
-        assert!(encode_command_result(2, 1, &[], CommandOutcome::Failed, "failed").is_err());
-        assert!(encode_command_result(2, 1, &[0x80], CommandOutcome::Succeeded, "detail").is_err());
-        assert!(
-            encode_command_result(2, 1, &[0x80], CommandOutcome::Failed, &"x".repeat(4097),)
+        for sequence in [0, u64::MAX] {
+            assert!(
+                encode_command_result(
+                    2,
+                    OperationSource::Server,
+                    sequence,
+                    &[0x80],
+                    CommandOutcome::Failed,
+                    "failed"
+                )
                 .is_err()
+            );
+        }
+        assert!(
+            encode_command_result(
+                2,
+                OperationSource::Server,
+                1,
+                &[],
+                CommandOutcome::Failed,
+                "failed"
+            )
+            .is_err()
+        );
+        assert!(
+            encode_command_result(
+                2,
+                OperationSource::Manual,
+                1,
+                &[0x80],
+                CommandOutcome::Succeeded,
+                "detail"
+            )
+            .is_err()
+        );
+        assert!(
+            encode_command_result(
+                2,
+                OperationSource::Server,
+                1,
+                &[0x80],
+                CommandOutcome::Failed,
+                &"x".repeat(4097),
+            )
+            .is_err()
         );
     }
 
@@ -921,8 +1101,10 @@ mod tests {
             .collect()
     }
 
-    fn operation_prefix(envelope_length: u32) -> Vec<u8> {
+    fn operation_prefix(source: OperationSource, envelope_length: u32) -> Vec<u8> {
         let mut payload = Vec::new();
+        payload.extend_from_slice(&source.wire_code().to_le_bytes());
+        payload.extend_from_slice(&0_u16.to_le_bytes());
         payload.extend_from_slice(&envelope_length.to_le_bytes());
         payload
     }
@@ -933,12 +1115,13 @@ mod tests {
 
     fn assert_invalid_operation_payload(
         message_type: u16,
-        _sequence: u64,
-        envelope: &[u8],
+        source: OperationSource,
+        server_envelope: Option<&[u8]>,
         effect: &[u8],
         expected: &str,
     ) {
-        let error = encode_operation_control_payload(message_type, envelope, effect).unwrap_err();
+        let error = encode_operation_control_payload(message_type, source, server_envelope, effect)
+            .unwrap_err();
         assert!(
             error.to_string().contains(expected),
             "unexpected error: {error}"
@@ -973,24 +1156,7 @@ pub mod protocol_fixture {
         format_hex_records(&truncated_item_records())
     }
 
-    pub fn control() -> Vec<u8> {
-        let input_id = [
-            0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd,
-            0xfe, 0xff,
-        ];
-        let input = pty_input_payload(input_id, b"echo hello\n").unwrap();
-        let request = encode_control_frame(ControlFrame {
-            message_type: control_message::INPUT,
-            payload_schema_version: 1,
-            flags: 0,
-            sequence: 42,
-            payload: &input,
-        })
-        .unwrap();
-        request
-    }
-
-    pub fn control_idempotency_v2() -> Vec<u8> {
+    pub fn control_source_aware() -> Vec<u8> {
         let input_id = [
             0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd,
             0xfe, 0xff,
@@ -1012,49 +1178,43 @@ pub mod protocol_fixture {
                 &(-1_i32).to_le_bytes(),
             ]),
             concat_parts(&[&0_u16.to_le_bytes(), &0_u16.to_le_bytes()]),
+            ((i64::MAX as u64) + 5).to_le_bytes().to_vec(),
         ];
         let message_types = [
             control_message::INPUT,
             control_message::RESIZE,
             control_message::SIGNAL,
             control_message::TERMINATE,
+            control_message::ACK_JOURNAL,
         ];
         let mut frames = Vec::new();
-        for index in 0..message_types.len() {
-            let operation_sequence = (i64::MAX as u64) + 1 + index as u64;
-            let payload = encode_operation_control_payload(
-                message_types[index],
-                &envelopes[index],
-                &effects[index],
-            )
-            .unwrap();
-            frames.push(
-                encode_control_frame(ControlFrame {
-                    message_type: message_types[index],
-                    payload_schema_version: 2,
-                    flags: 0,
-                    sequence: operation_sequence,
-                    payload: &payload,
-                })
-                .unwrap(),
-            );
+        for source in [OperationSource::Server, OperationSource::Manual] {
+            for index in 0..message_types.len() {
+                let operation_sequence = (i64::MAX as u64) + 1 + index as u64;
+                let server_envelope = if source == OperationSource::Server {
+                    Some(envelopes[index].as_slice())
+                } else {
+                    None
+                };
+                let payload = encode_operation_control_payload(
+                    message_types[index],
+                    source,
+                    server_envelope,
+                    &effects[index],
+                )
+                .unwrap();
+                frames.push(
+                    encode_control_frame(ControlFrame {
+                        message_type: message_types[index],
+                        payload_schema_version: 3,
+                        flags: 0,
+                        sequence: operation_sequence,
+                        payload: &payload,
+                    })
+                    .unwrap(),
+                );
+            }
         }
-        let acknowledgement = encode_operation_control_payload(
-            control_message::ACK_JOURNAL,
-            &[0x81, 0x07],
-            &((i64::MAX as u64) + 5).to_le_bytes(),
-        )
-        .unwrap();
-        frames.push(
-            encode_control_frame(ControlFrame {
-                message_type: control_message::ACK_JOURNAL,
-                payload_schema_version: 2,
-                flags: 0,
-                sequence: (i64::MAX as u64) + 5,
-                payload: &acknowledgement,
-            })
-            .unwrap(),
-        );
         frames.concat()
     }
 
@@ -1091,10 +1251,26 @@ pub mod protocol_fixture {
         vec![
             encode_command_result(
                 1,
+                OperationSource::Server,
                 operation_sequence,
                 &envelope,
                 CommandOutcome::Succeeded,
                 "",
+            )
+            .unwrap(),
+            encode_command_result(
+                2,
+                OperationSource::Manual,
+                operation_sequence + 1,
+                &encode_operation_control_payload(
+                    control_message::INPUT,
+                    OperationSource::Manual,
+                    None,
+                    &[input_id.as_slice(), b"echo manual\n"].concat(),
+                )
+                .unwrap(),
+                CommandOutcome::Failed,
+                "write failed",
             )
             .unwrap(),
         ]
@@ -1130,7 +1306,8 @@ pub mod protocol_fixture {
         let mut terminate = command_envelope_prefix(0x8104, command_ids[3]);
         cbor_unsigned(&mut terminate, 0);
         cbor_text(&mut terminate, "future");
-        vec![input, resize, signal, terminate]
+        let acknowledgement = vec![0x81, 0x07];
+        vec![input, resize, signal, terminate, acknowledgement]
     }
 
     fn command_envelope_prefix(message_type: u16, command_id: &str) -> Vec<u8> {

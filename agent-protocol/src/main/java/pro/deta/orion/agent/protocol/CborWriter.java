@@ -28,6 +28,10 @@ final class CborWriter {
         typeAndValue(0, value);
     }
 
+    void unsigned(long value) {
+        typeAndValue(0, value);
+    }
+
     void unsigned(EventId value) {
         typeAndValue(0, value.value());
     }

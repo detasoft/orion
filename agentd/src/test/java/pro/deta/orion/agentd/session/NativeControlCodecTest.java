@@ -3,6 +3,7 @@ package pro.deta.orion.agentd.session;
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.SessionCommandSource;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -12,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.UUID;
 
@@ -20,37 +22,50 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 
 class NativeControlCodecTest {
     private static final ProtocolBytes ENVELOPE = ProtocolBytes.copyOf(new byte[]{0x11});
+    private static final Optional<ProtocolBytes> SERVER_ENVELOPE = Optional.of(ENVELOPE);
     private static final long SEQUENCE = 0x0102_0304_0506_0708L;
     private final NativeControlCodec codec = new NativeControlCodec();
 
     @Test
-    void encodesAllOperationEffectsBehindTheCanonicalSchemaTwoWrapper() {
+    void encodesAllOperationEffectsForBothSources() {
         UUID inputId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
 
         assertOperation(
                 new ControlCommand.Input(
-                        SEQUENCE, ENVELOPE, inputId, ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff, 7})),
+                        SEQUENCE, SessionCommandSource.SERVER, SERVER_ENVELOPE,
+                        inputId, ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff, 7})),
                 1,
+                SessionCommandSource.SERVER,
                 concat(concatHex("00112233445566778899aabbccddeeff"), new byte[]{0, (byte) 0xff, 7}));
-        assertOperation(new ControlCommand.Resize(SEQUENCE, ENVELOPE, 160, 50), 2,
+        assertOperation(new ControlCommand.Resize(
+                SEQUENCE, SessionCommandSource.MANUAL, Optional.empty(), 160, 50), 2,
+                SessionCommandSource.MANUAL,
                 concatHex("a000000032000000"));
         assertOperation(
-                new ControlCommand.Signal(SEQUENCE, ENVELOPE, AgentMessage.SignalKind.INTERRUPT, -1),
+                new ControlCommand.Signal(
+                        SEQUENCE, SessionCommandSource.SERVER, SERVER_ENVELOPE,
+                        AgentMessage.SignalKind.INTERRUPT, -1),
                 3,
+                SessionCommandSource.SERVER,
                 concatHex("01000000ffffffff"));
         assertOperation(
-                new ControlCommand.Terminate(SEQUENCE, ENVELOPE, AgentMessage.TerminationMode.GRACEFUL),
+                new ControlCommand.Terminate(
+                        SEQUENCE, SessionCommandSource.MANUAL, Optional.empty(),
+                        AgentMessage.TerminationMode.GRACEFUL),
                 4,
+                SessionCommandSource.MANUAL,
                 concatHex("00000000"));
-        assertOperation(new ControlCommand.AckJournal(SEQUENCE, ENVELOPE, -2), 7,
+        assertOperation(new ControlCommand.AckJournal(
+                SEQUENCE, SessionCommandSource.SERVER, SERVER_ENVELOPE, -2), 7,
+                SessionCommandSource.SERVER,
                 concatHex("feffffffffffffff"));
     }
 
     @Test
     void matchesEveryRequestInTheSharedNativeFixture() throws IOException {
         List<byte[]> frames = splitFrames(Files.readAllBytes(Path.of(
-                "../session-host/protocol/fixtures/control-idempotency-v2.bin")));
-        assertThat(frames).hasSize(5);
+                "../session-host/protocol/fixtures/control-source-aware.bin")));
+        assertThat(frames).hasSize(10);
 
         for (byte[] frame : frames) {
             ByteBuffer header = ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN);
@@ -58,6 +73,9 @@ class NativeControlCodecTest {
             long sequence = header.getLong(16);
             ByteBuffer payload = ByteBuffer.wrap(frame, NativeControlCodec.HEADER_LENGTH, header.getInt(24))
                     .slice().order(ByteOrder.LITTLE_ENDIAN);
+            int sourceIndex = Short.toUnsignedInt(payload.getShort()) - 1;
+            SessionCommandSource source = SessionCommandSource.values()[sourceIndex];
+            assertThat(payload.getShort()).isZero();
             byte[] envelope = new byte[payload.getInt()];
             payload.get(envelope);
             byte[] effect = new byte[payload.remaining()];
@@ -65,16 +83,16 @@ class NativeControlCodecTest {
 
             assertThat(sequence).isNegative();
             assertThat(sequence).isNotEqualTo(-1);
-            if (type != 7) {
+            if (source == SessionCommandSource.SERVER && type != 7) {
                 assertThat(envelope).contains((byte) 0x66, (byte) 'f', (byte) 'u', (byte) 't');
             }
-            assertThat(codec.encode(command(type, sequence, envelope, effect))).isEqualTo(frame);
+            assertThat(codec.encode(command(type, sequence, source, envelope, effect))).isEqualTo(frame);
         }
     }
 
     @Test
     void decodesReceivedAsTransientAdmissionOrTypedRejection() {
-        ControlCommand.Resize resize = new ControlCommand.Resize(SEQUENCE, ENVELOPE, 80, 24);
+        ControlCommand.Resize resize = serverResize(SEQUENCE, 80, 24);
         byte[] error = ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(4).put("exited".getBytes(StandardCharsets.UTF_8)).array();
 
@@ -105,7 +123,7 @@ class NativeControlCodecTest {
 
     @Test
     void reportsMismatchedSequenceChecksumAndMalformedReceivedAsFramingFailures() {
-        ControlCommand.Resize resize = new ControlCommand.Resize(SEQUENCE, ENVELOPE, 80, 24);
+        ControlCommand.Resize resize = serverResize(SEQUENCE, 80, 24);
         byte[] wrongSequence = response(0x8000, SEQUENCE + 1, new byte[0]);
         byte[] corrupt = response(0x8000, SEQUENCE, new byte[0]);
         corrupt[28] ^= 1;
@@ -122,7 +140,7 @@ class NativeControlCodecTest {
         ByteBuffer.wrap(oversized).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(24, NativeControlCodec.MAX_PAYLOAD_LENGTH + 1);
         assertFailure(
-                codec.decode(new ControlCommand.Resize(SEQUENCE, ENVELOPE, 80, 24), oversized),
+                codec.decode(serverResize(SEQUENCE, 80, 24), oversized),
                 ControlResult.FailureKind.FRAMING);
 
         byte[] statusPayload = runningStatus();
@@ -133,10 +151,11 @@ class NativeControlCodecTest {
     }
 
     @Test
-    void boundsTheCompleteSchemaTwoPayload() {
+    void boundsTheCompleteSourceAwarePayload() {
         ProtocolBytes oversizedEnvelope =
                 ProtocolBytes.copyOf(new byte[NativeControlCodec.MAX_PAYLOAD_LENGTH]);
-        ControlCommand.Resize resize = new ControlCommand.Resize(-2, oversizedEnvelope, 80, 24);
+        ControlCommand.Resize resize = new ControlCommand.Resize(
+                -2, SessionCommandSource.SERVER, Optional.of(oversizedEnvelope), 80, 24);
 
         assertThatIllegalArgumentException()
                 .isThrownBy(() -> codec.encode(resize))
@@ -146,31 +165,47 @@ class NativeControlCodecTest {
     @Test
     void reservesOnlyZeroAndUnsignedMaxForOperationSequences() {
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new ControlCommand.Resize(0, ENVELOPE, 80, 24));
+                .isThrownBy(() -> serverResize(0, 80, 24));
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> new ControlCommand.Resize(-1, ENVELOPE, 80, 24));
+                .isThrownBy(() -> serverResize(-1, 80, 24));
 
-        assertThat(codec.encode(new ControlCommand.Resize(-2, ENVELOPE, 80, 24))).isNotEmpty();
+        assertThat(codec.encode(serverResize(-2, 80, 24))).isNotEmpty();
     }
 
-    private void assertOperation(ControlCommand command, int type, byte[] expectedEffect) {
+    @Test
+    void requiresOnlyServerCommandsToCarryAServerEnvelope() {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new ControlCommand.Resize(
+                        1, SessionCommandSource.SERVER, Optional.empty(), 80, 24));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new ControlCommand.Resize(
+                        1, SessionCommandSource.MANUAL, SERVER_ENVELOPE, 80, 24));
+    }
+
+    private void assertOperation(
+            ControlCommand command, int type, SessionCommandSource source, byte[] expectedEffect) {
         byte[] frame = codec.encode(command);
         ByteBuffer header = ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN);
         assertThat(Short.toUnsignedInt(header.getShort(8))).isEqualTo(type);
-        assertThat(Short.toUnsignedInt(header.getShort(10))).isEqualTo(2);
+        assertThat(Short.toUnsignedInt(header.getShort(10))).isEqualTo(3);
         assertThat(header.getLong(16)).isEqualTo(SEQUENCE);
         ByteBuffer payload = ByteBuffer.wrap(frame, NativeControlCodec.HEADER_LENGTH, header.getInt(24))
                 .slice().order(ByteOrder.LITTLE_ENDIAN);
+        assertThat(Short.toUnsignedInt(payload.getShort())).isEqualTo(source.wireCode());
+        assertThat(payload.getShort()).isZero();
         byte[] envelope = new byte[payload.getInt()];
         payload.get(envelope);
         byte[] effect = new byte[payload.remaining()];
         payload.get(effect);
-        assertThat(envelope).isEqualTo(ENVELOPE.toByteArray());
+        assertThat(envelope).isEqualTo(
+                source == SessionCommandSource.SERVER ? ENVELOPE.toByteArray() : new byte[0]);
         assertThat(effect).isEqualTo(expectedEffect);
     }
 
-    private static ControlCommand command(int type, long sequence, byte[] envelope, byte[] effect) {
-        ProtocolBytes commandEnvelope = ProtocolBytes.copyOf(envelope);
+    private static ControlCommand command(
+            int type, long sequence, SessionCommandSource source, byte[] envelope, byte[] effect) {
+        Optional<ProtocolBytes> serverEnvelope = source == SessionCommandSource.SERVER
+                ? Optional.of(ProtocolBytes.copyOf(envelope)) : Optional.empty();
         ByteBuffer decoded = ByteBuffer.wrap(effect).order(ByteOrder.LITTLE_ENDIAN);
         return switch (type) {
             case 1 -> {
@@ -179,24 +214,30 @@ class NativeControlCodecTest {
                 byte[] bytes = new byte[input.remaining()];
                 input.get(bytes);
                 yield new ControlCommand.Input(
-                        sequence, commandEnvelope, inputId, ProtocolBytes.copyOf(bytes));
+                        sequence, source, serverEnvelope, inputId, ProtocolBytes.copyOf(bytes));
             }
-            case 2 -> new ControlCommand.Resize(sequence, commandEnvelope, decoded.getInt(), decoded.getInt());
+            case 2 -> new ControlCommand.Resize(
+                    sequence, source, serverEnvelope, decoded.getInt(), decoded.getInt());
             case 3 -> {
                 AgentMessage.SignalKind kind =
                         AgentMessage.SignalKind.fromWireCode(Short.toUnsignedInt(decoded.getShort()));
                 decoded.getShort();
-                yield new ControlCommand.Signal(sequence, commandEnvelope, kind, decoded.getInt());
+                yield new ControlCommand.Signal(sequence, source, serverEnvelope, kind, decoded.getInt());
             }
             case 4 -> {
                 AgentMessage.TerminationMode mode =
                         AgentMessage.TerminationMode.fromWireCode(Short.toUnsignedInt(decoded.getShort()));
                 decoded.getShort();
-                yield new ControlCommand.Terminate(sequence, commandEnvelope, mode);
+                yield new ControlCommand.Terminate(sequence, source, serverEnvelope, mode);
             }
-            case 7 -> new ControlCommand.AckJournal(sequence, commandEnvelope, decoded.getLong());
+            case 7 -> new ControlCommand.AckJournal(sequence, source, serverEnvelope, decoded.getLong());
             default -> throw new IllegalArgumentException("unexpected fixture message type " + type);
         };
+    }
+
+    private static ControlCommand.Resize serverResize(long sequence, int columns, int rows) {
+        return new ControlCommand.Resize(
+                sequence, SessionCommandSource.SERVER, SERVER_ENVELOPE, columns, rows);
     }
 
     private static List<byte[]> splitFrames(byte[] data) {

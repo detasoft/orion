@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.SessionCommandSource;
 
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
@@ -18,6 +19,7 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.OptionalLong;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -67,7 +69,7 @@ class SessionControlClientTest {
                 error.putInt(4).put("exited".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 return NativeControlCodec.frame(0x8000, sequence(request), error.array());
             });
-            ControlCommand.Resize resize = new ControlCommand.Resize(3, COMMAND_ENVELOPE, 80, 24);
+            ControlCommand.Resize resize = serverResize(3, 80, 24);
 
             ControlResult result = new SessionControlClient(Duration.ofSeconds(2))
                     .send(endpoint("error.sock"), resize);
@@ -99,7 +101,8 @@ class SessionControlClientTest {
                 }
                 return null;
             });
-            ControlCommand.Resize resize = new ControlCommand.Resize(3, COMMAND_ENVELOPE, 81, 25);
+            ControlCommand.Resize resize = new ControlCommand.Resize(
+                    3, SessionCommandSource.MANUAL, Optional.empty(), 81, 25);
 
             ControlResult result = new SessionControlClient(Duration.ofSeconds(1))
                     .send(endpoint("no-retry.sock"), resize);
@@ -127,7 +130,7 @@ class SessionControlClientTest {
         SessionControlClient client = new SessionControlClient(
                 Duration.ofSeconds(1),
                 endpoint -> new ControlTransportFactory.Selection.Available(transport));
-        ControlCommand.Resize resize = new ControlCommand.Resize(9, COMMAND_ENVELOPE, 81, 25);
+        ControlCommand.Resize resize = serverResize(9, 81, 25);
 
         ControlResult result = client.send(endpoint("unused.sock"), resize);
 
@@ -307,6 +310,15 @@ class SessionControlClientTest {
         status.putInt(44, Integer.MIN_VALUE).putInt(48, -1);
         status.putShort(52, (short) 1).putShort(54, (short) 1);
         return payload;
+    }
+
+    private static ControlCommand.Resize serverResize(long sequence, int columns, int rows) {
+        return new ControlCommand.Resize(
+                sequence,
+                SessionCommandSource.SERVER,
+                Optional.of(COMMAND_ENVELOPE),
+                columns,
+                rows);
     }
 
     private static void assertFailure(

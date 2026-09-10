@@ -258,13 +258,16 @@ fn decode_payload(event_type: u16, encoded: &[u8]) -> Result<Vec<u8>, ReadError>
     match event_type {
         protocol::event_type::COMMAND_RESULT => {
             let fields = array_fields(encoded)?;
-            require_fields(&fields, 4, "COMMAND_RESULT")?;
-            let sequence = decode_unsigned(field(encoded, fields[0]), "operationSequence")?;
-            let envelope = decode_bytes(field(encoded, fields[1]))?;
-            let outcome = u8::try_from(decode_unsigned(field(encoded, fields[2]), "outcome")?)
+            require_fields(&fields, 5, "COMMAND_RESULT")?;
+            let source = u16::try_from(decode_unsigned(field(encoded, fields[0]), "source")?)
+                .map_err(|_| ReadError::Format("COMMAND_RESULT source exceeds u16".to_owned()))?;
+            let sequence = decode_unsigned(field(encoded, fields[1]), "operationSequence")?;
+            let envelope = decode_bytes(field(encoded, fields[2]))?;
+            let outcome = u8::try_from(decode_unsigned(field(encoded, fields[3]), "outcome")?)
                 .map_err(|_| ReadError::Format("COMMAND_RESULT outcome exceeds u8".to_owned()))?;
-            let detail = decode_text(field(encoded, fields[3]))?;
+            let detail = decode_text(field(encoded, fields[4]))?;
             let mut payload = Vec::new();
+            payload.extend_from_slice(&source.to_le_bytes());
             payload.extend_from_slice(&sequence.to_le_bytes());
             let envelope_length = u32::try_from(envelope.len()).map_err(|_| {
                 ReadError::Format("COMMAND_RESULT command envelope is too long".to_owned())

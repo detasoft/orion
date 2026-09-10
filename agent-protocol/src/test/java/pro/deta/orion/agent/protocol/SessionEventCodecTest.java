@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.management.ManagementFactory;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -26,7 +28,19 @@ class SessionEventCodecTest {
                         "pty-input:session-1",
                         ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff})),
                 new SessionEventPayload.PtyResize(180, 50),
-                new SessionEventPayload.ProcessExited(-17));
+                new SessionEventPayload.ProcessExited(-17),
+                new SessionEventPayload.CommandResult(
+                        SessionCommandSource.SERVER,
+                        Long.MIN_VALUE,
+                        ProtocolBytes.copyOf(new byte[]{(byte) 0x80}),
+                        SessionCommandOutcome.SUCCEEDED,
+                        ""),
+                new SessionEventPayload.CommandResult(
+                        SessionCommandSource.MANUAL,
+                        Long.MIN_VALUE + 1,
+                        ProtocolBytes.copyOf(new byte[]{2, 0, 0, 0, 0, 0, 0, 0}),
+                        SessionCommandOutcome.FAILED,
+                        "write failed"));
 
         for (int index = 0; index < payloads.size(); index++) {
             SessionEventPayload expected = payloads.get(index);
@@ -120,6 +134,44 @@ class SessionEventCodecTest {
                         "input identity",
                         ProtocolBytes.copyOf(new byte[]{1})))
                 .withMessage("ptyInputId must be 1-128 safe ASCII characters");
+    }
+
+    @Test
+    void decodesTheSharedSourceAwareCommandResultFixture() throws Exception {
+        Path javaFixture = Path.of("protocol/fixtures/command-events-v1.hex");
+        Path rustFixture = Path.of("../session-host/protocol/fixtures/command-events-v1.hex");
+        assertThat(Files.readString(javaFixture)).isEqualTo(Files.readString(rustFixture));
+
+        List<String> records = Files.readAllLines(javaFixture);
+        SessionEventPayload.CommandResult server = (SessionEventPayload.CommandResult)
+                CODEC.decodeKnownPayload(CODEC.decode(Hex.parse(records.get(0)))).orElseThrow();
+        SessionEventPayload.CommandResult manual = (SessionEventPayload.CommandResult)
+                CODEC.decodeKnownPayload(CODEC.decode(Hex.parse(records.get(1)))).orElseThrow();
+
+        assertThat(server.source()).isEqualTo(SessionCommandSource.SERVER);
+        assertThat(server.operationSequence()).isEqualTo(Long.MIN_VALUE);
+        assertThat(server.outcome()).isEqualTo(SessionCommandOutcome.SUCCEEDED);
+        assertThat(server.detail()).isEmpty();
+        assertThat(manual.source()).isEqualTo(SessionCommandSource.MANUAL);
+        assertThat(manual.operationSequence()).isEqualTo(Long.MIN_VALUE + 1);
+        assertThat(manual.sourceEnvelope().toByteArray())
+                .containsExactly(Hex.parse(
+                        "0200000000000000f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff6563686f206d616e75616c0a"));
+        assertThat(manual.outcome()).isEqualTo(SessionCommandOutcome.FAILED);
+        assertThat(manual.detail()).isEqualTo("write failed");
+    }
+
+    @Test
+    void rejectsMalformedCommandResultFields() throws Exception {
+        for (String payload : List.of(
+                "85030041800160",
+                "85010040810160",
+                "85010141800960",
+                "8501014180016664657461696c")) {
+            SessionEventRecord record = CODEC.decode(Hex.parse("830102" + payload));
+            assertThatExceptionOfType(AgentProtocolException.class)
+                    .isThrownBy(() -> CODEC.decodeKnownPayload(record));
+        }
     }
 
     @Test
@@ -420,6 +472,7 @@ class SessionEventCodecTest {
 
     @Test
     void freezesEventTypeAllocation() {
+        assertThat(SessionEventType.COMMAND_RESULT).isEqualTo(0x0002);
         assertThat(SessionEventType.PTY_OUTPUT).isEqualTo(0x0100);
         assertThat(SessionEventType.PTY_INPUT).isEqualTo(0x0101);
         assertThat(SessionEventType.PTY_RESIZE).isEqualTo(0x0102);

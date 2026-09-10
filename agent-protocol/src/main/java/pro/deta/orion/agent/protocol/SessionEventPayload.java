@@ -3,7 +3,35 @@ package pro.deta.orion.agent.protocol;
 import java.util.Objects;
 
 public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutput,
-        SessionEventPayload.PtyInput, SessionEventPayload.PtyResize, SessionEventPayload.ProcessExited {
+        SessionEventPayload.PtyInput, SessionEventPayload.PtyResize, SessionEventPayload.ProcessExited,
+        SessionEventPayload.CommandResult {
+
+    record CommandResult(
+            SessionCommandSource source,
+            long operationSequence,
+            ProtocolBytes sourceEnvelope,
+            SessionCommandOutcome outcome,
+            String detail
+    ) implements SessionEventPayload {
+        public CommandResult {
+            Objects.requireNonNull(source, "source");
+            if (operationSequence == 0 || operationSequence == -1) {
+                throw new IllegalArgumentException("operationSequence must be between 1 and u64::MAX - 1");
+            }
+            Objects.requireNonNull(sourceEnvelope, "sourceEnvelope");
+            if (sourceEnvelope.size() == 0) {
+                throw new IllegalArgumentException("sourceEnvelope must not be empty");
+            }
+            Objects.requireNonNull(outcome, "outcome");
+            Objects.requireNonNull(detail, "detail");
+            if (detail.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 4096) {
+                throw new IllegalArgumentException("detail exceeds 4096 UTF-8 bytes");
+            }
+            if (outcome == SessionCommandOutcome.SUCCEEDED && !detail.isEmpty()) {
+                throw new IllegalArgumentException("successful result detail must be empty");
+            }
+        }
+    }
 
     record PtyOutput(ProtocolBytes bytes) implements SessionEventPayload {
         public PtyOutput {

@@ -576,6 +576,217 @@ fn orders_controls_and_rejects_duplicate_sequences_after_reconnect() {
 }
 
 #[test]
+fn interleaves_sources_and_executes_every_repeated_manual_delivery() {
+    let directory = temporary_directory("source-aware-controls");
+    let mut host = HostGuard::spawn(
+        directory,
+        &["/bin/sh", "-c", "printf READY; sleep 30"],
+        "xterm-256color",
+        80,
+        24,
+    );
+    wait_for_output(host.directory(), b"READY");
+
+    let mut first = connect(host.directory());
+    let operations = [
+        (protocol::OperationSource::Server, 42, 101, 31),
+        (protocol::OperationSource::Manual, 1, 102, 32),
+        (protocol::OperationSource::Manual, u64::MAX - 1, 103, 33),
+        (protocol::OperationSource::Server, 43, 104, 34),
+        (protocol::OperationSource::Manual, 2, 105, 35),
+        (protocol::OperationSource::Manual, 1, 106, 36),
+    ];
+    for (source, sequence, columns, rows) in operations {
+        let effect = protocol::pty_resize_payload(columns, rows);
+        send_operation_from(
+            &mut first,
+            control_message::RESIZE,
+            sequence,
+            source,
+            (source == protocol::OperationSource::Server).then_some(b"server-envelope".as_slice()),
+            &effect,
+        );
+    }
+
+    let stale = operation_request(
+        &mut first,
+        control_message::RESIZE,
+        43,
+        b"server-envelope",
+        &protocol::pty_resize_payload(200, 60),
+    );
+    assert_received_error(&stale, 43, ERROR_INVALID_REQUEST);
+
+    let manual_input_effect = protocol::pty_input_payload([0x73; 16], b"manual input\n").unwrap();
+    let manual_input_payload = protocol::encode_operation_control_payload(
+        control_message::INPUT,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_input_effect,
+    )
+    .unwrap();
+    send_operation_from(
+        &mut first,
+        control_message::INPUT,
+        3,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_input_effect,
+    );
+    let manual_signal_effect = host::signal_payload(0xffff, libc::SIGCONT);
+    let manual_signal_payload = protocol::encode_operation_control_payload(
+        control_message::SIGNAL,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_signal_effect,
+    )
+    .unwrap();
+    send_operation_from(
+        &mut first,
+        control_message::SIGNAL,
+        4,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_signal_effect,
+    );
+    wait_for_command_result(host.directory(), 4);
+    let acknowledged_event_id = journal_reader::read(host.directory(), 0)
+        .unwrap()
+        .events
+        .last()
+        .unwrap()
+        .event_id;
+
+    let mut second = connect(host.directory());
+    let reconnect_effect = protocol::pty_resize_payload(107, 37);
+    let reconnect_payload = protocol::encode_operation_control_payload(
+        control_message::RESIZE,
+        protocol::OperationSource::Manual,
+        None,
+        &reconnect_effect,
+    )
+    .unwrap();
+    send_operation_from(
+        &mut second,
+        control_message::RESIZE,
+        1,
+        protocol::OperationSource::Manual,
+        None,
+        &reconnect_effect,
+    );
+    let manual_ack_effect = acknowledged_event_id.to_le_bytes();
+    let manual_ack_payload = protocol::encode_operation_control_payload(
+        control_message::ACK_JOURNAL,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_ack_effect,
+    )
+    .unwrap();
+    send_operation_from(
+        &mut second,
+        control_message::ACK_JOURNAL,
+        5,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_ack_effect,
+    );
+    let manual_terminate_effect = [1, 0, 0, 0];
+    let manual_terminate_payload = protocol::encode_operation_control_payload(
+        control_message::TERMINATE,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_terminate_effect,
+    )
+    .unwrap();
+    send_operation_from(
+        &mut second,
+        control_message::TERMINATE,
+        6,
+        protocol::OperationSource::Manual,
+        None,
+        &manual_terminate_effect,
+    );
+    drop(first);
+    drop(second);
+
+    assert!(host.wait().success());
+    let journal = journal_reader::read(host.directory(), 0).unwrap();
+    let resizes: Vec<_> = journal
+        .events
+        .iter()
+        .filter(|event| event.event_type == event_type::PTY_RESIZE)
+        .map(|event| (u32_at(&event.payload[0..4]), u32_at(&event.payload[4..8])))
+        .collect();
+    assert!(resizes.ends_with(&[
+        (101, 31),
+        (102, 32),
+        (103, 33),
+        (104, 34),
+        (105, 35),
+        (106, 36),
+        (107, 37)
+    ]));
+
+    assert!(journal.events.iter().any(|event| {
+        event.event_type == event_type::PTY_INPUT && event.payload == manual_input_effect
+    }));
+    assert!(journal.events.iter().any(|event| {
+        event.event_type == event_type::SIGNAL && event.payload == manual_signal_effect
+    }));
+    let result_identities: Vec<_> = journal
+        .events
+        .iter()
+        .filter(|event| event.event_type == event_type::COMMAND_RESULT)
+        .map(|event| (u16_at(&event.payload[0..2]), u64_at(&event.payload[2..10])))
+        .collect();
+    assert_eq!(
+        result_identities,
+        [
+            (protocol::OperationSource::Server.wire_code(), 42),
+            (protocol::OperationSource::Manual.wire_code(), 1),
+            (
+                protocol::OperationSource::Manual.wire_code(),
+                u64::MAX - 1,
+            ),
+            (protocol::OperationSource::Server.wire_code(), 43),
+            (protocol::OperationSource::Manual.wire_code(), 2),
+            (protocol::OperationSource::Manual.wire_code(), 1),
+            (protocol::OperationSource::Manual.wire_code(), 3),
+            (protocol::OperationSource::Manual.wire_code(), 4),
+            (protocol::OperationSource::Manual.wire_code(), 1),
+            (protocol::OperationSource::Manual.wire_code(), 5),
+            (protocol::OperationSource::Manual.wire_code(), 6),
+        ]
+    );
+
+    let manual_reconnect_result = journal.events.iter().find(|event| {
+        event.event_type == event_type::COMMAND_RESULT
+            && u16_at(&event.payload[0..2]) == protocol::OperationSource::Manual.wire_code()
+            && u64_at(&event.payload[2..10]) == 1
+            && event.payload[14..14 + reconnect_payload.len()] == reconnect_payload
+    });
+    assert!(manual_reconnect_result.is_some());
+    for (sequence, expected_envelope) in [
+        (3, manual_input_payload.as_slice()),
+        (4, manual_signal_payload.as_slice()),
+        (5, manual_ack_payload.as_slice()),
+        (6, manual_terminate_payload.as_slice()),
+    ] {
+        let result = journal.events.iter().find(|event| {
+            event.event_type == event_type::COMMAND_RESULT
+                && u16_at(&event.payload[0..2]) == protocol::OperationSource::Manual.wire_code()
+                && u64_at(&event.payload[2..10]) == sequence
+        });
+        let result = result.unwrap();
+        let envelope_length = u32_at(&result.payload[10..14]) as usize;
+        assert_eq!(
+            &result.payload[14..14 + envelope_length],
+            expected_envelope
+        );
+    }
+}
+
+#[test]
 fn leaves_metadata_unchanged_across_output_input_and_signal_events() {
     let directory = temporary_directory("stable-metadata");
     let mut host = HostGuard::spawn(
@@ -728,10 +939,6 @@ fn durable_acknowledgement_controls_retention() {
         b"server-envelope-resize-11",
         &resize,
     );
-
-    let schema_one = request(&mut stream, control_message::RESIZE, 3, &resize);
-    assert_eq!(schema_one.message_type, control_message::ERROR);
-    assert_eq!(schema_one.sequence, 3);
 
     send_journal_ack(&mut stream, 12, 0);
     wait_for_command_result(host.directory(), 12);
@@ -890,12 +1097,12 @@ fn blocked_pty_input_does_not_block_admission_on_another_connection() {
         .find(|event| {
             event.event_type == event_type::COMMAND_RESULT
                 && event.payload.len() >= 8
-                && u64_at(&event.payload[..8]) == 1
+                && u64_at(&event.payload[2..10]) == 1
         })
         .unwrap();
     assert_eq!(command_result.event_type, event_type::COMMAND_RESULT);
-    let envelope_length = u32_at(&command_result.payload[8..12]) as usize;
-    let outcome_index = 12 + envelope_length;
+    let envelope_length = u32_at(&command_result.payload[10..14]) as usize;
+    let outcome_index = 14 + envelope_length;
     assert_eq!(command_result.payload[outcome_index], 2);
 }
 
@@ -959,7 +1166,7 @@ fn terminate_bypasses_a_blocked_pty_input() {
         assert!(result.events.iter().any(|event| {
             event.event_type == event_type::COMMAND_RESULT
                 && event.payload.len() >= 8
-                && u64_at(&event.payload[..8]) == operation_sequence
+                && u64_at(&event.payload[2..10]) == operation_sequence
         }));
     }
     let input_result = result
@@ -968,11 +1175,11 @@ fn terminate_bypasses_a_blocked_pty_input() {
         .find(|event| {
             event.event_type == event_type::COMMAND_RESULT
                 && event.payload.len() >= 8
-                && u64_at(&event.payload[..8]) == 1
+                && u64_at(&event.payload[2..10]) == 1
         })
         .unwrap();
-    let envelope_length = u32_at(&input_result.payload[8..12]) as usize;
-    assert_eq!(input_result.payload[12 + envelope_length], 2);
+    let envelope_length = u32_at(&input_result.payload[10..14]) as usize;
+    assert_eq!(input_result.payload[14 + envelope_length], 2);
 }
 
 #[test]
@@ -1119,7 +1326,7 @@ fn force_terminate_accelerates_an_active_graceful_shutdown() {
         .find(|event| {
             event.event_type == event_type::COMMAND_RESULT
                 && event.payload.len() >= 8
-                && u64_at(&event.payload[..8]) == 1
+                && u64_at(&event.payload[2..10]) == 1
         })
         .unwrap()
         .event_id;
@@ -1476,9 +1683,28 @@ fn operation_request(
     command_envelope: &[u8],
     effect: &[u8],
 ) -> OwnedControlFrame {
+    operation_request_from(
+        stream,
+        message_type,
+        operation_sequence,
+        protocol::OperationSource::Server,
+        Some(command_envelope),
+        effect,
+    )
+}
+
+fn operation_request_from(
+    stream: &mut UnixStream,
+    message_type: u16,
+    operation_sequence: u64,
+    source: protocol::OperationSource,
+    server_envelope: Option<&[u8]>,
+    effect: &[u8],
+) -> OwnedControlFrame {
     let payload =
-        protocol::encode_operation_control_payload(message_type, command_envelope, effect).unwrap();
-    request_with_schema(stream, message_type, 2, operation_sequence, &payload)
+        protocol::encode_operation_control_payload(message_type, source, server_envelope, effect)
+            .unwrap();
+    request_with_schema(stream, message_type, 3, operation_sequence, &payload)
 }
 
 fn send_operation(
@@ -1488,11 +1714,30 @@ fn send_operation(
     command_envelope: &[u8],
     effect: &[u8],
 ) {
+    send_operation_from(
+        stream,
+        message_type,
+        operation_sequence,
+        protocol::OperationSource::Server,
+        Some(command_envelope),
+        effect,
+    )
+}
+
+fn send_operation_from(
+    stream: &mut UnixStream,
+    message_type: u16,
+    operation_sequence: u64,
+    source: protocol::OperationSource,
+    server_envelope: Option<&[u8]>,
+    effect: &[u8],
+) {
     let payload =
-        protocol::encode_operation_control_payload(message_type, command_envelope, effect).unwrap();
+        protocol::encode_operation_control_payload(message_type, source, server_envelope, effect)
+            .unwrap();
     let bytes = protocol::encode_control_frame(ControlFrame {
         message_type,
-        payload_schema_version: 2,
+        payload_schema_version: 3,
         flags: 0,
         sequence: operation_sequence,
         payload: &payload,
@@ -1560,7 +1805,7 @@ fn assert_command_events(events: &[JournalEvent], effect_type: u16, operation_se
         .iter()
         .position(|event| {
             event.event_type == event_type::COMMAND_RESULT
-                && u64_at(&event.payload[..8]) == operation_sequence
+                && u64_at(&event.payload[2..10]) == operation_sequence
         })
         .unwrap();
     assert!(
@@ -1597,7 +1842,7 @@ fn wait_for_command_result(directory: &Path, operation_sequence: u64) {
             && result.events.iter().any(|event| {
                 event.event_type == event_type::COMMAND_RESULT
                     && event.payload.len() >= 8
-                    && u64_at(&event.payload[..8]) == operation_sequence
+                    && u64_at(&event.payload[2..10]) == operation_sequence
             })
         {
             return;

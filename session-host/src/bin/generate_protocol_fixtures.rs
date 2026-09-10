@@ -17,12 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         protocol_fixture::unknown_event_hex(),
     )?;
     fs::write(
-        directory.join("control-v1.bin"),
-        protocol_fixture::control(),
-    )?;
-    fs::write(
-        directory.join("control-idempotency-v2.bin"),
-        protocol_fixture::control_idempotency_v2(),
+        directory.join("control-source-aware.bin"),
+        protocol_fixture::control_source_aware(),
     )?;
     fs::write(
         directory.join("command-events-v1.hex"),

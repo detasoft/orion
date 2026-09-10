@@ -13,7 +13,7 @@ RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema
 	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
-	cargo-init rust-install session-host
+	cargo-init rust-install session-host session-host-test
 RUN_TEST_POSITIONAL_ARGUMENTS :=
 RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
 RUN_TEST_MODULE = $(value MODULE)
@@ -31,12 +31,13 @@ RUN_TEST_LOCATOR := $(word 2,$(RUN_TEST_POSITIONAL_ARGUMENTS))
 endif
 endif
 
-.PHONY: dist test run-test test-jfr test-jfr-report xml-schema cargo-init rust-install session-host
+.PHONY: dist test run-test test-jfr test-jfr-report xml-schema cargo-init rust-install session-host \
+	session-host-test
 
 dist:
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
-test:
+test: session-host-test
 	$(MAVEN) test -Pdev -T 4
 
 xml-schema:
@@ -53,6 +54,9 @@ rust-install: cargo-init
 
 session-host: rust-install
 	cd session-host && $(HOME)/.cargo/bin/cargo build --release
+
+session-host-test: rust-install
+	cd session-host && $(HOME)/.cargo/bin/cargo test --locked
 
 run-test:
 	@if [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -eq 0 ]; then \
