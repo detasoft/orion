@@ -50,7 +50,8 @@ cargo-init:
 	fi
 
 rust-install: cargo-init
-	$(HOME)/.cargo/bin/rustup toolchain install 1.97.0 --profile minimal
+	@$(HOME)/.cargo/bin/rustup run 1.97.0 rustc --version >/dev/null 2>&1 \
+		|| $(HOME)/.cargo/bin/rustup toolchain install 1.97.0 --profile minimal
 
 session-host: rust-install
 	cd session-host && $(HOME)/.cargo/bin/cargo build --release
