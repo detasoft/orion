@@ -65,6 +65,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -654,7 +655,7 @@ class OrionShellTest {
         private final boolean completeWrites;
         private final String name;
         private final List<String> closes;
-        private final List<AsyncWrite> writes = new ArrayList<>();
+        private final List<AsyncWrite> writes = new CopyOnWriteArrayList<>();
         private final CountDownLatch writeStarted = new CountDownLatch(1);
         private final CountDownLatch commandCompleted = new CountDownLatch(1);
         private final CountDownLatch secondCommandCompleted = new CountDownLatch(1);
