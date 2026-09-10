@@ -1,186 +1,145 @@
 # Repository definitions
 
+## Terms
+
+- A **checkpoint** is one coherent, complete, reviewable change that leaves the
+  repository working and can be committed independently.
+- The **current worktree and branch** are the worktree and checked-out branch in
+  which Quick or Simple was started. Those workflows do not switch branches.
+- An **explicit commit instruction** is a user instruction such as `commit`,
+  `сделай коммит`, or an equivalent unambiguous request covering the result being
+  prepared. It authorizes that commit after all required checks and reviews.
+- A **task claim** is an `Owner:` entry in the body of one executable task-tree
+  leaf. `Status:`, prose, parent composites, and `MODULE_REVIEW.md` findings are
+  never claims.
+
 ## Repository workflows
 
-Workflow selection controls how a change is executed, not which files it may
-touch. Any workflow may change source, tests, build files, configuration,
-documentation, skills, or task files when its mechanics are appropriate.
+Read-only review, explanation, planning, and status requests do not select an
+execution workflow and do not authorize repository changes. `orion-review` is
+the narrow exception: a requested module audit updates and commits its report,
+but does not authorize repairs.
 
-Use these defaults as recommendations, not routing rules:
+Honor an explicitly requested workflow when its mechanics can complete the
+request safely. Otherwise choose by the shape of the work, not by file type:
 
-| Work being considered | Default workflow |
+| Work | Workflow |
 | --- | --- |
-| A repair found during module review | Simple workflow |
-| Execution of a task-tree leaf | Change workflow |
-| Documentation, task-tree, or skill editing | Quick workflow |
+| One understood, coherent result and one commit | Quick |
+| Several sequential checkpoints, or a requested staged user review | Simple |
+| Execution of a task-tree leaf, or work requiring an isolated worker | Change |
 
-The executor makes the final choice from the actual size, uncertainty, risk,
-need for isolation, useful verification, and desired user interaction. A task
-may use the simple or quick workflow; a large documentation or skill change may
-use the simple or change workflow; a Makefile change may use the quick workflow.
-File type, queue membership, and the stage that discovered work never force a
-workflow by themselves. Once selected, the workflow's own mechanics and gates
-are binding.
+Escalate to a workflow with stronger mechanics when inspection reveals that the
+selected one cannot safely contain the work. Do not silently carry partial edits
+into another workflow: preserve and report the current state first.
 
-When the simple or change workflow reaches a primary-owned documentation
-milestone, use the quick workflow for that commit without replacing or
-changing the surrounding implementation workflow.
+### Commit authorization
 
-### Simple workflow
+- A mutating request performed through Quick authorizes its one logical commit.
+- Simple presents every staged checkpoint for user review. An explicit commit
+  instruction covering that checkpoint means the review is complete: commit it
+  immediately without requesting the same approval again.
+- Change prepares and reviews its task commit. An explicit commit instruction in
+  the request also authorizes immediate integration after the review and required
+  checks succeed. Without it, stop with the reviewed commit and request
+  integration approval.
 
-The **simple workflow** is the preferred path for a bounded, predictable change
-that can be implemented and reviewed safely in the current location. Use it
-when the required result, affected files and existing production path are
-clear, the expected change is non-destructive, and the risk of blocking other
-work is low. These are indicators that isolated worker ownership and task
-tracking may not add enough value.
+Authorization never includes unrelated files, later scope expansion, or a
+different checkpoint.
 
-Typical examples include:
+## Pre-commit verification
 
-- a clear correction to an existing Makefile or `pom.xml`;
-- a small bug fix in an understood production path;
-- a predictable refactoring whose consumers and mechanical result are known;
-- a local deletion or simplification with verified consumers.
+Determine verification from the files in the checkpoint, independently of the
+selected workflow. Run every required check before creating the commit and
+against the content intended for that commit. If content changes afterward,
+rerun the affected check. A failed required check blocks the commit.
 
-These are selection evidence, not file-based eligibility rules. The executor
-may instead choose the change workflow when work materially affects contracts,
-crosses uncertain boundaries, adds state or dependencies, has unresolved design
-choices, or benefits from isolation. Within `orion-review`, consider the simple
-workflow first, then choose from the actual repair size and risk.
+| Changed content | Required pre-commit verification |
+| --- | --- |
+| Documentation only | No automated check required; inspect the diff. |
+| Maven/JVM source or build input | `mvn test -Pdev -T 4` from the repository root. |
+| Rust source or build input under `session-host/` | `make session-host-test`. |
+| Both Maven/JVM and `session-host/` source or build inputs | `make test`. |
+| `Makefile` or `*.mk` | Run each affected real goal. |
+| Any other file | The executor chooses a useful proportionate check, or reports that none applies. |
 
-The primary agent performs the simple workflow directly in the current
-worktree and branch:
+Documentation includes `*.md`, task descriptions, and review reports.
+Maven/JVM input includes Java, tests, `pom.xml`, module resources, schemas,
+ANTLR, and Maven-managed frontend files. For any affected Make goal that is
+destructive, interactive, dependent on unavailable external state, or otherwise
+unsafe to run, use `make -n <goal>` and report the limitation.
 
-1. Inspect the repository state and preserve unrelated changes.
-2. Derive one concise, stable task name from the user request. This name might be a
-   commit prefix, not a task-tree node or claim.
-3. Identify logical implementation checkpoints as the work proceeds. Each
-   checkpoint must be an independently coherent, reviewable change that leaves
-   the repository working; do not fragment by file or hide a real checkpoint
-   merely to reduce the number of user reviews.
-4. Implement and verify one checkpoint without creating or claiming a task,
-   writing a plan merely for routing, launching a worker, or creating a branch
-   or worktree. Include ordinary product documentation for that checkpoint.
-5. Stage only files and hunks owned by the checkpoint. Self-review the staged
-   result, show it and the verification outcome to the user, and ask for review.
-   Do not commit yet.
-6. If the user requests corrections, update, verify, stage and self-review the
-   checkpoint again, then repeat the user gate.
-7. After explicit approval, verify that the index is the reviewed result and
-   commit it immediately, before any later checkpoint edit, using `<task name>:
-   <imperative checkpoint summary>`. Keep the task name byte-for-byte identical
-   in every checkpoint subject so the commits can be found and squashed together
-   later.
-8. Do not repeat verification that already passed against the identical staged
-   checkpoint. Run a post-commit check only when it validates the commit itself
-   or could not run before commit, then continue with the next checkpoint.
+For a checkpoint matching several rows, run the union of their checks; one
+broader command may satisfy narrower rows when it actually executes them. Tests
+must run outside the sandbox because they may need loopback sockets. Do not
+repeat an identical passed check after commit unless the committed or integrated
+environment itself is what the check must validate.
 
-A task with one logical checkpoint produces one commit. Do not rewrite or
-squash approved checkpoint commits unless the user requests it. If post-commit
-verification was actually needed and requires a fix commit, follow the
-same-subject rule in `AGENTS.md`.
-
-The simple workflow creates no routing documentation. A surrounding workflow
-may still own documentation whose truth changes before or after the simple
-implementation, such as a `MODULE_REVIEW.md` finding. You can commit such documentation
-separately or altogether on `main` (at the time of finishing task) at the moment required by its ownership rules;
-it is not part of the staged implementation gate.
-
-
-### Change workflow
-
-The **change workflow** is the task-backed isolated path, normally preferred for
-task execution and larger, uncertain, cross-boundary, or review-heavy changes.
-Choosing it is discretionary; its task-backed mechanics are not. Every change
-workflow has one executable task: before launching a worker, the primary agent
-either creates a suitable leaf or claims a matching existing leaf and commits
-that task-tree state on `main`.
-
-The primary agent coordinates and reviews; one fresh implementation worker owns
-the dedicated branch and worktree, implementation, tests, review fixes and
-prepared implementation commit. The primary agent returns findings to that
-worker and presents the final reviewed commit to the user before integration.
-Only explicit user approval permits integration. After approval, integrate and
-verify the implementation on `main`, remove the completed worktree and branch,
-then commit task-tree completion separately.
-
-Documentation commits occur at the lifecycle point where their statements
-become accurate; they are not postponed into the implementation commit:
-
-- create or claim task-tree state before worker launch;
-- commit required governing plans before they become worker inputs;
-- commit material plan corrections on `main` before the worker resumes from
-  the corrected base;
-- commit task-tree completion only after verified integration and cleanup;
-- commit `MODULE_REVIEW.md` updates when a finding is confirmed and again after
-  its repair is verified on `main`.
-
-The primary agent owns governing documents and the current execution task's
-claim, pause, and completion state on `main`. The worker owns every explicit task
-deliverable, including documentation or skills when they are the requested
-change, unless a repository rule assigns that particular state to the primary
-agent.
+Use `make run-test MODULE=<module> TEST='<test-locator>'` for focused Maven tests
+during development. Focused tests do not replace the table's full pre-commit
+check. Use `make test` for routine verification after Change integration.
 
 ### Quick workflow
 
-The **quick workflow** is the fast direct path normally preferred for
-documentation, repository rules, skills, task-tree files and `MODULE_REVIEW.md`
-reports. It may change any file, including a Makefile, when the executor judges
-that a prompt direct edit is proportionate. It also
-performs primary-owned documentation commits at lifecycle moments established
-by a surrounding simple or change workflow.
+Quick produces one coherent commit in the current worktree and branch. A result
+may require several internal steps, but they are not separate checkpoints or
+commits.
 
-Work directly on `main`. Do not create, claim, move or delete a task merely to
-route a quick change; do not write an implementation plan for routing,
-launch a worker, create a branch or worktree, or add a staged user-review gate.
-When the requested documentation change is itself a task-tree operation, apply
-`orion-task-runner` to that operation, but create or remove task nodes only when
-that is the requested state change or a lifecycle action required by the
-surrounding change workflow.
+1. Inspect repository state and preserve unrelated changes.
+2. Make only the requested coherent change.
+3. Stage only its files and hunks.
+4. Run the required pre-commit verification and inspect the complete staged
+   diff.
+5. Commit immediately with a descriptive single-line subject.
 
-Make the requested edits and commit one coherent state change promptly with a
-descriptive single-line subject. Do not split one logical change merely because
-it touches both workflow-control and ordinary documentation. Preserve unrelated
-changes and keep genuinely unrelated changes in separate commits.
+Quick does not create or claim a task, launch a worker, create a worktree, or add
+a staged user-review gate. If the request contains several independently
+committable results, use Simple rather than splitting them inside Quick.
 
-Do not add tests, test coverage or implementation scaffolding solely for the
-quick workflow. Verification is optional and chosen by the executor. Run an
-existing check only when its value is proportionate to the change; this may be
-a lightweight artifact validator, `git diff --check`, a Makefile dry run, or a
-Maven or other project test. Do not invent or broaden verification merely to
-claim that the change was tested, and do not repeat the same check after commit
-when it already passed against the committed content. If no useful check exists,
-inspect the diff, commit it, and report that no automated check was applicable.
+### Simple workflow
 
-Within a simple or change workflow, the surrounding workflow determines when a
-documentation state is accurate and who owns it. The quick workflow performs
-that edit, chosen check and commit without adding an interaction, approval gate,
-worker handoff or extra commit split. It never folds a primary-owned lifecycle
-document into an implementation commit.
+Simple implements one or more checkpoints sequentially in the current worktree
+and branch. Only one checkpoint may be unfinished at a time.
 
-## Workflow-control scope
+For each checkpoint:
 
-The **workflow-control scope** is the exact set of repository files that define
-or record agent workflow rather than product implementation:
+1. Implement and stage the complete checkpoint while preserving unrelated work.
+2. Run its required pre-commit verification.
+3. Perform the automatic review required by repository rules.
+4. Present the staged result and verification to the user. Treat an explicit
+   commit instruction covering it as completed user review.
+5. Commit immediately using `<stable task name>: <imperative checkpoint
+   summary>`.
+6. Compact context before starting the next checkpoint.
 
-- repository-local skills under `.agents/skills/`;
-- the filesystem task tree rooted at `docs/plans/TASK.md`, including
-  `current-work/`, `upcoming-work/`, their descendants, and the root `TASKS.md`
-  compatibility pointer when it changes as part of task-tree maintenance;
-- every module review report named `MODULE_REVIEW.md`.
+Context retained after compaction consists of the original request or review,
+the remaining checkpoint queue, still-applicable user decisions, current
+`HEAD` and workspace state, and for each completed checkpoint its commit SHA,
+short result, and `command -> passed/failed` verification summary. Remove raw
+tool and test output, detailed investigation, local decisions, rejected
+alternatives, and discussion that cannot affect remaining work.
 
-The scope excludes `AGENTS.md`, ordinary plan documents outside the task tree,
-production code, tests, build files, and configuration unless another rule names
-them explicitly. Mechanically required references from an in-scope change do not
-make their containing files part of the scope.
+Simple has no task claims, task lifecycle, governing-state commits, worker, or
+dedicated worktree. When repairing a `MODULE_REVIEW.md` finding, update or remove
+that finding in the same checkpoint commit as the verified repair.
 
-For repository routing and Maven policy, changes within this scope are
-workflow-control changes and normally use the quick workflow. The executor
-may choose the simple or change workflow when the actual magnitude justifies its
-review or isolation mechanics. During a change workflow, the primary agent owns
-the current execution task's state transitions on `main`; a worker may edit an
-in-scope file only when that file is an explicit task deliverable rather than
-state governing its own execution. Verification remains at the selected
-workflow's discretion; an in-scope file neither requires nor forbids Maven or
-another project check. Coherent changes may share one commit and do not require
-isolation merely because files cross this scope boundary.
+### Change workflow
+
+Change executes one task-tree leaf through a dedicated branch and worktree, one
+fresh implementation worker, primary-agent review, integration, and cleanup.
+
+Before worker launch, the primary agent creates or selects one executable leaf,
+records its claim only in that leaf, and commits the claim on `main`. The worker
+implements the explicit deliverables, runs required pre-commit verification,
+and prepares one logical task commit. The primary agent reviews the complete
+result and returns findings to the same worker.
+
+After a clean review, integrate immediately when an explicit commit instruction
+already authorizes it; otherwise request approval. Integrate with cherry-pick,
+run `make test` on `main`, then remove the completed worktree and branch. Only
+after verified integration and cleanup may the primary agent delete the task
+leaf and eligible empty ancestors and commit that completion state.
+
+Primary-owned claim, pause, governing-input, and completion commits are direct
+state commits made at the moment their statements become true. They do not
+start another workflow or become part of the worker's implementation commit.

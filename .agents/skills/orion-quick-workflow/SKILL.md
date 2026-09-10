@@ -1,90 +1,46 @@
 ---
 name: orion-quick-workflow
 description: >-
-  Use when an Orion change is small enough for a prompt direct edit, optional
-  executor-chosen verification, and immediate commit, commonly documentation,
-  task-tree, skill, Makefile, or similarly low-risk maintenance.
+  Use when an Orion change has one understood coherent result and does not need
+  sequential checkpoints or isolated worker ownership.
 ---
 
 # Orion Quick Workflow
 
-Make one coherent change directly on `main` and commit it promptly, without a
-routing task, worker, test, or review ceremony.
+Produce one logical commit directly in the current worktree and branch.
 
-## Selection and boundary
+## Boundary
 
-Read `AGENTS.md` and [the canonical quick workflow](../../../docs/definitions.md#quick-workflow).
-The listed file types are defaults, not eligibility rules. This workflow may
-change any file when the executor judges its direct mechanics proportionate.
-Documentation, task-tree and skill edits normally start here; a Makefile or
-source change may also use it. A large or risky documentation change may use the
-simple or change workflow instead.
+Read `AGENTS.md` and
+[the canonical workflow and verification rules](../../../docs/definitions.md#repository-workflows).
+Quick may change any file; the shape of the result, not its file type, selects
+the workflow. A mutating request performed through Quick authorizes its commit.
 
-Use [orion-task-runner](../orion-task-runner/SKILL.md) when the requested edit
-changes task-tree content or state. Do not create, claim, move, pause, complete,
-or delete a task merely to route a quick change. A requested task-tree operation
-may itself do those things because the operation is the requested result.
+The requested result may require several internal steps, including tests, but
+they form one checkpoint and one commit. If the request contains several
+independently committable results, needs staged user review, or requires an
+isolated worker, stop before expanding the edit and report that Quick no longer
+fits.
 
-If evidence shows that useful completion requires test coverage, extensive
-verification, staged user review, isolated worker ownership, or unresolved
-design decisions, stop before expanding the change and select the workflow whose
-mechanics fit. File type alone never forces that decision.
-
-## Quick reference
-
-| Situation | Required action |
-| --- | --- |
-| Direct mechanics remain proportionate | Edit and commit on `main`. |
-| One coherent change crosses file categories | Keep it in one commit. |
-| Requested task-tree operation | Apply `orion-task-runner` directly. |
-| Another workflow reaches a primary-owned state milestone | Commit it at that moment. |
-| A useful check exists | Run it at the executor's discretion. |
-| No meaningful automated check exists | Inspect the diff and commit without inventing one. |
+Quick never creates or claims a task, launches a worker, creates a worktree, or
+switches branches. Use `orion-task-runner` only when changing task-tree content
+is itself the requested result.
 
 ## Execute
 
-1. Inspect `git status --short` and the requested area. Preserve unrelated
+1. Inspect `git status --short` and the requested area. Preserve all unrelated
    staged and unstaged changes.
-2. Identify one coherent state change. Include directly related files in the
-   same commit even when they cross documentation, workflow-control, build, or
-   source categories. Keep genuinely unrelated changes separate.
-3. Make only the requested edits. Do not create routing documentation, launch a
-   worker, create a branch or worktree, or introduce an implementation checkpoint.
-4. Briefly inspect the complete diff for correctness and consistency. At the
-   executor's discretion, run any already available check whose value is
-   proportionate to the change. This may be a lightweight artifact validator,
-   `git diff --check`, a Makefile dry run, or a Maven or other project test.
-5. Stage only the coherent owned change, verify that no unrelated files would
-   enter the commit, and create one descriptive single-line commit immediately.
-   Do not add a user-review gate unless the user explicitly asks for one.
+2. Identify the complete coherent result and make only those edits.
+3. Stage only the result's files and hunks. Inspect `git status --short`,
+   `git diff --cached`, and `git diff --cached --check`.
+4. Run every check required by the
+   [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
+   Add or update tests whenever behavior changes.
+5. Review the complete staged result against the request and applicable
+   repository rules. Fix local findings, restage, and rerun affected checks.
+6. Create one descriptive single-line commit immediately. Do not ask for an
+   additional review or commit approval.
 
-Do not add tests, test coverage, implementation scaffolding, or source-scanning
-checks solely for this workflow. No pre-commit or post-commit command is
-mandatory. Do not broaden verification just to report a check or repeat the
-same check after commit when it already passed against the committed content.
-When no useful automated check exists, diff inspection is sufficient; report
-that no automated check was applicable.
-
-## State milestones inside other workflows
-
-When a simple or change workflow reaches a primary-owned task, plan, review, or
-other repository-state milestone, that surrounding workflow decides when the
-state is accurate and which files belong to it. Perform the edit, quick useful
-check, and prompt commit without adding a worker handoff, user interaction,
-approval gate, or split by file category. Then return to the surrounding
-workflow.
-
-Keep primary-owned lifecycle state separate from a worker implementation commit.
-Examples include a confirmed review finding before repair, task creation or
-claim before worker launch, a governing-plan correction before worker resume,
-task completion after verified integration, and removal of a resolved finding.
-
-## Red flags and common mistakes
-
-- Selecting or rejecting this workflow only because of a file extension.
-- Creating a task solely to route the quick change.
-- Splitting one coherent cross-category change into multiple commits.
-- Treating any check as mandatory merely because this workflow was selected.
-- Adding tests or running Maven as ceremony rather than for useful evidence.
-- Inventing a validator when a quick useful check does not exist.
-- Adding an approval gate that changes the surrounding workflow's interaction.
+Do not include unrelated work merely because it is already staged or because
+the requested result spans several file categories. If a required check fails,
+do not commit; report the failure when it cannot be fixed in scope.

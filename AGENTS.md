@@ -1,213 +1,102 @@
 # Agent Instructions
 
-- When the user asks to commit changes, for example by writing `commit` or
-  `сделай коммит`, create the intended logical commit first, then follow the
-  selected workflow's post-commit policy.
-- Documentation-only commits do not require tests, including commits that
-  change only Markdown files such as task `TASK.md` files and files under
-  `docs/`. Under quick workflow, the executor may run an existing meaningful
-  check before or after commit, but should not repeat an identical passed check.
-- Do not commit changes you did not make in the current requested work unless the user explicitly asks to commit those specific changes. If unrelated or pre-existing changes are present, leave them unstaged and report them separately.
-- Use `make test` for routine full-project tests and change-workflow integration.
+## Routing and ownership
+
+- Select Quick, Simple, or Change from
+  [the repository workflow definitions](docs/definitions.md#repository-workflows).
+  An explicitly requested workflow is binding while it remains safe and
+  sufficient for the work.
+- Use `orion-task-runner` for every task-tree operation. Executing a task-tree
+  leaf uses Change workflow; planning, status, and task-tree edits alone do not
+  start or claim implementation.
+- Use `orion-minimal-implementation` for every implementation or review.
+  Review, status, and explanation requests are read-only except that
+  `orion-review` maintains and commits requested module reports.
+- Preserve unrelated staged and unstaged changes. Never stage, discard, or
+  commit work not produced by the current request.
+
+## Commits and verification
+
+- Follow the canonical
+  [pre-commit verification table](docs/definitions.md#pre-commit-verification).
+  Every required check must pass before the corresponding commit.
+- An explicit `commit`, `сделай коммит`, or equivalent instruction means the
+  user review for the covered result is complete. Commit it immediately after
+  required verification and automatic review; do not request the same approval
+  again.
+- Commit messages are one line without a body. Preserve the subject formats
+  required by the selected workflow.
+- If the worktree contains unrelated changes, stage only the files and hunks
+  owned by the current checkpoint. Keep one coherent result in one commit;
+  genuinely unrelated results require separate checkpoints and commits.
+- If a required check fails and cannot be fixed in scope, do not commit. Report
+  the command and relevant failure. Do not debug failures caused by unrelated
+  working-tree changes unless requested.
+- If a required post-commit check fails and the failure is fixed, create the fix
+  commit with exactly the same subject as the original commit.
+
+## Test commands
+
+- Run all tests outside the sandbox because they may need loopback sockets.
+- Use `mvn test -Pdev -T 4` for the full Maven/JVM pre-commit check.
+- Use `make session-host-test` for the Rust `session-host` pre-commit check.
+- Use `make test` when both Maven/JVM and `session-host` must be checked and
+  for routine Change-workflow verification after integration.
 - For focused Maven tests, always use
   `make run-test MODULE=<module> TEST='<test-locator>'`. The target supplies the
-  `dev` profile, reactor dependencies, parallelism, and the Surefire setting
-  needed for helper modules without the selected test.
-- Do not run integration tests automatically after every commit; `make test` is enough for the commit workflow.
-- Use `mvn verify -Pdev -T 4` for routine development verification. Run Maven without `-Pdev` only when explicitly checking the default build behavior or integration tests.
-- The project allows running `mvn verify` from the repository root without asking for additional confirmation when it is explicitly needed.
-- The project allows running `make test`, `make run-test` with any module and
-  test locator, and `mvn test` with any Maven parameters without asking for
-  additional confirmation.
-- Always run test commands outside the sandbox, because local tests may need to bind loopback sockets and sandboxed runs can fail with `Operation not permitted`.
-- When requesting approval for Maven commands, put the Maven phase immediately after `mvn`, then pass the remaining arguments, for example `mvn test -q -pl ...`.
-- After integrating under change workflow, run `make test`. Under simple
-  workflow, do not repeat verification that passed against the identical staged
-  checkpoint; run a post-commit check only when it validates the commit itself
-  or could not run before commit. Under quick workflow, verification is optional
-  and selected by the executor; Maven or another project check is allowed when
-  useful, but is never required merely by the workflow. If a required
-  post-commit check fails and the failure is fixed, create the follow-up fix
-  commit with the exact same message as the original commit.
-- If the Maven test command fails and cannot be fixed in the current turn, report the failure and the relevant error output.
-- If post-commit Maven tests fail because of unrelated or pre-existing working tree changes, do not debug those changes unless the user explicitly asks; report the failure and finish the requested commit task.
-- If the working tree contains multiple unrelated or clearly separate changes, split them into separate commits. Stage only the files that belong to each commit.
-- Changes within the
-  [workflow-control scope](docs/definitions.md#workflow-control-scope) that are
-  made in the same requested work do not need separate commits from each other.
-  A coherent quick-workflow change may also include directly related files
-  outside that scope; do not split or temporarily remove them only because their
-  categories differ.
-- Select an execution workflow from
-  [the repository workflow definitions](docs/definitions.md#repository-workflows).
-  Module-review repairs normally start with simple workflow, task execution with
-  change workflow, and documentation/task/skill edits with quick workflow. These
-  are recommendations. The executor chooses from actual magnitude, uncertainty,
-  risk, useful verification, isolation, and interaction; no file type or task
-  state forces a workflow. Once selected, that workflow's mechanics are binding.
-- Do not use `git merge` or create merge commits when integrating `origin/main` or other upstream branches. Use `git rebase` instead, unless the user explicitly asks for a merge commit.
-- When finishing a requested change in a dedicated Git worktree:
-  - After implementation, review fixes, and verification are complete, squash
-    all commits unique to the task branch into one logical commit.
-  - Use the squashed commit subject template:
-    `<imperative summary> [task: <leaf-path-relative-to-its-queue-root>]`.
-    Example:
-    `Implement native protocol bootstrap [task: 05_native-session-host/01_contracts-and-build.md]`.
-  - Task-tree execution state is a committed `main` input. The
-    implementation worker and task branch do not modify task-tree files or
-    include task-tree changes in branch commits, squashes, or amendments.
-  - Transfer the squashed commit to `main` with `git cherry-pick`, never with a
-    merge commit. Run the required post-commit tests on `main`, then remove the
-    completed worktree and its branch only after confirming the transfer and a
-    clean worktree.
-  - After work is transferred and verified, the active `orion-change-workflow`
-    applies `orion-task-runner` and `orion-quick-workflow` directly on `main`
-    and immediately commits completion cleanup separately.
-    Delete the completed numbered leaf and remove completed empty composite
-    ancestor directories in full only when their aggregate acceptance and scope
-    are satisfied. Preserve parents with unfinished siblings, the queue roots,
-    and root `TASK.md`. Remove the task's outstanding-work entries from active
-    plans and replace still-needed dependency references with verified
-    completion evidence. Do not retain completed task nodes or renumber
-    remaining siblings to close gaps.
-  - Do not report the task complete until `git worktree list` no longer shows
-    the completed worktree and its task branch has been deleted.
-- Under simple or change workflow, when adding or changing functionality, add or
-  extend tests in the same change. Cover the straightforward happy path and at
-  least one meaningful non-trivial scenario, such as overwrite/update behavior,
-  missing or invalid state, reloads, multiple backends, or another relevant edge
-  case. Quick workflow does not add tests solely for workflow ceremony; its
-  executor may run existing tests when they provide useful evidence.
-- For implementations of `Continuation`, write the production continuation
-  logic first and add or update its tests afterward. Do not use test-first TDD
-  for `Continuation` classes. This exception does not remove the requirement to
-  cover continuation behavior with tests in the same change.
+  dev profile, reactor dependencies, parallelism, and Surefire configuration.
+- Run `mvn verify -Pdev -T 4` when the Maven verify lifecycle is explicitly
+  needed. Run Maven without `-Pdev` only to check default-build behavior or
+  integration tests.
+- Do not run integration tests automatically after every commit.
+- When requesting approval for a Maven command, put the phase immediately after
+  `mvn`, then pass the remaining arguments.
+
+## Git integration
+
+- Do not use `git merge` or create merge commits when integrating upstream
+  branches. Rebase unless the user explicitly requests a merge commit.
+- Change workflow transfers its reviewed task commit to `main` with
+  `git cherry-pick`. Do not report completion until required verification
+  passes and the dedicated worktree and task branch are removed.
+
+## Implementation rules
+
+- Add or extend tests whenever observable behavior changes, regardless of the
+  selected workflow. Cover the straightforward path and at least one meaningful
+  non-trivial scenario chosen from the actual risks.
+- For `Continuation` implementations, write production continuation logic
+  before its tests. This exception changes test order, not the requirement for
+  coverage.
 - In `Output` implementations, report expected serialization, validation, and
-  delivery failures through the standard output result/flow interface, such as
-  `SendResult.Failed` and its continuation transition. Do not use `throw new`
-  exceptions as expected `Output` control flow.
-- When replacing one behavior or concept with another, do not add or keep tests whose only purpose is to assert that the previous behavior is absent. Remove those legacy negative checks in a separate commit after the behavior-change commit.
+  delivery failures through the standard result/flow interface, such as
+  `SendResult.Failed`; do not throw exceptions as expected control flow.
 - When replacing an internal API, behavior, or concept, update every real
-  in-repository consumer and delete the old path in the same task. Do not
-  introduce or retain deprecated aliases, adapters, compatibility shims, dual
-  read/write paths, migration modes, or feature flags for the old model. Tests
-  are not consumers: preserve meaningful behavior coverage through the single
-  replacement API and remove legacy-only coverage under the separate-commit
-  rule above.
-- Prefer a model in which each operation has one canonical production path. If
-  code, state, configuration, coordination, or an API can be removed without
-  losing required runtime behavior or an explicitly preserved wire/persisted
-  contract, removing it is the highest implementation and task-selection
-  priority. Hypothetical future or external consumers are not a reason to
-  preserve an old internal API.
-- Prefer ordinary loops and straightforward control flow over Java Stream API unless streams make the code noticeably more readable.
-- Keep source-code lines at or below 112 characters. In exceptional cases where
-  a line barely does not fit, up to 135 characters is acceptable.
-- If a method is created only for use in tests and is not part of the public contract, mark it with `core/lifecycle-state-machine/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
-- When asked to add comments or explanations to classes, add class-level comments only. Do not add method or constructor comments unless explicitly requested.
-- Treat class-level comments tagged with `@AiRule` as local implementation rules. When changing a class, read these comments and verify the rules still hold before finishing the change.
-- For code reviews, read and apply the blocking criteria in
-  [`docs/reviews/RULES.md`](docs/reviews/RULES.md). Do not approve a change that
-  violates a blocking review rule.
-- Commit messages must be a single line. Do not add a body, bullet points, or multi-line descriptions — the entire meaning goes in the subject line.
-- Use the filesystem task tree in the
-  [workflow-control scope](docs/definitions.md#workflow-control-scope) to track
-  current high-level implementation work and upcoming tasks. `current-work/`
-  and `upcoming-work/` are unnumbered queue roots. Below them, `NN_slug/` directories
-  describe composite tasks in `TASK.md`, and `NN_slug.md` files are executable
-  leaves. Nest composites to any depth. Numeric prefixes are local, may have
-  gaps, and must be unique across sibling files and directories. Filesystem
-  order is the only child queue; do not duplicate it in parent checklists.
-  `TASKS.md` is only a compatibility pointer; do not maintain task lists there.
-  Keep task nodes short, update them when starting or finishing substantial
-  work, and leave detailed designs and implementation steps in ordinary
-  `docs/plans/` plan files.
-- Use `orion-task-runner` directly for task selection and for every change to
-  the filesystem task tree, including task creation and editing, descriptions,
-  ordering, composition, dependencies, claims, queue moves, pause markers,
-  completion deletion, and completion evidence. During execution, the primary
-  agent owns claim, queue, pause, and completion state on `main`; a worker never
-  changes state governing its own execution. Commit each task-tree state change
-  through `orion-quick-workflow` as soon as it becomes accurate. Keep one
-  coherent state change atomic, including directly related documentation across
-  scope boundaries. Any useful check for that quick commit is at the executor's
-  discretion. In change workflow, commit create-or-claim state before launching
-  the worker and completion cleanup only after verified integration and
-  worktree/branch cleanup.
-- Apply the shared ownership, commit, and test rules from the
-  [workflow-control scope](docs/definitions.md#workflow-control-scope) to every
-  in-scope change. Use quick workflow for primary-owned state milestones. A
-  simple or change workflow may edit documentation or workflow-control files
-  when they are explicit deliverables rather than state governing the same
-  execution. Review/status-only requests remain read-only. A change-workflow
-  implementation worker must apply `orion-minimal-implementation`. Plan insertion
-  follows the intended local numeric order; queued execution selects the first
-  unclaimed, dependency-ready leaf.
+  in-repository consumer and remove the old production path in the same change.
+  Do not retain compatibility shims, deprecated aliases, dual paths, migration
+  modes, or feature flags for the old internal model.
+- Preserve meaningful behavior coverage through the replacement API. Remove
+  tests whose only purpose is asserting absence of the old behavior in a
+  separate commit.
+- Prefer ordinary loops and straightforward control flow over Java streams
+  unless streams are noticeably clearer.
+- Keep source lines at or below 112 characters; up to 135 is acceptable only
+  for a line that barely cannot fit.
+- Mark test-only non-contract methods with
+  `core/lifecycle-state-machine/src/main/java/pro/deta/orion/lifecycle/state/TestOnly.java`.
+- When comments or explanations are requested for classes, add class-level
+  comments only unless method or constructor comments are explicitly requested.
+- Treat class-level `@AiRule` comments as local implementation rules. Read and
+  revalidate them whenever changing that class.
+- For code review, apply [the blocking review rules](docs/reviews/RULES.md).
+  Never approve a blocking violation.
 
+## Minimal implementation policy
 
-# Repository Agent Policy
-
-## Core implementation policy
-
-- Make the smallest change that satisfies the requirement.
-- Preserve all externally observable behavior not explicitly changed by the task.
-- Preserve existing architectural invariants and module boundaries.
-- Reuse existing concepts, abstractions, protocols, lifecycle, state, and configuration before introducing new ones.
-- New abstractions, public APIs, persistent state, protocols, dependencies, configuration options, modules, and services have a cost and require concrete justification from the current requirement.
-- Do not perform unrelated refactoring.
-- Extensibility is not a goal unless explicitly required.
-- Prefer local changes over cross-module changes when both are correct.
-- Prefer fewer changed files, fewer changed types, and fewer new concepts over broader cleanup.
-- Prefer simplification or deletion over addition when behavior remains equivalent.
-- Do not introduce a general-purpose abstraction for a single use case unless the existing code cannot express the requirement cleanly.
-
-## Decision order
-
-When several implementations satisfy the requirement, choose in this order:
-
-1. Preserve behavior not mentioned by the task.
-2. Preserve architectural invariants.
-3. Minimize public contract changes.
-4. Minimize affected modules.
-5. Minimize changed files.
-6. Minimize new types/interfaces/classes.
-7. Minimize new configuration and persistent state.
-8. Minimize dependencies.
-9. Minimize code added.
-
-## Architectural-change trigger
-
-Always use the `orion-minimal-implementation` skill when reviewing changes or
-developing tasks, regardless of the scope or complexity of the work. Apply its
-implementation workflow for changes and its read-only mode for review requests.
-
-Before making a change that introduces or materially modifies any of the
-following, apply the skill's model, concept, and contract analysis:
-
-- public API or protocol
-- persistent state or schema
-- cross-module behavior
-- lifecycle or ownership
-- concurrency model
-- new dependency
-- new service/module/subsystem
-- new reusable abstraction
-
-A new `Manager`, `Provider`, `Registry`, `Factory`, `Coordinator`, `Service`, or similar concept should be treated as an architectural change unless it is clearly an implementation detail local to one existing concept.
-
-## Review expectation
-
-After any non-trivial implementation, perform the self-review required by
-`orion-minimal-implementation`: verify that the same requirement could not be met
-with fewer concepts or a smaller architectural delta. For cross-module,
-concept-heavy changes, inspect both individual modules and their interactions.
-
-Finish implementation with the skill's required summary: what was being
-solved, how it was solved, which parts changed and what changed in each, and
-verification results with any remaining work.
-
-## Philosophy
-
-The central rule is:
-
-> Implement the smallest change that makes the requested behavior true while preserving existing invariants. Introduce no new concepts unless the requirement cannot be satisfied with concepts already present in the codebase.
+Implement the smallest change that makes the requested behavior true while
+preserving existing behavior and architectural invariants. Reuse existing
+concepts before adding state, APIs, services, dependencies, configuration, or
+abstractions. Prefer deletion and one canonical production path. Do not perform
+unrelated refactoring or preserve an old internal path for hypothetical
+consumers. Apply the full analysis and final summary from
+`orion-minimal-implementation`.
