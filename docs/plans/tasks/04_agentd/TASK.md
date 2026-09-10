@@ -26,7 +26,7 @@ the AgentD lifecycle.
 > Contract update, 2026-09-07: native-control and recovery passages below are
 > historical proposals, not a description of current runtime behavior. The
 > [current native contract and Java interface comparison](03_session-host-contract-alignment/TASK.md)
-> define in-memory admission, journaled command results, schema-2 ACK, and
+> define source-aware in-memory admission, journaled command results, ACK, and
 > start-outcome uncertainty.
 > Recovery from recorded sequence maxima alone is not established when an
 > admitted operation has a pending or missing result. Reconcile affected steps
@@ -415,7 +415,8 @@ boundary.
 5. Corrupt or truncate one session tail and verify complete preceding records
    remain readable, that session becomes degraded, and other sessions continue
    synchronization.
-6. Deliver duplicate input IDs and control reconnects without writing the same
-   accepted input twice.
+6. Repeat a `SERVER` operation sequence across control reconnects and verify
+   the host rejects it as stale without repeating the effect. Repeat a
+   `MANUAL` operation sequence and verify every delivered operation executes.
 7. Shut AgentD down gracefully and verify no local host receives a termination
    command and all hosted process trees remain alive.

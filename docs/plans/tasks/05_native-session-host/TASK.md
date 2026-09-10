@@ -95,10 +95,13 @@ The journal contract includes:
 - cursor and gap semantics based on record timestamps.
 
 The control contract includes `INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`,
-`STATUS`, and generic typed-event submission, with `ACCEPTED`, `DUPLICATE`,
-`ERROR`, and `STATUS` responses. Input IDs provide at-most-once delivery after
-acceptance for the lifetime of a host, including client reconnects. The
-protocol must not expose Unix-domain-socket or named-pipe details.
+`ACK_JOURNAL`, `STATUS`, and generic typed-event submission. Operations receive
+`RECEIVED` admission responses; queries and failures use their typed response or
+`ERROR`. `SERVER` operation sequences provide host-incarnation replay
+protection, while `MANUAL` sequences are live response-correlation values and
+every valid manual delivery executes. Input IDs remain journal data and do not
+provide another deduplication mechanism. The protocol must not expose
+Unix-domain-socket or named-pipe details.
 
 ### Session Storage
 
@@ -143,9 +146,10 @@ sit behind internal interfaces so lifecycle, ordering, journal, and command
 behavior remain common.
 
 Resize is ordered by appending `PTY_RESIZE` and then applying the new terminal
-size. Input is ordered by accepting and deduplicating its ID, appending
-`PTY_INPUT`, and then writing its bytes to the terminal. This is an explicit
-at-most-once policy, not a distributed exactly-once transaction.
+size. Input is ordered by admitting its source and operation sequence,
+appending `PTY_INPUT`, and then writing its bytes to the terminal. Server replay
+protection comes only from the sequence high-water mark; manual delivery has no
+deduplication or durable retry identity.
 
 The host records process start and exit, including exit code and termination
 signal when available, finalizes the journal, and exits immediately or after a
@@ -205,8 +209,8 @@ host cannot guarantee ownership of fully daemonized descendants.
   journal.
 - Resize between output writes and observe `PTY_RESIZE` at the correct replay
   position.
-- Retry the same input ID after reconnect and receive `DUPLICATE` without a
-  second terminal write.
+- Repeat a `SERVER` sequence and receive a stale rejection without a second
+  effect; repeat a `MANUAL` sequence and execute the effect again.
 - Truncate the active record or compressed block and recover every preceding
   complete event.
 - Rotate past the retention limit without stalling PTY reads and report a gap

@@ -72,20 +72,20 @@ global streams so deterministic tests do not require a real TTY.
 
 The terminal controller starts with no private durable cursor. It reads the
 oldest retained journal record through the stable tail, renders each
-`PTY_OUTPUT` payload byte-for-byte, and observes command and lifecycle records
-needed to recover the next operation sequence. Unknown event types do not
-affect the screen but still advance the in-memory journal cursor. After catch-up
+`PTY_OUTPUT` payload byte-for-byte, and observes lifecycle records. Unknown
+event types do not affect the screen but still advance the in-memory journal
+cursor. After catch-up
 the existing journal availability monitor wakes bounded incremental reads of
 the active tail. Polling remains a safety net for missed or overflowed
 filesystem notifications.
 
 The input side sends bounded stdin chunks as `INPUT` operations. The current
 terminal dimensions initialize the session and subsequent POSIX window changes
-become ordered `RESIZE` operations. Every established-session operation uses a
-fresh CommandId, the canonical Agent protocol command envelope, and the next
-operation sequence recovered from journal history. The tool uses the same
-control codec, retry identity, and serial ordering as daemon mode; it does not
-add a simplified testing-only native protocol.
+become ordered `RESIZE` operations. Every established-session operation uses
+the shared control codec with source `MANUAL` and a live response-correlation
+sequence. The tool sends each intended effect once, never retries an uncertain
+delivery, and recovers no manual sequence from journal history. It does not add
+a simplified testing-only native protocol.
 
 Terminal control bytes such as Ctrl-C are passed to the child PTY as input, so
 the remote line discipline retains normal behavior. `Ctrl-] d` is a local
@@ -113,9 +113,9 @@ Watermarks remain monotonic for the lifetime of the invocation.
 Unlike the real server, terminal mode does not persist a durable replica.
 Usage text must therefore warn that `--ack-journal` may make old segments
 eligible for deletion and can prevent a later stateless attach from recovering
-the command prefix. If required history is no longer available, the tool may
-replay the retained output but must not guess an operation sequence or send new
-controls.
+the complete output prefix. If required history is no longer available, the
+tool reports the gap, replays the retained output, and may still send one-shot
+manual controls because their sequences have no recovery semantics.
 
 ### Failure Handling and Lifecycle
 
@@ -569,10 +569,9 @@ Verify ordinary bytes, including Ctrl-C, remain `INPUT` payload. Verify the init
 start and each changed size becomes an ordered `RESIZE`; repeated notifications with the same dimensions do
 nothing.
 
-Use the completed command scheduler/lane from the prerequisite task. Assert every generated message has a fresh
-CommandId, exact bytes from `AgentProtocolCodec.encode(...)`, and a recovered monotonic operation sequence.
-Controls must wait until journal catch-up establishes a safe sequence. A gap or corrupt suffix keeps output
-diagnostics available but sends no control.
+Use one bounded local control lane. Assert every generated message has source `MANUAL`, no server command
+envelope, and a live response-correlation sequence. A reconnect may restart that sequence; every intended effect
+is sent once, and an uncertain delivery is never retried. Controls do not depend on journal sequence recovery.
 
 Cover detach, EOF, interrupted reads, rejected control, ambiguous delivery, `PROCESS_EXITED`, and concurrent
 resize/input. Assert close never sends `TERMINATE` and always closes the terminal device once.
@@ -591,7 +590,7 @@ Expected: FAIL because the input parser and session coordinator do not exist.
 **Step 3: Implement the input lane and lifecycle coordinator**
 
 Run journal following and terminal input in two owned virtual threads. Feed all input and resize messages to one
-bounded serial command lane so their operation sequence matches delivery order. Stop admitting input after
+bounded serial manual-control lane. Stop admitting input after
 detach, exit, unsafe recovery, or control failure. The journal remains the source of durable command results and
 process exit; a direct native acknowledgement is delivery evidence, not terminal output.
 
@@ -645,8 +644,9 @@ Expected: FAIL because terminal assembly and optional ACK are incomplete.
 
 **Step 3: Wire terminal components and ACK policy**
 
-Pass one acknowledgement policy from parsed options into the follower. Reuse the shared schema-2
-`ACK_JOURNAL` operation and its journaled `COMMAND_RESULT` introduced by journal-sync. The watermark is the
+Pass one acknowledgement policy from parsed options into the follower. Reuse the shared source-aware
+`MANUAL` `ACK_JOURNAL` operation and its journaled `COMMAND_RESULT` introduced by journal-sync. Send each
+manual acknowledgement once without retrying an uncertain delivery. The watermark is the
 last EventId of the fully consumed contiguous page and is never persisted by AgentD terminal mode.
 
 Make `TerminalMain` acquire the terminal, resolve the target, construct observer/command lane/follower, enter raw

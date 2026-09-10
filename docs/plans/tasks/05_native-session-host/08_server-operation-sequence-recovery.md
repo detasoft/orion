@@ -1,7 +1,7 @@
 # Resolve SERVER Operation Sequence Recovery
 
 Status: todo
-Depends on: [source-aware controls](07_source-aware-controls.md)
+Depends on: source-aware controls (completed in `09ed12c0` and `b3c8953c`)
 Coordinates with: [AgentD journal sync](../04_agentd/02_journal-sync.md) and
 [server command orchestration](../04_agentd/04_command-orchestration.md)
 

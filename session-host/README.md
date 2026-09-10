@@ -120,15 +120,18 @@ oldest remaining segment.
 ## Session Controls
 
 Established-session `INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`, and `ACK_JOURNAL`
-requests use payload schema 2. A control client supplies a nonzero monotonic
-sequence in the frame header, the exact opaque server CBOR command item, and
-the typed effect bytes. The host never decodes or re-encodes the server command item. A sequence
-at or below the accepted-sequence high-water mark is stale,
-so a reconnect cannot repeat an already accepted effect.
+requests use the source-aware operation payload. A control client supplies an
+explicit `SERVER` or `MANUAL` source, a nonzero sequence in the frame header,
+and the typed effect bytes. `SERVER` also supplies the exact opaque server CBOR
+command item, which the host never decodes or re-encodes. A server sequence at
+or below the accepted-sequence high-water mark is stale, so a reconnect cannot
+repeat an already accepted server effect. Manual sequences are live response
+correlation values only: every valid delivery executes, and the host retains
+no manual ordering or deduplication state.
 
 The host applies each new effect synchronously and writes one `COMMAND_RESULT`
 with an empty detail on success or diagnostic detail on an application failure.
-After a new operation passes the high-water mark, the host returns `RECEIVED`
+After a new operation is admitted, the host returns `RECEIVED`
 with the sequence in the response header and then applies the effect. This is
 an admission receipt, not a durable journal confirmation; a client observes
 the result in the journal when its append succeeds. There is no separate
@@ -137,13 +140,14 @@ failures return `RECEIVED` with an error payload. If a journal append
 fails, the host reports it only on stderr and does not retry the effect or the
 append.
 
-The sequence identifies an operation and protects it from replay; it does not
-define FIFO order across control connections. Ordinary effects are mutually
-exclusive, but `TERMINATE` bypasses the effect mutex so it can signal descendants
-while a blocked ordinary effect is still running. The order in which different
-connections acquire the effect mutex is not preserved in the sequence.
-`RECEIVED` may precede an earlier effect or result, so journal readers match
-`COMMAND_RESULT` records by sequence rather than by their physical record order.
+For `SERVER`, the sequence identifies an operation and protects it from replay;
+for `MANUAL`, it has no durable identity. Neither source defines FIFO order
+across control connections. Ordinary effects are mutually exclusive, but
+`TERMINATE` bypasses the effect mutex so it can signal descendants while a
+blocked ordinary effect is still running. Journal `eventId` is the common order.
+Server recovery matches only `SERVER` results by sequence and ignores manual
+sequences; a manual client sends each intended effect once and does not retry an
+uncertain delivery.
 
 PTY output remains continuously drained when a `PTY_OUTPUT` append fails. The
 host reports the failure on stderr and attempts later output chunks again, so a
@@ -157,22 +161,26 @@ have transferred only part of the requested bytes, and a signal may have been
 delivered to some or none of its targets. The journal's `PTY_INPUT` record
 contains the requested bytes, not a delivery acknowledgement. If no
 `COMMAND_RESULT` exists, the effect is unknown because the host may have
-executed it before the journal append failed. Retrying with a new sequence is
-a new attempt and may repeat an earlier partial effect.
+executed it before the journal append failed. A later server command with a new
+sequence is a new attempt and may repeat an earlier partial effect; a manual
+client does not retry an uncertain delivery.
 
 Planned AgentD recovery uses the server's durably committed prefix plus the
 later suffix in the still-running host journal. Recorded sequences do not
 reveal admissions whose result is pending or missing; sequence allocation on
-reconnect remains an AgentD integration concern. The host does not reconstruct
-a failed incarnation. After the server durably commits a complete journal
-prefix, a client may send its event ID through the `ACK_JOURNAL` operation.
+reconnect remains an AgentD integration concern, and manual sequences are never
+inputs to that recovery. The host does not reconstruct a failed incarnation.
+After the server durably commits a complete journal prefix, a client may send
+its event ID through a `SERVER` `ACK_JOURNAL` operation. A delivered manual ACK
+has the normal retention effect but carries no server durability authority by
+itself.
 The host atomically persists that monotonic watermark beside the journal before
 requesting deletion. The sidecar
 is local deletion permission only: it is not an AgentD recovery cursor or
 evidence that the server committed anything by itself. ACK follows the ordinary
 operation result path and creates a `COMMAND_RESULT` when the journal is writable.
 
-The current Java control client still uses a different operation wrapper and
-response model, and has no `ACK_JOURNAL` command. See the
-[implementation comparison](../docs/plans/tasks/04_agentd/03_session-host-contract-alignment/TASK.md)
-for the current boundary and pending integration work.
+The Java control client uses the same source-aware operation wrapper and
+response model, including `ACK_JOURNAL`. See the
+[integration contract](../docs/plans/tasks/04_agentd/03_session-host-contract-alignment/TASK.md)
+for the remaining AgentD orchestration work.

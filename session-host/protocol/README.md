@@ -247,8 +247,9 @@ effect, with the frame sequence in the response header. Validation
 and stale-sequence failures receive `RECEIVED` with the same sequence and an
 error payload. Journal append failures go only to stderr.
 
-`operationSequence` identifies an operation and protects it from replay; it is
-not a FIFO position across control connections. `operation_order` serializes
+For `SERVER`, `operationSequence` identifies an operation and protects it from
+replay. For `MANUAL`, it is only a live response-correlation value and may
+repeat. It is not a FIFO position across control connections. `operation_order` serializes
 ordinary effects, but `TERMINATE` bypasses it so it can signal descendants while
 a blocked ordinary effect is still running. `RECEIVED` may therefore be
 observed before an earlier effect or result is complete, and journal readers
@@ -291,8 +292,9 @@ have transferred only part of the requested bytes, and a signal may have been
 delivered to some or none of its targets. The `PTY_INPUT` journal record
 contains the requested bytes, not a delivery acknowledgement. If no
 `COMMAND_RESULT` exists, the effect is unknown because the host may have
-executed it before the journal append failed. Retrying with a new sequence is
-a new attempt and may repeat an earlier partial effect.
+executed it before the journal append failed. The server may retry a `SERVER`
+command with a new sequence as a new attempt, which may repeat an earlier
+partial effect. A `MANUAL` sender does not retry uncertain delivery.
 
 `TERMINATE` is 4 bytes: u16 mode (`0` graceful, `1` force) and u16 reserved zero.
 The server owns escalation timing and sends a later force operation when needed.
@@ -304,10 +306,12 @@ host-assigned journal event ID and no producer UUID deduplication semantics.
 The current Unix host rejects `APPEND_EVENT` with an unsupported-message error;
 ordered harness ingress is not implemented yet.
 
-`ACK_JOURNAL` is recorded as `COMMAND_RESULT` using its operation sequence and
-exact command envelope. Its effect is the supplied journal event ID.
-An AgentD integration must send it only after the server confirms durable
-storage through that event ID; Java ACK forwarding is still pending. The host
+`ACK_JOURNAL` is recorded as `COMMAND_RESULT` using its source, operation
+sequence, and exact source envelope: the opaque server envelope for `SERVER`,
+or the complete operation payload for `MANUAL`. Its effect is the supplied
+journal event ID. Higher-level AgentD server forwarding must send it only after
+the server confirms durable storage through that event ID; the shared Java
+command model and codec already support ACK. The host
 first durably publishes the monotonic
 `control-retention-state` sidecar and only then allows newly covered closed
 segments to be deleted. A repeated or lower value does not lower the watermark.

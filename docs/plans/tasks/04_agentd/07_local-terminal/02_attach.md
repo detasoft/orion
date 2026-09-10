@@ -3,7 +3,7 @@
 Status: todo
 Depends on: completed local launch `e3822a4a`, ../02_journal-sync.md,
 ../04_command-orchestration.md, and
-[source-aware native controls](../../05_native-session-host/07_source-aware-controls.md)
+source-aware native controls (completed in `09ed12c0` and `b3c8953c`)
 
 Add `agentd terminal attach` and extend `terminal start` to attach after launch
 through the production journal and native control paths.
@@ -12,7 +12,8 @@ through the production journal and native control paths.
 
 - Acquire and restore a local POSIX terminal, replay retained output, and follow
   durable journal events.
-- Send manual input and resize operations with connection-scoped sequencing.
+- Send each manual input and resize operation once, using its sequence only for
+  live response correlation. Never retry an uncertain delivery.
 - Detach without stopping `session-host`; support attaching to an existing
   session directory.
 - Keep manual journal reading non-acknowledging and independent from server

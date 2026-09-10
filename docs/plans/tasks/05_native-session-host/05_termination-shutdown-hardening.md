@@ -6,12 +6,13 @@ Depends on:
 completed process control and PTY closure (`10e92141`, `dcebb944`)
 
 Align shutdown behavior with the session-host boundary. The host is a process
-proxy: it admits operations by `operationSequence`, executes each admitted
-effect once, records its result, and reports journal failures on `stderr`.
+proxy: it applies a high-water mark to `SERVER` operations and admits every
+valid `MANUAL` delivery, executes each admitted effect once, records its result,
+and reports journal failures on `stderr`.
 
 ## Scope
 
-- Keep operation state limited to the in-memory sequence high-water mark and
+- Keep operation state limited to the in-memory `SERVER` sequence high-water mark and
   active-operation accounting needed for finalization. Neither state tracks
   an unjournaled result or a second lifecycle model.
 - Ensure `TERMINATE` can signal the owned process tree while another
@@ -28,7 +29,8 @@ effect once, records its result, and reports journal failures on `stderr`.
 
 ## Acceptance
 
-- Stale or repeated sequences are rejected without executing the effect again.
+- Stale or repeated `SERVER` sequences are rejected without executing the
+  effect again; repeated `MANUAL` sequences execute again.
 - A blocked `INPUT` does not prevent a `TERMINATE` received on another control
   connection from reaching the process tree.
 - Successful effects and effect failures produce their corresponding

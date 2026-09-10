@@ -3,7 +3,8 @@
 Status: todo
 Depends on: completed AgentD HTTP/2 transport, session discovery, and session
 runtime/control; completed journal-reader (02e74a3a); 02_journal-sync.md;
-completed native-control-contract (c298ad34); [source-aware controls](../05_native-session-host/07_source-aware-controls.md);
+completed native-control-contract (`c298ad34`); completed source-aware controls
+(`09ed12c0`, `b3c8953c`);
 [SERVER sequence recovery](../05_native-session-host/08_server-operation-sequence-recovery.md); and the
 [native control-journal contract](03_session-host-contract-alignment/TASK.md)
 
@@ -43,7 +44,7 @@ from each session journal.
 > Contract update, 2026-09-07: native-control and recovery passages below are
 > historical proposals, not a description of current runtime behavior. The
 > [current native contract and Java interface comparison](03_session-host-contract-alignment/TASK.md)
-> define in-memory admission, journaled command results, schema-2 ACK, and
+> define source-aware in-memory admission, journaled command results, ACK, and
 > start-outcome uncertainty.
 > Recovery from recorded sequence maxima alone is not established when an
 > admitted operation has a pending or missing result. Reconcile affected steps
@@ -91,7 +92,7 @@ or substituted for one another:
   an `operationSequence` allocator.
 
 `ACK_JOURNAL` carries a server-durably-committed journal `eventId` watermark to
-the host through a schema-2 operation with its own sequence and opaque envelope.
+the host through a source-aware `SERVER` operation with its own sequence and opaque envelope.
 It produces `COMMAND_RESULT` when the result append succeeds. AgentD never
 treats the host retention watermark as replication authority and never
 persists it as an AgentD cursor.
@@ -262,7 +263,7 @@ fixtures rather than silently changing frozen fields:
 - Agent protocol decoding must expose the exact bytes of known command items
   and carry recovery's acknowledged operation sequence.
 - Native control must use the header `operationSequence`, opaque command
-  envelope, and typed effect for all schema-2 operations. `RECEIVED` is an
+  envelope, and typed effect for all source-aware `SERVER` operations. `RECEIVED` is an
   admission receipt; completion comes from the journal.
 - Java journal projection must consume the native `COMMAND_RESULT` and
   `SESSION_START_FAILED` layouts and preserve the exact command envelope.
@@ -271,7 +272,7 @@ fixtures rather than silently changing frozen fields:
 - Server command handling must stop treating direct successful results as
   completion and instead project durable journal results.
 
-Journal-sync sends schema-2 `ACK_JOURNAL` only from a complete server-durable
+Journal-sync sends a source-aware `SERVER` `ACK_JOURNAL` only from a complete server-durable
 prefix and observes its journaled result. It must avoid a feedback loop driven
 solely by ACK results. The focused Java native-control alignment was integrated
 in `c298ad34`. Remaining Java/native conformance work is tracked by the
@@ -320,7 +321,7 @@ multi-session progress.
 > Contract update, 2026-09-07: native-control and recovery passages below are
 > historical proposals, not a description of current runtime behavior. The
 > [current native contract and Java interface comparison](03_session-host-contract-alignment/TASK.md)
-> define in-memory admission, journaled command results, schema-2 ACK, and
+> define source-aware in-memory admission, journaled command results, ACK, and
 > start-outcome uncertainty.
 > Recovery from recorded sequence maxima alone is not established when an
 > admitted operation has a pending or missing result. Reconcile affected steps
@@ -333,7 +334,7 @@ outcomes and recovery state come exclusively from session journals.
 bounded serial lane per session, and run different session lanes concurrently. Observe recorded results through
 the server-durable prefix and an independent local journal suffix scan. Resolve fresh sequence allocation
 separately when admissions may have pending or missing results. The native host owns effect execution and
-result append; journal-sync owns durable upload and schema-2 ACK forwarding.
+result append; journal-sync owns durable upload and source-aware `SERVER` ACK forwarding.
 
 **Tech Stack:** Java 25, Maven, JUnit 5, AssertJ, Jetty HTTP/2, CBOR Sequence, existing AgentD runtime,
 discovery, local-control, journal-reader, and journal-sync boundaries.
@@ -391,7 +392,7 @@ If any task remains, stop. Do not copy its implementation into this leaf.
 Confirm the integrated host contract and fixtures provide all of these:
 
 ```text
-INPUT, RESIZE, SIGNAL, TERMINATE, ACK_JOURNAL use the schema-2 operation wrapper
+INPUT, RESIZE, SIGNAL, TERMINATE, ACK_JOURNAL use the source-aware `SERVER` operation wrapper
 operationSequence is in the frame header; the payload retains the exact server CBOR envelope
 admission advances an in-memory high-water mark and sends transient RECEIVED
 an admitted effect executes once, then COMMAND_RESULT durable append is attempted
@@ -402,7 +403,7 @@ missing COMMAND_RESULT leaves the effect unknown and does not authorize replay
 Expected: every line is implemented and covered by native fixtures/tests. Align Java controls with those
 fixtures and a real host before enabling command routing.
 
-Separately verify journal-sync sends schema-2 `ACK_JOURNAL` only for a complete server-durable prefix. Its
+Separately verify journal-sync sends a source-aware `SERVER` `ACK_JOURNAL` only for a complete server-durable prefix. Its
 `RECEIVED` is admission only; observe effect completion through the journaled `COMMAND_RESULT`. Physical
 cleanup is asynchronous. ACK scheduling must not form a feedback loop driven solely by ACK results.
 
@@ -574,7 +575,7 @@ round trips for:
 
 ```java
 new SessionEventPayload.ProcessStarted(processId)
-new SessionEventPayload.CommandResult(sequence, exactEnvelope, outcome, detail)
+new SessionEventPayload.CommandResult(source, operationSequence, sourceEnvelope, outcome, detail)
 new SessionEventPayload.SessionStartFailed(commandId, diagnostic, omittedByteCount)
 ```
 
@@ -594,9 +595,10 @@ Expected: FAIL because Java does not know the prerequisite host event allocation
 
 **Step 7: Implement only the Java-side event model and codec**
 
-Add the typed payload records, bounds, and codec cases. `COMMAND_RESULT` must preserve the exact command
-byte string and expose its operation sequence for server/local projection. Extract command identity from the
-preserved envelope in the consuming projection.
+Add the typed payload records, bounds, and codec cases. `COMMAND_RESULT` must preserve its source, operation
+sequence, and exact source envelope for server/local projection. Extract server command identity from a
+preserved `SERVER` envelope in the consuming projection; never interpret a `MANUAL` envelope as a server
+command.
 `SESSION_START_FAILED` must carry the omission count separately from diagnostic text. Do not change the native
 writer in this leaf.
 
@@ -633,8 +635,9 @@ Expected: FAIL because the scanner and state do not exist.
 
 Inject the prerequisite `SessionJournalReader`; call `readAfter` with the server `eventId` cursor and iterate
 with ordinary loops. Observe known command results and lifecycle payloads while leaving every record available
-to journal sync. Return the recorded maximum and tail observation without claiming they expose admissions
-whose results are pending or missing. Any allocator subsequently selected must handle sequence exhaustion.
+to journal sync. Return the recorded maximum `SERVER` operation sequence and tail observation without claiming
+they expose admissions whose results are pending or missing. Exclude `MANUAL` sequences from server recovery.
+Any allocator subsequently selected must handle sequence exhaustion.
 
 **Step 4: Add failing lifecycle and missing-result tests**
 
@@ -748,7 +751,7 @@ Expected: FAIL because the dispatcher does not exist and current commands lack t
 **Step 3: Adapt the Java control client to the integrated native contract**
 
 Remove automatic operation retries. Encode the operation sequence in the frame header and preserve the exact
-opaque envelope in the schema-2 payload. Decode empty or rejected `RECEIVED` as transient admission, and
+opaque envelope in the source-aware `SERVER` payload. Decode empty or rejected `RECEIVED` as transient admission, and
 observe completion through `COMMAND_RESULT`. Remove the native timestamp/duplicate-response model.
 Continue using `OperationDeadline` and transport-native cancellation; do not add per-call timeout threads.
 

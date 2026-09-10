@@ -1056,8 +1056,15 @@ fn serve_connection(
     mut stream: UnixStream,
     state: Arc<Mutex<SharedState>>,
 ) -> Result<(), HostError> {
+    if let Err(error) = stream.set_write_timeout(Some(CONTROL_RESPONSE_WRITE_TIMEOUT))
+        && !matches!(
+            error.raw_os_error(),
+            Some(libc::EINVAL) | Some(libc::ENOTCONN)
+        )
+    {
+        return Err(error.into());
+    }
     while let Some(frame) = host::read_control_frame(&mut stream)? {
-        stream.set_write_timeout(Some(CONTROL_RESPONSE_WRITE_TIMEOUT))?;
         if is_operation_control(frame.message_type)
             && (frame.payload_schema_version == 3
                 || (frame.message_type == control_message::SIGNAL && frame.payload_schema_version == 4))

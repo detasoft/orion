@@ -8,7 +8,7 @@ Bring every remaining AgentD session-host integration path to the final native
 control, journal, metadata, and lifecycle contracts after the focused control
 model changes are complete. The documentation audit accepts the current native
 implementation as the baseline; it did not change Java or Rust runtime behavior.
-The linked contract records the current Java/native interface differences.
+The linked contract records the shared Java/native interface.
 
 ## Scope
 
@@ -18,18 +18,18 @@ The linked contract records the current Java/native interface differences.
 - Treat `RECEIVED` as transient admission only. Observe operation completion
   through `COMMAND_RESULT` and preserve the documented unknown/partial-effect
   semantics after ambiguous delivery or a missing result record.
-- Use the single schema-2 operation sequence and exact opaque command envelope
-  without restoring a duplicate native command identity, result ledger, or
-  schema-1 operation fallback.
-- Put the operation sequence in the frame header; encode only envelope length,
-  envelope, and effect in the payload. Replace the Java timestamp/duplicate ACK
-  model with empty or rejected `RECEIVED` and correlate results by sequence.
+- Use the source-aware operation wrapper and exact source envelope without
+  restoring a duplicate native command identity, result ledger, or legacy
+  operation fallback. Apply replay protection only to `SERVER` sequences.
+- Put the operation sequence in the frame header and the explicit source in the
+  payload. Use empty or rejected `RECEIVED`; correlate server results by source
+  and sequence, while treating manual sequences as live-only values.
 - Preserve uncertain delivery across reconnects: a stale rejection cannot
   resolve an earlier attempt. A journal suffix does not expose admissions with
   pending or missing results, so recorded maxima alone do not prove a fresh
   sequence. Resolve allocation with command orchestration before completion.
-- Send `ACK_JOURNAL` through the same schema-2 operation contract and advance
-  it only from a server-durable journal prefix.
+- Send server retention acknowledgements through the same source-aware
+  operation contract and advance them only from a server-durable journal prefix.
 - Consume the four-byte `TERMINATE` effect and effective sandbox status without
   adding AgentD-owned process-tree or host-shutdown policy.
 - Preserve current start-outcome and journal-failure behavior: output append
@@ -53,7 +53,7 @@ The linked contract records the current Java/native interface differences.
   append failure and no fabricated start outcome after exec.
 - Shared protocol fixtures and real-host integration tests cover unsigned
   sequences above `i64::MAX`, unknown envelope fields, reconnect, and ACK.
-- No obsolete schema-1 operation path, duplicate command identity, private
+- No obsolete operation path, duplicate command identity, private
   durable command cursor, or AgentD-owned host termination coordinator remains.
 
 ## Boundary
@@ -67,7 +67,7 @@ UI behavior.
 
 ## Native Control and Journal Contract
 
-Status: reconciled with the current implementation on 2026-09-07.
+Status: reconciled with the source-aware implementation on 2026-09-10.
 This replaces the 2026-09-03 intent/result-ledger design. Current native
 behavior is the accepted baseline; this document does not request runtime
 changes. Wire layouts are specified in
@@ -84,15 +84,15 @@ termination timing, and escalation. AgentD launches and discovers hosts and
 provides the local Java control client. Server command orchestration and
 journal synchronization remain queued work, not completed integration.
 
-The Rust host and Java client currently expose different operation layouts.
-The comparison below records both implementations; the
-[alignment task](TASK.md)
-tracks the remaining Java integration work. Do not infer interoperability from
-both sides calling their payload schema `2`.
+The Rust host and Java client use the same checked-in fixtures and operation
+layout. Remaining work in this task concerns higher-level AgentD consumers, not
+a second control codec.
 
 ### Native operation contract
 
-`INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`, and `ACK_JOURNAL` use schema 2.
+`INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`, and `ACK_JOURNAL` use the
+source-aware operation wrapper (schema 3, with schema 4 extending `SIGNAL` by a
+process token).
 One unsigned sequence in the 32-byte frame header identifies the operation and
 correlates its response. Live operation admission accepts values from `1`
 through `u64::MAX - 1`; gaps and values above `i64::MAX` are valid.
@@ -101,13 +101,17 @@ through `u64::MAX - 1`; gaps and values above `i64::MAX` are valid.
 The little-endian operation payload is:
 
 ```text
-u32 commandEnvelopeLength
-commandEnvelopeLength opaque bytes
+u16 source                 # 1 SERVER, 2 MANUAL
+u16 reserved               # zero
+u32 serverEnvelopeLength
+serverEnvelopeLength bytes # nonempty for SERVER, empty for MANUAL
 command-specific effect bytes
 ```
 
-The nonempty envelope is preserved exactly without decoding its CBOR contents.
-There is no separately encoded native CommandId or payload operation sequence.
+For `SERVER`, the nonempty envelope is preserved exactly without decoding its
+CBOR contents. For `MANUAL`, the exact complete operation payload is preserved
+as the result envelope. There is no separately encoded native CommandId or
+payload operation sequence.
 `INPUT` retains its 16-byte input UUID and raw bytes; `RESIZE` contains two u32
 dimensions; `SIGNAL` contains u16 kind, u16 reserved zero, and i32 platform code;
 `TERMINATE` contains only u16 mode and u16 reserved zero; `ACK_JOURNAL` contains
@@ -119,10 +123,12 @@ because ordered harness ingress is not implemented.
 
 ### Admission, execution, and journal results
 
-The host keeps only an in-memory accepted-sequence high-water mark for replay
-protection. A sequence at or below it is rejected, including a byte-identical
-retry. Admission advances the mark and registers an active operation; it does
-not append a durable intent or retain a result ledger.
+The host keeps only an in-memory accepted-sequence high-water mark for `SERVER`
+replay protection. A server sequence at or below it is rejected, including a
+byte-identical retry. Every valid `MANUAL` delivery is admitted without reading
+or changing that mark, including repeated sequences on one or several
+connections. Admission registers one active operation; it does not append a
+durable intent or retain a result ledger or manual source state.
 
 The host sends an empty `RECEIVED` before applying the effect. Admission
 rejection uses `RECEIVED` with u32 error code and bounded UTF-8 detail.
@@ -133,7 +139,7 @@ After executing an admitted effect once, the host attempts to durably append:
 
 ```text
 [eventId, COMMAND_RESULT,
- [operationSequence, exactCommandEnvelope, outcome, detail]]
+ [source, operationSequence, exactSourceEnvelope, outcome, detail]]
 ```
 
 A live host produces succeeded or failed results. Rejected and ambiguous
@@ -143,17 +149,22 @@ side effects; `PTY_INPUT` records requested bytes, not confirmed delivery.
 A result-append failure is logged to stderr and does not replay the effect.
 A missing result therefore means unknown outcome.
 
-Ordinary effects share a mutex; `TERMINATE` bypasses it to signal descendants
-while an ordinary effect is blocked. Sequences identify attempts, not FIFO
-positions across connections. Match journal results by sequence rather than
-record position. The host has no grace timer, escalation loop, or signal retry.
+Ordinary effects from both sources share a mutex; `TERMINATE` bypasses it to
+signal descendants while an ordinary effect is blocked. Sequences identify attempts, not FIFO
+positions across connections. Server recovery matches only `SERVER` results by
+sequence and ignores manual sequences. A manual client sends an intended effect
+once and does not retry an uncertain delivery. The host has no grace timer,
+escalation loop, or signal retry.
 
 ### Journal acknowledgement and retention
 
-`ACK_JOURNAL` uses the same admission and result path as the other operations,
-including an opaque envelope and its own operation sequence. Its watermark
-must represent a complete server-durable prefix; a network write alone is
-not authority to delete local history. Java forwarding is still pending.
+`ACK_JOURNAL` uses the same admission and result path as the other operations.
+A server ACK includes its opaque envelope and participates in server sequence
+ordering. A manual ACK executes on every valid delivery without a durable retry
+identity. A server ACK watermark must represent a complete server-durable
+prefix; a network write alone is not authority to delete local history. A
+manual client that deliberately sends ACK assumes its retention consequences.
+Java server forwarding is still pending.
 
 During effect execution, the host rejects zero watermarks and values beyond
 the current journal tail. These effect failures produce failed results when
@@ -164,7 +175,8 @@ it, and syncs the directory before newly covered deletion is authorized.
 The sidecar is local deletion permission, not an AgentD replication cursor.
 
 Repeated or lower watermarks in newly admitted operations do not lower the
-stored watermark. Reusing an operation sequence is still stale. The handler
+stored watermark. Reusing a server operation sequence is stale; reusing a
+manual sequence does not affect watermark validation. The handler
 requests retention maintenance and then follows the ordinary `COMMAND_RESULT`
 path. `RECEIVED` does not confirm checkpoint publication or physical deletion.
 An ACK itself adds a result record; it does not acknowledge that new record.
@@ -196,24 +208,22 @@ Metadata remains a discovery manifest, not a lifecycle record or journal
 index. Live STATUS reports current process observations and journal bounds;
 missing journal evidence cannot be reconstructed from metadata.
 
-### Current Java interface and remaining alignment
+### Shared Java and native interface
 
 Sources: `ControlCommand`, `NativeControlCodec`, `ControlResult`, and
 `SessionControlClient` under `agentd/src/main/java/pro/deta/orion/agentd/session/`.
 
-| Area | Current AgentD implementation | Current native host |
-| --- | --- | --- |
-| Frame correlation | Independent positive request ID allocated by the client | Operation sequence in the header |
-| Schema-2 prefix | u64 operation sequence, u16 CommandId length, CommandId, u32 envelope length, envelope | u32 envelope length and envelope |
-| TERMINATE effect | Eight bytes, including u32 graceMillis | Four bytes, mode and reserved zero |
-| Operation response | 0x8000/0x8001 select accepted/duplicate, with an eight-byte journal timestamp | 0x8000 RECEIVED, empty or an error payload |
-| ACK_JOURNAL | No ControlCommand variant or encoder path | Schema-2 operation with a journaled result |
-| Replay | One retry of a non-STATUS request within its deadline | Any sequence at or below the high-water mark is rejected |
-| STATUS | Schema-1 request and 64-byte response; Java omits journal bounds from HostStatus | Schema-1 snapshot including retained journal bounds |
+| Area | AgentD and native host |
+| --- | --- |
+| Frame correlation | Operation sequence in the header; query commands retain their query sequence |
+| Source prefix | Explicit `SERVER` or `MANUAL`, reserved zero, optional server envelope, effect |
+| TERMINATE effect | Four bytes, mode and reserved zero |
+| Operation response | `RECEIVED`, empty or carrying an error payload |
+| ACK_JOURNAL | Source-aware operation with a journaled result |
+| Replay | Server high-water rejection; no manual retry or deduplication state |
+| STATUS | Schema-1 snapshot including retained journal bounds |
 
-The Java client preserves the same request bytes for its retry. In the current
-implementation a decoded retry response can end the exchange even when the
-first delivery was uncertain; it does not recover a native durable result.
+The Java client performs one exchange and never retries an uncertain operation.
 Launch uses the native CLI and a manifest/journal/host handoff probe. Discovery
 reads the manifest and observes host and journal state. These implemented
 paths do not imply that command routing, result projection, or server-durable
@@ -221,26 +231,25 @@ ACK forwarding has been completed.
 
 ### Recovery limits and future implementation
 
-The server-durable prefix plus local journal suffix provide recorded operation
-and lifecycle evidence. They do not expose the host's complete admission
-high-water mark: an admitted operation may have no result record, or its effect
+The server-durable prefix plus local journal suffix provide recorded server
+operation and lifecycle evidence. They do not expose the host's complete
+admission high-water mark: an admitted server operation may have no result
+record, or its effect
 may still be running. Therefore `max(recorded sequence) + 1` is not proven to
 be a fresh sequence on reconnect. No native API currently returns that mark.
 The orchestration task must resolve this under the existing admission contract;
 this documentation does not invent an intent log, replay ledger, or recovery
-protocol. Missing results never authorize automatic effect replay.
+protocol. Missing results never authorize automatic effect replay, and manual
+result sequences are excluded from server recovery.
 
 The host does not restart a failed incarnation to resume its live process tree.
-Source-aware controls, addressed process controls, PTY closure events, and
-Windows ConPTY remain separate queued work. Their proposed contracts must not
-be described as current behavior.
+Windows ConPTY remains separate queued work. Source-aware controls, addressed
+process controls, and PTY closure events are current contracts.
 
 ### Verification reference
 
 Native protocol fixtures and Rust tests describe the implemented native bytes.
-In particular, `control-idempotency-v2.bin` covers all five operation types,
-unsigned sequences above `i64::MAX`, and opaque envelopes with unknown fields.
-Older schema-1 operation fixture bytes remain frozen, although the live host
-rejects those operation requests. Java alignment acceptance must compare with
-the current native fixtures and exercise a real host; documentation updates
-alone do not establish that these checks pass.
+In particular, `control-source-aware.bin` covers both sources for all five
+operation types, unsigned sequences above `i64::MAX`, and opaque server
+envelopes with unknown fields. Java tests compare with the native fixtures and
+exercise a real host.

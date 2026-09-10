@@ -31,8 +31,9 @@ authentication, heartbeat, or reconnect loop.
 - Accept only monotonic batch acknowledgements issued after durable server
   commit and forward their exact watermark to the matching host as
   `ACK_JOURNAL`.
-- Send `ACK_JOURNAL` as a schema-2 operation with an operation sequence and
-  exact opaque envelope. The host journals its `COMMAND_RESULT`; an empty
+- Send `ACK_JOURNAL` as a source-aware `SERVER` operation with an operation
+  sequence and exact opaque server envelope. The host journals its
+  `COMMAND_RESULT`; an empty
   `RECEIVED` confirms admission only. Coordinate sequence allocation with
   command orchestration and avoid an ACK feedback loop driven solely by ACK
   result records.

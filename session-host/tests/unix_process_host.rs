@@ -961,6 +961,62 @@ fn interleaves_sources_and_executes_every_repeated_manual_delivery() {
 }
 
 #[test]
+fn lost_received_does_not_cancel_an_admitted_manual_effect() {
+    let directory = temporary_directory("lost-manual-received");
+    let host = HostGuard::spawn(
+        directory,
+        &["/bin/sh", "-c", "printf READY; sleep 30"],
+        "xterm-256color",
+        80,
+        24,
+    );
+    wait_for_output(host.directory(), b"READY");
+
+    let effect = protocol::pty_resize_payload(111, 41);
+    let payload = protocol::encode_operation_control_payload(
+        control_message::RESIZE,
+        protocol::OperationSource::Manual,
+        None,
+        &effect,
+    )
+    .unwrap();
+    let frame = protocol::encode_control_frame(ControlFrame {
+        message_type: control_message::RESIZE,
+        payload_schema_version: 3,
+        flags: 0,
+        sequence: 77,
+        payload: &payload,
+    })
+    .unwrap();
+    let mut stream = connect(host.directory());
+    stream.write_all(&frame).unwrap();
+    drop(stream);
+
+    wait_for_command_result(host.directory(), 77);
+    let events = journal_reader::read(host.directory(), 0).unwrap().events;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == event_type::PTY_RESIZE && event.payload == effect)
+            .count(),
+        1,
+    );
+    let results: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            event.event_type == event_type::COMMAND_RESULT
+                && u16_at(&event.payload[0..2])
+                    == protocol::OperationSource::Manual.wire_code()
+                && u64_at(&event.payload[2..10]) == 77
+        })
+        .collect();
+    assert_eq!(results.len(), 1);
+    let envelope_length = u32_at(&results[0].payload[10..14]) as usize;
+    assert_eq!(&results[0].payload[14..14 + envelope_length], payload);
+    assert_eq!(results[0].payload[14 + envelope_length], 1);
+}
+
+#[test]
 fn leaves_metadata_unchanged_across_output_input_and_signal_events() {
     let directory = temporary_directory("stable-metadata");
     let mut host = HostGuard::spawn(
