@@ -1,7 +1,7 @@
 # Persist Reconnect Credential State
 
 Status: todo
-Depends on: 02_launch-generation-and-permits.md
+Depends on: launch generation and permit transitions committed in `a93bb1d5`.
 Design: ../../../../2026-09-02-agentd-server-launched-identity-design.md
 Plan: ../../../../2026-09-09-agent-server-durable-records.md
 
