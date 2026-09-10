@@ -11,7 +11,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.ee10.servlet.ServletContextResponse;
 import org.eclipse.jetty.ee10.servlet.ServletContextRequest;
+import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.component.LifeCycle;
 import org.eclipse.jetty.util.thread.Scheduler;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
@@ -102,13 +104,14 @@ public final class AgentControlRoute implements OrionHttpRoute {
     }
 
     private static final class ControlStream
-            implements AgentControlHandler.Connection, ReadListener, AsyncListener {
+            implements AgentControlHandler.Connection, ReadListener, AsyncListener, LifeCycle.Listener {
         private static final Object END = new Object();
 
         private final AsyncContext async;
         private final ServletInputStream input;
         private final ServletContextRequest request;
         private final ServletContextResponse response;
+        private final Server server;
         private final AgentControlHandler handler;
         private final AgentProtocolDecoder decoder;
         private final AgentProtocolCodec codec;
@@ -132,6 +135,7 @@ public final class AgentControlRoute implements OrionHttpRoute {
             this.input = input;
             this.request = request;
             this.response = response;
+            server = request.getConnectionMetaData().getConnector().getServer();
             this.handler = handler;
             decoder = new AgentProtocolDecoder(limits);
             codec = new AgentProtocolCodec(limits);
@@ -140,6 +144,11 @@ public final class AgentControlRoute implements OrionHttpRoute {
 
         private void start() throws IOException {
             async.addListener(this);
+            server.addEventListener(this);
+            if (!server.isRunning()) {
+                fail(new IOException("HTTP server stopping"));
+                return;
+            }
             handshakeDeadline = request.getComponents().getScheduler().schedule(
                     this::timeoutHandshake, handshakeTimeoutMillis, TimeUnit.MILLISECONDS);
             input.setReadListener(this);
@@ -324,6 +333,11 @@ public final class AgentControlRoute implements OrionHttpRoute {
         public void onStartAsync(AsyncEvent event) {
         }
 
+        @Override
+        public void lifeCycleStopping(LifeCycle event) {
+            fail(new IOException("HTTP server stopping"));
+        }
+
         private void fail(Throwable failure) {
             finish(failure == null ? new IOException("control stream failed") : failure);
         }
@@ -347,6 +361,7 @@ public final class AgentControlRoute implements OrionHttpRoute {
             if (!closed.compareAndSet(false, true)) {
                 return;
             }
+            server.removeEventListener(this);
             cancelHandshakeDeadline();
             terminalFailure = failure;
             synchronized (decoderLock) {
