@@ -103,11 +103,21 @@ Quick produces one coherent commit in the current worktree and branch. A result
 may require several internal steps, but they are not separate checkpoints or
 commits.
 
-1. Inspect repository state and preserve unrelated changes.
+1. Inspect repository state, including the full staged diff. Record pre-existing
+   staged changes and preserve unrelated work.
 2. Make only the requested coherent change.
 3. Run required verification and automatically review the complete result.
-4. Stage only its verified files and hunks, then inspect the staged diff.
-5. Commit immediately with a descriptive single-line subject.
+4. Recheck the index for other sessions' changes. Select explicit files owned
+   entirely by this result, stage only those verified files, and inspect their
+   staged diff. If a selected file also contains unrelated staged or unstaged
+   changes, stop before staging: `--only` commits whole working-tree files,
+   not selected staged hunks.
+5. Check `git commit --only --dry-run -- <owned-paths>`, then commit immediately
+   with `git commit --only -m "<single-line subject>" -- <owned-paths>` using
+   the same explicit file list. Do not use a bare commit or `-a`, even if the
+   index was initially empty.
+6. Confirm the created commit's scope and preservation of unrelated staged
+   changes. Never clear the index or restore a stale index snapshot.
 
 Quick does not launch a worker, create a worktree, or add a staged user-review
 gate. It may update task-tree state in scope through `orion-task-runner` without

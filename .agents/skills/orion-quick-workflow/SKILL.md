@@ -29,18 +29,34 @@ bookkeeping does not start task-tree implementation or select Change.
 
 ## Execute
 
-1. Inspect `git status --short` and the requested area. Preserve all unrelated
-   staged and unstaged changes.
+1. Inspect `git status --short`, `git diff --cached --name-status`, and
+   `git diff --cached` before editing. Record which changes were already staged;
+   do not assume ownership of them. Preserve all unrelated staged and unstaged
+   changes.
 2. Identify the complete coherent result and make only those edits.
 3. Keep the result unstaged and run every check required by the
    [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
    Add or update tests whenever behavior changes.
 4. Review the complete result against the request and applicable repository
    rules. Fix local findings and rerun affected checks before staging.
-5. Stage only the verified result's files and hunks. Inspect `git status --short`,
-   `git diff --cached`, and `git diff --cached --check`.
-6. Create one descriptive single-line commit immediately. Do not ask for an
-   additional review or commit approval.
+5. Recheck the entire index before staging: other sessions may have staged work
+   since step 1. Select an explicit list of files owned entirely by this result.
+   `git commit --only` takes their working-tree contents, not just staged hunks.
+   If any selected file contains unrelated staged or unstaged changes, stop
+   before staging and report that Quick cannot safely commit the mixed file.
+   Never reset, stash, or unstage somebody else's work to make the index empty.
+6. Stage only the verified files with `git add -- <owned-paths>`. Inspect
+   `git diff --cached -- <owned-paths>` and run
+   `git diff --cached --check -- <owned-paths>`. Check the proposed commit with
+   `git commit --only --dry-run -- <owned-paths>`; its commit list must contain
+   only the intended result. Use explicit file paths, not directories or globs.
+7. Immediately create the commit with
+   `git commit --only -m "<single-line subject>" -- <owned-paths>` using the same
+   file list. Never use a bare `git commit` or `git commit -a`, even when the
+   initial index was empty. Do not ask for additional review or commit approval.
+8. Inspect `git show --stat --oneline HEAD` and `git diff --cached` to confirm
+   the commit scope and that unrelated staged changes remain. If another
+   session changed the index, investigate without restoring a stale snapshot.
 
 Do not include unrelated work merely because it is already staged or because
 the requested result spans several file categories. If a required check fails,
