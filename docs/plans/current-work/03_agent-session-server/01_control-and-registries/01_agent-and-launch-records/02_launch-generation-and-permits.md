@@ -1,6 +1,8 @@
 # Persist Launch Generations and Permits
 
 Status: todo
+Owner: codex, session lgp-20260910-1257, branch `codex/agent-launch-generation-permits-a47d`,
+worktree `.worktrees/agent-launch-generation-permits-a47d`, started 2026-09-10 12:57 Europe/Amsterdam.
 Depends on: registered-agent registry foundation committed in `6648e57c`.
 Design: ../../../../2026-09-02-agentd-server-launched-identity-design.md
 Plan: ../../../../2026-09-09-agent-server-durable-records.md
