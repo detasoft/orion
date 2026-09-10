@@ -69,10 +69,11 @@ When splitting a leaf, move all executable scope into numbered children and keep
 only aggregate context in the composite. Do not leave executable scope in both.
 
 Do not create speculative siblings, duplicate production paths, or task nodes
-whose only purpose is routing a direct taskless change. Changes limited to
-skills or ordinary documentation never create a task. They may still be
-deliverables of an already existing task leaf when that leaf explicitly
-requires them.
+merely to route a Quick or Simple change. When the canonical workflow selection
+requires Change and no matching leaf exists, create only the minimal executable
+leaf needed for its isolated ownership. This exception also covers skills and
+ordinary documentation when isolation requires Change; file type alone never
+justifies a task. An existing leaf may include those files as explicit deliverables.
 
 ## Change claim
 
