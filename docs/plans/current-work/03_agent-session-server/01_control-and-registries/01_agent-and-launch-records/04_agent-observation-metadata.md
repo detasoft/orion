@@ -1,7 +1,7 @@
 # Persist Agent Observation Metadata
 
 Status: todo
-Depends on: 03_reconnect-credential-state.md
+Depends on: reconnect credential state committed in `1a34cbda`.
 Design: ../../../../2026-09-02-agentd-server-launched-identity-design.md
 Plan: ../../../../2026-09-09-agent-server-durable-records.md
 
