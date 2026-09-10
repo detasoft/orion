@@ -54,6 +54,71 @@ class AgentRegistryDurabilityTest {
         }
     }
 
+    @Test
+    void credentialFailuresNeverReportAnUncommittedTokenOrRenewal() throws AgentRegistryException {
+        AgentId agentId = new AgentId("agent-1");
+        AgentRecord.Credential permit = new AgentRecord.Credential(
+                new AgentRecord.CredentialDigest(new byte[32]), NOW.plusSeconds(60));
+        byte[] tokenBytes = new byte[32];
+        tokenBytes[0] = 1;
+        AgentRecord.Credential token = new AgentRecord.Credential(
+                new AgentRecord.CredentialDigest(tokenBytes), NOW.plusSeconds(600));
+        Instant renewedExpiry = NOW.plusSeconds(900);
+        for (boolean renewal : new boolean[]{false, true}) {
+            for (FailurePoint point : FailurePoint.values()) {
+                Path root = temporaryDirectory.resolve(point.name() + renewal);
+                AgentRecord before;
+                try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
+                    registry.register(agentId, "Build agent");
+                    AgentRecord.Launch launch = registry.allocateLaunch(agentId).launch().orElseThrow();
+                    before = registry.installLaunchPermit(
+                            agentId, launch.generation(), launch.launchId(), permit, NOW);
+                    if (renewal) {
+                        before = registry.consumeLaunchPermit(agentId, launch.generation(), launch.launchId(),
+                                permit.digest(), token, NOW);
+                    }
+                }
+                AgentRecord.Launch launch = before.launch().orElseThrow();
+                boolean indeterminate = point == FailurePoint.MOVE || point == FailurePoint.AFTER_PUBLICATION;
+                AgentRegistryException.Reason reason = indeterminate
+                        ? AgentRegistryException.Reason.INDETERMINATE : AgentRegistryException.Reason.IO_FAILURE;
+                try (FileSystemAgentRegistry registry = FileSystemAgentRegistry.withOperations(
+                        root, new FailingOperations(point))) {
+                    ThrowingOperation mutation = renewal
+                            ? () -> registry.renewReconnectToken(agentId, launch.generation(), launch.launchId(),
+                                    token.digest(), renewedExpiry, NOW)
+                            : () -> registry.consumeLaunchPermit(agentId, launch.generation(), launch.launchId(),
+                                    permit.digest(), token, NOW);
+                    assertFailureReason(mutation, reason);
+                    if (indeterminate) {
+                        assertFailureReason(() -> registry.find(agentId), reason);
+                        assertFailureReason(() -> registry.verifyReconnectToken(
+                                agentId, launch.generation(), launch.launchId(), token.digest(), NOW), reason);
+                        assertFailureReason(mutation, reason);
+                    } else {
+                        assertThat(registry.find(agentId)).contains(before);
+                        if (!renewal) {
+                            assertFailureReason(() -> registry.verifyReconnectToken(
+                                    agentId, launch.generation(), launch.launchId(), token.digest(), NOW),
+                                    AgentRegistryException.Reason.INVALID_STATE);
+                        }
+                    }
+                }
+                try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
+                    if (point == FailurePoint.AFTER_PUBLICATION) {
+                        AgentRecord recovered = registry.verifyReconnectToken(
+                                agentId, launch.generation(), launch.launchId(), token.digest(), NOW);
+                        assertThat(recovered.launch().orElseThrow().launchPermit()).isEmpty();
+                        assertThat(recovered.launch().orElseThrow().reconnectToken()).contains(
+                                renewal ? new AgentRecord.Credential(token.digest(), renewedExpiry) : token);
+                    } else {
+                        assertThat(registry.find(agentId)).contains(before);
+                    }
+                }
+            }
+        }
+    }
+
     private void assertLaunchPublicationFailure(FailurePoint point, boolean installingPermit)
             throws AgentRegistryException {
         Path root = temporaryDirectory.resolve(point.name());

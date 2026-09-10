@@ -7,6 +7,7 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -27,6 +28,9 @@ import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason
  * Owns durable agent snapshots; recorded launch state is not connection authority.
  * The recovery caller installs a permit only after making the launch safe and supplies its digest,
  * expiry, and current time. Credential issuance and lifetime policy remain with that caller.
+ * Authentication supplies digests only; successful credential mutations return after durable publication.
+ * Token renewal retains the same digest and never shortens its expiry. Verification is a snapshot,
+ * not authority over a later connection or generation change.
  */
 public final class FileSystemAgentRegistry implements AutoCloseable {
     private final Path root;
@@ -136,12 +140,7 @@ public final class FileSystemAgentRegistry implements AutoCloseable {
         lock.lock();
         try {
             AgentRecord current = requireRecord(agentId);
-            AgentRecord.Launch launch = current.launch().orElseThrow(
-                    () -> new AgentRegistryException(INVALID_STATE, "Agent has no current launch"));
-            if (!launch.generation().equals(expectedGeneration)
-                    || !launch.launchId().equals(expectedLaunchId)) {
-                throw new AgentRegistryException(CONFLICT, "Agent launch has been superseded");
-            }
+            AgentRecord.Launch launch = requireLaunch(current, expectedGeneration, expectedLaunchId);
             if (launch.state() != AgentRecord.LaunchState.RECOVERING
                     || launch.launchPermit().isPresent() || launch.reconnectToken().isPresent()) {
                 throw new AgentRegistryException(INVALID_STATE, "Agent launch is not awaiting a permit");
@@ -155,6 +154,79 @@ public final class FileSystemAgentRegistry implements AutoCloseable {
                     Optional.of(permit), Optional.empty());
             return publish(new AgentRecord(
                     agentId, current.displayName(), Optional.of(starting), current.observation()));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public AgentRecord consumeLaunchPermit(
+            AgentId agentId,
+            AgentGeneration expectedGeneration,
+            AgentLaunchId expectedLaunchId,
+            AgentRecord.CredentialDigest expectedPermit,
+            AgentRecord.Credential reconnectToken,
+            Instant now) throws AgentRegistryException {
+        Objects.requireNonNull(expectedPermit, "expectedPermit");
+        Objects.requireNonNull(reconnectToken, "reconnectToken");
+        Objects.requireNonNull(now, "now");
+        lock.lock();
+        try {
+            AgentRecord current = requireRecord(agentId);
+            AgentRecord.Launch launch = requireLaunch(current, expectedGeneration, expectedLaunchId);
+            if (launch.state() != AgentRecord.LaunchState.STARTING) {
+                throw new AgentRegistryException(INVALID_STATE, "Agent launch is not awaiting authentication");
+            }
+            requireCredential(launch.launchPermit(), expectedPermit, now);
+            if (!reconnectToken.expiresAt().isAfter(now)) {
+                throw new AgentRegistryException(INVALID_STATE, "Reconnect token must expire after the current time");
+            }
+            return publishReconnectToken(current, launch, reconnectToken);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public AgentRecord verifyReconnectToken(
+            AgentId agentId,
+            AgentGeneration expectedGeneration,
+            AgentLaunchId expectedLaunchId,
+            AgentRecord.CredentialDigest expectedToken,
+            Instant now) throws AgentRegistryException {
+        Objects.requireNonNull(expectedToken, "expectedToken");
+        Objects.requireNonNull(now, "now");
+        lock.lock();
+        try {
+            AgentRecord current = requireRecord(agentId);
+            AgentRecord.Launch launch = requireLaunch(current, expectedGeneration, expectedLaunchId);
+            requireCredential(launch.reconnectToken(), expectedToken, now);
+            return current;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public AgentRecord renewReconnectToken(
+            AgentId agentId,
+            AgentGeneration expectedGeneration,
+            AgentLaunchId expectedLaunchId,
+            AgentRecord.CredentialDigest expectedToken,
+            Instant expiresAt,
+            Instant now) throws AgentRegistryException {
+        Objects.requireNonNull(expectedToken, "expectedToken");
+        Objects.requireNonNull(expiresAt, "expiresAt");
+        Objects.requireNonNull(now, "now");
+        lock.lock();
+        try {
+            AgentRecord current = requireRecord(agentId);
+            AgentRecord.Launch launch = requireLaunch(current, expectedGeneration, expectedLaunchId);
+            AgentRecord.Credential token = requireCredential(launch.reconnectToken(), expectedToken, now);
+            if (!expiresAt.isAfter(now)) {
+                throw new AgentRegistryException(INVALID_STATE, "Reconnect token must expire after the current time");
+            }
+            if (!expiresAt.isAfter(token.expiresAt())) {
+                return current;
+            }
+            return publishReconnectToken(current, launch, new AgentRecord.Credential(token.digest(), expiresAt));
         } finally {
             lock.unlock();
         }
@@ -213,12 +285,49 @@ public final class FileSystemAgentRegistry implements AutoCloseable {
     }
 
     private AgentRecord requireRecord(AgentId agentId) throws AgentRegistryException {
+        Objects.requireNonNull(agentId, "agentId");
         requireOpen();
         AgentRecord record = records.get(agentId);
         if (record == null) {
             throw new AgentRegistryException(NOT_FOUND, "Agent is not registered");
         }
         return record;
+    }
+
+    private static AgentRecord.Launch requireLaunch(
+            AgentRecord current, AgentGeneration expectedGeneration, AgentLaunchId expectedLaunchId)
+            throws AgentRegistryException {
+        Objects.requireNonNull(expectedGeneration, "expectedGeneration");
+        Objects.requireNonNull(expectedLaunchId, "expectedLaunchId");
+        AgentRecord.Launch launch = current.launch().orElseThrow(
+                () -> new AgentRegistryException(INVALID_STATE, "Agent has no current launch"));
+        if (!launch.generation().equals(expectedGeneration) || !launch.launchId().equals(expectedLaunchId)) {
+            throw new AgentRegistryException(CONFLICT, "Agent launch has been superseded");
+        }
+        return launch;
+    }
+
+    private static AgentRecord.Credential requireCredential(
+            Optional<AgentRecord.Credential> credential, AgentRecord.CredentialDigest expectedDigest, Instant now)
+            throws AgentRegistryException {
+        AgentRecord.Credential current = credential.orElseThrow(
+                () -> new AgentRegistryException(INVALID_STATE, "Agent launch has no current credential"));
+        if (!MessageDigest.isEqual(current.digest().bytes(), expectedDigest.bytes())) {
+            throw new AgentRegistryException(CONFLICT, "Agent credential does not match");
+        }
+        if (!current.expiresAt().isAfter(now)) {
+            throw new AgentRegistryException(INVALID_STATE, "Agent credential has expired");
+        }
+        return current;
+    }
+
+    private AgentRecord publishReconnectToken(
+            AgentRecord current, AgentRecord.Launch launch, AgentRecord.Credential token)
+            throws AgentRegistryException {
+        AgentRecord.Launch updated = new AgentRecord.Launch(
+                launch.generation(), launch.launchId(), launch.state(), Optional.empty(), Optional.of(token));
+        return publish(new AgentRecord(
+                current.agentId(), current.displayName(), Optional.of(updated), current.observation()));
     }
 
     private AgentRecord publish(AgentRecord candidate) throws AgentRegistryException {
