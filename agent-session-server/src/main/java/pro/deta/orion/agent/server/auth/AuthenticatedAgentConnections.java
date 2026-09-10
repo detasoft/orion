@@ -260,7 +260,7 @@ public final class AuthenticatedAgentConnections {
         }
     }
 
-    private final class ActiveSession implements AgentControlHandler.Session {
+    private final class ActiveSession implements AuthenticatedSession {
         private final AuthenticatedConnectionContext context;
         private final AgentControlHandler.Session delegate;
         private final ReentrantLock callbackLock = new ReentrantLock();
@@ -290,6 +290,20 @@ public final class AuthenticatedAgentConnections {
                     return;
                 }
                 delegate.onMessage(message);
+            } finally {
+                unlock();
+            }
+        }
+
+        @Override
+        public void onAuthenticated() {
+            if (!acquireIfAuthoritative()) {
+                return;
+            }
+            try {
+                if (delegate instanceof AuthenticatedSession authenticatedSession) {
+                    authenticatedSession.onAuthenticated();
+                }
             } finally {
                 unlock();
             }

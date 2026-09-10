@@ -325,6 +325,9 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
             }
             if (accepted) {
                 connection.handshakeComplete();
+                if (published instanceof AuthenticatedSession authenticatedSession) {
+                    authenticatedSession.onAuthenticated();
+                }
             } else {
                 published.onClosed(null);
             }

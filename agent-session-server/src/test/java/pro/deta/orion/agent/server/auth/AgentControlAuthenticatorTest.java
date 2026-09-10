@@ -11,6 +11,7 @@ import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.registry.AgentRecord;
 import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
+import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
 
 import java.nio.file.Path;
 import java.security.SecureRandom;
@@ -630,6 +631,57 @@ class AgentControlAuthenticatorTest {
     }
 
     @Test
+    void synchronousPostAuthenticationRequestFailureDoesNotPublishDeadConnection() throws Exception {
+        Path agentRoot = root.resolve("agents");
+        Path sessionRoot = root.resolve("sessions");
+        try (FileSystemAgentRegistry agentRegistry = new FileSystemAgentRegistry(agentRoot);
+                FileSystemSessionRegistry sessionRegistry = new FileSystemSessionRegistry(sessionRoot)) {
+            SessionReconciliationPublisher reconciliation = new SessionReconciliationPublisher(
+                    sessionRegistry,
+                    ignored -> new AgentControlHandler.Session() {
+                        @Override
+                        public void onMessage(AgentMessage message) {
+                        }
+
+                        @Override
+                        public void onClosed(Throwable failure) {
+                        }
+                    });
+            AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(
+                    reconciliation::publish);
+            AgentControlAuthenticator authenticator = AgentControlAuthenticator.withPolicy(
+                    agentRegistry,
+                    connections::activate,
+                    CLOCK,
+                    new SecureRandom(),
+                    PERMIT_LIFETIME,
+                    TOKEN_LIFETIME);
+            AgentRecord.Launch launch = prepareLaunch(agentRegistry);
+            var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
+                    authenticator.issueLaunchPermit(
+                            TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+            try (var permit = issued.permit()) {
+                FailingRequestConnection connection = new FailingRequestConnection();
+                AgentControlHandler.Session transportSession = authenticator.open(connection);
+                connection.onClose = () -> transportSession.onClosed(null);
+                transportSession.onMessage(hello(
+                        launch,
+                        AgentAuthentication.Kind.LAUNCH_PERMIT,
+                        Base64.getUrlDecoder().decode(permit.copyBytes())));
+
+                connection.welcomeDelivery.complete(null);
+
+                assertThat(connection.sent).hasSize(2);
+                assertThat(connection.sent.get(0)).isInstanceOf(AgentMessage.Welcome.class);
+                assertThat(connection.sent.get(1)).isEqualTo(new AgentMessage.RequestSessionList());
+                assertThat(connection.handshakeComplete).isTrue();
+                assertThat(connection.closed).isTrue();
+                assertThat(connections.active(TestIdentity.AGENT_ID)).isEmpty();
+            }
+        }
+    }
+
+    @Test
     void closedSessionCannotRenewItsReconnectToken() throws Exception {
         TestClock clock = new TestClock(NOW);
         List<AuthenticatedConnectionContext> authenticated = new ArrayList<>();
@@ -817,6 +869,37 @@ class AgentControlAuthenticatorTest {
         @Override
         public void close() {
             closed = true;
+        }
+    }
+
+    private static final class FailingRequestConnection implements AgentControlHandler.Connection {
+        private final List<AgentMessage> sent = new ArrayList<>();
+        private final CompletableFuture<Void> welcomeDelivery = new CompletableFuture<>();
+        private Runnable onClose = () -> {
+        };
+        private boolean handshakeComplete;
+        private boolean closed;
+
+        @Override
+        public CompletionStage<Void> send(AgentMessage message) {
+            sent.add(message);
+            if (message instanceof AgentMessage.RequestSessionList) {
+                return CompletableFuture.failedFuture(new IllegalStateException("request failed"));
+            }
+            return welcomeDelivery;
+        }
+
+        @Override
+        public void handshakeComplete() {
+            handshakeComplete = true;
+        }
+
+        @Override
+        public void close() {
+            if (!closed) {
+                closed = true;
+                onClose.run();
+            }
         }
     }
 
