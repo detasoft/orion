@@ -1,8 +1,7 @@
 ---
 name: orion-review
 description: >-
-  Use when auditing one or more Orion modules, maintaining MODULE_REVIEW.md, or
-  repairing the active findings in those reports.
+  Use when auditing, maintaining MODULE_REVIEW.md, or repairing the active findings in those reports.
 ---
 
 # Orion Review
@@ -106,8 +105,8 @@ required result, owner and production path, real consumers, preserved invariants
 affected guarantee, and verification.
 
 Select the execution workflow through the canonical definitions. Several
-findings use Simple by default, one checkpoint at a time. A task-tree leaf or
-isolated repair uses Change.
+findings use Simple by default, one checkpoint at a time. For a task-tree leaf,
+use `orion-task-runner` to select the workflow. An isolated repair might use Change.
 
 `MODULE_REVIEW.md` findings are never task claims. Do not create one task per
 finding merely for routing. Change may create one task only when its own

@@ -1,8 +1,7 @@
 ---
 name: orion-quick-workflow
 description: >-
-  Use when an Orion change has one understood coherent result and does not need
-  sequential checkpoints or isolated worker ownership.
+  Use when an change has one understood simple coherent result.
 ---
 
 # Orion Quick Workflow

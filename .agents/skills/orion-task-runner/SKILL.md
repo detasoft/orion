@@ -2,13 +2,15 @@
 name: orion-task-runner
 description: >-
   Use for selecting, planning, describing, ordering, claiming, pausing, or
-  completing work in the numbered Orion task tree rooted at docs/plans/TASK.md.
+  completing work in the task tree rooted at docs/plans/TASK.md.
 ---
 
 # Orion Task Runner
 
-Own the filesystem task model and its state transitions. Task-tree execution
-uses Change workflow; this skill does not own implementation, tests, or review.
+Own the filesystem task model and its state transitions. Recommend Change by
+default for task-tree execution. Honor an explicitly requested Quick or Simple
+workflow when its mechanics can safely complete the work. This skill does not
+own implementation, tests, or review.
 
 ## Startup
 
@@ -16,11 +18,9 @@ Read `AGENTS.md`, `docs/plans/TASK.md`, relevant ancestor `TASK.md` files and
 candidate leaves, then inspect `git status --short`. Preserve unrelated work.
 
 Planning, triage, explanation, and status requests do not claim or start work.
-Only Change creates an implementation claim. A requested task-tree edit may
-still add, reorder, or rewrite nodes because that edit is itself the result.
+A requested task-tree edit may still add, reorder, or rewrite nodes because that edit is itself the result.
 Any workflow may update task status and completion state when supported by
-verified work within the request's scope. State bookkeeping alone does not
-select Change or authorize implementation.
+verified work within the request's scope.
 
 ## Task model
 
@@ -80,7 +80,7 @@ justifies a task. An existing leaf may include those files as explicit deliverab
 
 ## Change claim
 
-Executing any task-tree leaf selects Change workflow. Before worker launch, the
+When Change is selected, before worker launch the
 primary agent records one claim in that leaf and commits it directly on `main`:
 
 ```markdown

@@ -1,7 +1,7 @@
 ---
 name: orion-simple-workflow
 description: >-
-  Use when an Orion change contains several sequential checkpoints or requires
+  Manual appred workflow, might be useful when it contains several sequential checkpoints or requires
   staged user review in the current worktree.
 ---
 
@@ -22,8 +22,7 @@ Simple never launches a worker, creates a worktree, or switches branches.
 It may update task status and completion state through `orion-task-runner`,
 including in the same checkpoint as the verified result. If the work no
 longer needs sequential checkpoints or staged review, stop and reselect through
-the canonical workflow table. Task-tree execution and isolated ownership are
-outside this workflow; recording related task state does not start that execution.
+the canonical workflow table. Isolated worker ownership is outside this workflow.
 
 Only one checkpoint may be unfinished. Do not begin or edit a later checkpoint
 until the current checkpoint has been committed and its context compacted.

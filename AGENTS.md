@@ -8,8 +8,8 @@
   sufficient for the work.
   Read-only review, explanation, planning, and status requests do not select an
   execution workflow; requested module-report updates use `orion-review`.
-- Use `orion-task-runner` for every task-tree operation. Executing a task-tree
-  leaf uses Change workflow; planning, status, and task-tree edits alone do not
+- Use `orion-task-runner` for every task-tree operation.
+  Planning, status, and task-tree edits alone do not
   start or claim implementation.
   Any workflow may update task status and completion state through that skill
   when the update is supported by verified work within the request's scope.

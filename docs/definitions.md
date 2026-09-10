@@ -27,7 +27,7 @@ request safely. Otherwise choose by the shape of the work, not by file type:
 | --- | --- |
 | One understood, coherent result and one commit | Quick |
 | Several sequential checkpoints, or a requested staged user review | Simple |
-| Execution of a task-tree leaf, or work requiring an isolated worker | Change |
+| Work requiring an isolated worker | Change |
 
 Every workflow may update task status and completion state through
 `orion-task-runner`. Recording the verified result of Quick or Simple in the

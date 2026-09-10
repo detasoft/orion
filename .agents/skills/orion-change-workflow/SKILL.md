@@ -1,8 +1,7 @@
 ---
 name: orion-change-workflow
 description: >-
-  Use when executing an Orion task-tree leaf or when a change needs isolated
-  worker ownership and primary-agent review.
+  Suits for complex tasks with multiple automated reviews and feedback.
 ---
 
 # Orion Change Workflow
