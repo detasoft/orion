@@ -39,6 +39,7 @@
                             <goal>java</goal>
                         </goals>
                         <configuration>
+                            <skip>${resource-reference-parser.skip}</skip>
                             <mainClass>org.antlr.v4.Tool</mainClass>
                             <includePluginDependencies>true</includePluginDependencies>
                             <blockSystemExit>true</blockSystemExit>
@@ -65,6 +66,29 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>build-helper-maven-plugin</artifactId>
                 <executions>
+                    <execution>
+                        <id>check-resource-reference-generated-sources</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>uptodate-property</goal>
+                        </goals>
+                        <configuration>
+                            <name>resource-reference-parser.skip</name>
+                            <value>true</value>
+                            <elseValue>false</elseValue>
+                            <fileSet>
+                                <directory>${project.basedir}/src/main/resources/pro/deta/orion/resource/reference</directory>
+                                <includes>
+                                    <include>ResourceReference.g4</include>
+                                </includes>
+                                <outputDirectory>${project.build.directory}/generated-sources/resource-reference/pro/deta/orion/resource/reference/generated</outputDirectory>
+                                <mapper>
+                                    <type>merge</type>
+                                    <to>ResourceReferenceParser.java</to>
+                                </mapper>
+                            </fileSet>
+                        </configuration>
+                    </execution>
                     <execution>
                         <id>add-resource-reference-generated-sources</id>
                         <phase>generate-sources</phase>
