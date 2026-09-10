@@ -2611,6 +2611,7 @@ mod tests {
             fs::read(directory.join("00000001.cbor")).unwrap(),
             expected_records.concat(),
         );
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2632,6 +2633,7 @@ mod tests {
             fs::read(directory.join("00000001.cbor")).unwrap(),
             protocol::encode_session_start_failed(1, "command.start", "exec failed", 17).unwrap()
         );
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2685,6 +2687,7 @@ mod tests {
                 .is_empty()
         );
 
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -2716,6 +2719,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(sync.calls.load(Ordering::SeqCst), 1);
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3160,6 +3164,7 @@ mod tests {
 
         assert_eq!(writer.active_segment_number(), 2);
         assert_eq!(sync.calls.load(Ordering::SeqCst), 2);
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -3191,6 +3196,7 @@ mod tests {
         let scans = scan_segments(&discover_segments(&directory).unwrap()).unwrap();
         assert_eq!(scans[0].first_event_id, Some(event_id));
         assert_eq!(scans[0].last_event_id, event_id);
+        drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
 
