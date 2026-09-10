@@ -18,6 +18,7 @@ pub mod event_type {
     pub const PTY_OUTPUT: u16 = 0x0100;
     pub const PTY_INPUT: u16 = 0x0101;
     pub const PTY_RESIZE: u16 = 0x0102;
+    pub const PTY_CLOSED: u16 = 0x0103;
 
     pub const PROCESS_STARTED: u16 = 0x0200;
     pub const PROCESS_EXITED: u16 = 0x0201;
@@ -281,6 +282,12 @@ pub fn encode_pty_output(event_id: u64, bytes: &[u8]) -> Result<Vec<u8>, EncodeE
     let mut encoded = event_prefix(event_id, event_type::PTY_OUTPUT);
     cbor_bytes(&mut encoded, bytes);
     Ok(encoded)
+}
+
+pub fn encode_pty_closed(event_id: u64) -> Vec<u8> {
+    let mut encoded = event_prefix(event_id, event_type::PTY_CLOSED);
+    cbor_array(&mut encoded, 0);
+    encoded
 }
 
 pub fn encode_pty_input(
@@ -722,6 +729,14 @@ mod tests {
         let generated = protocol_fixture::process_control_events_hex();
         assert_eq!(std::fs::read_to_string(native).unwrap(), generated);
         assert_eq!(std::fs::read_to_string(agent).unwrap(), generated);
+    }
+
+    #[test]
+    fn pty_closure_fixture_is_shared_and_stable() {
+        assert_eq!(event_type::PTY_CLOSED, 0x0103);
+        let generated = protocol_fixture::pty_closure_hex();
+        assert_eq!(include_str!("../protocol/fixtures/pty-closure-v1.hex"), generated);
+        assert_eq!(include_str!("../../agent-protocol/protocol/fixtures/pty-closure-v1.hex"), generated);
     }
 
     #[test]
@@ -1391,6 +1406,14 @@ pub mod protocol_fixture {
 
     pub fn process_control_events_hex() -> String {
         format_hex_records(&process_control_event_records())
+    }
+
+    pub fn pty_closure_hex() -> String {
+        format_hex_records(&[
+            encode_pty_output(1, b"x").unwrap(),
+            encode_pty_closed(2),
+            encode_process_exited(3, 0),
+        ])
     }
 
     fn journal_records() -> Vec<Vec<u8>> {

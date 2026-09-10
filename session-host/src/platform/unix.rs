@@ -199,6 +199,7 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         journal,
         metadata: initialized.metadata,
         master: initialized.master,
+        pty_closed: false,
         accepted_sequence_high_watermark: None,
         operation_order: Arc::new(Mutex::new(())),
         operations: Arc::new(OperationCoordinator::new()),
@@ -851,6 +852,7 @@ struct SharedState {
     journal: JournalWriter,
     metadata: Metadata,
     master: File,
+    pty_closed: bool,
     accepted_sequence_high_watermark: Option<u64>,
     operation_order: Arc<Mutex<()>>,
     operations: Arc<OperationCoordinator>,
@@ -935,6 +937,24 @@ impl Drop for ActiveOperation {
 }
 
 impl SharedState {
+    fn close_pty(&mut self) {
+        if self.pty_closed {
+            return;
+        }
+        self.pty_closed = true;
+        if let Err(error) = self.append_durable(JournalEvent::PtyClosed) {
+            eprintln!("session-host: PTY_CLOSED was not persisted: {error}");
+        }
+    }
+
+    fn require_pty(&self) -> Result<(), String> {
+        if self.pty_closed {
+            Err("PTY is closed".to_owned())
+        } else {
+            Ok(())
+        }
+    }
+
     fn append_buffered(&mut self, event: JournalEvent) -> Result<u64, HostError> {
         Ok(self.journal.append_buffered(event)?)
     }
@@ -954,7 +974,7 @@ fn copy_pty_output(mut master: File, state: Arc<Mutex<SharedState>>) -> Result<(
     let mut journal_available = true;
     loop {
         match master.read(&mut buffer) {
-            Ok(0) => return Ok(()),
+            Ok(0) => break,
             Ok(length) => {
                 let mut state = match lock_state(&state) {
                     Ok(state) => state,
@@ -996,10 +1016,12 @@ fn copy_pty_output(mut master: File, state: Arc<Mutex<SharedState>>) -> Result<(
                     }
                 }
             }
-            Err(error) if error.raw_os_error() == Some(libc::EIO) => return Ok(()),
+            Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
             Err(error) => return Err(error.into()),
         }
     }
+    lock_state(&state)?.close_pty();
+    Ok(())
 }
 
 fn spawn_accept_loop(
@@ -1308,8 +1330,9 @@ fn execute_operation_effect(
     }
 }
 
-fn apply_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), String> {
-    let mut state = lock_state(state).map_err(|error| error.to_string())?;
+fn apply_input(payload: &[u8], shared: &Arc<Mutex<SharedState>>) -> Result<(), String> {
+    let mut state = lock_state(shared).map_err(|error| error.to_string())?;
+    state.require_pty()?;
     let command_id = payload
         .get(0..16)
         .and_then(|raw| <&[u8; 16]>::try_from(raw).ok())
@@ -1340,6 +1363,8 @@ fn apply_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), St
             }
             return Err(error.to_string());
         }
+        let state = lock_state(shared).map_err(|error| error.to_string())?;
+        state.require_pty()?;
         if ready == 0 {
             continue;
         }
@@ -1371,6 +1396,7 @@ fn apply_resize(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), S
     let cols = host::u32_at(&payload[0..4]);
     let rows = host::u32_at(&payload[4..8]);
     let mut state = lock_state(state).map_err(|error| error.to_string())?;
+    state.require_pty()?;
     state
         .append_buffered(JournalEvent::PtyResize { cols, rows })
         .map_err(|error| error.to_string())?;
@@ -2081,7 +2107,9 @@ mod tests {
             sandbox_policy: None,
             journal_segment_bytes: 1024,
             journal_max_bytes: 1024 * 1024,
-            command: ["/bin/sh", "-c", "printf output; sleep 0.05"]
+            command: ["/usr/bin/perl", "-e",
+                "$SIG{HUP}=q(IGNORE); $|=1; print q(output); \
+                 close STDIN; close STDOUT; close STDERR; sleep 30"]
                 .into_iter()
                 .map(OsString::from)
                 .collect(),
@@ -2097,6 +2125,7 @@ mod tests {
             journal,
             metadata,
             master: File::open("/dev/null").unwrap(),
+            pty_closed: false,
             accepted_sequence_high_watermark: None,
             operation_order: Arc::new(Mutex::new(())),
             operations: Arc::new(OperationCoordinator::new()),
@@ -2108,7 +2137,27 @@ mod tests {
         }));
 
         assert!(copy_pty_output(master, Arc::clone(&state)).is_ok());
-        assert!(libc::WIFEXITED(wait_for_child(child_pid).unwrap()));
+        assert!(lock_state(&state).unwrap().pty_closed);
+        assert_eq!(apply_input(&[0; 16], &state).unwrap_err(), "PTY is closed");
+        assert_eq!(apply_resize(&[80, 0, 0, 0, 24, 0, 0, 0], &state).unwrap_err(), "PTY is closed");
+        let processes = list_processes(&state).unwrap();
+        let root = processes[4..].chunks_exact(24).find(|entry| {
+            u64::from_le_bytes(entry[8..16].try_into().unwrap()) == child_pid as u64
+        }).unwrap();
+        let token = u64::from_le_bytes(root[..8].try_into().unwrap());
+        assert_eq!(unsafe { libc::kill(child_pid, 0) }, 0);
+        assert!(apply_process_signal(token, 3, libc::SIGKILL, &state).is_err());
+        let status = wait_for_child(child_pid).unwrap();
+        assert!(libc::WIFSIGNALED(status));
+        assert_eq!(libc::WTERMSIG(status), libc::SIGKILL);
+        {
+            let mut state = lock_state(&state).unwrap();
+            state.journal = JournalWriter::create(&directory.join("recovered"), JournalConfig::default()).unwrap();
+            let before = state.journal.latest_event_id();
+            state.close_pty();
+            assert_eq!(state.journal.latest_event_id(), before, "closure is not retried after append failure");
+            assert!(state.operations.register_operation().unwrap().is_some());
+        }
         drop(state);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -2149,6 +2198,7 @@ mod tests {
             journal,
             metadata,
             master,
+            pty_closed: false,
             accepted_sequence_high_watermark: None,
             operation_order: Arc::new(Mutex::new(())),
             operations: Arc::new(OperationCoordinator::new()),

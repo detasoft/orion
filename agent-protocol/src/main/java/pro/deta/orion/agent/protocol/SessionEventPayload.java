@@ -4,7 +4,7 @@ import java.util.Objects;
 
 public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutput,
         SessionEventPayload.PtyInput, SessionEventPayload.PtyResize, SessionEventPayload.ProcessExited,
-        SessionEventPayload.CommandResult, SessionEventPayload.HostWarning {
+        SessionEventPayload.CommandResult, SessionEventPayload.HostWarning, SessionEventPayload.PtyClosed {
 
     record CommandResult(
             SessionCommandSource source,
@@ -70,6 +70,9 @@ public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutpu
             columns = ProtocolValidation.terminalDimension(columns, "columns");
             rows = ProtocolValidation.terminalDimension(rows, "rows");
         }
+    }
+
+    record PtyClosed() implements SessionEventPayload {
     }
 
     record ProcessExited(int exitCode) implements SessionEventPayload {

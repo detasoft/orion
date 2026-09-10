@@ -94,6 +94,7 @@ The shared version 1 allocation is:
 | `0x0100` | `PTY_OUTPUT` | byte string |
 | `0x0101` | `PTY_INPUT` | `[ptyInputId, byte string]` |
 | `0x0102` | `PTY_RESIZE` | `[columns, rows]` |
+| `0x0103` | `PTY_CLOSED` | `[]` |
 | `0x0200` | `PROCESS_STARTED` | `[processId]` |
 | `0x0201` | `PROCESS_EXITED` | `[signed exit code]` |
 | `0x0203` | `SESSION_START_FAILED` | `[CommandId, diagnostic, omittedByteCount]` |
@@ -101,6 +102,12 @@ The shared version 1 allocation is:
 The transport decoder extracts EventId and event type but retains the encoded
 payload and complete encoded record. It therefore forwards unknown event types,
 payload encodings, and optional record tails byte-for-byte.
+
+`PTY_CLOSED` has a typed Java projection and ends terminal availability only.
+Readers continue through subsequent command results and process events;
+closure does not mean that the host or its owned processes have exited. Native
+ordering and append-failure semantics are specified in the
+[session-host protocol](../../session-host/protocol/README.md).
 
 Once a native journal exists, exactly one start outcome is durable before the
 host leaves its start phase. `SESSION_START_FAILED` diagnostics are strict
@@ -119,5 +126,7 @@ preserves their exact encoded bytes.
   unknown event payload and an optional future record field.
 - `fixtures/start-outcomes-v1.hex` freezes native success and failure start
   observations and is byte-identical to the session-host fixture.
+- `fixtures/pty-closure-v1.hex` freezes terminal output, empty terminal closure,
+  and process exit, and is byte-identical to the session-host fixture.
 
 Whitespace in fixture files is not part of the encoding.

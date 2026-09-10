@@ -288,6 +288,10 @@ fn decode_payload(event_type: u16, encoded: &[u8]) -> Result<Vec<u8>, ReadError>
                 .map_err(|error| ReadError::Format(error.to_string()))
         }
         protocol::event_type::PTY_OUTPUT => decode_bytes(encoded),
+        protocol::event_type::PTY_CLOSED => {
+            array_fields(encoded)?;
+            Ok(Vec::new())
+        }
         protocol::event_type::PTY_INPUT => {
             let fields = array_fields(encoded)?;
             require_fields(&fields, 2, "PTY_INPUT")?;

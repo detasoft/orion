@@ -223,6 +223,7 @@ pub(crate) enum JournalEvent {
     #[cfg(any(target_os = "linux", test))]
     HostWarning { code: u16, message: String },
     PtyOutput(Vec<u8>),
+    PtyClosed,
     PtyInput {
         command_id: [u8; 16],
         payload: Vec<u8>,
@@ -869,6 +870,7 @@ fn encode_event(event_id: u64, event: JournalEvent) -> Result<Vec<u8>, JournalEr
         #[cfg(any(target_os = "linux", test))]
         JournalEvent::HostWarning { code, message } => protocol::encode_host_warning(event_id, code, &message),
         JournalEvent::PtyOutput(payload) => protocol::encode_pty_output(event_id, &payload),
+        JournalEvent::PtyClosed => Ok(protocol::encode_pty_closed(event_id)),
         JournalEvent::PtyInput {
             command_id,
             payload,

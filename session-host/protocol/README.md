@@ -79,6 +79,7 @@ Version 1 assigns:
 | `0x0100` | `PTY_OUTPUT` | byte string |
 | `0x0101` | `PTY_INPUT` | `[ptyInputId, byte-string]` |
 | `0x0102` | `PTY_RESIZE` | `[columns, rows]` |
+| `0x0103` | `PTY_CLOSED` | `[]` |
 | `0x0200` | `PROCESS_STARTED` | `[processId]` |
 | `0x0201` | `PROCESS_EXITED` | `[exitCode]` |
 | `0x0202` | `SIGNAL` | `[kind, platformCode]` |
@@ -103,6 +104,32 @@ Terminal bytes are opaque and preserved without text conversion. The 16-byte
 input identity is preserved in the `PTY_INPUT` record; host replay protection
 uses `operationSequence`, not that identity.
 Terminal dimensions are unsigned integers in the range 1 through 65535.
+
+The Unix terminal reader owns PTY availability. On EOF or the platform's final
+PTY condition it marks the terminal unavailable and attempts one durable
+`PTY_CLOSED` append after its final `PTY_OUTPUT`. With a writable journal there
+is exactly one closure event and no later terminal output. A failed closure
+append is reported to stderr without retrying it or restoring availability;
+missing journal evidence does not prove that the terminal is available.
+
+Output, closure, resize, and each nonblocking input write share the host's
+journal mutex. An admitted INPUT or RESIZE that executes after closure performs
+no terminal effect and writes no `PTY_INPUT` or `PTY_RESIZE`; it follows the
+ordinary failed `COMMAND_RESULT` path with detail `PTY is closed` when that
+append succeeds. An input already in progress may have written a prefix before
+closure. Readiness polling releases the mutex, allowing closure and TERMINATE
+to proceed while input is blocked.
+
+Closure and root exit do not initiate termination. STATUS, LIST_PROCESSES,
+addressed SIGNAL, TERMINATE, and ACK_JOURNAL remain available while owned
+processes live. Foreground SIGNAL still requires a usable foreground terminal
+group. The process owner decides when all owned processes have exited and been
+reaped; finalization then waits for the reader and admitted operations before
+`PROCESS_EXITED`. Availability is local resource state, not a metadata field or
+a persisted session lifecycle replica. The additive shared
+`pty-closure-v1.hex` fixture freezes output, empty closure, and final exit;
+existing fixtures and journal version 1 remain unchanged.
+
 Process IDs are nonzero unsigned integers. Exit codes and platform signal codes
 fit signed 32-bit integers. Portable signal kinds `1` through `5` may carry
 `-1` or any non-negative platform signal or control code delivered by the host;

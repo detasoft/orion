@@ -57,6 +57,10 @@ public final class SessionEventCodec {
                 writer.unsigned(value.columns());
                 writer.unsigned(value.rows());
             }
+            case SessionEventPayload.PtyClosed ignored -> {
+                writer.unsigned(SessionEventType.PTY_CLOSED);
+                writer.array(0);
+            }
             case SessionEventPayload.ProcessExited value -> {
                 writer.unsigned(SessionEventType.PROCESS_EXITED);
                 writer.array(1);
@@ -133,6 +137,10 @@ public final class SessionEventCodec {
                             ProtocolBytes.copyOf(bytes(payload(event), "PTY_OUTPUT"))));
             case SessionEventType.PTY_INPUT -> Optional.of(decodePtyInput(payloadArray(event, "PTY_INPUT")));
             case SessionEventType.PTY_RESIZE -> Optional.of(decodePtyResize(payloadArray(event, "PTY_RESIZE")));
+            case SessionEventType.PTY_CLOSED -> {
+                payloadArray(event, "PTY_CLOSED");
+                yield Optional.of(new SessionEventPayload.PtyClosed());
+            }
             case SessionEventType.PROCESS_EXITED -> Optional.of(
                     decodeProcessExited(payloadArray(event, "PROCESS_EXITED")));
             default -> Optional.empty();

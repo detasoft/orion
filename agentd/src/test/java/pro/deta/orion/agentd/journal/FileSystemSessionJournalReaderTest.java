@@ -6,6 +6,8 @@ import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.SessionCommandOutcome;
+import pro.deta.orion.agent.protocol.SessionCommandSource;
 import pro.deta.orion.agent.protocol.SessionEventCodec;
 import pro.deta.orion.agent.protocol.SessionEventPayload;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
@@ -36,6 +38,34 @@ class FileSystemSessionJournalReaderTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void readsPtyClosureAndContinuesThroughLaterCommandAndProcessResults() throws Exception {
+        List<SessionEventPayload> payloads = List.of(
+                new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{'x'})),
+                new SessionEventPayload.PtyClosed(),
+                new SessionEventPayload.CommandResult(
+                        SessionCommandSource.SERVER, 1,
+                        ProtocolBytes.copyOf(new byte[]{(byte) 0x80}),
+                        SessionCommandOutcome.FAILED, "PTY is closed"),
+                new SessionEventPayload.ProcessExited(0));
+        ByteArrayOutputStream segment = new ByteArrayOutputStream();
+        for (int index = 0; index < payloads.size(); index++) {
+            segment.write(CODEC.encode(new EventId(index + 1), payloads.get(index)));
+        }
+        Files.write(temporaryDirectory.resolve("00000001.cbor"), segment.toByteArray());
+
+        PagedReadResult result = readAll(temporaryDirectory, Optional.empty());
+
+        assertThat(result.issue()).isEmpty();
+        assertThat(result.records()).hasSize(payloads.size());
+        for (int index = 0; index < payloads.size(); index++) {
+            assertThat(CODEC.decodeKnownPayload(result.records().get(index))).contains(payloads.get(index));
+        }
+        PagedReadResult afterClosure = readAll(temporaryDirectory, Optional.of(new EventId(2)));
+        assertThat(afterClosure.records()).extracting(SessionEventRecord::eventId)
+                .containsExactly(new EventId(3), new EventId(4));
+    }
 
     @Test
     void readsExactRecordsAndRangeFromOneRawSegment() throws Exception {

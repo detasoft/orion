@@ -26,12 +26,16 @@ static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 fn lists_owned_processes_and_signals_tokens_after_root_exit() {
     let directory = temporary_directory("list-processes");
     let child_file = directory.join("child.pid");
+    let close_file = directory.join("close-descendant-pty");
     let mut host = HostGuard::spawn(directory, &[
         "/usr/bin/perl", "-e",
-        concat!("$SIG{HUP}=q(IGNORE); defined(my $child = fork) or die; ",
-            "if (!$child) { open my $f, q(>), $ARGV[0] or die; print {$f} $$; close $f; } ",
+        concat!("$SIG{HUP}=q(IGNORE); $|=1; defined(my $child = fork) or die; ",
+            "if (!$child) { open my $f, q(>), $ARGV[0] or die; print {$f} $$; close $f; ",
+            "while (!-e $ARGV[1]) { select undef, undef, undef, 0.01; } ",
+            "print q(FINAL); close STDIN; close STDOUT; close STDERR; } ",
             "while (1) { sleep 30; }"),
         child_file.to_str().unwrap(),
+        close_file.to_str().unwrap(),
     ], "xterm-256color", 80, 24);
     let child = wait_for_pid_file(&child_file) as u64;
     let mut stream = connect(host.directory());
@@ -86,6 +90,19 @@ fn lists_owned_processes_and_signals_tokens_after_root_exit() {
     assert_eq!(events.iter().filter(|event| event.event_type == event_type::SIGNAL).count(), 2);
     assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
 
+    #[cfg(target_os = "linux")]
+    assert!(!events.iter().any(|event| event.event_type == event_type::PTY_CLOSED));
+    fs::write(close_file, b"close").unwrap();
+    wait_for_event(host.directory(), event_type::PTY_CLOSED);
+    #[cfg(target_os = "linux")]
+    assert!(contains(&terminal_output(&journal_reader::read(host.directory(), 0).unwrap().events), b"FINAL"));
+    assert_pty_closed(&journal_reader::read(host.directory(), 0).unwrap().events);
+    assert_terminal_controls_unavailable(&mut stream, host.directory(), 5);
+    addressed_signal(&mut stream, 7, descendant.token, 0xffff, libc::SIGCONT);
+    assert_command_succeeded(host.directory(), 7);
+    assert_eq!(request(&mut stream, control_message::STATUS, 0, &[]).message_type,
+        control_message::STATUS_RESPONSE);
+    assert!(listed_processes(&mut stream, 8).contains(&descendant));
     let mut concurrent = connect(host.directory());
     concurrent.set_read_timeout(Some(TIMEOUT)).unwrap();
     let (ready, started) = std::sync::mpsc::channel();
@@ -107,12 +124,13 @@ fn lists_owned_processes_and_signals_tokens_after_root_exit() {
         }
     });
     started.recv_timeout(TIMEOUT).unwrap();
-    let terminated = operation_request(&mut stream, control_message::TERMINATE, 5,
+    let terminated = operation_request(&mut stream, control_message::TERMINATE, 8,
         b"terminate", &[1, 0, 0, 0]);
-    assert_received(&terminated, 5);
+    assert_received(&terminated, 8);
     listing.join().unwrap();
     drop(stream);
     assert!(host.wait().success());
+    assert_pty_closed(&journal_reader::read(host.directory(), 0).unwrap().events);
     wait_for_process_exit(child as i32);
 }
 
@@ -511,6 +529,7 @@ fn hosts_a_real_tty_and_preserves_raw_output() {
     assert!(status.success(), "session-host exited with {status}");
     let result = journal_reader::read(host.directory(), 0).unwrap();
     let output = terminal_output(&result.events);
+    assert_pty_closed(&result.events);
     assert!(contains(&output, b"\x1b[31mraw\xff\x1b[0m"));
     assert_start_prefix(&result.events, event_type::PROCESS_STARTED);
     assert_eq!(
@@ -1185,14 +1204,24 @@ fn force_waits_for_and_reaps_a_double_fork_setsid_descendant_after_pty_closure()
     )
     .unwrap();
     wait_for_process_exit(leader);
+    wait_for_event(host.directory(), event_type::PTY_CLOSED);
     assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
 
     let mut stream = connect(host.directory());
+    let processes = listed_processes(&mut stream, 100);
+    let owned = processes.iter().find(|process| process.pid == descendant as u64).unwrap();
+    addressed_signal(&mut stream, 1, owned.token, 0xffff, libc::SIGCONT);
+    assert_command_succeeded(host.directory(), 1);
+    assert_terminal_controls_unavailable(&mut stream, host.directory(), 2);
+    assert_eq!(journal::read_metadata(host.directory()).unwrap().current_cols, 80);
+    assert_eq!(request(&mut stream, control_message::STATUS, 101, &[]).message_type,
+        control_message::STATUS_RESPONSE);
+    assert!(listed_processes(&mut stream, 102).contains(owned));
     let terminate = [1_u8, 0, 0, 0];
     let response = operation_request(
         &mut stream,
         control_message::TERMINATE,
-        1,
+        4,
         b"server-envelope-double-fork",
         &terminate,
     );
@@ -1200,6 +1229,7 @@ fn force_waits_for_and_reaps_a_double_fork_setsid_descendant_after_pty_closure()
     drop(stream);
 
     assert!(host.wait_with_timeout(Duration::from_secs(3)).success());
+    assert_pty_closed(&journal_reader::read(host.directory(), 0).unwrap().events);
     wait_for_process_exit(descendant);
 }
 
@@ -1431,6 +1461,58 @@ fn blocked_pty_input_does_not_block_admission_on_another_connection() {
 }
 
 #[test]
+fn pty_closure_releases_blocked_input_and_serializes_a_queued_resize() {
+    let directory = temporary_directory("pty-control-closure-race");
+    let close_file = directory.join("close-pty");
+    let mut host = HostGuard::spawn(directory, &[
+        "/usr/bin/perl", "-e",
+        concat!("$SIG{HUP}=q(IGNORE); system(q(stty raw -echo)) == 0 or die; ",
+            "$|=1; print q(READY); ",
+            "while (!-e $ARGV[0]) { select undef, undef, undef, 0.01; } ",
+            "close STDIN; close STDOUT; close STDERR; while (1) { sleep 30; }"),
+        close_file.to_str().unwrap(),
+    ], "xterm-256color", 80, 24);
+    wait_for_output(host.directory(), b"READY");
+    let mut input_stream = connect(host.directory());
+    let input = protocol::pty_input_payload([0x45; 16], &vec![b'x'; 1024 * 1024]).unwrap();
+    send_operation(&mut input_stream, control_message::INPUT, 1, b"racing-input", &input);
+    wait_for_event(host.directory(), event_type::PTY_INPUT);
+    let mut resize_stream = connect(host.directory());
+    send_operation(&mut resize_stream, control_message::RESIZE, 2, b"racing-resize",
+        &[90, 0, 0, 0, 30, 0, 0, 0]);
+
+    fs::write(close_file, b"close").unwrap();
+    wait_for_event(host.directory(), event_type::PTY_CLOSED);
+    wait_for_command_result(host.directory(), 1);
+    wait_for_command_result(host.directory(), 2);
+    let events = journal_reader::read(host.directory(), 0).unwrap().events;
+    assert_pty_closed(&events);
+    let result = events.iter().find(|event| event.event_type == event_type::COMMAND_RESULT
+        && u64_at(&event.payload[2..10]) == 1).unwrap();
+    let envelope_length = u32_at(&result.payload[10..14]) as usize;
+    assert_eq!(result.payload[14 + envelope_length], 2);
+
+    let resize_result = events.iter().find(|event| event.event_type == event_type::COMMAND_RESULT
+        && u64_at(&event.payload[2..10]) == 2).unwrap();
+    let envelope_length = u32_at(&resize_result.payload[10..14]) as usize;
+    if let Some(resize) = events.iter().find(|event| event.event_type == event_type::PTY_RESIZE) {
+        let closed = events.iter().find(|event| event.event_type == event_type::PTY_CLOSED).unwrap();
+        assert!(resize.event_id < closed.event_id);
+        assert_eq!(resize_result.payload[14 + envelope_length], 1);
+    } else {
+        assert_eq!(resize_result.payload[14 + envelope_length], 2);
+        assert_eq!(&resize_result.payload[15 + envelope_length..], b"PTY is closed");
+    }
+
+    let mut controls = connect(host.directory());
+    assert_terminal_controls_unavailable(&mut controls, host.directory(), 3);
+    assert!(listed_processes(&mut controls, 0).iter().any(|process| process.original_root));
+    send_operation(&mut controls, control_message::TERMINATE, 5, b"terminate-after-closure", &[1, 0, 0, 0]);
+    assert!(host.wait_with_timeout(Duration::from_secs(3)).success());
+    assert_pty_closed(&journal_reader::read(host.directory(), 0).unwrap().events);
+}
+
+#[test]
 fn terminate_bypasses_a_blocked_pty_input() {
     let directory = temporary_directory("terminate-blocked-input");
     let mut host = HostGuard::spawn(
@@ -1475,6 +1557,7 @@ fn terminate_bypasses_a_blocked_pty_input() {
     drop(terminate_stream);
 
     let result = journal_reader::read(host.directory(), 0).unwrap();
+    assert_pty_closed(&result.events);
     let signal = result
         .events
         .iter()
@@ -1504,6 +1587,45 @@ fn terminate_bypasses_a_blocked_pty_input() {
         .unwrap();
     let envelope_length = u32_at(&input_result.payload[10..14]) as usize;
     assert_eq!(input_result.payload[14 + envelope_length], 2);
+}
+
+fn assert_pty_closed(events: &[JournalEvent]) {
+    let closures: Vec<_> = events.iter().enumerate()
+        .filter(|(_, event)| event.event_type == event_type::PTY_CLOSED).collect();
+    assert_eq!(closures.len(), 1, "one PTY_CLOSED must follow final output");
+    let (index, closed) = closures[0];
+    assert!(closed.payload.is_empty());
+    assert!(!events[index + 1..].iter().any(|event| matches!(event.event_type,
+        event_type::PTY_OUTPUT | event_type::PTY_INPUT | event_type::PTY_RESIZE)));
+}
+
+fn assert_terminal_controls_unavailable(stream: &mut UnixStream, directory: &Path, sequence: u64) {
+    let input = protocol::pty_input_payload([0x31; 16], b"after close").unwrap();
+    send_operation(stream, control_message::INPUT, sequence, b"closed-input", &input);
+    let mut resize = Vec::new();
+    resize.extend_from_slice(&120_u32.to_le_bytes());
+    resize.extend_from_slice(&40_u32.to_le_bytes());
+    send_operation(stream, control_message::RESIZE, sequence + 1, b"closed-resize", &resize);
+    wait_for_command_result(directory, sequence + 1);
+    let events = journal_reader::read(directory, 0).unwrap().events;
+    for sequence in [sequence, sequence + 1] {
+        let event = events.iter().find(|event| event.event_type == event_type::COMMAND_RESULT
+            && u64_at(&event.payload[2..10]) == sequence).unwrap();
+        let envelope_length = u32_at(&event.payload[10..14]) as usize;
+        assert_eq!(event.payload[14 + envelope_length], 2);
+        assert_eq!(&event.payload[15 + envelope_length..], b"PTY is closed");
+    }
+    assert_pty_closed(&events);
+    assert!(!events.iter().any(|event| event.event_type == event_type::PROCESS_EXITED));
+}
+
+fn assert_command_succeeded(directory: &Path, sequence: u64) {
+    wait_for_command_result(directory, sequence);
+    let events = journal_reader::read(directory, 0).unwrap().events;
+    let event = events.iter().find(|event| event.event_type == event_type::COMMAND_RESULT
+        && u64_at(&event.payload[2..10]) == sequence).unwrap();
+    let envelope_length = u32_at(&event.payload[10..14]) as usize;
+    assert_eq!(event.payload[14 + envelope_length], 1);
 }
 
 #[test]

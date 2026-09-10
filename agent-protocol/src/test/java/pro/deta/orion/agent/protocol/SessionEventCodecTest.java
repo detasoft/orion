@@ -22,6 +22,27 @@ class SessionEventCodecTest {
     private static final SessionEventCodec CODEC = new SessionEventCodec(LIMITS);
 
     @Test
+    void projectsEmptyPtyClosedAndPreservesFutureRecordFields() throws Exception {
+        byte[] encoded = CODEC.encodeOpaque(new EventId(7), SessionEventType.PTY_CLOSED,
+                ProtocolBytes.copyOf(new byte[]{(byte) 0x80}),
+                List.of(ProtocolBytes.copyOf(new byte[]{1})));
+        SessionEventRecord event = CODEC.decode(encoded);
+
+        assertThat(CODEC.decodeKnownPayload(event)).contains(new SessionEventPayload.PtyClosed());
+        assertThat(event.trailingFieldCount()).isOne();
+        assertThat(event.encodedRecord().toByteArray()).containsExactly(encoded);
+    }
+
+    @Test
+    void rejectsPtyClosedWithNonArrayPayload() throws Exception {
+        byte[] encoded = CODEC.encodeOpaque(new EventId(7), SessionEventType.PTY_CLOSED,
+                ProtocolBytes.copyOf(new byte[]{0x40}), List.of());
+
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(() -> CODEC.decodeKnownPayload(CODEC.decode(encoded)));
+    }
+
+    @Test
     void roundTripsRequiredEventPayloads() throws Exception {
         List<SessionEventPayload> payloads = List.of(
                 new SessionEventPayload.HostWarning(1, "permission denied"),
@@ -30,6 +51,7 @@ class SessionEventCodecTest {
                         "pty-input:session-1",
                         ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff})),
                 new SessionEventPayload.PtyResize(180, 50),
+                new SessionEventPayload.PtyClosed(),
                 new SessionEventPayload.ProcessExited(-17),
                 new SessionEventPayload.CommandResult(
                         SessionCommandSource.SERVER,

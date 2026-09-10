@@ -22,6 +22,21 @@ class AgentProtocolFixtureTest {
     private static final SessionEventCodec EVENT_CODEC = new SessionEventCodec(LIMITS);
 
     @Test
+    void ptyClosureMatchesSharedVersionOneFixture() throws Exception {
+        List<SessionEventPayload> payloads = List.of(
+                new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{'x'})),
+                new SessionEventPayload.PtyClosed(),
+                new SessionEventPayload.ProcessExited(0));
+        List<byte[]> encoded = new ArrayList<>();
+        for (int index = 0; index < payloads.size(); index++) {
+            byte[] record = EVENT_CODEC.encode(new EventId(index + 1), payloads.get(index));
+            encoded.add(record);
+            assertThat(EVENT_CODEC.decodeKnownPayload(EVENT_CODEC.decode(record))).contains(payloads.get(index));
+        }
+        assertThat(concatenate(encoded)).containsExactly(fixture("pty-closure-v1.hex"));
+    }
+
+    @Test
     void helloMatchesVersionOneFixture() throws Exception {
         AgentMessage.Hello hello = new AgentMessage.Hello(
                 AgentProtocolVersion.CURRENT,
