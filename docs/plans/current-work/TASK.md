@@ -15,7 +15,7 @@ ACL foundation in upcoming work; snapshot loading is an independent branch.
 
 ### Agent control and journal delivery
 
-Next: durable server agent/launch records; AgentD handshake is independently
+Next: server launch/reconnect authentication; AgentD handshake is independently
 available. Replication follows authenticated ownership, then commands and clients.
 
 ### Native session execution

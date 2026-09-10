@@ -1,6 +1,6 @@
 # Durable Agent and Launch Records
 
-Task pool: `current-work/03_agent-session-server/01_control-and-registries/01_agent-and-launch-records/TASK.md`
+Task pool: completed; final observation checkpoint committed in `73ad78bb`.
 Pool: [Server agent registration](current-work/03_agent-session-server/01_control-and-registries/TASK.md)
 Design: [Server-launched identity](2026-09-02-agentd-server-launched-identity-design.md)
 
