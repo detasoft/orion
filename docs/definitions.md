@@ -1,12 +1,15 @@
 # Repository definitions
 
-## Implementation workflows
+## Repository workflows
 
 An **implementation change** modifies source, tests, build files, configuration,
-or ordinary product documentation that accompanies such a modification. Before
-editing implementation files, select exactly one of the following workflows.
-Documentation-only work does not need an implementation workflow; apply its
-own repository ownership and commit rules directly.
+or ordinary product documentation that accompanies such a modification. Select
+the simple or change workflow before editing implementation files. A change
+that affects only documentation uses the document workflow.
+
+When the simple or change workflow reaches a primary-owned documentation
+milestone, use the document workflow for that commit without replacing or
+changing the surrounding implementation workflow.
 
 ### Simple workflow
 
@@ -98,6 +101,43 @@ The primary agent owns those governing and workflow-control documents on
 implemented behavior and includes it in the implementation commit unless a
 repository rule explicitly assigns that document to the primary agent.
 
+### Document workflow
+
+The **document workflow** is the direct path for changes that affect only
+documentation, including ordinary documents, repository rules, skills, task-tree
+files and `MODULE_REVIEW.md` reports. It also performs primary-owned
+documentation commits at the lifecycle moments established by a surrounding
+simple or change workflow.
+
+Work directly on `main`. Do not create, claim, move or delete a task merely to
+route a documentation change; do not write an implementation plan for routing,
+launch a worker, create a branch or worktree, or add a staged user-review gate.
+When the requested documentation change is itself a task-tree operation, apply
+`orion-task-runner` to that operation, but create or remove task nodes only when
+that is the requested state change or a lifecycle action required by the
+surrounding change workflow.
+
+Make the requested edits and commit one coherent documentation state change
+promptly with a descriptive single-line subject. Do not split one logical
+documentation change merely because it touches both workflow-control and
+ordinary documentation. Preserve unrelated changes and keep genuinely unrelated
+documentation changes in separate commits.
+
+Do not add tests, test coverage or implementation scaffolding for a document
+workflow, and do not run Maven or project tests before or after its commit. Use
+only a quick check that is already available and meaningful for the edited
+artifact, such as `git diff --check`, the repository skill validator for a
+changed skill, a task-tree structural check for changed task state, or a link
+check for edited links. Do not invent a check or broaden verification merely to
+claim that the document was tested. If no useful check exists, inspect the diff,
+commit it, and report that no automated check was applicable.
+
+Within a simple or change workflow, the surrounding workflow determines when a
+documentation state is accurate and who owns it. The document workflow performs
+that edit, quick check and commit without adding an interaction, approval gate,
+worker handoff or extra commit split. It never folds a primary-owned lifecycle
+document into an implementation commit.
+
 ## Workflow-control scope
 
 The **workflow-control scope** is the exact set of repository files that define
@@ -115,11 +155,12 @@ them explicitly. Mechanically required references from an in-scope change do not
 make their containing files part of the scope.
 
 For repository routing and Maven policy, changes within this scope are
-workflow-control changes rather than product implementation. Make and commit
-them directly on `main`, never in an implementation branch or worktree and never
-through an implementation worker. During queued execution, the primary agent
-running the change workflow owns task-tree state transitions; otherwise the
-primary agent owns the in-scope change. Do not run Maven for an in-scope-only
-commit, but still run validation specific to affected skill resources. In-scope
-changes from the same requested work may share one commit and do not require
-isolation from each other.
+workflow-control changes rather than product implementation and use the document
+workflow. Make and commit them directly on `main`, never in an implementation
+branch or worktree and never through an implementation worker. During queued
+execution, the primary agent running the change workflow owns task-tree state
+transitions; otherwise the primary agent owns the in-scope change. Do not run
+Maven for an in-scope-only commit. Use only quick validation that is meaningful
+for the affected resource. Coherent documentation changes may share one commit
+and do not require isolation merely because some files are inside this scope
+and others are ordinary documentation.

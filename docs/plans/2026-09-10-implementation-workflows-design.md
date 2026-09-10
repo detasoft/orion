@@ -1,7 +1,8 @@
-# Orion implementation workflows
+# Orion repository workflows
 
 Orion uses two implementation workflows selected before source, build, or
-configuration files are changed.
+configuration files are changed and one direct workflow for documentation-only
+changes.
 
 ## Simple workflow
 
@@ -42,20 +43,37 @@ updates after a finding is confirmed or resolved. Ordinary documentation that
 describes the implemented product behavior stays with the worker implementation
 commit unless repository rules explicitly assign it to the primary agent.
 
+## Document workflow
+
+Use the document workflow for changes containing only documents, including
+ordinary docs, repository rules, skills, task-tree state and module review
+reports. Make the requested coherent edit directly on `main` and commit it
+promptly without creating a routing task, worker, branch, worktree, checkpoint
+gate or test coverage. Run no Maven or project tests. Perform only an existing,
+quick check that is meaningful for the artifact, and do not invent validation
+when none applies.
+
+The document workflow also executes primary-owned documentation commits at the
+moments defined by a surrounding simple or change workflow. It does not add a
+new user interaction or split one coherent documentation state by file category.
+It does not fold lifecycle documentation into an implementation commit.
+
 ## Skill structure
 
 - `orion-simple-workflow` owns direct current-worktree implementation, logical
   checkpoint selection, and each checkpoint's staged user-review gate.
 - `orion-change-workflow` owns task-backed worker execution, coordinator review,
   the integration gate, and cleanup.
+- `orion-document-workflow` owns direct documentation-only edits and the
+  primary-owned documentation commits reached during other workflows.
 - `orion-task-runner` owns only task-tree modeling, selection, and state edits;
   execution routes to `orion-change-workflow`.
 - `orion-review` owns audits and module reports. For each authorized repair it
   prefers the simple workflow and uses the change workflow only when the repair
   does not meet the simple workflow boundary.
 - `orion-change-orchestrator` is removed after its guarantees and consumers have
-  moved to the two workflow skills.
+  moved to the replacement workflow skills.
 
-The canonical definitions in `docs/definitions.md` provide shared selection
-criteria and documentation-commit rules so these skills do not redefine the
-same boundary independently.
+The canonical definitions in `docs/definitions.md` provide shared selection and
+documentation-commit rules so these skills do not redefine the same boundaries
+independently.

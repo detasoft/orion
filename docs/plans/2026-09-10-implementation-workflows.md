@@ -2,12 +2,12 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the single change orchestrator with explicit simple and task-backed change workflows.
+**Goal:** Replace the single change orchestrator with explicit simple, task-backed change, and document workflows.
 
 **Architecture:** `docs/definitions.md` owns the shared selection boundary and documentation-commit semantics.
-Two repository-local skills own execution: `orion-simple-workflow` for staged current-worktree changes and
-`orion-change-workflow` for task-backed worker changes. Task and review skills keep their domain ownership and
-route implementation through one of those workflows.
+Three repository-local skills own execution: `orion-simple-workflow` for staged current-worktree changes,
+`orion-change-workflow` for task-backed worker changes, and `orion-document-workflow` for documentation-only
+changes. Task and review skills keep their domain ownership and route work through the applicable workflow.
 
 **Tech Stack:** Markdown skill instructions, Git workflow, repository skill validator.
 
@@ -22,7 +22,7 @@ route implementation through one of those workflows.
 
 Define a decision boundary that selects the simple workflow only for bounded, predictable changes and selects the
 change workflow for task-backed, contract-affecting, cross-module, lifecycle, concurrency, or materially uncertain
-work. State that documentation-only work is not independently routed through an implementation workflow.
+work. Route documentation-only work through the document workflow.
 
 **Step 2: Define documentation timing**
 
@@ -87,7 +87,32 @@ Run the same scenario with the new skill and confirm it creates or claims a task
 
 Commit only the new skill with a one-line subject. Do not run Maven.
 
-### Task 4: Migrate workflow consumers and remove the orchestrator
+### Task 4: Create and verify `orion-document-workflow`
+
+**Files:**
+- Create: `.agents/skills/orion-document-workflow/SKILL.md`
+
+**Step 1: Establish the baseline failure**
+
+Give an independent read-only agent a coherent documentation-only request touching an ordinary document and an
+existing task description. Confirm that current ownership rules split it into multiple paths or commits.
+
+**Step 2: Write the minimal skill**
+
+Require direct primary-owned work on `main`, no routing task or worker, one prompt commit per coherent documentation
+state, no tests or Maven, and only cheap artifact-specific validation when it exists and matters. Preserve lifecycle
+timing when this workflow performs a documentation commit inside a surrounding simple or change workflow.
+
+**Step 3: Validate behavior and structure**
+
+Run the same scenario with the new skill and confirm one direct commit with no extra gate or tests. Run
+`quick_validate.py` for the skill and `git diff --check`.
+
+**Step 4: Commit the verified skill**
+
+Commit only the new skill with a one-line subject. Do not run Maven.
+
+### Task 5: Migrate workflow consumers and remove the orchestrator
 
 **Files:**
 - Modify: `AGENTS.md`
