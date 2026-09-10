@@ -31,13 +31,13 @@ is itself the requested result.
 1. Inspect `git status --short` and the requested area. Preserve all unrelated
    staged and unstaged changes.
 2. Identify the complete coherent result and make only those edits.
-3. Stage only the result's files and hunks. Inspect `git status --short`,
-   `git diff --cached`, and `git diff --cached --check`.
-4. Run every check required by the
+3. Keep the result unstaged and run every check required by the
    [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
    Add or update tests whenever behavior changes.
-5. Review the complete staged result against the request and applicable
-   repository rules. Fix local findings, restage, and rerun affected checks.
+4. Review the complete result against the request and applicable repository
+   rules. Fix local findings and rerun affected checks before staging.
+5. Stage only the verified result's files and hunks. Inspect `git status --short`,
+   `git diff --cached`, and `git diff --cached --check`.
 6. Create one descriptive single-line commit immediately. Do not ask for an
    additional review or commit approval.
 

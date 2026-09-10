@@ -21,6 +21,14 @@
 
 ## Commits and verification
 
+- Minimize time in the index in every workflow. Finish required verification
+  and automatic review before staging the result for user feedback or commit.
+  Do not stage this result while its checks are still running. After approval, commit immediately;
+  if approval is already covered, stage and commit without an extra waiting step.
+  If feedback requires corrections, unstage only this result, make the corrections,
+  verify and review again, then restage. Preserve unrelated index entries throughout.
+  This does not reserve the shared index: other sessions may stage and commit
+  their own changes in parallel. Never include or unstage their entries.
 - Follow the canonical
   [pre-commit verification table](docs/definitions.md#pre-commit-verification).
   Every required check must pass before the corresponding commit.

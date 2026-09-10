@@ -37,14 +37,14 @@ until the current checkpoint has been committed and its context compacted.
    or update tests whenever behavior changes. When repairing a
    `MODULE_REVIEW.md` finding, update or remove the finding in this same
    checkpoint.
-4. Stage only the checkpoint. Inspect `git status --short`,
-   `git diff --cached`, and `git diff --cached --check`.
-5. Run every check required by the
+4. Keep the checkpoint unstaged and run every check required by the
    [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
-6. Automatically review the staged result against the request,
+5. Automatically review the complete result against the request,
    `docs/reviews/RULES.md`, applicable `@AiRule` comments, and
-   `orion-minimal-implementation`. Fix task-local findings, restage, and rerun
-   affected checks.
+   `orion-minimal-implementation`. Fix task-local findings and rerun affected
+   checks before staging.
+6. Stage only the ready checkpoint. Inspect `git status --short`,
+   `git diff --cached`, and `git diff --cached --check`.
 7. Present the stable task name, proposed subject, staged checkpoint,
    verification summary, automatic-review result, remaining checkpoints, and
    unrelated workspace state. Ask the user to review it unless an explicit
@@ -59,10 +59,10 @@ until the current checkpoint has been committed and its context compacted.
    Keep the task-name prefix byte-for-byte identical across the sequence.
 9. Compact context before selecting the next checkpoint.
 
-If the user requests corrections instead of committing, update only the current
-checkpoint, restage it, rerun affected verification and automatic review, and
-present it again. Never commit an older staged version while newer corrections
-exist.
+If the user requests corrections instead of committing, unstage only the current
+checkpoint, correct it, rerun affected verification and automatic review, then
+restage and present it again. Never commit an older staged version while newer
+corrections exist.
 
 ## Context compaction
 

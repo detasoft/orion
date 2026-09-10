@@ -47,6 +47,18 @@ into another workflow: preserve and report the current state first.
 Authorization never includes unrelated files, later scope expansion, or a
 different checkpoint.
 
+### Staging boundary
+
+Keep a result unstaged until required verification and automatic review have
+passed. Staging is the handoff of a ready result for user feedback or immediate
+commit, never a place to wait for running checks. After approval, commit
+immediately. Quick and other already-authorized commits stage and commit without
+an additional waiting step. If feedback requires corrections, unstage only the
+affected result, correct and reverify it, then review and stage it again.
+Preserve unrelated index entries throughout. This boundary concerns the current
+result's checks; it does not reserve the index or block other sessions from
+staging and committing their own work in parallel.
+
 ## Pre-commit verification
 
 Determine verification from the files in the checkpoint, independently of the
@@ -87,9 +99,8 @@ commits.
 
 1. Inspect repository state and preserve unrelated changes.
 2. Make only the requested coherent change.
-3. Stage only its files and hunks.
-4. Run the required pre-commit verification and inspect the complete staged
-   diff.
+3. Run required verification and automatically review the complete result.
+4. Stage only its verified files and hunks, then inspect the staged diff.
 5. Commit immediately with a descriptive single-line subject.
 
 Quick does not create or claim a task, launch a worker, create a worktree, or add
@@ -103,10 +114,10 @@ and branch. Only one checkpoint may be unfinished at a time.
 
 For each checkpoint:
 
-1. Implement and stage the complete checkpoint while preserving unrelated work.
+1. Implement the complete checkpoint while preserving unrelated work.
 2. Run its required pre-commit verification.
 3. Perform the automatic review required by repository rules.
-4. Present the staged result and verification to the user. Treat an explicit
+4. Stage the ready result and present it with verification to the user. Treat an explicit
    commit instruction covering it as completed user review.
 5. Commit immediately using `<stable task name>: <imperative checkpoint
    summary>`.

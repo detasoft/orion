@@ -60,12 +60,13 @@ The worker must:
    present, and keep task state read-only.
 3. Implement the smallest complete task. Include a corresponding
    `MODULE_REVIEW.md` update in the same commit when the task repairs a finding.
-4. Stage the complete result and run every check required by the
+4. Keep the result unstaged and run every check required by the
    [pre-commit verification table](../../../docs/definitions.md#pre-commit-verification).
    A failed required check blocks the commit.
-5. Automatically review the staged result, fix local findings, restage, and
-   rerun affected checks.
-6. Commit the result and return base/head SHAs, task path, branch/worktree,
+5. Automatically review the complete result, fix local findings, and rerun
+   affected checks before staging.
+6. Stage only the verified result, inspect `git diff --cached` and
+   `git diff --cached --check`, then commit immediately. Return base/head SHAs, task path, branch/worktree,
    changed parts, verification summary, risks, remaining work, and the required
    `orion-minimal-implementation` summary. Do not integrate at this stage.
 
