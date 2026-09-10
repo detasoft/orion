@@ -110,12 +110,12 @@ AgentD is not responsible for:
 
 ### Identity and Persistent State
 
-The server-launched identity design is defined in
-[the server-launched identity contract](../03_agent-session-server/01_control-and-registries/TASK.md).
-Orion Server owns the stable `AgentId`, launch generation, and launch ID. An
-AgentD process generates only its per-process `InstanceId`, receives a
-single-use launch permit through a short SSH bootstrap channel, and keeps the
-resulting reconnect token only in memory.
+The server-launched identity contract is integrated in the completed server
+control work, including launch provisioning (`3758705a`) and runtime composition
+(`490b458b`). Orion Server owns the stable `AgentId`, launch generation, and
+launch ID. An AgentD process generates only its per-process `InstanceId`,
+receives a single-use launch permit through a short SSH bootstrap channel, and
+keeps the resulting reconnect token only in memory.
 
 Persistent AgentD state contains no identity or credential:
 

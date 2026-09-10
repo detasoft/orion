@@ -1,7 +1,7 @@
 # Route Commands to Connected Agents
 
 Status: todo
-Depends on: 01_control-and-registries/TASK.md
+Depends on: completed server control and registries (`3e4a6156`, `3758705a`, `490b458b`)
 
 Send session commands only through the authoritative AgentD connection and
 separate transient delivery results from durable journal confirmation.

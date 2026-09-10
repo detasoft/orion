@@ -1,7 +1,7 @@
 # Complete the AgentD Control Connection Lifecycle
 
 Status: todo
-Server counterpart: [Server control work](../../03_agent-session-server/01_control-and-registries/TASK.md)
+Server counterpart: completed server control work (`3e4a6156`, `3758705a`, `490b458b`)
 
 Extend the existing initial `HELLO`/`WELCOME` exchange into a reusable
 authenticated control lifecycle with reconnect, heartbeat, and session reports.

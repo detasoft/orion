@@ -1,14 +1,45 @@
 package pro.deta.orion.transport.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpURI;
+import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.http.MetaData;
+import org.eclipse.jetty.http2.api.Session;
+import org.eclipse.jetty.http2.api.Stream;
+import org.eclipse.jetty.http2.client.HTTP2Client;
+import org.eclipse.jetty.http2.frames.DataFrame;
+import org.eclipse.jetty.http2.frames.HeadersFrame;
+import org.eclipse.jetty.http2.frames.ResetFrame;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.agent.protocol.AgentAuthentication;
+import pro.deta.orion.agent.protocol.AgentGeneration;
+import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentInstanceId;
+import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolDecoder;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.AgentProtocolVersion;
+import pro.deta.orion.agent.protocol.JournalFormatVersion;
+import pro.deta.orion.agent.protocol.MachineInfo;
+import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
+import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.protocol.SessionId;
+import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
+import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
+import pro.deta.orion.agentd.core.AgentControlService;
+import pro.deta.orion.agentd.core.AgentHandshake;
+import pro.deta.orion.agentd.core.AgentLaunchContext;
+import pro.deta.orion.agentd.core.LaunchPermit;
+import pro.deta.orion.agentd.transport.JettyHttp2Transport;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
 import pro.deta.orion.keymaterial.AcmeMaterialConfiguration;
@@ -36,6 +67,7 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.BindException;
 import java.net.HttpURLConnection;
@@ -46,44 +78,40 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.time.Duration;
-import java.io.ByteArrayOutputStream;
-import java.util.ArrayList;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.eclipse.jetty.http.HttpFields;
-import org.eclipse.jetty.http.HttpURI;
-import org.eclipse.jetty.http.HttpVersion;
-import org.eclipse.jetty.http.MetaData;
-import org.eclipse.jetty.http2.api.Session;
-import org.eclipse.jetty.http2.api.Stream;
-import org.eclipse.jetty.http2.client.HTTP2Client;
-import org.eclipse.jetty.http2.frames.DataFrame;
-import org.eclipse.jetty.http2.frames.HeadersFrame;
-import org.eclipse.jetty.http2.frames.ResetFrame;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.util.Callback;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JettyHTTPServerTest {
-    private static final AgentProtocolCodec AGENT_CODEC = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+    private static final AgentProtocolCodec AGENT_CODEC =
+            new AgentProtocolCodec(AgentProtocolLimits.defaults());
     private static final int HTTPS_START_ATTEMPTS = 3;
     private static final String CLUSTER = "test-cluster";
     private static final KeyMaterialDescriptor SIGNING = descriptor(
@@ -95,6 +123,129 @@ class JettyHTTPServerTest {
     private static final TrustedCertificateDescriptor SERVER_ROOT = trusted("server-root-v1");
     private static final TrustedCertificateDescriptor CLIENT_ROOT = trusted("client-root-v1");
     private static final SharedMaterial SHARED_MATERIAL = sharedMaterial();
+
+    @TempDir
+    Path agentServerRoot;
+
+    @Test
+    void realAgentdAndLivePeerExerciseDurableServerControlLifecycle() throws Exception {
+        AgentId agentId = new AgentId("live-agent");
+        AgentInstanceId instanceId = new AgentInstanceId(UUID.randomUUID());
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-10T12:00:00Z"));
+        AgentSessionServer agentServer =
+                AgentSessionServer.withPolicy(agentServerRoot, clock, Duration.ofSeconds(30));
+        byte[] reconnectToken;
+        AgentGeneration generation;
+        AgentLaunchId launchId;
+        SessionDescriptor reported = new SessionDescriptor(
+                new SessionId("live-session"),
+                AgentMessage.SessionState.RUNNING,
+                Optional.empty(),
+                Optional.empty(),
+                "running");
+
+        try (MaterialFixture material = material()) {
+            agentServer.onStart();
+            agentServer.registerAgent(agentId, "Live worker");
+            JettyHTTPServer firstServer = startHttps(
+                    material,
+                    false,
+                    OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                    List.of(),
+                    new AgentControlRoute(agentServer));
+            try {
+                URI endpoint = URI.create(firstServer.relativiseHttps("").toString());
+                var control = agentServer.provisioningControl(
+                        agentId, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
+                try (var attempt = control.nextAttempt()) {
+                    generation = attempt.request().generation();
+                    launchId = attempt.request().launchId();
+                    byte[] permit = Base64.getUrlDecoder().decode(attempt.permit().copyBytes());
+                    AgentLaunchContext context = new AgentLaunchContext(
+                            agentId, generation, launchId, instanceId, new LaunchPermit(permit));
+                    JettyHttp2Transport transport = new JettyHttp2Transport(
+                            endpoint, agentdTls(material.serverCertificate()),
+                            AgentProtocolLimits.defaults(), 8, 8);
+                    try (AgentControlService service = new AgentControlService(
+                            transport,
+                            AGENT_CODEC,
+                            new AgentHandshake(),
+                            context,
+                            "1.0.0",
+                            new MachineInfo("worker-1", "linux", "aarch64"),
+                            Map.of())) {
+                        service.start();
+                        reconnectToken = service.connection().orElseThrow().reconnectToken().copyBytes();
+                        assertThat(control.awaitOnline(launchId, Duration.ofSeconds(5))).isTrue();
+                    }
+                }
+            } finally {
+                firstServer.onStop();
+                agentServer.onStop();
+            }
+
+            agentServer.onStart();
+            JettyHTTPServer restarted = startHttps(
+                    material,
+                    false,
+                    OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                    List.of(),
+                    new AgentControlRoute(agentServer));
+            try {
+                URI endpoint = URI.create(restarted.relativiseHttps("").toString());
+                var control = agentServer.provisioningControl(
+                        agentId, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
+                try (TestAgentClient reconnect = agentClient(
+                        restarted, material.serverCertificate())) {
+                    reconnect.connect();
+                    reconnect.send(AGENT_CODEC.encode(hello(
+                            agentId, generation, launchId, instanceId,
+                            AgentAuthentication.Kind.RECONNECT_TOKEN, reconnectToken)));
+                    assertAuthenticated(reconnect);
+
+                    clock.advance(Duration.ofSeconds(31));
+                    assertThat(control.awaitOnline(launchId, Duration.ZERO)).isFalse();
+                    reconnect.send(AGENT_CODEC.encode(new AgentMessage.SessionList(List.of(reported))));
+                    reconnect.send(AGENT_CODEC.encode(new AgentMessage.Heartbeat(agentId, instanceId, 1)));
+                    assertThat(control.awaitOnline(launchId, Duration.ofSeconds(5))).isTrue();
+
+                    clock.advance(Duration.ofSeconds(31));
+                    assertThat(control.awaitOnline(launchId, Duration.ZERO)).isFalse();
+
+                    try (var replacement = control.nextAttempt();
+                         TestAgentClient replacementPeer = agentClient(
+                                 restarted, material.serverCertificate())) {
+                        assertThat(control.awaitOnline(
+                                replacement.request().launchId(), Duration.ZERO)).isFalse();
+                        replacementPeer.connect();
+                        byte[] permit = Base64.getUrlDecoder().decode(replacement.permit().copyBytes());
+                        replacementPeer.send(AGENT_CODEC.encode(hello(
+                                agentId,
+                                replacement.request().generation(),
+                                replacement.request().launchId(),
+                                new AgentInstanceId(UUID.randomUUID()),
+                                AgentAuthentication.Kind.LAUNCH_PERMIT,
+                                permit)));
+                        assertAuthenticated(replacementPeer);
+                        assertThat(control.awaitOnline(
+                                replacement.request().launchId(), Duration.ZERO)).isTrue();
+                        reconnect.terminal.get(5, TimeUnit.SECONDS);
+                    }
+                }
+            } finally {
+                restarted.onStop();
+                agentServer.onStop();
+            }
+        }
+
+        try (FileSystemSessionRegistry sessions =
+                     new FileSystemSessionRegistry(agentServerRoot.resolve("sessions"))) {
+            assertThat(sessions.ownedBy(agentId))
+                    .singleElement()
+                    .extracting(record -> record.reported())
+                    .isEqualTo(reported);
+        }
+    }
 
     @Test
     void servesMaterialBackedHttpsWithoutRootInTheServerChain() throws Exception {
@@ -607,6 +758,42 @@ class JettyHTTPServerTest {
         return new TestAgentClient(URI.create(server.relativiseHttps("").toString()), tls, demandData, receiveWindow);
     }
 
+    private static SslContextFactory.Client agentdTls(X509Certificate certificate) throws Exception {
+        KeyStore trust = KeyStore.getInstance("PKCS12");
+        trust.load(null, new char[0]);
+        trust.setCertificateEntry("server", certificate);
+        SslContextFactory.Client tls = new SslContextFactory.Client();
+        tls.setTrustStore(trust);
+        return tls;
+    }
+
+    private static AgentMessage.Hello hello(
+            AgentId agentId,
+            AgentGeneration generation,
+            AgentLaunchId launchId,
+            AgentInstanceId instanceId,
+            AgentAuthentication.Kind authenticationKind,
+            byte[] credential) {
+        return new AgentMessage.Hello(
+                AgentProtocolVersion.CURRENT,
+                JournalFormatVersion.CURRENT,
+                agentId,
+                instanceId,
+                "1.0.0",
+                new MachineInfo("worker-1", "linux", "aarch64"),
+                Map.of(),
+                Optional.of(new AgentAuthentication(
+                        generation,
+                        launchId,
+                        authenticationKind,
+                        ProtocolBytes.copyOf(credential))));
+    }
+
+    private static void assertAuthenticated(TestAgentClient client) throws InterruptedException {
+        assertThat(client.replies.poll(5, TimeUnit.SECONDS)).isInstanceOf(AgentMessage.Welcome.class);
+        assertThat(client.replies.poll(5, TimeUnit.SECONDS)).isEqualTo(new AgentMessage.RequestSessionList());
+    }
+
     private static byte[] concatenate(byte[]... items) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         for (byte[] item : items) {
@@ -1105,6 +1292,33 @@ class JettyHTTPServerTest {
         @Override
         public void close() {
             owner.close();
+        }
+    }
+
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> current;
+
+        private MutableClock(Instant current) {
+            this.current = new AtomicReference<>(current);
+        }
+
+        private void advance(Duration duration) {
+            current.updateAndGet(value -> value.plus(duration));
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return current.get();
         }
     }
 

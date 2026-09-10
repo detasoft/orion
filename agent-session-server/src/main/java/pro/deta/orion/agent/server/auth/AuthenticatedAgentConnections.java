@@ -43,7 +43,7 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
     }
 
     @TestOnly
-    static AuthenticatedAgentConnections withPolicy(
+    public static AuthenticatedAgentConnections withPolicy(
             Function<AuthenticatedConnectionContext, AgentControlHandler.Session> publisher,
             Clock clock,
             Duration heartbeatDeadline) {

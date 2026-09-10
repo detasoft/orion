@@ -12,9 +12,12 @@ import pro.deta.orion.agent.server.registry.AgentRegistryException;
 import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
 import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter.ServiceLifecycle;
+import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Objects;
 
 /** Owns the durable and transient server-side state behind the Agent control endpoint. */
@@ -30,13 +33,26 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
     };
 
     private final Path root;
+    private final Clock clock;
+    private final Duration heartbeatDeadline;
     private FileSystemAgentRegistry agentRegistry;
     private FileSystemSessionRegistry sessionRegistry;
     private AuthenticatedAgentConnections connections;
     private AgentControlAuthenticator authenticator;
 
     public AgentSessionServer(Path root) {
+        this(root, Clock.systemUTC(), AuthenticatedAgentConnections.DEFAULT_HEARTBEAT_DEADLINE);
+    }
+
+    @TestOnly
+    public static AgentSessionServer withPolicy(Path root, Clock clock, Duration heartbeatDeadline) {
+        return new AgentSessionServer(root, clock, heartbeatDeadline);
+    }
+
+    private AgentSessionServer(Path root, Clock clock, Duration heartbeatDeadline) {
         this.root = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
+        this.clock = Objects.requireNonNull(clock, "clock");
+        this.heartbeatDeadline = Objects.requireNonNull(heartbeatDeadline, "heartbeatDeadline");
     }
 
     @Override
@@ -52,7 +68,8 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             SessionReconciliationPublisher reconciliation =
                     new SessionReconciliationPublisher(openedSessions, ignored -> TERMINAL_SESSION);
             AuthenticatedAgentConnections openedConnections =
-                    new AuthenticatedAgentConnections(reconciliation::publish);
+                    AuthenticatedAgentConnections.withPolicy(
+                            reconciliation::publish, clock, heartbeatDeadline);
             AgentControlAuthenticator openedAuthenticator =
                     new AgentControlAuthenticator(openedAgents, openedConnections::activate);
             agentRegistry = openedAgents;

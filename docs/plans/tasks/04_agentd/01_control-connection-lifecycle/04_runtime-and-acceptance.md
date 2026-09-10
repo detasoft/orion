@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on: all preceding sibling tasks.
-Server acceptance dependency: [Runtime integration](../../03_agent-session-server/01_control-and-registries/05_runtime-and-provisioning-integration.md)
+Server acceptance dependency: completed runtime integration (`3758705a`, `490b458b`)
 
 Wire authentication, reconnect, heartbeat, and discovery reporting into the
 real AgentD entry point and prove the shared server-agent control contract.

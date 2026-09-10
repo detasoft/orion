@@ -3,7 +3,7 @@
 Status: todo
 Depends on: completed command-core-and-exec (3ed68b68),
 completed interactive-terminal (1f99a9ea),
-../03_agent-session-server/01_control-and-registries/TASK.md,
+completed server control and registries (`3e4a6156`, `3758705a`, `490b458b`),
 ../03_agent-session-server/03_command-service.md,
 ../03_agent-session-server/04_live-event-api.md
 

@@ -431,6 +431,28 @@ HTTPS and ACME are configured under `<system>` in the versioned `orion.xml`:
 ACME account and domain private keys remain inside `material.p12`. The ACME
 admin route returns only the public certificate chain.
 
+### AgentD control HTTPS
+
+AgentD opens its long-lived control stream at `POST /agent/control`. The
+listener accepts this route only over HTTPS with HTTP/2. Set AgentD's `--server`
+to the absolute `publicUrl` origin (for example,
+`https://orion.example.test:8443`); AgentD appends the control path.
+
+The HTTPS identity named by `<identity>` must already exist in Orion's
+protected material store. Its certificate chain must be trusted by the AgentD
+JVM, and its subject alternative names must cover the host in `--server`.
+AgentD currently authenticates with its one-time launch permit and subsequent
+in-memory reconnect token, not a TLS client certificate. Keep
+`<clientAuthentication>disabled</clientAuthentication>` (or `want` when other
+clients use certificates); `required` rejects the current AgentD client before
+the protocol handshake. Client trust anchors configure verification of TLS
+client certificates and do not make AgentD trust Orion's server certificate.
+
+Orion persists server-side agent and reconciled session records below
+`<bootstrap.baseDir>/agent-session-server`. AgentD's separate `--state-dir`
+holds its process lock and local session journals. Remote host provisioning,
+SSH credential resolution, and packaged deployment are administered separately.
+
 `storage.location` supports local filesystem storage with `file:` locations.
 `bootstrap.accessControl.location` can point to a local ACL directory with
 `file:` or to a repository in Orion's configured storage with
