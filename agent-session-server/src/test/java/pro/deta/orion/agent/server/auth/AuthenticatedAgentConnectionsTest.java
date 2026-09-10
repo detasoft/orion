@@ -133,12 +133,76 @@ class AuthenticatedAgentConnectionsTest {
         }
     }
 
+    @Test
+    void generationRevocationClosesCurrentConnectionAndFencesLatePublication() {
+        List<Throwable> closures = new ArrayList<>();
+        AtomicInteger publications = new AtomicInteger();
+        AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(
+                ignored -> {
+                    publications.incrementAndGet();
+                    return recordingSession(new ArrayList<>(), closures);
+                });
+        AtomicInteger renewals = new AtomicInteger();
+        TestConnection currentTransport = new TestConnection();
+        AuthenticatedConnectionContext current = context(
+                GENERATION, LAUNCH_ID, "connection-1", currentTransport, renewals);
+        connections.activate(current);
+
+        connections.revokeGeneration(AGENT_ID, GENERATION);
+
+        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(currentTransport.closed).isTrue();
+        assertThat(closures).containsExactly((Throwable) null);
+        assertThat(current.renewReconnectToken())
+                .isEqualTo(AuthenticatedConnectionContext.RenewalResult.REJECTED);
+        assertThat(renewals).hasValue(0);
+
+        TestConnection lateTransport = new TestConnection();
+        AuthenticatedConnectionContext late = context(
+                GENERATION, LAUNCH_ID, "connection-late", lateTransport, new AtomicInteger());
+        assertThatThrownBy(() -> connections.activate(late))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(lateTransport.closed).isTrue();
+        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(publications).hasValue(1);
+    }
+
+    @Test
+    void staleGenerationRevocationDoesNotCloseNewerConnection() {
+        AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(
+                ignored -> recordingSession(new ArrayList<>(), new ArrayList<>()));
+        AgentGeneration replacementGeneration = new AgentGeneration(GENERATION.value() + 1);
+        AgentLaunchId replacementLaunch = new AgentLaunchId(UUID.randomUUID());
+        TestConnection replacementTransport = new TestConnection();
+        AuthenticatedConnectionContext replacement = context(
+                replacementGeneration,
+                replacementLaunch,
+                "connection-2",
+                replacementTransport,
+                new AtomicInteger());
+        connections.activate(replacement);
+
+        connections.revokeGeneration(AGENT_ID, GENERATION);
+
+        assertThat(connections.active(AGENT_ID)).contains(replacement);
+        assertThat(replacementTransport.closed).isFalse();
+    }
+
     private static AuthenticatedConnectionContext context(
             String connectionId, TestConnection connection, AtomicInteger renewals) {
+        return context(GENERATION, LAUNCH_ID, connectionId, connection, renewals);
+    }
+
+    private static AuthenticatedConnectionContext context(
+            AgentGeneration generation,
+            AgentLaunchId launchId,
+            String connectionId,
+            TestConnection connection,
+            AtomicInteger renewals) {
         return new AuthenticatedConnectionContext(
                 AGENT_ID,
-                GENERATION,
-                LAUNCH_ID,
+                generation,
+                launchId,
                 INSTANCE_ID,
                 "2.4.1",
                 MACHINE,

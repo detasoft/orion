@@ -1,5 +1,6 @@
 package pro.deta.orion.agent.server.auth;
 
+import pro.deta.orion.agent.protocol.AgentGeneration;
 import pro.deta.orion.agent.protocol.AgentId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
@@ -15,6 +16,7 @@ import java.util.function.Function;
 public final class AuthenticatedAgentConnections {
     private final Function<AuthenticatedConnectionContext, AgentControlHandler.Session> publisher;
     private final Map<AgentId, ActiveSession> active = new HashMap<>();
+    private final Map<AgentId, Long> revokedThrough = new HashMap<>();
     private final ReentrantLock lock = new ReentrantLock();
 
     public AuthenticatedAgentConnections(
@@ -24,10 +26,17 @@ public final class AuthenticatedAgentConnections {
 
     public AgentControlHandler.Session activate(AuthenticatedConnectionContext context) {
         Objects.requireNonNull(context, "context");
+        rejectIfRevoked(context);
         AgentControlHandler.Session delegate = Objects.requireNonNull(
                 publisher.apply(context), "authenticated session");
         ActiveSession replacement = new ActiveSession(context, delegate);
-        ActiveSession previous = replace(replacement);
+        ActiveSession previous;
+        try {
+            previous = replace(replacement);
+        } catch (IllegalStateException failure) {
+            reject(context, failure);
+            throw failure;
+        }
         if (previous != null) {
             try {
                 previous.context.connection().close();
@@ -39,11 +48,94 @@ public final class AuthenticatedAgentConnections {
         return replacement;
     }
 
+    private void rejectIfRevoked(AuthenticatedConnectionContext context) {
+        boolean revoked;
+        lock.lock();
+        try {
+            revoked = isRevoked(context);
+        } finally {
+            lock.unlock();
+        }
+        if (revoked) {
+            IllegalStateException failure = new IllegalStateException("Agent generation has been revoked");
+            reject(context, failure);
+            throw failure;
+        }
+    }
+
+    private static void reject(
+            AuthenticatedConnectionContext context, IllegalStateException failure) {
+        context.revoke();
+        try {
+            context.connection().close();
+        } catch (RuntimeException closeFailure) {
+            failure.addSuppressed(closeFailure);
+        }
+    }
+
+    public void revokeGeneration(AgentId agentId, AgentGeneration generation) {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(generation, "generation");
+        ActiveSession revoked = recordRevocation(agentId, generation.value());
+        if (revoked != null) {
+            try {
+                revoked.context.connection().close();
+                revoked.delegate.onClosed(null);
+            } finally {
+                revoked.unlock();
+            }
+        }
+    }
+
+    private ActiveSession recordRevocation(AgentId agentId, long generation) {
+        ActiveSession candidate;
+        lock.lock();
+        try {
+            revokedThrough.merge(agentId, generation, Math::max);
+            candidate = active.get(agentId);
+        } finally {
+            lock.unlock();
+        }
+        while (candidate != null) {
+            candidate.lock();
+            boolean removed = false;
+            lock.lock();
+            try {
+                ActiveSession current = active.get(agentId);
+                if (current != candidate) {
+                    candidate.unlock();
+                    candidate = current;
+                    continue;
+                }
+                if (candidate.context.generation().value() <= revokedThrough.get(agentId)) {
+                    active.remove(agentId);
+                    candidate.revoke();
+                    removed = true;
+                }
+            } finally {
+                lock.unlock();
+            }
+            if (removed) {
+                return candidate;
+            }
+            candidate.unlock();
+            return null;
+        }
+        return null;
+    }
+
+    private boolean isRevoked(AuthenticatedConnectionContext context) {
+        return context.generation().value() <= revokedThrough.getOrDefault(context.agentId(), 0L);
+    }
+
     private ActiveSession replace(ActiveSession replacement) {
         while (true) {
             ActiveSession previous;
             lock.lock();
             try {
+                if (isRevoked(replacement.context)) {
+                    throw new IllegalStateException("Agent generation has been revoked");
+                }
                 previous = active.get(replacement.context.agentId());
                 if (previous == null) {
                     active.put(replacement.context.agentId(), replacement);
@@ -56,6 +148,9 @@ public final class AuthenticatedAgentConnections {
             boolean replaced = false;
             lock.lock();
             try {
+                if (isRevoked(replacement.context)) {
+                    throw new IllegalStateException("Agent generation has been revoked");
+                }
                 if (active.get(replacement.context.agentId()) == previous) {
                     previous.revoke();
                     active.put(replacement.context.agentId(), replacement);
