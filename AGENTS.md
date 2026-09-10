@@ -2,10 +2,12 @@
 
 ## Routing and ownership
 
-- Select Quick, Simple, or Change from
+- For change requests, select Quick, Simple, or Change from
   [the repository workflow definitions](docs/definitions.md#repository-workflows).
   An explicitly requested workflow is binding while it remains safe and
   sufficient for the work.
+  Read-only review, explanation, planning, and status requests do not select an
+  execution workflow; requested module-report updates use `orion-review`.
 - Use `orion-task-runner` for every task-tree operation. Executing a task-tree
   leaf uses Change workflow; planning, status, and task-tree edits alone do not
   start or claim implementation.
