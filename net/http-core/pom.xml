@@ -78,6 +78,10 @@
             <groupId>pro.deta.orion</groupId>
             <artifactId>agent-protocol</artifactId>
         </dependency>
+        <dependency>
+            <groupId>pro.deta.orion</groupId>
+            <artifactId>agent-session-server</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.shredzone.acme4j</groupId>

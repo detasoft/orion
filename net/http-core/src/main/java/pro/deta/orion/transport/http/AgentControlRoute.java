@@ -21,6 +21,7 @@ import pro.deta.orion.agent.protocol.AgentProtocolDecoder;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
+import pro.deta.orion.agent.server.connection.AgentControlHandler;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
