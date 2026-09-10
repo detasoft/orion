@@ -162,7 +162,7 @@ class NativeControlLivePeerTest {
     }
 
     private Path extractSessionHost() throws Exception {
-        Path builtExecutable = Path.of("../session-host/target/debug/session-host");
+        Path builtExecutable = Path.of("../session-host/target/cargo/debug/session-host");
         assertThat(builtExecutable).isRegularFile().isExecutable();
         Path executable = temporaryDirectory.resolve("session-host");
         Files.copy(builtExecutable, executable);
