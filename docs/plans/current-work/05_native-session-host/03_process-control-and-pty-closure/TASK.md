@@ -8,13 +8,13 @@ completed Unix process host and the
 Keep a live `session-host` as the sole declaration that a session is running,
 while exposing its owned processes for inspection and addressed signalling.
 
-Next: implement the common LIST_PROCESSES/addressed-signal and PTY_CLOSED
-contracts against the integrated Linux owner and current source-aware control
-path. The earlier design is in branch
+LIST_PROCESSES and addressed signalling are integrated in `10e92141`.
+Next: implement PTY_CLOSED against the integrated Linux owner and current
+source-aware control path. The earlier design is in branch
 `codex/linux-process-tree-control-47c2`, worktree
 `.worktrees/linux-process-tree-control-47c2`, at `79386060`.
-That branch contains useful design but no LIST_PROCESSES request or PTY_CLOSED
-event implementation. This composite holds no execution claim.
+That branch contains useful PTY-closure design but no PTY_CLOSED event
+implementation. This composite holds no execution claim.
 
 ## Scope
 

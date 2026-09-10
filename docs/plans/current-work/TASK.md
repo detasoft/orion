@@ -22,9 +22,10 @@ Replication follows authenticated ownership, then commands and clients.
 ### Native session execution
 
 Linux process ownership is integrated in `c0a764d1`; real delegated-cgroup
-acceptance awaits a modern validation host. LIST_PROCESSES and PTY_CLOSED can
-now proceed against the integrated owner and current source-aware controls.
-The preserved Linux branch retains their earlier design.
+acceptance awaits a modern validation host. LIST_PROCESSES and addressed
+signalling are integrated in `10e92141`; PTY_CLOSED can now proceed against the
+integrated owner and current source-aware controls. The preserved Linux branch
+retains its earlier PTY-closure design.
 
 ### Remote Git
 

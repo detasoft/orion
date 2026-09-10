@@ -30,6 +30,7 @@ See [the reconciliation record](../../2026-09-10-linux-process-control-reconcili
 
 Branch `codex/linux-process-tree-control-47c2` and worktree
 `.worktrees/linux-process-tree-control-47c2` retain the earlier design at
-`79386060`. Keep them until the separate LIST_PROCESSES and PTY_CLOSED leaves
-have reconciled their useful design. Its intent ledger, host-owned grace timer,
-repeated signalling, and old operation framing are obsolete.
+`79386060`. LIST_PROCESSES reconciled its useful design in `10e92141`; keep the
+branch and worktree until the PTY_CLOSED leaf has reconciled the remaining
+design. Its intent ledger, host-owned grace timer, repeated signalling, and old
+operation framing are obsolete.

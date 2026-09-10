@@ -55,15 +55,10 @@ files are historical source, not current control requirements. In particular,
 their intent ledger, grace timer, repeated signalling, and old operation
 framing must not be restored.
 
-The useful remaining design is:
+LIST_PROCESSES and addressed signalling later integrated in `10e92141`, using
+the reconciled process-token and retained-identity design. The useful remaining
+design is PTY closure:
 
-- LIST_PROCESSES is a read-only, non-journaled snapshot of owned processes.
-  Entries expose an incarnation-local, nonzero, never-reused process token,
-  diagnostic OS PID, and original-root flag. Dead tokens are retired.
-- Addressed SIGNAL resolves a token through the existing owner to a retained
-  kernel identity. Unknown/stale tokens never fall back to numeric PID. It
-  must use current source-aware admission and result semantics. Foreground
-  signalling retains its terminal role; TERMINATE addresses the whole tree.
 - PTY_CLOSED is emitted exactly once by the terminal reader after its final
   output. Output and terminal controls share the existing serialization
   boundary; later input/resize fail through ordinary command results. Closing
@@ -72,6 +67,6 @@ The useful remaining design is:
   new forms without changing frozen fixtures. No persisted lifecycle state or
   second control execution path is needed.
 
-These remain separate task leaves. No process-list request, addressed-signal
-framing, or PTY_CLOSED event is implemented by this checkpoint. Keep the source
-branch/worktree until those leaves have reconciled their detailed designs.
+No process-list request, addressed-signal framing, or PTY_CLOSED event was
+implemented by this reconciliation checkpoint. Keep the source branch/worktree
+until the PTY_CLOSED leaf has reconciled its detailed design.
