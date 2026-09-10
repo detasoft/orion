@@ -35,6 +35,12 @@ public final class SessionEventCodec {
                 writer.unsigned(value.outcome().wireCode());
                 writer.text(value.detail());
             }
+            case SessionEventPayload.HostWarning value -> {
+                writer.unsigned(SessionEventType.HOST_WARNING);
+                writer.array(2);
+                writer.unsigned(value.code());
+                writer.text(value.message());
+            }
             case SessionEventPayload.PtyOutput value -> {
                 writer.unsigned(SessionEventType.PTY_OUTPUT);
                 writer.bytes(value.bytes());
@@ -120,6 +126,8 @@ public final class SessionEventCodec {
         return switch (event.eventType()) {
             case SessionEventType.COMMAND_RESULT -> Optional.of(
                     decodeCommandResult(payloadArray(event, "COMMAND_RESULT")));
+            case SessionEventType.HOST_WARNING -> Optional.of(
+                    decodeHostWarning(payloadArray(event, "HOST_WARNING")));
             case SessionEventType.PTY_OUTPUT -> Optional.of(
                     new SessionEventPayload.PtyOutput(
                             ProtocolBytes.copyOf(bytes(payload(event), "PTY_OUTPUT"))));
@@ -167,6 +175,18 @@ public final class SessionEventCodec {
                 ProtocolBytes.copyOf(sourceEnvelope),
                 outcome,
                 detail);
+    }
+
+    private SessionEventPayload.HostWarning decodeHostWarning(List<CborReader.Value> fields)
+            throws AgentProtocolException {
+        requireFields(fields, 2, "HOST_WARNING");
+        int code = unsignedShort(fields.get(0), "HOST_WARNING code");
+        String message = text(fields.get(1), "HOST_WARNING message");
+        try {
+            return new SessionEventPayload.HostWarning(code, message);
+        } catch (IllegalArgumentException exception) {
+            throw new AgentProtocolException(INVALID_FIELD, exception.getMessage(), exception);
+        }
     }
 
     private SessionEventPayload.PtyInput decodePtyInput(List<CborReader.Value> fields)

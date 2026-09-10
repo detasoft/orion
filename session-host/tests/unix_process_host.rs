@@ -66,6 +66,45 @@ fn missing_working_directory_records_the_authoritative_start_failure() {
     assert_start_failure(&events, "child failed to change working directory");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn unavailable_cgroup_warns_exactly_once_before_process_started() {
+    let directory = temporary_directory("cgroup-fallback-warning");
+    let mut host = HostGuard::spawn(
+        directory,
+        &["/bin/sh", "-c", "printf fallback-ready"],
+        "xterm-256color",
+        80,
+        24,
+    );
+
+    let status = host.wait();
+    assert!(status.success(), "session-host exited with {status}");
+    let events = journal_reader::read(host.directory(), 0).unwrap().events;
+    let warnings = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| event.event_type == event_type::HOST_WARNING)
+        .collect::<Vec<_>>();
+    if warnings.is_empty() {
+        eprintln!("cgroup fallback assertion skipped: writable delegated cgroup v2 is available");
+        return;
+    }
+
+    assert_eq!(warnings.len(), 1);
+    let (warning_index, warning) = warnings[0];
+    assert_eq!(u16_at(&warning.payload[0..2]), protocol::host_warning::CGROUP_FALLBACK);
+    let reason = std::str::from_utf8(&warning.payload[2..]).unwrap();
+    assert!(!reason.is_empty());
+    assert!(reason.len() <= 4096);
+    let started_index = events
+        .iter()
+        .position(|event| event.event_type == event_type::PROCESS_STARTED)
+        .unwrap();
+    assert!(warning_index < started_index);
+    assert_eq!(terminal_output(&events), b"fallback-ready");
+}
+
 #[test]
 fn post_journal_initialization_failure_records_the_authoritative_outcome() {
     let directory = DirectoryGuard::new(temporary_directory("post-journal-failure"));
@@ -351,10 +390,7 @@ fn hosts_a_real_tty_and_preserves_raw_output() {
     let result = journal_reader::read(host.directory(), 0).unwrap();
     let output = terminal_output(&result.events);
     assert!(contains(&output, b"\x1b[31mraw\xff\x1b[0m"));
-    assert_eq!(
-        result.events.first().unwrap().event_type,
-        event_type::PROCESS_STARTED
-    );
+    assert_start_prefix(&result.events, event_type::PROCESS_STARTED);
     assert_eq!(
         result
             .events
@@ -417,10 +453,7 @@ fn bounds_compresses_and_replays_the_session_journal() {
 
     let result = journal_reader::read_after(host.directory(), 0).unwrap();
     assert_eq!(terminal_output(&result.events), b"bounded-journal-output");
-    assert_eq!(
-        result.events.first().unwrap().event_type,
-        event_type::PROCESS_STARTED
-    );
+    assert_start_prefix(&result.events, event_type::PROCESS_STARTED);
     assert_eq!(
         result.events.last().unwrap().event_type,
         event_type::PROCESS_EXITED
@@ -991,15 +1024,179 @@ fn durable_acknowledgement_controls_retention() {
     assert!(host.wait().success());
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn force_waits_for_and_reaps_a_double_fork_setsid_descendant_after_pty_closure() {
+    let directory = temporary_directory("double-fork-closed-pty");
+    let pid_file = directory.join("grandchild.pid");
+    let mut host = HostGuard::spawn(
+        directory,
+        &[
+            "/usr/bin/perl",
+            "-MPOSIX",
+            "-e",
+            concat!(
+                "pipe(my $ready_read, my $ready_write) or die; ",
+                "defined(my $first = fork) or die; if ($first) { close $ready_write; ",
+                "sysread($ready_read, my $ready, 1) == 1 or die; exit 0; } ",
+                "close $ready_read; defined(my $second = fork) or die; exit 0 if $second; ",
+                "POSIX::setsid() >= 0 or die; ",
+                "open STDIN, q(<), q(/dev/null) or die; ",
+                "open STDOUT, q(>), q(/dev/null) or die; ",
+                "open STDERR, q(>), q(/dev/null) or die; ",
+                "open my $pid_file, q(>), $ARGV[0] or die; ",
+                "print {$pid_file} qq($$\n); close $pid_file; ",
+                "syswrite($ready_write, q(1), 1) == 1 or die; close $ready_write; sleep 30",
+            ),
+            pid_file.to_str().unwrap(),
+        ],
+        "xterm-256color",
+        80,
+        24,
+    );
+    let descendant = wait_for_pid_file(&pid_file);
+    let leader = i32::try_from(
+        journal::read_metadata(host.directory())
+            .unwrap()
+            .child_pid
+            .unwrap(),
+    )
+    .unwrap();
+    wait_for_process_exit(leader);
+    assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
+
+    let mut stream = connect(host.directory());
+    let terminate = [1_u8, 0, 0, 0];
+    let response = operation_request(
+        &mut stream,
+        control_message::TERMINATE,
+        1,
+        b"server-envelope-double-fork",
+        &terminate,
+    );
+    assert_eq!(response.message_type, control_message::RECEIVED);
+    drop(stream);
+
+    assert!(host.wait_with_timeout(Duration::from_secs(3)).success());
+    wait_for_process_exit(descendant);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn explicit_force_finds_a_descendant_forked_after_graceful_termination() {
+    let directory = temporary_directory("fork-during-grace");
+    let pid_file = directory.join("late-child.pid");
+    let mut host = HostGuard::spawn(
+        directory,
+        &[
+            "/usr/bin/perl",
+            "-e",
+            concat!(
+                "$| = 1; my $spawned = 0; ",
+                "$SIG{TERM} = sub { return if $spawned++; ",
+                "defined(my $pid = fork) or die; if ($pid == 0) { ",
+                "$SIG{TERM} = q(IGNORE); sleep 30; exit 0; } ",
+                "open my $pid_file, q(>), $ARGV[0] or die; ",
+                "print {$pid_file} qq($pid\n); close $pid_file; }; ",
+                "print q(READY); sleep 30 while 1",
+            ),
+            pid_file.to_str().unwrap(),
+        ],
+        "xterm-256color",
+        80,
+        24,
+    );
+    wait_for_output(host.directory(), b"READY");
+
+    let terminate = [0_u8; 4];
+    let mut stream = connect(host.directory());
+    let response = operation_request(
+        &mut stream,
+        control_message::TERMINATE,
+        1,
+        b"server-envelope-grace-race",
+        &terminate,
+    );
+    assert_eq!(response.message_type, control_message::RECEIVED);
+    let descendant = wait_for_pid_file(&pid_file);
+    thread::sleep(Duration::from_millis(100));
+    assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
+    send_operation(&mut stream, control_message::TERMINATE, 2,
+        b"server-envelope-force-late-child", &[1, 0, 0, 0]);
+    drop(stream);
+
+    assert!(host.wait_with_timeout(Duration::from_secs(4)).success());
+    wait_for_process_exit(descendant);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn delegated_cgroup_contains_the_child_and_is_removed_after_host_exit() {
+    let directory = temporary_directory("real-cgroup-lifecycle");
+    let mut host = HostGuard::spawn(
+        directory,
+        &["/bin/sh", "-c", "printf READY; sleep 30"],
+        "xterm-256color",
+        80,
+        24,
+    );
+    wait_for_output(host.directory(), b"READY");
+    let events = journal_reader::read(host.directory(), 0).unwrap().events;
+    if let Some(warning) = events
+        .iter()
+        .find(|event| event.event_type == event_type::HOST_WARNING)
+    {
+        let reason = std::str::from_utf8(&warning.payload[2..]).unwrap();
+        eprintln!(
+            "real cgroup lifecycle test skipped: writable delegated cgroup v2 unavailable: {reason}"
+        );
+        return;
+    }
+
+    let child_pid = journal::read_metadata(host.directory())
+        .unwrap()
+        .child_pid
+        .unwrap();
+    let membership = fs::read_to_string(format!("/proc/{child_pid}/cgroup")).unwrap();
+    let cgroup_path = resolve_unified_cgroup_path(
+        &membership,
+        &fs::read_to_string("/proc/self/mountinfo").unwrap(),
+    );
+    assert!(
+        cgroup_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("orion-session-")
+    );
+
+    let mut stream = connect(host.directory());
+    let terminate = [1_u8, 0, 0, 0];
+    let response = operation_request(
+        &mut stream,
+        control_message::TERMINATE,
+        1,
+        b"server-envelope-real-cgroup",
+        &terminate,
+    );
+    assert_eq!(response.message_type, control_message::RECEIVED);
+    drop(stream);
+    assert!(host.wait_with_timeout(Duration::from_secs(3)).success());
+    assert!(!cgroup_path.exists(), "session cgroup was not removed");
+}
+
 #[test]
 fn sends_interactive_signals_to_the_foreground_process_group() {
     let directory = temporary_directory("foreground-signal");
+    let background_pid_file = directory.join("background.pid");
     let mut host = HostGuard::spawn(
         directory,
         &[
             "/bin/sh",
             "-c",
-            "set -m; printf READY; sleep 30; printf FINISHED",
+            "set -m; sleep 30 & printf '%s\n' $! > \"$1\"; printf READY; sleep 30; printf FINISHED",
+            "foreground-signal",
+            background_pid_file.to_str().unwrap(),
         ],
         "xterm-256color",
         80,
@@ -1016,6 +1213,11 @@ fn sends_interactive_signals_to_the_foreground_process_group() {
         b"server-envelope-signal",
         &signal,
     );
+    wait_for_output(host.directory(), b"FINISHED");
+    let background_pid = wait_for_pid_file(&background_pid_file);
+    assert_eq!(unsafe { libc::kill(background_pid, 0) }, 0);
+    send_operation(&mut stream, control_message::TERMINATE, 2,
+        b"server-envelope-background-terminate", &[1, 0, 0, 0]);
     drop(stream);
 
     let status = host.wait_with_timeout(Duration::from_secs(2));
@@ -1592,9 +1794,8 @@ fn base_arguments_with_cwd(
 }
 
 fn assert_start_failure(events: &[JournalEvent], diagnostic_fragment: &str) {
-    assert_eq!(events.len(), 1);
-    let event = &events[0];
-    assert_eq!(event.event_type, event_type::SESSION_START_FAILED);
+    assert_start_prefix(events, event_type::SESSION_START_FAILED);
+    let event = events.iter().find(|event| event.event_type == event_type::SESSION_START_FAILED).unwrap();
     let command_id_length = usize::from(u16_at(&event.payload[0..2]));
     let command_id_end = 2 + command_id_length;
     assert_eq!(&event.payload[2..command_id_end], b"command.start");
@@ -1606,6 +1807,29 @@ fn assert_start_failure(events: &[JournalEvent], diagnostic_fragment: &str) {
     assert!(
         diagnostic.contains(diagnostic_fragment),
         "unexpected start failure diagnostic: {diagnostic}"
+    );
+}
+
+fn assert_start_prefix(events: &[JournalEvent], outcome: u16) {
+    let outcomes = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.event_type,
+                event_type::PROCESS_STARTED | event_type::SESSION_START_FAILED
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].event_type, outcome);
+    let outcome_index = events
+        .iter()
+        .position(|event| std::ptr::eq(event, outcomes[0]))
+        .unwrap();
+    assert!(
+        events[..outcome_index]
+            .iter()
+            .all(|event| event.event_type == event_type::HOST_WARNING)
     );
 }
 
@@ -1917,6 +2141,69 @@ fn wait_for_process_exit(pid: i32) {
         );
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn wait_for_pid_file(path: &Path) -> i32 {
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        if let Ok(contents) = fs::read_to_string(path)
+            && let Ok(pid) = contents.trim().parse::<i32>()
+        {
+            return pid;
+        }
+        if Instant::now() >= deadline {
+            let entries = fs::read_dir(path.parent().unwrap())
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.file_name())
+                .collect::<Vec<_>>();
+            panic!(
+                "timed out waiting for PID file {}; directory entries: {entries:?}",
+                path.display()
+            );
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_unified_cgroup_path(membership: &str, mountinfo: &str) -> PathBuf {
+    let membership = membership
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .map(PathBuf::from)
+        .expect("unified cgroup membership is missing");
+    let mut best = None;
+    for line in mountinfo.lines() {
+        let fields = line.split_ascii_whitespace().collect::<Vec<_>>();
+        let Some(separator) = fields.iter().position(|field| *field == "-") else {
+            continue;
+        };
+        if fields.get(separator + 1) != Some(&"cgroup2") {
+            continue;
+        }
+        let root = PathBuf::from(decode_mountinfo_test_path(fields[3]));
+        let Ok(relative) = membership.strip_prefix(&root) else {
+            continue;
+        };
+        let candidate = PathBuf::from(decode_mountinfo_test_path(fields[4])).join(relative);
+        if best.as_ref().is_none_or(|(depth, _): &(usize, PathBuf)| {
+            root.components().count() > *depth
+        }) {
+            best = Some((root.components().count(), candidate));
+        }
+    }
+    best.map(|(_, path)| path)
+        .expect("unified cgroup mount is missing")
+}
+
+#[cfg(target_os = "linux")]
+fn decode_mountinfo_test_path(path: &str) -> String {
+    path.replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
 }
 
 fn terminal_output(events: &[JournalEvent]) -> Vec<u8> {

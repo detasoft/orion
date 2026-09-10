@@ -93,6 +93,16 @@ class AgentProtocolFixtureTest {
         assertThat(event.encodedRecord().toByteArray()).containsExactly(fixture);
     }
 
+    @Test
+    void hostWarningMatchesSharedVersionOneFixture() throws Exception {
+        SessionEventPayload.HostWarning warning = new SessionEventPayload.HostWarning(1, "permission denied");
+        byte[] fixture = fixture("process-control-events-v1.hex");
+
+        assertThat(EVENT_CODEC.encode(new EventId(1), warning)).containsExactly(fixture);
+        SessionEventRecord event = EVENT_CODEC.decode(fixture);
+        assertThat(EVENT_CODEC.decodeKnownPayload(event)).contains(warning);
+    }
+
     private static byte[] fixture(String name) throws IOException {
         ClassLoader classLoader = AgentProtocolFixtureTest.class.getClassLoader();
         try (InputStream input = Objects.requireNonNull(

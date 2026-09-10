@@ -7,11 +7,13 @@ pub const MAX_PAYLOAD_LENGTH: usize = 16 * 1024 * 1024;
 pub const MAX_START_DIAGNOSTIC_BYTES: usize = 1024 * 1024;
 pub const START_DIAGNOSTIC_PREFIX_BYTES: usize = 64 * 1024;
 pub const START_DIAGNOSTIC_SUFFIX_BYTES: usize = 960 * 1024;
+pub const MAX_HOST_WARNING_MESSAGE_BYTES: usize = 4096;
 
 pub const CONTROL_MAGIC: &[u8; 4] = b"ORCT";
 
 pub mod event_type {
     pub const COMMAND_RESULT: u16 = 0x0002;
+    pub const HOST_WARNING: u16 = 0x0003;
 
     pub const PTY_OUTPUT: u16 = 0x0100;
     pub const PTY_INPUT: u16 = 0x0101;
@@ -29,6 +31,10 @@ pub mod event_type {
     pub const PROMPT: u16 = 0x1020;
     pub const ARTIFACT: u16 = 0x1030;
     pub const CHECKPOINT: u16 = 0x1040;
+}
+
+pub mod host_warning {
+    pub const CGROUP_FALLBACK: u16 = 1;
 }
 
 pub mod control_message {
@@ -387,6 +393,27 @@ pub fn encode_command_result(
     Ok(encoded)
 }
 
+pub fn host_warning_payload(code: u16, message: &str) -> Result<Vec<u8>, EncodeError> {
+    validate_host_warning(code, message)?;
+    let mut payload = Vec::with_capacity(2 + message.len());
+    payload.extend_from_slice(&code.to_le_bytes());
+    payload.extend_from_slice(message.as_bytes());
+    Ok(payload)
+}
+
+pub fn encode_host_warning(
+    event_id: u64,
+    code: u16,
+    message: &str,
+) -> Result<Vec<u8>, EncodeError> {
+    validate_host_warning(code, message)?;
+    let mut encoded = event_prefix(event_id, event_type::HOST_WARNING);
+    cbor_array(&mut encoded, 2);
+    cbor_unsigned(&mut encoded, u64::from(code));
+    cbor_text(&mut encoded, message);
+    Ok(encoded)
+}
+
 pub fn valid_terminal_dimensions(cols: u32, rows: u32) -> bool {
     (1..=65535).contains(&cols) && (1..=65535).contains(&rows)
 }
@@ -397,6 +424,25 @@ pub fn valid_signal(kind: u16, platform_code: i32) -> bool {
         0xffff => platform_code >= 0,
         _ => false,
     }
+}
+
+fn validate_host_warning(code: u16, message: &str) -> Result<(), EncodeError> {
+    if code == 0 {
+        return Err(EncodeError::InvalidPayload(
+            "host warning code must be nonzero",
+        ));
+    }
+    if message.is_empty() {
+        return Err(EncodeError::InvalidPayload(
+            "host warning message must not be empty",
+        ));
+    }
+    if message.len() > MAX_HOST_WARNING_MESSAGE_BYTES {
+        return Err(EncodeError::InvalidPayload(
+            "host warning message exceeds 4096 bytes",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_operation_sequence(operation_sequence: u64) -> Result<(), EncodeError> {
@@ -614,6 +660,44 @@ fn put_u64(target: &mut [u8], value: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checked_in_process_control_fixture_is_shared_and_stable() {
+        let native = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("protocol/fixtures/process-control-events-v1.hex");
+        let agent = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../agent-protocol/protocol/fixtures/process-control-events-v1.hex");
+        let generated = protocol_fixture::process_control_events_hex();
+        assert_eq!(std::fs::read_to_string(native).unwrap(), generated);
+        assert_eq!(std::fs::read_to_string(agent).unwrap(), generated);
+    }
+
+    #[test]
+    fn host_warning_has_a_frozen_system_encoding_and_internal_payload() {
+        assert_eq!(event_type::HOST_WARNING, 0x0003);
+        assert_eq!(host_warning::CGROUP_FALLBACK, 1);
+        assert_eq!(
+            host_warning_payload(host_warning::CGROUP_FALLBACK, "permission denied").unwrap(),
+            [
+                0x01, 0x00, b'p', b'e', b'r', b'm', b'i', b's', b's', b'i', b'o', b'n', b' ',
+                b'd', b'e', b'n', b'i', b'e', b'd',
+            ],
+        );
+        assert_eq!(
+            encode_host_warning(1, host_warning::CGROUP_FALLBACK, "permission denied").unwrap(),
+            [
+                0x83, 0x01, 0x03, 0x82, 0x01, 0x71, b'p', b'e', b'r', b'm', b'i', b's', b's',
+                b'i', b'o', b'n', b' ', b'd', b'e', b'n', b'i', b'e', b'd',
+            ],
+        );
+    }
+
+    #[test]
+    fn host_warning_rejects_invalid_code_and_message() {
+        assert!(host_warning_payload(0, "permission denied").is_err());
+        assert!(host_warning_payload(host_warning::CGROUP_FALLBACK, "").is_err());
+        assert!(host_warning_payload(host_warning::CGROUP_FALLBACK, &"x".repeat(4097)).is_err());
+    }
 
     #[test]
     fn required_events_match_the_shared_cbor_sequence_fixture() {
@@ -1226,6 +1310,10 @@ pub mod protocol_fixture {
         format_hex_records(&start_outcome_records())
     }
 
+    pub fn process_control_events_hex() -> String {
+        format_hex_records(&process_control_event_records())
+    }
+
     fn journal_records() -> Vec<Vec<u8>> {
         vec![
             encode_pty_output(1, &[0, 0x1b, 0xff]).unwrap(),
@@ -1280,6 +1368,12 @@ pub mod protocol_fixture {
         vec![
             encode_process_started(1, 4242).unwrap(),
             encode_session_start_failed(2, "command.start", "exec failed", 17).unwrap(),
+        ]
+    }
+
+    fn process_control_event_records() -> Vec<Vec<u8>> {
+        vec![
+            encode_host_warning(1, host_warning::CGROUP_FALLBACK, "permission denied").unwrap(),
         ]
     }
 

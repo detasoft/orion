@@ -11,24 +11,24 @@ process exits. Windows ConPTY execution is added by a later task node.
 
 ### Linux
 
-Linux is the production Unix target. Before releasing the PTY child,
-`session-host` makes itself a child subreaper with
-`PR_SET_CHILD_SUBREAPER`. Descendants orphaned by double-fork or `setsid`
-therefore reparent to the host instead of PID 1. The host combines subreaper
-adoption with `/proc` discovery by parent, session, and PTY ownership. Tracked
-PIDs include their process start time, which detects reuse between discovery
-passes and reduces the risk of signaling an unrelated process. It does not
-close the race between the final identity check and `kill(pid)`; the hardening
-task below must use pidfd or an equivalent kernel-owned identity for that
-guarantee.
+Linux is the production Unix target. The host sets and verifies child-subreaper
+mode before releasing the held PTY child. When cgroup v2 delegation supplies
+`cgroup.procs`, `cgroup.events`, and `cgroup.kill`, the child enters a
+dedicated session cgroup before exec. The host retains pidfds for safe signal
+delivery and observes cgroup population without scanning all processes.
 
-This baseline is implemented, but production hardening remains tracked in
-[Harden Linux process-tree
-control](../docs/plans/current-work/05_native-session-host/01_linux-process-tree-control.md).
-That task covers per-session cgroup v2 ownership where delegation is available,
-pidfd-based lifecycle observation, removal of frequent system-wide `/proc`
-scans, and acceptance tests for fast daemonization and forks racing with
-termination.
+If cgroup setup is unavailable, a durable `HOST_WARNING / CGROUP_FALLBACK`
+records the reason before child release. The fallback uses retained pidfds,
+subreaper adoption, and process discovery with post-acquisition identity checks.
+It still scans `/proc` on explicit controls and after root exit, and requires
+stable empty observations plus no unreaped children before shutdown.
+
+Graceful TERMINATE signals the currently owned processes once. Forced TERMINATE
+uses one `cgroup.kill` write when available, or signals the current fallback
+set once. Timing, retries, and escalation belong to callers. Descendants that
+fork after a fallback signal require another explicit control. Foreground
+signals are restricted to owned pidfds in the observed foreground group.
+See the [reconciliation notes](../docs/plans/2026-09-10-linux-process-control-reconciliation.md).
 
 ### macOS
 
@@ -48,8 +48,7 @@ unprivileged host.
 Do not use the macOS implementation as a process-isolation or cleanup boundary.
 Long-lived detached processes also make its current libproc fallback expensive,
 because discovery may enumerate system processes and their file descriptors.
-Production process-tree guarantees apply only to Linux after the hardening task
-above is accepted.
+Production process-tree guarantees apply only to Linux.
 
 ## Build
 

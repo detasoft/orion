@@ -14,6 +14,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 class SessionEventCodecTest {
     private static final int SESSION_HOST_MAX_START_DIAGNOSTIC_BYTES = 1024 * 1024;
@@ -23,6 +24,7 @@ class SessionEventCodecTest {
     @Test
     void roundTripsRequiredEventPayloads() throws Exception {
         List<SessionEventPayload> payloads = List.of(
+                new SessionEventPayload.HostWarning(1, "permission denied"),
                 new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{0x1b, 0, (byte) 0xff})),
                 new SessionEventPayload.PtyInput(
                         "pty-input:session-1",
@@ -472,11 +474,53 @@ class SessionEventCodecTest {
 
     @Test
     void freezesEventTypeAllocation() {
+        assertThat(SessionEventType.HOST_WARNING).isEqualTo(0x0003);
         assertThat(SessionEventType.COMMAND_RESULT).isEqualTo(0x0002);
         assertThat(SessionEventType.PTY_OUTPUT).isEqualTo(0x0100);
         assertThat(SessionEventType.PTY_INPUT).isEqualTo(0x0101);
         assertThat(SessionEventType.PTY_RESIZE).isEqualTo(0x0102);
         assertThat(SessionEventType.PROCESS_EXITED).isEqualTo(0x0201);
+    }
+
+    @Test
+    void rejectsInvalidHostWarningsWhenEncoding() {
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new SessionEventPayload.HostWarning(0, "permission denied"));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new SessionEventPayload.HostWarning(65_536, "permission denied"));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new SessionEventPayload.HostWarning(1, ""));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new SessionEventPayload.HostWarning(1, "x".repeat(4097)));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new SessionEventPayload.HostWarning(1, "\ud800"));
+    }
+
+    @Test
+    void rejectsInvalidHostWarningsWhenDecoding() throws Exception {
+        for (ProtocolBytes encodedPayload : List.of(
+                hostWarningPayload(65_536, "permission denied"),
+                hostWarningPayload(1, ""),
+                hostWarningPayload(1, "x".repeat(4097)))) {
+            SessionEventRecord record = CODEC.decode(CODEC.encodeOpaque(
+                    new EventId(1),
+                    SessionEventType.HOST_WARNING,
+                    encodedPayload,
+                    List.of()));
+
+            assertThatExceptionOfType(AgentProtocolException.class)
+                    .isThrownBy(() -> CODEC.decodeKnownPayload(record))
+                    .extracting(AgentProtocolException::reason)
+                    .isEqualTo(AgentProtocolException.Reason.INVALID_FIELD);
+        }
+    }
+
+    private static ProtocolBytes hostWarningPayload(int code, String message) throws Exception {
+        CborWriter writer = new CborWriter(LIMITS);
+        writer.array(2);
+        writer.unsigned(code);
+        writer.text(message);
+        return ProtocolBytes.copyOf(writer.toByteArray());
     }
 
     private static byte[] concatenate(List<byte[]> items) {

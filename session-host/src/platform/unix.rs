@@ -1,13 +1,12 @@
+#[cfg(target_os = "macos")]
 use std::collections::HashMap;
 use std::ffi::{CString, OsStr};
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
-#[cfg(target_os = "linux")]
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -28,6 +27,10 @@ use crate::journal::{
 };
 use crate::journal_acknowledgement::{JournalAcknowledgement, validate_received_watermark};
 use crate::protocol::{self, control_message};
+
+#[cfg(target_os = "linux")]
+#[path = "linux_process_tree.rs"]
+mod linux_process_tree;
 
 const CONTROL_ENDPOINT: &str = "control.sock";
 const DESCENDANT_ABSENCE_CONFIRMATIONS: usize = 3;
@@ -180,12 +183,12 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
             journal_max_bytes: options.journal_max_bytes,
         },
     )?;
-    let pending = PendingStartOutcome::new(journal, options.start_command_id.clone());
+    let mut pending = PendingStartOutcome::new(journal, options.start_command_id.clone());
     let signal_ingress = match SignalIngress::install() {
         Ok(signal_ingress) => signal_ingress,
         Err(error) => return Err(pending.failed(error)),
     };
-    let initialized = match initialize_after_journal(&options, &prepared, sandbox) {
+    let initialized = match initialize_after_journal(&options, &prepared, sandbox, &mut pending.journal) {
         Ok(initialized) => initialized,
         Err(error) => return Err(pending.failed(error)),
     };
@@ -338,6 +341,7 @@ fn initialize_after_journal(
     options: &SessionOptions,
     prepared: &PreparedCommand,
     sandbox: PreparedSandbox,
+    journal: &mut JournalWriter,
 ) -> Result<InitializedSession, HostError> {
     let acknowledgement = JournalAcknowledgement::open(&options.session_dir)
         .map_err(|error| HostError::Protocol(error.to_string()))?;
@@ -345,7 +349,7 @@ fn initialize_after_journal(
     let mut metadata = initial_metadata(options, &sandbox, started_at)?;
     journal::write_metadata(&options.session_dir, &metadata)?;
     let (child_pid, master, descendants) =
-        spawn_pty(prepared, options.cols, options.rows, sandbox)?;
+        spawn_pty(prepared, options.cols, options.rows, sandbox, journal)?;
     let child_pid_u64 = u64::try_from(child_pid)
         .map_err(|_| HostError::InvalidOptions("child PID is not representable".to_owned()))?;
     metadata.child_pid = Some(child_pid_u64);
@@ -531,7 +535,141 @@ fn spawn_pty(
     cols: u16,
     rows: u16,
     sandbox: PreparedSandbox,
+    journal: &mut JournalWriter,
 ) -> Result<(libc::pid_t, File, DescendantTracker), HostError> {
+    let held = fork_pty_held(command, cols, rows, sandbox)?;
+    set_nonblocking(held.master_fd())?;
+    #[cfg(target_os = "macos")]
+    let mut held = held;
+    #[cfg(target_os = "linux")]
+    let (held, descendants) = linux_process_tree::initialize_held_child(
+        held,
+        |reason| {
+            journal
+                .append_durable(JournalEvent::HostWarning {
+                    code: protocol::host_warning::CGROUP_FALLBACK,
+                    message: reason.to_owned(),
+                })
+                .map(|_| ())
+                .map_err(HostError::from)
+        },
+        |held, _backend| {
+            let pty = pty_slave_identity(held.master_fd())?;
+            Ok((held.pid(), linux_process_tree::process_start(held.pid(), pty)?, pty))
+        },
+        |(root, root_start, pty), backend| DescendantTracker::activate(backend, root, root_start, pty),
+    )?;
+    #[cfg(target_os = "macos")]
+    let (held, descendants) = {
+        let _ = journal;
+        let pty = pty_slave_identity(held.master_fd())?;
+        let descendants = DescendantTracker::new(held.pid(), pty)?;
+        held.release()?;
+        (held, descendants)
+    };
+    let (pid, master) = held.into_parts();
+    Ok((pid, master, descendants))
+}
+
+struct HeldChild {
+    pid: libc::pid_t,
+    master: Option<File>,
+    release: Option<File>,
+    setup: Option<File>,
+    aborted: bool,
+    released: bool,
+}
+
+impl HeldChild {
+    fn pid(&self) -> libc::pid_t {
+        self.pid
+    }
+
+    fn master_fd(&self) -> libc::c_int {
+        self.master.as_ref().expect("held child master is present").as_raw_fd()
+    }
+
+    fn release(&mut self) -> Result<(), HostError> {
+        let mut release = self
+            .release
+            .take()
+            .ok_or_else(|| io::Error::other("held child release pipe is unavailable"))?;
+        release.write_all(&[1])?;
+        drop(release);
+
+        let mut setup = self
+            .setup
+            .take()
+            .ok_or_else(|| io::Error::other("held child setup pipe is unavailable"))?;
+        let mut code = [0_u8; 1];
+        let result = loop {
+            match setup.read(&mut code) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => break result,
+            }
+        }?;
+        if result == 1 {
+            return Err(child_setup_error(code[0]));
+        }
+        self.released = true;
+        Ok(())
+    }
+
+    fn abort(&mut self) -> Result<(), HostError> {
+        if self.released {
+            return Err(io::Error::other("released child cannot be aborted").into());
+        }
+        if self.aborted {
+            return Ok(());
+        }
+        drop(self.release.take());
+        drop(self.setup.take());
+        let kill_error = if unsafe { libc::kill(self.pid, libc::SIGKILL) } == 0 {
+            None
+        } else {
+            let error = io::Error::last_os_error();
+            (error.raw_os_error() != Some(libc::ESRCH)).then_some(error)
+        };
+        let reap_error = match wait_for_child(self.pid) {
+            Ok(_) => {
+                self.aborted = true;
+                None
+            }
+            Err(error) => Some(error),
+        };
+        match (kill_error, reap_error) {
+            (None, None) => Ok(()),
+            (Some(error), None) => Err(error.into()),
+            (None, Some(error)) => Err(error),
+            (Some(kill), Some(reap)) => Err(io::Error::other(format!(
+                "failed to kill held child: {kill}; failed to reap held child: {reap}"
+            ))
+            .into()),
+        }
+    }
+
+    fn into_parts(mut self) -> (libc::pid_t, File) {
+        assert!(self.released, "held child must be released before use");
+        let master = self.master.take().expect("held child master is present");
+        (self.pid, master)
+    }
+}
+
+impl Drop for HeldChild {
+    fn drop(&mut self) {
+        if self.released || self.aborted {
+            return;
+        }
+        let _ = self.abort();
+    }
+}
+
+fn fork_pty_held(
+    command: &PreparedCommand,
+    cols: u16,
+    rows: u16,
+    sandbox: PreparedSandbox,
+) -> Result<HeldChild, HostError> {
     prepare_descendant_tracking()?;
     let mut start_pipe = [-1; 2];
     if unsafe { libc::pipe(start_pipe.as_mut_ptr()) } != 0 {
@@ -613,76 +751,14 @@ fn spawn_pty(
         libc::close(start_pipe[0]);
         libc::close(setup_pipe[1]);
     }
-    let pty = match pty_slave_identity(master) {
-        Ok(pty) => pty,
-        Err(error) => {
-            unsafe {
-                libc::close(start_pipe[1]);
-                libc::close(setup_pipe[0]);
-                libc::close(master);
-                libc::kill(pid, libc::SIGKILL);
-            }
-            let _ = wait_for_child(pid);
-            return Err(error.into());
-        }
-    };
-    let descendants = match DescendantTracker::new(pid, pty) {
-        Ok(descendants) => descendants,
-        Err(error) => {
-            unsafe {
-                libc::close(start_pipe[1]);
-                libc::close(setup_pipe[0]);
-                libc::close(master);
-                libc::kill(pid, libc::SIGKILL);
-            }
-            let _ = wait_for_child(pid);
-            return Err(error.into());
-        }
-    };
-    let release = 1_u8;
-    let released = unsafe { libc::write(start_pipe[1], (&release as *const u8).cast(), 1) };
-    unsafe {
-        libc::close(start_pipe[1]);
-    }
-    if released != 1 {
-        let error = io::Error::last_os_error();
-        unsafe {
-            libc::close(master);
-            libc::close(setup_pipe[0]);
-            libc::kill(pid, libc::SIGKILL);
-        }
-        let _ = wait_for_child(pid);
-        return Err(error.into());
-    }
-    let mut setup = 0_u8;
-    let setup_result = loop {
-        let result = unsafe { libc::read(setup_pipe[0], (&mut setup as *mut u8).cast(), 1) };
-        if result >= 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
-            break result;
-        }
-    };
-    unsafe {
-        libc::close(setup_pipe[0]);
-    }
-    if setup_result < 0 {
-        let error = io::Error::last_os_error();
-        unsafe {
-            libc::close(master);
-            libc::kill(pid, libc::SIGKILL);
-        }
-        let _ = wait_for_child(pid);
-        return Err(error.into());
-    }
-    if setup_result == 1 {
-        unsafe {
-            libc::close(master);
-            libc::kill(pid, libc::SIGKILL);
-        }
-        let _ = wait_for_child(pid);
-        return Err(child_setup_error(setup));
-    }
-    let master = unsafe { File::from_raw_fd(master) };
-    Ok((pid, master, descendants))
+    Ok(HeldChild {
+        pid,
+        master: Some(unsafe { File::from_raw_fd(master) }),
+        release: Some(unsafe { File::from_raw_fd(start_pipe[1]) }),
+        setup: Some(unsafe { File::from_raw_fd(setup_pipe[0]) }),
+        aborted: false,
+        released: false,
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -907,6 +983,19 @@ fn copy_pty_output(mut master: File, state: Arc<Mutex<SharedState>>) -> Result<(
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                let mut descriptor = libc::pollfd {
+                    fd: master.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                if unsafe { libc::poll(&mut descriptor, 1, -1) } < 0 {
+                    let error = io::Error::last_os_error();
+                    if error.kind() != io::ErrorKind::Interrupted {
+                        return Err(error.into());
+                    }
+                }
+            }
             Err(error) if error.raw_os_error() == Some(libc::EIO) => return Ok(()),
             Err(error) => return Err(error.into()),
         }
@@ -1230,6 +1319,9 @@ fn apply_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), St
         if ready == 0 {
             continue;
         }
+        if pollfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Err("PTY input is closed".to_owned());
+        }
         let chunk_end = (written + 4096).min(payload.len() - 16);
         let chunk = &payload[16 + written..16 + chunk_end];
         let result = unsafe { libc::write(master.as_raw_fd(), chunk.as_ptr().cast(), chunk.len()) };
@@ -1242,6 +1334,9 @@ fn apply_input(payload: &[u8], state: &Arc<Mutex<SharedState>>) -> Result<(), St
                 continue;
             }
             return Err(error.to_string());
+        }
+        if result == 0 {
+            return Err("PTY input write made no progress".to_owned());
         }
         written += result as usize;
     }
@@ -1368,7 +1463,28 @@ fn apply_foreground_signal(
     if foreground_group < 0 {
         return Err(io::Error::last_os_error().to_string());
     }
+    let descendants = Arc::clone(&state.descendants);
     drop(state);
+    apply_owned_foreground_signal(foreground_group, signal, &descendants)
+}
+
+#[cfg(target_os = "linux")]
+fn apply_owned_foreground_signal(
+    foreground_group: libc::pid_t,
+    signal: libc::c_int,
+    descendants: &Arc<Mutex<DescendantTracker>>,
+) -> Result<(), String> {
+    lock_descendants(descendants)
+        .and_then(|mut tracker| tracker.signal_foreground(foreground_group, signal).map_err(HostError::from))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn apply_owned_foreground_signal(
+    foreground_group: libc::pid_t,
+    signal: libc::c_int,
+    _descendants: &Arc<Mutex<DescendantTracker>>,
+) -> Result<(), String> {
     if unsafe { libc::kill(-foreground_group, signal) } != 0 {
         return Err(io::Error::last_os_error().to_string());
     }
@@ -1381,7 +1497,7 @@ struct DescendantSignalFailure {
     delivery: DescendantDelivery,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct DescendantDelivery {
     attempted: usize,
     succeeded: usize,
@@ -1437,23 +1553,31 @@ fn signal_descendants(
     };
     let mut tracker = lock_descendants(&descendants)
         .map_err(|error| DescendantSignalFailure::journal(error.to_string()))?;
-    tracker
-        .refresh()
+    #[cfg(target_os = "linux")]
+    let delivery = tracker.signal(signal)
         .map_err(|error| DescendantSignalFailure::discovery(error.to_string()))?;
-    let mut delivery = DescendantDelivery::default();
-    for (pid, _) in tracker.snapshot() {
-        delivery.attempted += 1;
-        if unsafe { libc::kill(pid, signal) } == 0 {
-            delivery.succeeded += 1;
-        } else {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
+    #[cfg(target_os = "macos")]
+    let delivery = {
+        tracker
+            .refresh()
+            .map_err(|error| DescendantSignalFailure::discovery(error.to_string()))?;
+        let mut delivery = DescendantDelivery::default();
+        for (pid, _) in tracker.snapshot() {
+            delivery.attempted += 1;
+            if unsafe { libc::kill(pid, signal) } == 0 {
                 delivery.succeeded += 1;
             } else {
-                delivery.failures.push(format!("pid {pid}: {error}"));
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(libc::ESRCH) {
+                    delivery.succeeded += 1;
+                } else {
+                    delivery.failures.push(format!("pid {pid}: {error}"));
+                }
             }
         }
-    }
+
+        delivery
+    };
     let journal_error = lock_state(state)
         .and_then(|mut state| {
             state
@@ -1582,10 +1706,7 @@ fn portable_signal_kind(signal: libc::c_int) -> u16 {
 
 #[cfg(target_os = "linux")]
 fn prepare_descendant_tracking() -> io::Result<()> {
-    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
+    linux_process_tree::prepare_descendant_tracking()
 }
 
 #[cfg(target_os = "macos")]
@@ -1786,167 +1907,7 @@ fn macos_process_holds_pty(pid: libc::pid_t, file_count: u32, pty: PtySlaveIdent
 }
 
 #[cfg(target_os = "linux")]
-struct DescendantTracker {
-    root: libc::pid_t,
-    root_reaped: bool,
-    pty: PtySlaveIdentity,
-    live: HashMap<libc::pid_t, u128>,
-}
-
-#[cfg(target_os = "linux")]
-impl DescendantTracker {
-    fn new(root: libc::pid_t, pty: PtySlaveIdentity) -> io::Result<Self> {
-        let processes = linux_processes(pty)?;
-        let root_start = processes
-            .get(&root)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "PTY child disappeared"))?
-            .start;
-        Ok(Self {
-            root,
-            root_reaped: false,
-            pty,
-            live: HashMap::from([(root, root_start)]),
-        })
-    }
-
-    fn mark_root_reaped(&mut self) {
-        self.root_reaped = true;
-        self.live.remove(&self.root);
-    }
-
-    fn refresh(&mut self) -> io::Result<()> {
-        if self.root_reaped {
-            loop {
-                let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
-                if result <= 0 {
-                    break;
-                }
-            }
-        }
-        let processes = linux_processes(self.pty)?;
-        self.live.retain(|pid, start| {
-            processes
-                .get(pid)
-                .is_some_and(|process| process.start == *start)
-        });
-        let host_pid = std::process::id() as libc::pid_t;
-        loop {
-            let mut changed = false;
-            for (pid, process) in &processes {
-                if !self.live.contains_key(pid)
-                    && (process.parent == host_pid
-                        || process.session == self.root
-                        || process.holds_pty
-                        || self.live.contains_key(&process.parent))
-                {
-                    self.live.insert(*pid, process.start);
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    fn snapshot(&self) -> Vec<(libc::pid_t, u128)> {
-        self.live
-            .iter()
-            .map(|(pid, start)| (*pid, *start))
-            .collect()
-    }
-
-    fn is_live(&mut self) -> io::Result<bool> {
-        self.refresh()?;
-        Ok(!self.live.is_empty())
-    }
-}
-
-#[cfg(target_os = "linux")]
-struct LinuxProcess {
-    parent: libc::pid_t,
-    session: libc::pid_t,
-    start: u128,
-    holds_pty: bool,
-}
-
-#[cfg(target_os = "linux")]
-fn linux_processes(pty: PtySlaveIdentity) -> io::Result<HashMap<libc::pid_t, LinuxProcess>> {
-    let mut processes = HashMap::new();
-    for entry in fs::read_dir("/proc")? {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<libc::pid_t>().ok())
-        else {
-            continue;
-        };
-        let stat = match fs::read_to_string(entry.path().join("stat")) {
-            Ok(stat) => stat,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        let Some(fields) = stat.rsplit_once(") ").map(|(_, fields)| fields) else {
-            continue;
-        };
-        let fields: Vec<_> = fields.split_ascii_whitespace().collect();
-        if fields.len() < 20 {
-            continue;
-        }
-        let (Ok(parent), Ok(session), Ok(start)) = (
-            fields[1].parse::<libc::pid_t>(),
-            fields[3].parse::<libc::pid_t>(),
-            fields[19].parse::<u128>(),
-        ) else {
-            continue;
-        };
-        let holds_pty = linux_process_holds_pty(entry.path().join("fd"), pty)?;
-        processes.insert(
-            pid,
-            LinuxProcess {
-                parent,
-                session,
-                start,
-                holds_pty,
-            },
-        );
-    }
-    Ok(processes)
-}
-
-#[cfg(target_os = "linux")]
-fn linux_process_holds_pty(path: PathBuf, pty: PtySlaveIdentity) -> io::Result<bool> {
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        match fs::metadata(entry.path()) {
-            Ok(metadata)
-                if metadata.rdev() as libc::dev_t == pty.device
-                    && metadata.ino() as libc::ino_t == pty.inode =>
-            {
-                return Ok(true);
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(false)
-}
+type DescendantTracker = linux_process_tree::ActiveProcessTreeBackend;
 
 fn decode_wait_status(status: libc::c_int) -> (i32, i32) {
     if libc::WIFEXITED(status) {
@@ -2050,10 +2011,10 @@ mod tests {
         let prepared = PreparedCommand::validate(&options).unwrap();
         let sandbox = PreparedSandbox::prepare(&options).unwrap();
         let mut journal = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
-        journal.finish_durably(0).unwrap();
         let acknowledgement = JournalAcknowledgement::open(&directory).unwrap();
         let metadata = initial_metadata(&options, &sandbox, epoch_millis().unwrap()).unwrap();
-        let (child_pid, master, descendants) = spawn_pty(&prepared, 80, 24, sandbox).unwrap();
+        let (child_pid, master, descendants) = spawn_pty(&prepared, 80, 24, sandbox, &mut journal).unwrap();
+        journal.finish_durably(0).unwrap();
         let state = Arc::new(Mutex::new(SharedState {
             journal,
             metadata,
@@ -2101,11 +2062,11 @@ mod tests {
         let prepared = PreparedCommand::validate(&options).unwrap();
         let sandbox = PreparedSandbox::prepare(&options).unwrap();
         let mut journal = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
-        let final_event_id = journal.finish_durably(0).unwrap();
-        let journal_before_operation = fs::read(directory.join("00000001.cbor")).unwrap();
         let acknowledgement = JournalAcknowledgement::open(&directory).unwrap();
         let metadata = initial_metadata(&options, &sandbox, epoch_millis().unwrap()).unwrap();
-        let (child_pid, master, descendants) = spawn_pty(&prepared, 80, 24, sandbox).unwrap();
+        let (child_pid, master, descendants) = spawn_pty(&prepared, 80, 24, sandbox, &mut journal).unwrap();
+        let final_event_id = journal.finish_durably(0).unwrap();
+        let journal_before_operation = fs::read(directory.join("00000001.cbor")).unwrap();
         let state = Arc::new(Mutex::new(SharedState {
             journal,
             metadata,

@@ -1,6 +1,7 @@
 package pro.deta.orion.agent.protocol;
 
 public final class SessionEventType {
+    public static final int HOST_WARNING = 0x0003;
     public static final int COMMAND_RESULT = 0x0002;
     public static final int PTY_OUTPUT = 0x0100;
     public static final int PTY_INPUT = 0x0101;

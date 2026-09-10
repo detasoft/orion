@@ -13,7 +13,7 @@ RUN_TEST_RESERVED_GOALS = dist test run-test test-jfr test-jfr-report xml-schema
 	run-server issue-token issue-token-raw ssh-state ssh-status list-repos \
 	clone-repository clone-repo clone-http-repo admin-acl admin-acl-with-token \
 	check-git-all check-jetty-git check-ssh-git check-ssh-git-clone check-ssh-git-push-create \
-	cargo-init rust-install session-host session-host-test
+	cargo-init rust-install session-host session-host-test session-host-linux-test
 RUN_TEST_POSITIONAL_ARGUMENTS :=
 RUN_TEST_POSITIONAL_CONFLICT = $(filter $(RUN_TEST_RESERVED_GOALS),$(RUN_TEST_POSITIONAL_ARGUMENTS))
 RUN_TEST_MODULE = $(value MODULE)
@@ -32,7 +32,7 @@ endif
 endif
 
 .PHONY: dist test run-test test-jfr test-jfr-report xml-schema cargo-init rust-install session-host \
-	session-host-test
+	session-host-test session-host-linux-test
 
 dist:
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
@@ -58,6 +58,28 @@ session-host: rust-install
 
 session-host-test: rust-install
 	cd session-host && $(HOME)/.cargo/bin/cargo test --locked
+
+SESSION_HOST_LINUX_HOST ?= root@gw.ntechs.ru
+SESSION_HOST_LINUX_PORT ?= 30022
+SESSION_HOST_LINUX_REMOTE_ROOT ?= /root/orion-session-host-linux
+SESSION_HOST_LINUX_CC ?= /usr/bin/cc
+SESSION_HOST_LINUX_AR ?= /usr/bin/ar
+SESSION_HOST_LINUX_TOOLCHAIN_BIN ?= /root/.cargo/bin
+SESSION_HOST_LINUX_CFLAGS ?=
+SESSION_HOST_LINUX_SSH ?= ssh
+SESSION_HOST_LINUX_SCP ?= scp
+
+session-host-linux-test:
+	@SESSION_HOST_LINUX_HOST="$(SESSION_HOST_LINUX_HOST)" \
+		SESSION_HOST_LINUX_PORT="$(SESSION_HOST_LINUX_PORT)" \
+		SESSION_HOST_LINUX_REMOTE_ROOT="$(SESSION_HOST_LINUX_REMOTE_ROOT)" \
+		SESSION_HOST_LINUX_CC="$(SESSION_HOST_LINUX_CC)" \
+		SESSION_HOST_LINUX_AR="$(SESSION_HOST_LINUX_AR)" \
+		SESSION_HOST_LINUX_TOOLCHAIN_BIN="$(SESSION_HOST_LINUX_TOOLCHAIN_BIN)" \
+		SESSION_HOST_LINUX_CFLAGS="$(SESSION_HOST_LINUX_CFLAGS)" \
+		SESSION_HOST_LINUX_SSH="$(SESSION_HOST_LINUX_SSH)" \
+		SESSION_HOST_LINUX_SCP="$(SESSION_HOST_LINUX_SCP)" \
+		sh make/session-host-linux-test.sh
 
 run-test:
 	@if [ "$(words $(RUN_TEST_POSITIONAL_ARGUMENTS))" -eq 0 ]; then \

@@ -4,7 +4,7 @@ import java.util.Objects;
 
 public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutput,
         SessionEventPayload.PtyInput, SessionEventPayload.PtyResize, SessionEventPayload.ProcessExited,
-        SessionEventPayload.CommandResult {
+        SessionEventPayload.CommandResult, SessionEventPayload.HostWarning {
 
     record CommandResult(
             SessionCommandSource source,
@@ -30,6 +30,25 @@ public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutpu
             if (outcome == SessionCommandOutcome.SUCCEEDED && !detail.isEmpty()) {
                 throw new IllegalArgumentException("successful result detail must be empty");
             }
+        }
+    }
+
+    record HostWarning(int code, String message) implements SessionEventPayload {
+        private static final int MAX_MESSAGE_BYTES = 4096;
+
+        public HostWarning {
+            code = ProtocolValidation.unsignedShort(code, "code");
+            if (code == 0) {
+                throw new IllegalArgumentException("code must be nonzero");
+            }
+            Objects.requireNonNull(message, "message");
+            int messageBytes;
+            try {
+                messageBytes = ProtocolValidation.utf8(message).length;
+            } catch (AgentProtocolException exception) {
+                throw new IllegalArgumentException("message must be valid Unicode", exception);
+            }
+            ProtocolValidation.byteLength(messageBytes, 1, MAX_MESSAGE_BYTES, "message");
         }
     }
 

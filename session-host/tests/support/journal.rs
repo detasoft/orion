@@ -278,6 +278,15 @@ fn decode_payload(event_type: u16, encoded: &[u8]) -> Result<Vec<u8>, ReadError>
             payload.extend_from_slice(detail.as_bytes());
             Ok(payload)
         }
+        protocol::event_type::HOST_WARNING => {
+            let fields = array_fields(encoded)?;
+            require_fields(&fields, 2, "HOST_WARNING")?;
+            let code = u16::try_from(decode_unsigned(field(encoded, fields[0]), "warning code")?)
+                .map_err(|_| ReadError::Format("HOST_WARNING code exceeds u16".to_owned()))?;
+            let message = decode_text(field(encoded, fields[1]))?;
+            protocol::host_warning_payload(code, &message)
+                .map_err(|error| ReadError::Format(error.to_string()))
+        }
         protocol::event_type::PTY_OUTPUT => decode_bytes(encoded),
         protocol::event_type::PTY_INPUT => {
             let fields = array_fields(encoded)?;

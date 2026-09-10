@@ -13,6 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         protocol_fixture::journal_hex(),
     )?;
     fs::write(
+        directory.join("process-control-events-v1.hex"),
+        protocol_fixture::process_control_events_hex(),
+    )?;
+    fs::write(
         directory.join("session-event-unknown-tail-v1.hex"),
         protocol_fixture::unknown_event_hex(),
     )?;

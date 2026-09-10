@@ -75,6 +75,7 @@ Version 1 assigns:
 | ID | Name | CBOR payload |
 | ---: | --- | --- |
 | `0x0002` | `COMMAND_RESULT` | `[operationSequence, exactCommandEnvelope, outcome, detail]` |
+| `0x0003` | `HOST_WARNING` | `[code, message]` |
 | `0x0100` | `PTY_OUTPUT` | byte string |
 | `0x0101` | `PTY_INPUT` | `[ptyInputId, byte-string]` |
 | `0x0102` | `PTY_RESIZE` | `[columns, rows]` |
@@ -89,6 +90,14 @@ Version 1 assigns:
 | `0x1020` | `PROMPT` | schema reserved |
 | `0x1030` | `ARTIFACT` | schema reserved |
 | `0x1040` | `CHECKPOINT` | schema reserved |
+
+`HOST_WARNING` code is a nonzero unsigned 16-bit value and its message is
+1–4096 strict UTF-8 bytes. Code `1` means `CGROUP_FALLBACK`. On Linux, exactly
+one durable fallback warning precedes release of the held child when cgroup v2
+delegation or the required `cgroup.kill` capability is unavailable. Failure to
+persist this warning aborts startup while the child is still held. Normal cgroup
+startup and macOS do not emit this warning. The shared
+`process-control-events-v1.hex` fixture freezes its encoding.
 
 Terminal bytes are opaque and preserved without text conversion. The 16-byte
 input identity is preserved in the `PTY_INPUT` record; host replay protection

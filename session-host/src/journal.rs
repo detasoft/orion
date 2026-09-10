@@ -220,6 +220,8 @@ pub(crate) enum JournalEvent {
         outcome: protocol::CommandOutcome,
         detail: String,
     },
+    #[cfg(any(target_os = "linux", test))]
+    HostWarning { code: u16, message: String },
     PtyOutput(Vec<u8>),
     PtyInput {
         command_id: [u8; 16],
@@ -864,6 +866,8 @@ fn encode_event(event_id: u64, event: JournalEvent) -> Result<Vec<u8>, JournalEr
             outcome,
             &detail,
         ),
+        #[cfg(any(target_os = "linux", test))]
+        JournalEvent::HostWarning { code, message } => protocol::encode_host_warning(event_id, code, &message),
         JournalEvent::PtyOutput(payload) => protocol::encode_pty_output(event_id, &payload),
         JournalEvent::PtyInput {
             command_id,
@@ -2611,6 +2615,23 @@ mod tests {
             fs::read(directory.join("00000001.cbor")).unwrap(),
             expected_records.concat(),
         );
+        drop(writer);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn host_warning_encodes_and_validates_the_durable_record() {
+        let directory = temporary_directory("host-warning");
+        let mut writer = JournalWriter::create(&directory, JournalConfig::default()).unwrap();
+        for (code, message) in [(0, "invalid".to_owned()), (1, String::new()), (1, "x".repeat(4097))] {
+            assert!(writer.append_durable(JournalEvent::HostWarning { code, message }).is_err());
+        }
+        let event_id = writer.append_durable(JournalEvent::HostWarning {
+            code: protocol::host_warning::CGROUP_FALLBACK,
+            message: "permission denied".to_owned(),
+        }).unwrap();
+        assert_eq!(fs::read(directory.join("00000001.cbor")).unwrap(),
+            protocol::encode_host_warning(event_id, 1, "permission denied").unwrap());
         drop(writer);
         fs::remove_dir_all(directory).unwrap();
     }
