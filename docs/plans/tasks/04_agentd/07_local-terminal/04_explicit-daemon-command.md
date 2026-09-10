@@ -1,7 +1,7 @@
 # Make the AgentD Daemon Command Explicit
 
 Status: todo
-Depends on: 02_attach.md
+Depends on: completed local terminal attach `8667378a`
 
 Separate server daemon startup from local terminal commands with an explicit
 top-level command router.

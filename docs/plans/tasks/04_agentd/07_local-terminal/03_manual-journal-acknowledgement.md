@@ -1,7 +1,7 @@
 # Add Explicit Local Journal Acknowledgement
 
 Status: todo
-Depends on: 02_attach.md
+Depends on: completed local terminal attach `8667378a`
 
 Add an opt-in `--ack-journal` testing mode without changing the default
 non-acknowledging attach behavior.
