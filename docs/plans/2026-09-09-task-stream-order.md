@@ -18,8 +18,9 @@ still creates and loads
 consumers, then finish the single material-store path without rebuilding ACME.
 
 The corresponding independent Agent control candidate was agent and launch
-records. Its final observation checkpoint is integrated in `73ad78bb`, making
-[server launch/reconnect authentication](current-work/03_agent-session-server/01_control-and-registries/02_launch-and-reconnect-authentication.md)
+records. Its final observation checkpoint is integrated in `73ad78bb`, and
+server launch/reconnect authentication is integrated in `3e4a6156`, making
+[connection ownership and health](current-work/03_agent-session-server/01_control-and-registries/03_connection-ownership-and-health.md)
 the next server task. AgentD handshake can be developed against the existing
 protocol in parallel.
 
@@ -71,11 +72,11 @@ control foundation before attaching replication and command routing to it.
 | Order | Existing task | Gate / reason |
 | --- | --- | --- |
 | A1 | Agent/launch records | Integrated; final observation checkpoint `73ad78bb`. |
-| A2 | [Server launch/reconnect authentication](current-work/03_agent-session-server/01_control-and-registries/02_launch-and-reconnect-authentication.md) | **Next server task**; A1 and HTTP/2 transport are integrated. |
-| A3 | [Connection ownership/health](current-work/03_agent-session-server/01_control-and-registries/03_connection-ownership-and-health.md) | A2. |
+| A2 | Server launch/reconnect authentication | Integrated in `3e4a6156`. |
+| A3 | [Connection ownership/health](current-work/03_agent-session-server/01_control-and-registries/03_connection-ownership-and-health.md) | **Next server task**; A2 is integrated. |
 | A4 | [Session reconciliation/ownership](current-work/03_agent-session-server/01_control-and-registries/04_session-reconciliation-and-ownership.md) | A3. |
 | A5 | [Server runtime/provisioning integration](current-work/03_agent-session-server/01_control-and-registries/05_runtime-and-provisioning-integration.md) | A1–A4; use current AgentD and a live protocol peer. |
-| D1 | [AgentD handshake/authentication](current-work/04_agentd/01_control-connection-lifecycle/01_handshake-and-authentication.md) | Available beside A2; agree authentication behavior with A2. |
+| D1 | [AgentD handshake/authentication](current-work/04_agentd/01_control-connection-lifecycle/01_handshake-and-authentication.md) | Server contract A2 is integrated; ready independently of A3. |
 | D2a | [Reconnect/heartbeat](current-work/04_agentd/01_control-connection-lifecycle/02_reconnect-and-heartbeat.md) | D1; counterpart A3. |
 | D2b | [Discovery/reporting](current-work/04_agentd/01_control-connection-lifecycle/03_session-discovery-and-reporting.md) | D1; independent of D2a; counterpart A4. |
 | D3 | [AgentD control runtime/acceptance](current-work/04_agentd/01_control-connection-lifecycle/04_runtime-and-acceptance.md) | D2a + D2b + A5. A5 does not depend on D3. |

@@ -1,7 +1,7 @@
 # Track Authoritative Connections and Health
 
 Status: todo
-Depends on: 02_launch-and-reconnect-authentication.md
+Depends on: integrated launch/reconnect authentication `3e4a6156`.
 
 Maintain one authoritative authenticated connection per logical agent and
 derive current availability from that connection and its heartbeats.

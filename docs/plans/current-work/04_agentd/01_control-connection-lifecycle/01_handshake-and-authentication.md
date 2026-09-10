@@ -3,7 +3,7 @@
 Status: todo
 Depends on: integrated unsupported-version repair `b7dce0ce` and completed
 AgentD launch identity and HTTP/2 transport.
-Server contract: [Authentication](../../03_agent-session-server/01_control-and-registries/02_launch-and-reconnect-authentication.md)
+Server contract: launch/reconnect authentication integrated in `3e4a6156`.
 
 Generalize the existing initial handshake so each new transport connection
 authenticates the same running AgentD process before application work begins.

@@ -15,8 +15,9 @@ ACL foundation in upcoming work; snapshot loading is an independent branch.
 
 ### Agent control and journal delivery
 
-Next: server launch/reconnect authentication; AgentD handshake is independently
-available. Replication follows authenticated ownership, then commands and clients.
+Launch/reconnect authentication is integrated in `3e4a6156`. Next: server
+connection ownership and health; AgentD handshake is independently available.
+Replication follows authenticated ownership, then commands and clients.
 
 ### Native session execution
 
