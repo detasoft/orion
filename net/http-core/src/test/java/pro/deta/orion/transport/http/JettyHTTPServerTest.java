@@ -155,7 +155,7 @@ class JettyHTTPServerTest {
 
     @Test
     void failsHttpsStartupForStorageOnlyIdentity() throws Exception {
-        try (OrionKeyMaterial owner = owner()) {
+        try (OrionKeyMaterial owner = owner(new InMemoryKeyMaterialContentStore())) {
             AcmeMaterialConfiguration acme = new AcmeMaterialConfiguration(
                     ACCOUNT, IDENTITY, Optional.empty());
             owner.acme().acquire(acme, 2048, 2048);
