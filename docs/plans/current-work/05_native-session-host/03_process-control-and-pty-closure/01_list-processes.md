@@ -4,6 +4,8 @@ Status: todo
 Parent: TASK.md
 Contract: ../../../2026-09-03-native-control-journal-idempotency-design.md
 Related: ../01_linux-process-tree-control.md
+- Owner: codex, session list-processes-6b31, branch `codex/list-processes-6b31`,
+  worktree `.worktrees/list-processes-6b31`, started 2026-09-10 15:49 Europe/Amsterdam.
 Next: compare the process-control design in branch
 `codex/linux-process-tree-control-47c2`, worktree
 `.worktrees/linux-process-tree-control-47c2`, with the retained Linux implementation
