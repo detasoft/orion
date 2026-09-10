@@ -3,11 +3,15 @@ package pro.deta.orion.agent.server.registry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentInstanceId;
+import pro.deta.orion.agent.protocol.MachineInfo;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -114,6 +118,49 @@ class AgentRegistryDurabilityTest {
                     } else {
                         assertThat(registry.find(agentId)).contains(before);
                     }
+                }
+            }
+        }
+    }
+
+    @Test
+    void observationFailuresNeverReportUncommittedMetadata() throws AgentRegistryException {
+        AgentId agentId = new AgentId("agent-1");
+        for (FailurePoint point : FailurePoint.values()) {
+            Path root = temporaryDirectory.resolve("observation-" + point);
+            AgentRecord before;
+            try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
+                registry.register(agentId, "Build agent");
+                before = registry.allocateLaunch(agentId);
+            }
+            AgentRecord.Launch launch = before.launch().orElseThrow();
+            AgentRecord.Observation observation = new AgentRecord.Observation(
+                    launch.generation(),
+                    launch.launchId(),
+                    new AgentInstanceId(UUID.fromString("15caeaf0-402d-40aa-8205-ed61cb31c41b")),
+                    "1.2.3",
+                    new MachineInfo("worker-1", "linux", "aarch64"),
+                    Map.of("pty", "true"),
+                    NOW);
+            boolean indeterminate = point == FailurePoint.MOVE || point == FailurePoint.AFTER_PUBLICATION;
+            AgentRegistryException.Reason reason = indeterminate
+                    ? AgentRegistryException.Reason.INDETERMINATE : AgentRegistryException.Reason.IO_FAILURE;
+            try (FileSystemAgentRegistry registry = FileSystemAgentRegistry.withOperations(
+                    root, new FailingOperations(point))) {
+                assertFailureReason(() -> registry.recordObservation(agentId, observation), reason);
+                if (indeterminate) {
+                    assertFailureReason(() -> registry.find(agentId), reason);
+                    assertFailureReason(() -> registry.recordObservation(agentId, observation), reason);
+                } else {
+                    assertThat(registry.find(agentId)).contains(before);
+                }
+            }
+            try (FileSystemAgentRegistry reopened = new FileSystemAgentRegistry(root)) {
+                AgentRecord recovered = reopened.find(agentId).orElseThrow();
+                if (point == FailurePoint.AFTER_PUBLICATION) {
+                    assertThat(recovered.observation()).contains(observation);
+                } else {
+                    assertThat(recovered).isEqualTo(before);
                 }
             }
         }

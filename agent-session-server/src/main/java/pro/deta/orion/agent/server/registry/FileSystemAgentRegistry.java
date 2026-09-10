@@ -232,6 +232,22 @@ public final class FileSystemAgentRegistry implements AutoCloseable {
         }
     }
 
+    public AgentRecord recordObservation(
+            AgentId agentId,
+            AgentRecord.Observation observation) throws AgentRegistryException {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(observation, "observation");
+        lock.lock();
+        try {
+            AgentRecord current = requireRecord(agentId);
+            requireLaunch(current, observation.generation(), observation.launchId());
+            return publish(new AgentRecord(
+                    current.agentId(), current.displayName(), current.launch(), Optional.of(observation)));
+        } finally {
+            lock.unlock();
+        }
+    }
+
     @Override
     public void close() throws AgentRegistryException {
         lock.lock();

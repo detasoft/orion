@@ -74,6 +74,49 @@ class AgentRecordTest {
     }
 
     @Test
+    void observationMetadataIsBoundedByUtf8BytesAndCollectionCount() {
+        Map<String, String> maximumCapabilities = new LinkedHashMap<>();
+        for (int index = 0; index < AgentRecord.MAX_CAPABILITIES; index++) {
+            maximumCapabilities.put("key-" + index, "value");
+        }
+        maximumCapabilities.put("é".repeat(AgentRecord.MAX_CAPABILITY_KEY_BYTES / 2),
+                "é".repeat(AgentRecord.MAX_CAPABILITY_VALUE_BYTES / 2));
+        maximumCapabilities.remove("key-0");
+
+        AgentRecord.Observation maximum = observation(
+                "é".repeat(AgentRecord.MAX_AGENT_VERSION_BYTES / 2),
+                new MachineInfo(
+                        "é".repeat(AgentRecord.MAX_MACHINE_FIELD_BYTES / 2),
+                        "é".repeat(AgentRecord.MAX_MACHINE_FIELD_BYTES / 2),
+                        "é".repeat(AgentRecord.MAX_MACHINE_FIELD_BYTES / 2)),
+                maximumCapabilities);
+
+        assertThat(maximum.capabilities()).hasSize(AgentRecord.MAX_CAPABILITIES);
+        assertThatIllegalArgumentException().isThrownBy(() -> observation(
+                "é".repeat(AgentRecord.MAX_AGENT_VERSION_BYTES / 2 + 1),
+                maximum.machine(),
+                Map.of()));
+        assertThatIllegalArgumentException().isThrownBy(() -> observation(
+                maximum.agentVersion(),
+                new MachineInfo(
+                        "é".repeat(AgentRecord.MAX_MACHINE_FIELD_BYTES / 2 + 1),
+                        "linux",
+                        "aarch64"),
+                Map.of()));
+
+        Map<String, String> tooManyCapabilities = new LinkedHashMap<>(maximumCapabilities);
+        tooManyCapabilities.put("extra", "value");
+        assertThatIllegalArgumentException().isThrownBy(() -> observation(
+                maximum.agentVersion(), maximum.machine(), tooManyCapabilities));
+        assertThatIllegalArgumentException().isThrownBy(() -> observation(
+                maximum.agentVersion(), maximum.machine(), Map.of(
+                        "é".repeat(AgentRecord.MAX_CAPABILITY_KEY_BYTES / 2 + 1), "value")));
+        assertThatIllegalArgumentException().isThrownBy(() -> observation(
+                maximum.agentVersion(), maximum.machine(), Map.of(
+                        "key", "é".repeat(AgentRecord.MAX_CAPABILITY_VALUE_BYTES / 2 + 1))));
+    }
+
+    @Test
     void recordRejectsContradictoryOptionalState() {
         AgentRecord.Credential credential = credential();
         assertThatIllegalArgumentException().isThrownBy(() -> new AgentRecord.Launch(
@@ -115,12 +158,22 @@ class AgentRecordTest {
     }
 
     private static AgentRecord.Observation observation(Map<String, String> capabilities) {
+        return observation(
+                "1.2.3",
+                new MachineInfo("worker-1", "linux", "aarch64"),
+                capabilities);
+    }
+
+    private static AgentRecord.Observation observation(
+            String agentVersion,
+            MachineInfo machine,
+            Map<String, String> capabilities) {
         return new AgentRecord.Observation(
                 new AgentGeneration(7),
                 new AgentLaunchId(UUID.fromString("662d904d-6aac-4383-b9a7-eb955d18bd4b")),
                 new AgentInstanceId(UUID.fromString("88fd20ae-89f3-4ec8-af65-a3d66ca499b6")),
-                "1.2.3",
-                new MachineInfo("worker-1", "linux", "aarch64"),
+                agentVersion,
+                machine,
                 capabilities,
                 Instant.parse("2026-09-10T11:59:00Z"));
     }
