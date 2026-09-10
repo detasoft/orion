@@ -175,6 +175,7 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
             synchronized (this) {
                 closeLocked();
                 delegate = authenticated;
+                authenticated = null;
             }
             if (delegate != null) {
                 delegate.onClosed(failure);
@@ -281,6 +282,8 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
             }
             Session published;
             try {
+                registry.verifyReconnectToken(
+                        hello.agentId(), generation, launchId, tokenDigest, clock.instant());
                 AuthenticatedConnectionContext context = new AuthenticatedConnectionContext(
                         hello.agentId(),
                         generation,
@@ -291,7 +294,7 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
                         hello.capabilities(),
                         connectionId,
                         connection,
-                        () -> renew(
+                        () -> renewIfOpen(
                                 hello.agentId(),
                                 generation,
                                 launchId,
@@ -324,6 +327,17 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
             if (close) {
                 connection.close();
             }
+        }
+
+        private synchronized AuthenticatedConnectionContext.RenewalResult renewIfOpen(
+                AgentId agentId,
+                AgentGeneration generation,
+                AgentLaunchId launchId,
+                AgentRecord.CredentialDigest tokenDigest) {
+            if (state != State.PUBLISHING && state != State.AUTHENTICATED) {
+                return AuthenticatedConnectionContext.RenewalResult.REJECTED;
+            }
+            return renew(agentId, generation, launchId, tokenDigest);
         }
 
         private boolean closeLocked() {

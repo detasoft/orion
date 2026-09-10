@@ -452,6 +452,8 @@ class AgentControlAuthenticatorTest {
 
             session.onMessage(heartbeat);
             session.onClosed(null);
+            session.onClosed(new IllegalStateException("late close"));
+            session.onMessage(heartbeat);
 
             assertThat(messages).containsExactly(heartbeat);
             assertThat(closures).hasSize(1);
@@ -574,6 +576,80 @@ class AgentControlAuthenticatorTest {
                     .isEqualTo(AuthenticatedConnectionContext.RenewalResult.REJECTED);
             assertThat(registry.find(TestIdentity.AGENT_ID)).contains(replacement);
             issued.permit().close();
+        }
+    }
+
+    @Test
+    void closedSessionCannotRenewItsReconnectToken() throws Exception {
+        TestClock clock = new TestClock(NOW);
+        List<AuthenticatedConnectionContext> authenticated = new ArrayList<>();
+        try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
+            AgentRecord.Launch launch = prepareLaunch(registry);
+            AgentControlAuthenticator authenticator = authenticator(registry, authenticated, clock);
+            var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
+                    authenticator.issueLaunchPermit(TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+            try (var permit = issued.permit()) {
+                TestConnection connection = new TestConnection();
+                AgentControlHandler.Session session = authenticator.open(connection);
+                session.onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT,
+                        Base64.getUrlDecoder().decode(permit.copyBytes())));
+                connection.sendCompletion.complete(null);
+                session.onClosed(null);
+                AgentRecord before = registry.find(TestIdentity.AGENT_ID).orElseThrow();
+                clock.advance(Duration.ofMinutes(1));
+
+                assertThat(authenticated.getFirst().renewReconnectToken())
+                        .isEqualTo(AuthenticatedConnectionContext.RenewalResult.REJECTED);
+                assertThat(registry.find(TestIdentity.AGENT_ID)).contains(before);
+            }
+        }
+    }
+
+    @Test
+    void generationRevokedDuringWelcomeCannotPublishContext() throws Exception {
+        List<AuthenticatedConnectionContext> authenticated = new ArrayList<>();
+        try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
+            AgentRecord.Launch launch = prepareLaunch(registry);
+            AgentControlAuthenticator authenticator = authenticator(registry, authenticated);
+            var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
+                    authenticator.issueLaunchPermit(TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+            try (var permit = issued.permit()) {
+                TestConnection connection = new TestConnection();
+                authenticator.open(connection).onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT,
+                        Base64.getUrlDecoder().decode(permit.copyBytes())));
+                AgentRecord replacement = registry.allocateLaunch(TestIdentity.AGENT_ID);
+
+                connection.sendCompletion.complete(null);
+
+                assertThat(authenticated).isEmpty();
+                assertThat(connection.closed).isTrue();
+                assertThat(connection.handshakeComplete).isFalse();
+                assertThat(registry.find(TestIdentity.AGENT_ID)).contains(replacement);
+            }
+        }
+    }
+
+    @Test
+    void tokenExpiredDuringWelcomeCannotPublishContext() throws Exception {
+        TestClock clock = new TestClock(NOW);
+        List<AuthenticatedConnectionContext> authenticated = new ArrayList<>();
+        try (FileSystemAgentRegistry registry = new FileSystemAgentRegistry(root)) {
+            AgentRecord.Launch launch = prepareLaunch(registry);
+            AgentControlAuthenticator authenticator = authenticator(registry, authenticated, clock);
+            var issued = (AgentControlAuthenticator.PermitIssueResult.Issued)
+                    authenticator.issueLaunchPermit(TestIdentity.AGENT_ID, launch.generation(), launch.launchId());
+            try (var permit = issued.permit()) {
+                TestConnection connection = new TestConnection();
+                authenticator.open(connection).onMessage(hello(launch, AgentAuthentication.Kind.LAUNCH_PERMIT,
+                        Base64.getUrlDecoder().decode(permit.copyBytes())));
+                clock.advance(TOKEN_LIFETIME);
+
+                connection.sendCompletion.complete(null);
+
+                assertThat(authenticated).isEmpty();
+                assertThat(connection.closed).isTrue();
+                assertThat(connection.handshakeComplete).isFalse();
+            }
         }
     }
 
