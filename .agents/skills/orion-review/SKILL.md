@@ -67,10 +67,17 @@ Apart from a minimal title, the report contains active findings only. Do not add
 status/date/count boilerplate, general summaries, progress notes, or resolved
 history.
 
+When no active findings remain, delete `MODULE_REVIEW.md` instead of keeping an
+empty or title-only report. If an audit finds no issues and no report exists,
+do not create one. Include the deletion in the same audit or verified repair
+commit and update any links that would otherwise point to the deleted report.
+Deleting the report does not reset its finding-number history.
+
 ## Commit the audit result
 
-After validating all requested modules, update only their reports in the current
-worktree and branch. Stage only report changes produced by this audit, inspect
+After validating all requested modules, update their reports and any references
+affected by report deletion in the current worktree and branch.
+Stage only those verified audit changes, inspect
 the complete staged diff, and commit the coherent report update immediately with
 a descriptive single-line subject. No additional commit approval or project
 test is required. If nothing changed, create no commit.
@@ -119,4 +126,4 @@ and uncertainty is explicit.
 
 A repair run is complete only when every authorized finding is resolved or
 proved inapplicable, every implementation reached its selected workflow's
-completion condition, and each report describes only remaining active findings.
+completion condition, and each remaining report describes only active findings.
