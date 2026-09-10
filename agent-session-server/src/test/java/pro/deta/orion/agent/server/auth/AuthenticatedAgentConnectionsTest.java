@@ -10,6 +10,10 @@ import pro.deta.orion.agent.protocol.ConnectionId;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AuthenticatedAgentConnectionsTest {
+    private static final Instant NOW = Instant.parse("2026-09-10T12:00:00Z");
+    private static final Duration HEARTBEAT_DEADLINE = Duration.ofSeconds(30);
     private static final AgentId AGENT_ID = new AgentId("agent-1");
     private static final AgentGeneration GENERATION = new AgentGeneration(3);
     private static final AgentLaunchId LAUNCH_ID =
@@ -62,6 +68,8 @@ class AuthenticatedAgentConnectionsTest {
         List<Throwable> firstClosures = new ArrayList<>();
         List<AgentMessage> secondMessages = new ArrayList<>();
         List<Throwable> secondClosures = new ArrayList<>();
+        List<Observation> firstObservations = new ArrayList<>();
+        List<Observation> secondObservations = new ArrayList<>();
         AtomicInteger publications = new AtomicInteger();
         AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(ignored ->
                 publications.getAndIncrement() == 0
@@ -69,10 +77,21 @@ class AuthenticatedAgentConnectionsTest {
                         : recordingSession(secondMessages, secondClosures));
         AtomicInteger firstRenewals = new AtomicInteger();
         TestConnection firstTransport = new TestConnection();
-        AuthenticatedConnectionContext first = context("connection-1", firstTransport, firstRenewals);
+        AuthenticatedConnectionContext first = context(
+                GENERATION,
+                LAUNCH_ID,
+                "connection-1",
+                firstTransport,
+                firstRenewals,
+                firstObservations);
         AgentControlHandler.Session firstSession = connections.activate(first);
         AuthenticatedConnectionContext second = context(
-                "connection-2", new TestConnection(), new AtomicInteger());
+                GENERATION,
+                LAUNCH_ID,
+                "connection-2",
+                new TestConnection(),
+                new AtomicInteger(),
+                secondObservations);
         AgentControlHandler.Session secondSession = connections.activate(second);
         AgentMessage.Heartbeat heartbeat = heartbeat();
 
@@ -86,6 +105,8 @@ class AuthenticatedAgentConnectionsTest {
         assertThat(firstMessages).isEmpty();
         assertThat(secondMessages).containsExactly(heartbeat);
         assertThat(secondClosures).isEmpty();
+        assertThat(firstObservations).hasSize(1);
+        assertThat(secondObservations).hasSize(2);
         assertThat(first.renewReconnectToken())
                 .isEqualTo(AuthenticatedConnectionContext.RenewalResult.REJECTED);
         assertThat(firstRenewals).hasValue(0);
@@ -188,6 +209,111 @@ class AuthenticatedAgentConnectionsTest {
         assertThat(replacementTransport.closed).isFalse();
     }
 
+    @Test
+    void heartbeatRestoresTimedOutLaunchAndUsesServerTimeForObservation() {
+        TestClock clock = new TestClock(NOW);
+        AtomicInteger renewals = new AtomicInteger();
+        List<Observation> observations = new ArrayList<>();
+        AuthenticatedAgentConnections connections = AuthenticatedAgentConnections.withPolicy(
+                ignored -> recordingSession(new ArrayList<>(), new ArrayList<>()),
+                clock,
+                HEARTBEAT_DEADLINE);
+        AuthenticatedConnectionContext context = context(
+                GENERATION,
+                LAUNCH_ID,
+                "connection-1",
+                new TestConnection(),
+                renewals,
+                observations);
+        AgentControlHandler.Session session = connections.activate(context);
+
+        assertThat(connections.available(AGENT_ID, LAUNCH_ID)).isTrue();
+        assertThat(observations).containsExactly(new Observation(
+                "2.4.1", MACHINE, Map.of("pty", "true"), NOW));
+
+        clock.advance(HEARTBEAT_DEADLINE);
+        assertThat(connections.available(AGENT_ID, LAUNCH_ID)).isFalse();
+
+        session.onMessage(new AgentMessage.Heartbeat(
+                AGENT_ID, INSTANCE_ID, Long.MAX_VALUE));
+
+        assertThat(connections.available(AGENT_ID, LAUNCH_ID)).isTrue();
+        assertThat(renewals).hasValue(1);
+        assertThat(observations.getLast().observedAt()).isEqualTo(clock.instant());
+    }
+
+    @Test
+    void agentStatusRecordsValidatedMetadataAndReachesDownstream() {
+        TestClock clock = new TestClock(NOW);
+        List<Observation> observations = new ArrayList<>();
+        List<AgentMessage> messages = new ArrayList<>();
+        AuthenticatedAgentConnections connections = AuthenticatedAgentConnections.withPolicy(
+                ignored -> recordingSession(messages, new ArrayList<>()),
+                clock,
+                HEARTBEAT_DEADLINE);
+        AgentControlHandler.Session session = connections.activate(context(
+                GENERATION,
+                LAUNCH_ID,
+                "connection-1",
+                new TestConnection(),
+                new AtomicInteger(),
+                observations));
+        observations.clear();
+        MachineInfo updatedMachine = new MachineInfo("worker-1", "linux", "x86_64");
+        AgentMessage.AgentStatus status = new AgentMessage.AgentStatus(
+                AGENT_ID,
+                INSTANCE_ID,
+                "2.5.0",
+                updatedMachine,
+                2,
+                Map.of("load", "0.2"),
+                Map.of("pty", "true", "gpu", "false"));
+
+        session.onMessage(status);
+        clock.advance(Duration.ofSeconds(1));
+        session.onMessage(heartbeat());
+
+        assertThat(messages).containsExactly(status, heartbeat());
+        assertThat(observations).containsExactly(
+                new Observation("2.5.0", updatedMachine, status.capabilities(), NOW),
+                new Observation("2.5.0", updatedMachine, status.capabilities(), clock.instant()));
+    }
+
+    @Test
+    void mismatchedHeartbeatAndStatusIdentitiesCloseTheirConnections() {
+        TestClock clock = new TestClock(NOW);
+        List<AgentMessage> messages = new ArrayList<>();
+        List<Throwable> closures = new ArrayList<>();
+        AuthenticatedAgentConnections connections = AuthenticatedAgentConnections.withPolicy(
+                ignored -> recordingSession(messages, closures), clock, HEARTBEAT_DEADLINE);
+        TestConnection heartbeatTransport = new TestConnection();
+        AgentControlHandler.Session heartbeatSession = connections.activate(context(
+                GENERATION, LAUNCH_ID, "connection-1", heartbeatTransport, new AtomicInteger()));
+
+        heartbeatSession.onMessage(new AgentMessage.Heartbeat(
+                new AgentId("other-agent"), INSTANCE_ID, 1L));
+
+        assertThat(heartbeatTransport.closed).isTrue();
+        assertThat(connections.active(AGENT_ID)).isEmpty();
+
+        TestConnection statusTransport = new TestConnection();
+        AgentControlHandler.Session statusSession = connections.activate(context(
+                GENERATION, LAUNCH_ID, "connection-2", statusTransport, new AtomicInteger()));
+        statusSession.onMessage(new AgentMessage.AgentStatus(
+                AGENT_ID,
+                new AgentInstanceId(UUID.randomUUID()),
+                "2.4.1",
+                MACHINE,
+                0,
+                Map.of(),
+                Map.of()));
+
+        assertThat(statusTransport.closed).isTrue();
+        assertThat(connections.active(AGENT_ID)).isEmpty();
+        assertThat(messages).isEmpty();
+        assertThat(closures).hasSize(2).allMatch(IllegalArgumentException.class::isInstance);
+    }
+
     private static AuthenticatedConnectionContext context(
             String connectionId, TestConnection connection, AtomicInteger renewals) {
         return context(GENERATION, LAUNCH_ID, connectionId, connection, renewals);
@@ -199,6 +325,16 @@ class AuthenticatedAgentConnectionsTest {
             String connectionId,
             TestConnection connection,
             AtomicInteger renewals) {
+        return context(generation, launchId, connectionId, connection, renewals, new ArrayList<>());
+    }
+
+    private static AuthenticatedConnectionContext context(
+            AgentGeneration generation,
+            AgentLaunchId launchId,
+            String connectionId,
+            TestConnection connection,
+            AtomicInteger renewals,
+            List<Observation> observations) {
         return new AuthenticatedConnectionContext(
                 AGENT_ID,
                 generation,
@@ -212,6 +348,10 @@ class AuthenticatedAgentConnectionsTest {
                 () -> {
                     renewals.incrementAndGet();
                     return AuthenticatedConnectionContext.RenewalResult.RENEWED;
+                },
+                (agentVersion, machine, capabilities, observedAt) -> {
+                    observations.add(new Observation(agentVersion, machine, capabilities, observedAt));
+                    return AuthenticatedConnectionContext.ObservationResult.RECORDED;
                 });
     }
 
@@ -249,6 +389,40 @@ class AuthenticatedAgentConnectionsTest {
         @Override
         public void close() {
             closed = true;
+        }
+    }
+
+    private record Observation(
+            String agentVersion,
+            MachineInfo machine,
+            Map<String, String> capabilities,
+            Instant observedAt) {
+    }
+
+    private static final class TestClock extends Clock {
+        private Instant instant;
+
+        private TestClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        private void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+
+        @Override
+        public ZoneOffset getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
         }
     }
 }

@@ -8,6 +8,7 @@ import pro.deta.orion.agent.protocol.ConnectionId;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 
@@ -23,6 +24,7 @@ public final class AuthenticatedConnectionContext {
     private final ConnectionId connectionId;
     private final AgentControlHandler.Connection connection;
     private final Renewal renewal;
+    private final Observation observation;
     private boolean authoritative = true;
 
     AuthenticatedConnectionContext(
@@ -35,7 +37,8 @@ public final class AuthenticatedConnectionContext {
             Map<String, String> capabilities,
             ConnectionId connectionId,
             AgentControlHandler.Connection connection,
-            Renewal renewal) {
+            Renewal renewal,
+            Observation observation) {
         this.agentId = Objects.requireNonNull(agentId, "agentId");
         this.generation = Objects.requireNonNull(generation, "generation");
         this.launchId = Objects.requireNonNull(launchId, "launchId");
@@ -46,6 +49,7 @@ public final class AuthenticatedConnectionContext {
         this.connectionId = Objects.requireNonNull(connectionId, "connectionId");
         this.connection = Objects.requireNonNull(connection, "connection");
         this.renewal = Objects.requireNonNull(renewal, "renewal");
+        this.observation = Objects.requireNonNull(observation, "observation");
     }
 
     public AgentId agentId() {
@@ -95,8 +99,23 @@ public final class AuthenticatedConnectionContext {
         authoritative = false;
     }
 
+    ObservationResult recordObservation(
+            String observedAgentVersion,
+            MachineInfo observedMachine,
+            Map<String, String> observedCapabilities,
+            Instant observedAt) {
+        return observation.record(
+                observedAgentVersion, observedMachine, observedCapabilities, observedAt);
+    }
+
     public enum RenewalResult {
         RENEWED,
+        REJECTED,
+        PERSISTENCE_FAILED
+    }
+
+    enum ObservationResult {
+        RECORDED,
         REJECTED,
         PERSISTENCE_FAILED
     }
@@ -104,5 +123,14 @@ public final class AuthenticatedConnectionContext {
     @FunctionalInterface
     interface Renewal {
         RenewalResult renew();
+    }
+
+    @FunctionalInterface
+    interface Observation {
+        ObservationResult record(
+                String agentVersion,
+                MachineInfo machine,
+                Map<String, String> capabilities,
+                Instant observedAt);
     }
 }

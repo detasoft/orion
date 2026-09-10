@@ -3,11 +3,13 @@ package pro.deta.orion.agent.server.auth;
 import pro.deta.orion.agent.protocol.AgentAuthentication;
 import pro.deta.orion.agent.protocol.AgentGeneration;
 import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolVersion;
 import pro.deta.orion.agent.protocol.ConnectionId;
 import pro.deta.orion.agent.protocol.JournalFormatVersion;
+import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.registry.AgentRecord;
@@ -298,7 +300,16 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
                                 hello.agentId(),
                                 generation,
                                 launchId,
-                                tokenDigest));
+                                tokenDigest),
+                        (agentVersion, machine, capabilities, observedAt) -> observe(
+                                hello.agentId(),
+                                generation,
+                                launchId,
+                                hello.instanceId(),
+                                agentVersion,
+                                machine,
+                                capabilities,
+                                observedAt));
                 published = Objects.requireNonNull(publisher.apply(context), "authenticated session");
             } catch (Throwable failure) {
                 reject();
@@ -368,6 +379,34 @@ public final class AgentControlAuthenticator implements AgentControlHandler {
             return classify(failure) == Failure.PERSISTENCE_FAILED
                     ? AuthenticatedConnectionContext.RenewalResult.PERSISTENCE_FAILED
                     : AuthenticatedConnectionContext.RenewalResult.REJECTED;
+        }
+    }
+
+    private AuthenticatedConnectionContext.ObservationResult observe(
+            AgentId agentId,
+            AgentGeneration generation,
+            AgentLaunchId launchId,
+            AgentInstanceId instanceId,
+            String agentVersion,
+            MachineInfo machine,
+            Map<String, String> capabilities,
+            Instant observedAt) {
+        try {
+            registry.recordObservation(agentId, new AgentRecord.Observation(
+                    generation,
+                    launchId,
+                    instanceId,
+                    agentVersion,
+                    machine,
+                    capabilities,
+                    observedAt));
+            return AuthenticatedConnectionContext.ObservationResult.RECORDED;
+        } catch (IllegalArgumentException failure) {
+            return AuthenticatedConnectionContext.ObservationResult.REJECTED;
+        } catch (AgentRegistryException failure) {
+            return classify(failure) == Failure.PERSISTENCE_FAILED
+                    ? AuthenticatedConnectionContext.ObservationResult.PERSISTENCE_FAILED
+                    : AuthenticatedConnectionContext.ObservationResult.REJECTED;
         }
     }
 
