@@ -3,12 +3,12 @@ package pro.deta.orion.provisioning;
 public class ProvisioningException extends Exception {
     private final ProvisioningFailure failure;
 
-    ProvisioningException(ProvisioningFailure failure, String message) {
+    public ProvisioningException(ProvisioningFailure failure, String message) {
         super(message);
         this.failure = failure;
     }
 
-    ProvisioningException(ProvisioningFailure failure, String message, Throwable cause) {
+    public ProvisioningException(ProvisioningFailure failure, String message, Throwable cause) {
         super(message, cause);
         this.failure = failure;
     }

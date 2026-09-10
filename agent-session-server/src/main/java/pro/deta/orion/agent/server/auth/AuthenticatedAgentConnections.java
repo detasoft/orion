@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 
@@ -33,6 +34,7 @@ public final class AuthenticatedAgentConnections {
     private final Map<AgentId, ActiveSession> active = new HashMap<>();
     private final Map<AgentId, Long> revokedThrough = new HashMap<>();
     private final ReentrantLock lock = new ReentrantLock();
+    private final Condition stateChanged = lock.newCondition();
 
     public AuthenticatedAgentConnections(
             Function<AuthenticatedConnectionContext, AgentControlHandler.Session> publisher) {
@@ -166,6 +168,7 @@ public final class AuthenticatedAgentConnections {
                 if (candidate.context.generation().value() <= revokedThrough.get(agentId)) {
                     active.remove(agentId);
                     candidate.revoke();
+                    stateChanged.signalAll();
                     removed = true;
                 }
             } finally {
@@ -196,6 +199,7 @@ public final class AuthenticatedAgentConnections {
                 if (previous == null) {
                     observeInitial(replacement);
                     active.put(replacement.context.agentId(), replacement);
+                    stateChanged.signalAll();
                     return null;
                 }
             } finally {
@@ -212,6 +216,7 @@ public final class AuthenticatedAgentConnections {
                     observeInitial(replacement);
                     previous.revoke();
                     active.put(replacement.context.agentId(), replacement);
+                    stateChanged.signalAll();
                     replaced = true;
                     return previous;
                 }
@@ -251,12 +256,73 @@ public final class AuthenticatedAgentConnections {
         Objects.requireNonNull(launchId, "launchId");
         lock.lock();
         try {
-            ActiveSession session = active.get(agentId);
-            return session != null
-                    && session.context.launchId().equals(launchId)
-                    && clock.instant().isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
+            return available(agentId, launchId, clock.instant());
         } finally {
             lock.unlock();
+        }
+    }
+
+    boolean awaitOnline(AgentId agentId, AgentLaunchId launchId, Duration timeout)
+            throws InterruptedException {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(launchId, "launchId");
+        long remaining = timeoutNanos(timeout);
+        lock.lockInterruptibly();
+        try {
+            while (!available(agentId, launchId, clock.instant())) {
+                if (remaining <= 0) {
+                    return false;
+                }
+                remaining = stateChanged.awaitNanos(remaining);
+            }
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    boolean awaitSustainedOffline(AgentId agentId, Duration timeout)
+            throws InterruptedException {
+        Objects.requireNonNull(agentId, "agentId");
+        long remaining = timeoutNanos(timeout);
+        lock.lockInterruptibly();
+        try {
+            if (available(agentId, clock.instant())) {
+                return false;
+            }
+            while (remaining > 0) {
+                remaining = stateChanged.awaitNanos(remaining);
+                if (available(agentId, clock.instant())) {
+                    return false;
+                }
+            }
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private boolean available(AgentId agentId, AgentLaunchId launchId, Instant now) {
+        ActiveSession session = active.get(agentId);
+        return session != null
+                && session.context.launchId().equals(launchId)
+                && now.isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
+    }
+
+    private boolean available(AgentId agentId, Instant now) {
+        ActiveSession session = active.get(agentId);
+        return session != null && now.isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
+    }
+
+    private static long timeoutNanos(Duration timeout) {
+        Objects.requireNonNull(timeout, "timeout");
+        if (timeout.isNegative()) {
+            throw new IllegalArgumentException("timeout must not be negative");
+        }
+        try {
+            return timeout.toNanos();
+        } catch (ArithmeticException overflow) {
+            return Long.MAX_VALUE;
         }
     }
 
@@ -327,6 +393,7 @@ public final class AuthenticatedAgentConnections {
                     return false;
                 }
                 lastHeartbeat = observedAt;
+                signalStateChanged();
             } else if (message instanceof AgentMessage.AgentStatus status) {
                 if (!status.agentId().equals(context.agentId())
                         || !status.instanceId().equals(context.instanceId())) {
@@ -370,12 +437,22 @@ public final class AuthenticatedAgentConnections {
                     }
                     active.remove(context.agentId());
                     revoke();
+                    stateChanged.signalAll();
                 } finally {
                     lock.unlock();
                 }
                 delegate.onClosed(failure);
             } finally {
                 unlock();
+            }
+        }
+
+        private void signalStateChanged() {
+            lock.lock();
+            try {
+                stateChanged.signalAll();
+            } finally {
+                lock.unlock();
             }
         }
 
