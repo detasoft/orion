@@ -13,7 +13,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use orion_session_host::host::{self, ERROR_INVALID_REQUEST, OwnedControlFrame};
+use orion_session_host::host::{
+    self, ERROR_INVALID_REQUEST, ERROR_INVALID_STATE, OwnedControlFrame,
+};
 use orion_session_host::journal::{self, Metadata};
 use orion_session_host::journal_acknowledgement::STATE_FILE_NAME;
 use orion_session_host::protocol::{self, ControlFrame, control_message, event_type};
@@ -21,6 +23,8 @@ use support::journal::{self as journal_reader, JournalEvent};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+const CLAIM_SERVER_CONTROL: u16 = 0x0009;
+const SERVER_CONTROL_CLAIMED: u16 = 0x8005;
 
 #[test]
 fn lists_owned_processes_and_signals_tokens_after_root_exit() {
@@ -747,6 +751,137 @@ fn orders_controls_and_rejects_duplicate_sequences_after_reconnect() {
     let metadata = journal::read_metadata(host.directory()).unwrap();
     assert_eq!(metadata.current_cols, 101);
     assert_eq!(metadata.current_rows, 37);
+}
+
+#[test]
+fn claim_fences_older_server_connections_and_reports_watermarks() {
+    let directory = temporary_directory("server-control-claim");
+    let mut host = HostGuard::spawn(
+        directory,
+        &["/bin/sh", "-c", "sleep 30"],
+        "xterm-256color",
+        80,
+        24,
+    );
+    let mut older = connect(host.directory());
+    let accepted_sequence = (i64::MAX as u64) + 7;
+    send_operation(
+        &mut older,
+        control_message::RESIZE,
+        accepted_sequence,
+        b"server-envelope-before-claim",
+        &protocol::pty_resize_payload(90, 30),
+    );
+    wait_for_command_result(host.directory(), accepted_sequence);
+    let acknowledged_event_id = journal_reader::read(host.directory(), 0)
+        .unwrap()
+        .events
+        .last()
+        .unwrap()
+        .event_id;
+    send_journal_ack(
+        &mut older,
+        accepted_sequence + 1,
+        acknowledged_event_id,
+    );
+    wait_for_command_result(host.directory(), accepted_sequence + 1);
+
+    let mut claiming = connect(host.directory());
+    let claimed = request(
+        &mut claiming,
+        CLAIM_SERVER_CONTROL,
+        41,
+        &(accepted_sequence + 1).to_le_bytes(),
+    );
+    assert_eq!(claimed.message_type, SERVER_CONTROL_CLAIMED);
+    assert_eq!(claimed.sequence, 41);
+    assert_eq!(claimed.payload.len(), 16);
+    assert_eq!(u64_at(&claimed.payload[0..8]), accepted_sequence + 1);
+    assert_eq!(u64_at(&claimed.payload[8..16]), acknowledged_event_id);
+
+    let stale_claim = request(
+        &mut older,
+        CLAIM_SERVER_CONTROL,
+        42,
+        &(accepted_sequence + 1).to_le_bytes(),
+    );
+    assert_eq!(stale_claim.message_type, control_message::ERROR);
+    assert_eq!(stale_claim.sequence, 42);
+    assert_eq!(u32_at(&stale_claim.payload[0..4]), ERROR_INVALID_STATE);
+
+    let fenced = operation_request(
+        &mut older,
+        control_message::RESIZE,
+        accepted_sequence + 2,
+        b"server-envelope-from-fenced-connection",
+        &protocol::pty_resize_payload(91, 31),
+    );
+    assert_received_error(&fenced, accepted_sequence + 2, ERROR_INVALID_STATE);
+
+    send_operation_from(
+        &mut older,
+        control_message::RESIZE,
+        1,
+        protocol::OperationSource::Manual,
+        None,
+        &protocol::pty_resize_payload(92, 32),
+    );
+
+    let mut current = connect(host.directory());
+    send_operation(
+        &mut current,
+        control_message::TERMINATE,
+        accepted_sequence + 2,
+        b"server-envelope-after-claim",
+        &[1, 0, 0, 0],
+    );
+    drop(older);
+    drop(claiming);
+    drop(current);
+    assert!(host.wait().success());
+}
+
+#[test]
+fn claim_rejects_a_recorded_floor_ahead_of_host_admission() {
+    let directory = temporary_directory("server-control-claim-floor");
+    let mut host = HostGuard::spawn(
+        directory,
+        &["/bin/sh", "-c", "sleep 30"],
+        "xterm-256color",
+        80,
+        24,
+    );
+    let mut claiming = connect(host.directory());
+    let rejected = request(
+        &mut claiming,
+        CLAIM_SERVER_CONTROL,
+        42,
+        &1_u64.to_le_bytes(),
+    );
+    assert_eq!(rejected.message_type, control_message::ERROR);
+    assert_eq!(rejected.sequence, 42);
+    assert_eq!(u32_at(&rejected.payload[0..4]), ERROR_INVALID_STATE);
+
+    let claimed = request(
+        &mut claiming,
+        CLAIM_SERVER_CONTROL,
+        43,
+        &0_u64.to_le_bytes(),
+    );
+    assert_eq!(claimed.message_type, SERVER_CONTROL_CLAIMED);
+    assert_eq!(claimed.payload, [0; 16]);
+
+    let mut current = connect(host.directory());
+    send_operation(
+        &mut current,
+        control_message::TERMINATE,
+        1,
+        b"server-envelope-after-empty-claim",
+        &[1, 0, 0, 0],
+    );
+    drop(claiming);
+    drop(current);
+    assert!(host.wait().success());
 }
 
 #[test]

@@ -47,14 +47,70 @@ pub mod control_message {
     pub const APPEND_EVENT: u16 = 0x0006;
     pub const ACK_JOURNAL: u16 = 0x0007;
     pub const LIST_PROCESSES: u16 = 0x0008;
+    pub const CLAIM_SERVER_CONTROL: u16 = 0x0009;
 
     pub const RECEIVED: u16 = 0x8000;
     pub const ERROR: u16 = 0x8002;
     pub const STATUS_RESPONSE: u16 = 0x8003;
     pub const LIST_PROCESSES_RESPONSE: u16 = 0x8004;
+    pub const SERVER_CONTROL_CLAIMED: u16 = 0x8005;
 }
 
 pub const MAX_PROCESS_ENTRIES: usize = (MAX_PAYLOAD_LENGTH - 4) / 24;
+
+pub fn server_control_claim_payload(
+    observed_server_sequence_floor: Option<u64>,
+) -> Result<[u8; 8], EncodeError> {
+    let floor = match observed_server_sequence_floor {
+        Some(floor) => {
+            validate_operation_sequence(floor)?;
+            floor
+        }
+        None => 0,
+    };
+    Ok(floor.to_le_bytes())
+}
+
+pub fn decode_server_control_claim_payload(payload: &[u8]) -> Result<Option<u64>, EncodeError> {
+    let floor = u64::from_le_bytes(
+        payload
+            .try_into()
+            .map_err(|_| EncodeError::InvalidPayload(
+                "CLAIM_SERVER_CONTROL payload must be 8 bytes",
+            ))?,
+    );
+    if floor == 0 {
+        return Ok(None);
+    }
+    validate_operation_sequence(floor)?;
+    Ok(Some(floor))
+}
+
+pub fn server_control_claimed_payload(
+    accepted_server_sequence_high_watermark: Option<u64>,
+    acknowledged_journal_event_id: Option<u64>,
+) -> Result<[u8; 16], EncodeError> {
+    let accepted = match accepted_server_sequence_high_watermark {
+        Some(accepted) => {
+            validate_operation_sequence(accepted)?;
+            accepted
+        }
+        None => 0,
+    };
+    let acknowledged = match acknowledged_journal_event_id {
+        Some(0) => {
+            return Err(EncodeError::InvalidPayload(
+                "acknowledged journal event ID must be nonzero",
+            ));
+        }
+        Some(acknowledged) => acknowledged,
+        None => 0,
+    };
+    let mut payload = [0_u8; 16];
+    payload[0..8].copy_from_slice(&accepted.to_le_bytes());
+    payload[8..16].copy_from_slice(&acknowledged.to_le_bytes());
+    Ok(payload)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ListedProcess {
@@ -828,6 +884,37 @@ mod tests {
     }
 
     #[test]
+    fn server_control_claim_payloads_and_fixture_are_stable() {
+        let high = (i64::MAX as u64) + 7;
+        assert_eq!(
+            decode_server_control_claim_payload(&server_control_claim_payload(None).unwrap())
+                .unwrap(),
+            None,
+        );
+        assert_eq!(
+            decode_server_control_claim_payload(
+                &server_control_claim_payload(Some(high)).unwrap(),
+            )
+            .unwrap(),
+            Some(high),
+        );
+        assert!(decode_server_control_claim_payload(&[0; 7]).is_err());
+        assert!(decode_server_control_claim_payload(&u64::MAX.to_le_bytes()).is_err());
+        assert!(server_control_claim_payload(Some(0)).is_err());
+        assert!(server_control_claimed_payload(Some(0), None).is_err());
+        assert!(server_control_claimed_payload(None, Some(0)).is_err());
+        assert!(server_control_claimed_payload(Some(u64::MAX), None).is_err());
+        assert!(server_control_claimed_payload(Some(u64::MAX - 1), None).is_ok());
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("protocol/fixtures/server-sequence-recovery.bin");
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            protocol_fixture::server_sequence_recovery(),
+        );
+    }
+
+    #[test]
     fn checked_in_command_event_fixture_is_stable() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("protocol/fixtures/command-events-v1.hex");
@@ -1394,6 +1481,32 @@ pub mod protocol_fixture {
             }
         }
         frames.concat()
+    }
+
+    pub fn server_sequence_recovery() -> Vec<u8> {
+        let observed_floor = (i64::MAX as u64) + 7;
+        let claim = server_control_claim_payload(Some(observed_floor)).unwrap();
+        let claimed =
+            server_control_claimed_payload(Some(observed_floor + 2), Some(u64::MAX)).unwrap();
+        [
+            encode_control_frame(ControlFrame {
+                message_type: control_message::CLAIM_SERVER_CONTROL,
+                payload_schema_version: 1,
+                flags: 0,
+                sequence: 41,
+                payload: &claim,
+            })
+            .unwrap(),
+            encode_control_frame(ControlFrame {
+                message_type: control_message::SERVER_CONTROL_CLAIMED,
+                payload_schema_version: 1,
+                flags: 0,
+                sequence: 41,
+                payload: &claimed,
+            })
+            .unwrap(),
+        ]
+        .concat()
     }
 
     pub fn command_events_hex() -> String {

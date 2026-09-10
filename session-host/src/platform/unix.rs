@@ -201,6 +201,7 @@ pub(super) fn run_session(options: SessionOptions) -> Result<(), HostError> {
         master: initialized.master,
         pty_closed: false,
         accepted_sequence_high_watermark: None,
+        active_server_connection_floor: None,
         operation_order: Arc::new(Mutex::new(())),
         operations: Arc::new(OperationCoordinator::new()),
         acknowledgement: initialized.acknowledgement,
@@ -854,6 +855,7 @@ struct SharedState {
     master: File,
     pty_closed: bool,
     accepted_sequence_high_watermark: Option<u64>,
+    active_server_connection_floor: Option<u64>,
     operation_order: Arc<Mutex<()>>,
     operations: Arc<OperationCoordinator>,
     acknowledgement: JournalAcknowledgement,
@@ -1030,13 +1032,16 @@ fn spawn_accept_loop(
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<Result<(), HostError>> {
     thread::spawn(move || {
+        let mut next_connection_ordinal = 1_u64;
         while !stop.load(Ordering::Acquire) {
             match listener.accept() {
                 Ok((stream, _address)) => {
                     stream.set_nonblocking(false)?;
+                    let connection_ordinal =
+                        take_connection_ordinal(&mut next_connection_ordinal)?;
                     let state = Arc::clone(&state);
                     thread::spawn(move || {
-                        if let Err(error) = serve_connection(stream, state) {
+                        if let Err(error) = serve_connection(stream, connection_ordinal, state) {
                             eprintln!("session-host: control connection failed: {error}");
                         }
                     });
@@ -1052,8 +1057,17 @@ fn spawn_accept_loop(
     })
 }
 
+fn take_connection_ordinal(next: &mut u64) -> Result<u64, HostError> {
+    let ordinal = *next;
+    *next = ordinal.checked_add(1).ok_or_else(|| {
+        HostError::Thread("control connection ordinal space is exhausted".to_owned())
+    })?;
+    Ok(ordinal)
+}
+
 fn serve_connection(
     mut stream: UnixStream,
+    connection_ordinal: u64,
     state: Arc<Mutex<SharedState>>,
 ) -> Result<(), HostError> {
     if let Err(error) = stream.set_write_timeout(Some(CONTROL_RESPONSE_WRITE_TIMEOUT))
@@ -1069,8 +1083,10 @@ fn serve_connection(
             && (frame.payload_schema_version == 3
                 || (frame.message_type == control_message::SIGNAL && frame.payload_schema_version == 4))
         {
-            handle_operation(&mut stream, &frame, &state)?;
-        } else if let Some((message_type, sequence, payload)) = handle_request(&frame, &state) {
+            handle_operation(&mut stream, &frame, connection_ordinal, &state)?;
+        } else if let Some((message_type, sequence, payload)) =
+            handle_request(&frame, connection_ordinal, &state)
+        {
             host::write_control_frame(&mut stream, message_type, sequence, &payload)?;
         }
     }
@@ -1090,6 +1106,7 @@ fn is_operation_control(message_type: u16) -> bool {
 
 fn handle_request(
     frame: &OwnedControlFrame,
+    connection_ordinal: u64,
     state: &Arc<Mutex<SharedState>>,
 ) -> Option<(u16, u64, Vec<u8>)> {
     match frame.message_type {
@@ -1137,6 +1154,24 @@ fn handle_request(
                 Err((code, detail)) => response_error(frame.sequence, code, &detail),
             })
         }
+        control_message::CLAIM_SERVER_CONTROL => {
+            let result = if frame.payload_schema_version != 1 {
+                Err((
+                    ERROR_UNSUPPORTED_SCHEMA,
+                    "CLAIM_SERVER_CONTROL requires schema 1".to_owned(),
+                ))
+            } else {
+                claim_server_control(connection_ordinal, &frame.payload, state)
+            };
+            Some(match result {
+                Ok(payload) => (
+                    control_message::SERVER_CONTROL_CLAIMED,
+                    frame.sequence,
+                    payload.to_vec(),
+                ),
+                Err((code, detail)) => response_error(frame.sequence, code, &detail),
+            })
+        }
         control_message::APPEND_EVENT => {
             if frame.payload_schema_version != 1 {
                 Some(response_error(
@@ -1163,6 +1198,7 @@ fn handle_request(
 fn handle_operation(
     stream: &mut UnixStream,
     frame: &OwnedControlFrame,
+    connection_ordinal: u64,
     shared: &Arc<Mutex<SharedState>>,
 ) -> Result<(), HostError> {
     let operation_sequence = frame.sequence;
@@ -1196,6 +1232,15 @@ fn handle_operation(
     let admission = match lock_state(shared) {
         Ok(mut state) => {
             if operation.source == protocol::OperationSource::Server
+                && state
+                    .active_server_connection_floor
+                    .is_some_and(|floor| connection_ordinal < floor)
+            {
+                Err((
+                    ERROR_INVALID_STATE,
+                    "server control connection is fenced".to_owned(),
+                ))
+            } else if operation.source == protocol::OperationSource::Server
                 && state
                     .accepted_sequence_high_watermark
                     .is_some_and(|watermark| operation_sequence <= watermark)
@@ -1277,6 +1322,41 @@ fn handle_operation(
         }
     }
     Ok(())
+}
+
+fn claim_server_control(
+    connection_ordinal: u64,
+    payload: &[u8],
+    shared: &Arc<Mutex<SharedState>>,
+) -> Result<[u8; 16], (u32, String)> {
+    let observed_floor = protocol::decode_server_control_claim_payload(payload)
+        .map_err(|error| (ERROR_INVALID_REQUEST, error.to_string()))?;
+    let mut state = lock_state(shared).map_err(|error| (ERROR_IO, error.to_string()))?;
+    if state
+        .active_server_connection_floor
+        .is_some_and(|floor| connection_ordinal < floor)
+    {
+        return Err((
+            ERROR_INVALID_STATE,
+            "server control connection is fenced".to_owned(),
+        ));
+    }
+    if observed_floor.is_some_and(|floor| {
+        state
+            .accepted_sequence_high_watermark
+            .is_none_or(|accepted| floor > accepted)
+    }) {
+        return Err((
+            ERROR_INVALID_STATE,
+            "recorded server sequence exceeds host admission".to_owned(),
+        ));
+    }
+    state.active_server_connection_floor = Some(connection_ordinal);
+    protocol::server_control_claimed_payload(
+        state.accepted_sequence_high_watermark,
+        state.acknowledgement.acknowledged_event_id(),
+    )
+    .map_err(|error| (ERROR_INVALID_STATE, error.to_string()))
 }
 
 fn send_operation_rejection(
@@ -2096,6 +2176,14 @@ mod tests {
     }
 
     #[test]
+    fn connection_ordinal_exhaustion_fails_closed() {
+        let mut next = u64::MAX;
+
+        assert!(take_connection_ordinal(&mut next).is_err());
+        assert_eq!(next, u64::MAX);
+    }
+
+    #[test]
     fn pty_reader_continues_after_journal_append_failure() {
         let directory = std::env::temp_dir().join(format!(
             "session-host-reader-{}-{}",
@@ -2134,6 +2222,7 @@ mod tests {
             master: File::open("/dev/null").unwrap(),
             pty_closed: false,
             accepted_sequence_high_watermark: None,
+            active_server_connection_floor: None,
             operation_order: Arc::new(Mutex::new(())),
             operations: Arc::new(OperationCoordinator::new()),
             acknowledgement,
@@ -2207,6 +2296,7 @@ mod tests {
             master,
             pty_closed: false,
             accepted_sequence_high_watermark: None,
+            active_server_connection_floor: None,
             operation_order: Arc::new(Mutex::new(())),
             operations: Arc::new(OperationCoordinator::new()),
             acknowledgement,
@@ -2231,7 +2321,7 @@ mod tests {
         };
         let (mut host_stream, mut client_stream) = UnixStream::pair().unwrap();
 
-        handle_operation(&mut host_stream, &frame, &state).unwrap();
+        handle_operation(&mut host_stream, &frame, 1, &state).unwrap();
         let received = host::read_control_frame(&mut client_stream)
             .unwrap()
             .unwrap();
@@ -2251,7 +2341,7 @@ mod tests {
             journal_before_operation
         );
 
-        handle_operation(&mut host_stream, &frame, &state).unwrap();
+        handle_operation(&mut host_stream, &frame, 1, &state).unwrap();
         let rejected = host::read_control_frame(&mut client_stream)
             .unwrap()
             .unwrap();
