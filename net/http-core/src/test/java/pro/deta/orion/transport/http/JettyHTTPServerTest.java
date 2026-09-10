@@ -93,6 +93,7 @@ class JettyHTTPServerTest {
             "https-identity-v1", KeyMaterialPurpose.TLS_IDENTITY);
     private static final TrustedCertificateDescriptor SERVER_ROOT = trusted("server-root-v1");
     private static final TrustedCertificateDescriptor CLIENT_ROOT = trusted("client-root-v1");
+    private static final SharedMaterial SHARED_MATERIAL = sharedMaterial();
 
     @Test
     void servesMaterialBackedHttpsWithoutRootInTheServerChain() throws Exception {
@@ -769,43 +770,57 @@ class JettyHTTPServerTest {
     }
 
     private static MaterialFixture material() throws Exception {
-        OrionKeyMaterial owner = owner();
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        store.write(SHARED_MATERIAL.snapshot(), null);
+        OrionKeyMaterial owner = owner(store);
+        return new MaterialFixture(
+                owner,
+                SHARED_MATERIAL.serverCertificate(),
+                SHARED_MATERIAL.trustedClientKey(),
+                SHARED_MATERIAL.trustedClientCertificate(),
+                SHARED_MATERIAL.serverIssuerClientKey(),
+                SHARED_MATERIAL.serverIssuerClientCertificate());
+    }
+
+    private static SharedMaterial sharedMaterial() {
         try {
-            TestCertificateChain.Authority serverRoot = TestCertificateChain.root("Server Root");
-            TestCertificateChain.Authority clientRoot = TestCertificateChain.root("Client Root");
-            AcmeMaterialConfiguration clientProvisioning = new AcmeMaterialConfiguration(
-                    ACCOUNT, IDENTITY, Optional.of(CLIENT_ROOT));
-            AcmeKeyMaterial keys = owner.acme().acquire(clientProvisioning, 2048, 2048);
-            owner.acme().installCertificateChain(
-                    clientProvisioning,
-                    List.of(TestCertificateChain.leaf("localhost", keys.domainKeyPair(), clientRoot)),
-                    Optional.of(clientRoot.certificate()));
-            AcmeMaterialConfiguration serverProvisioning = new AcmeMaterialConfiguration(
-                    ACCOUNT, IDENTITY, Optional.of(SERVER_ROOT));
-            X509Certificate serverCertificate = TestCertificateChain.leaf(
-                    "localhost", keys.domainKeyPair(), serverRoot);
-            owner.acme().installCertificateChain(
-                    serverProvisioning,
-                    List.of(serverCertificate),
-                    Optional.of(serverRoot.certificate()));
-            KeyPair trustedClientKey = TestCertificateChain.keyPair();
-            KeyPair serverIssuerClientKey = TestCertificateChain.keyPair();
-            return new MaterialFixture(
-                    owner,
-                    serverCertificate,
-                    trustedClientKey,
-                    TestCertificateChain.leaf("trusted-client", trustedClientKey, clientRoot),
-                    serverIssuerClientKey,
-                    TestCertificateChain.leaf("server-issuer-client", serverIssuerClientKey, serverRoot));
+            InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+            try (OrionKeyMaterial owner = owner(store)) {
+                TestCertificateChain.Authority serverRoot = TestCertificateChain.root("Server Root");
+                TestCertificateChain.Authority clientRoot = TestCertificateChain.root("Client Root");
+                AcmeMaterialConfiguration clientProvisioning = new AcmeMaterialConfiguration(
+                        ACCOUNT, IDENTITY, Optional.of(CLIENT_ROOT));
+                AcmeKeyMaterial keys = owner.acme().acquire(clientProvisioning, 2048, 2048);
+                owner.acme().installCertificateChain(
+                        clientProvisioning,
+                        List.of(TestCertificateChain.leaf("localhost", keys.domainKeyPair(), clientRoot)),
+                        Optional.of(clientRoot.certificate()));
+                AcmeMaterialConfiguration serverProvisioning = new AcmeMaterialConfiguration(
+                        ACCOUNT, IDENTITY, Optional.of(SERVER_ROOT));
+                X509Certificate serverCertificate = TestCertificateChain.leaf(
+                        "localhost", keys.domainKeyPair(), serverRoot);
+                owner.acme().installCertificateChain(
+                        serverProvisioning,
+                        List.of(serverCertificate),
+                        Optional.of(serverRoot.certificate()));
+                KeyPair trustedClientKey = TestCertificateChain.keyPair();
+                KeyPair serverIssuerClientKey = TestCertificateChain.keyPair();
+                return new SharedMaterial(
+                        store.read().orElseThrow().bytes(),
+                        serverCertificate,
+                        trustedClientKey,
+                        TestCertificateChain.leaf("trusted-client", trustedClientKey, clientRoot),
+                        serverIssuerClientKey,
+                        TestCertificateChain.leaf("server-issuer-client", serverIssuerClientKey, serverRoot));
+            }
         } catch (Exception failure) {
-            owner.close();
-            throw failure;
+            throw new ExceptionInInitializerError(failure);
         }
     }
 
-    private static OrionKeyMaterial owner() throws Exception {
+    private static OrionKeyMaterial owner(InMemoryKeyMaterialContentStore store) throws Exception {
         return OrionKeyMaterial.open(
-                new InMemoryKeyMaterialContentStore(),
+                store,
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(SIGNING, List.of()),
                 2048);
@@ -1105,5 +1120,14 @@ class JettyHTTPServerTest {
         public void close() {
             owner.close();
         }
+    }
+
+    private record SharedMaterial(
+            byte[] snapshot,
+            X509Certificate serverCertificate,
+            KeyPair trustedClientKey,
+            X509Certificate trustedClientCertificate,
+            KeyPair serverIssuerClientKey,
+            X509Certificate serverIssuerClientCertificate) {
     }
 }
