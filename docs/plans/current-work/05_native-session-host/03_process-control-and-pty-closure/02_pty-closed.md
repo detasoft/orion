@@ -3,7 +3,9 @@
 Status: todo
 Parent: TASK.md
 Contract: ../../../2026-09-03-native-control-journal-idempotency-design.md
-Related: 01_list-processes.md
+Related: completed LIST_PROCESSES and addressed signalling `10e92141`
+- Owner: codex, session pty-closed-c214, branch `codex/pty-closed-c214`,
+  worktree `.worktrees/pty-closed-c214`, started 2026-09-10 17:54 Europe/Amsterdam.
 Next: compare the PTY-closure design in branch
 `codex/linux-process-tree-control-47c2`, worktree
 `.worktrees/linux-process-tree-control-47c2`, with current journal and control
