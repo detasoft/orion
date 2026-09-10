@@ -45,10 +45,39 @@ pub mod control_message {
     pub const STATUS: u16 = 0x0005;
     pub const APPEND_EVENT: u16 = 0x0006;
     pub const ACK_JOURNAL: u16 = 0x0007;
+    pub const LIST_PROCESSES: u16 = 0x0008;
 
     pub const RECEIVED: u16 = 0x8000;
     pub const ERROR: u16 = 0x8002;
     pub const STATUS_RESPONSE: u16 = 0x8003;
+    pub const LIST_PROCESSES_RESPONSE: u16 = 0x8004;
+}
+
+pub const MAX_PROCESS_ENTRIES: usize = (MAX_PAYLOAD_LENGTH - 4) / 24;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ListedProcess {
+    pub token: u64,
+    pub pid: u64,
+    pub original_root: bool,
+}
+
+pub fn encode_process_list(processes: &[ListedProcess]) -> Result<Vec<u8>, EncodeError> {
+    if processes.len() > MAX_PROCESS_ENTRIES {
+        return Err(EncodeError::InvalidPayload("process list exceeds payload bound"));
+    }
+    let mut payload = Vec::with_capacity(4 + processes.len() * 24);
+    payload.extend_from_slice(&(processes.len() as u32).to_le_bytes());
+    for process in processes {
+        if process.token == 0 || process.pid == 0 || process.pid > i32::MAX as u64 {
+            return Err(EncodeError::InvalidPayload("invalid process identity"));
+        }
+        payload.extend_from_slice(&process.token.to_le_bytes());
+        payload.extend_from_slice(&process.pid.to_le_bytes());
+        payload.extend_from_slice(&u32::from(process.original_root).to_le_bytes());
+        payload.extend_from_slice(&0_u32.to_le_bytes());
+    }
+    Ok(payload)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -514,7 +543,8 @@ fn validate_operation_effect(message_type: u16, effect: &[u8]) -> Result<(), Enc
                 )
         }
         control_message::SIGNAL => {
-            effect.len() == 8
+            (effect.len() == 8 || (effect.len() == 16
+                && u64::from_le_bytes(effect[8..16].try_into().unwrap()) != 0))
                 && u16::from_le_bytes(effect[2..4].try_into().unwrap()) == 0
                 && valid_signal(
                     u16::from_le_bytes(effect[0..2].try_into().unwrap()),
@@ -660,6 +690,28 @@ fn put_u64(target: &mut [u8], value: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_controls_fixture_and_payload_bounds_are_stable() {
+        assert_eq!(protocol_fixture::process_controls(),
+            include_bytes!("../protocol/fixtures/process-controls.bin"));
+        let process = ListedProcess { token: 1, pid: 41, original_root: true };
+        assert_eq!(encode_process_list(&[]).unwrap(), [0, 0, 0, 0]);
+        let bound = vec![process; MAX_PROCESS_ENTRIES + 1];
+        assert!(encode_process_list(&bound).is_err());
+        assert!(encode_process_list(&[ListedProcess { token: 0, ..process }]).is_err());
+        assert!(encode_process_list(&[ListedProcess { pid: 0, ..process }]).is_err());
+        let mut signal = vec![1, 0, 0, 0, 255, 255, 255, 255, 1, 0, 0, 0, 0, 0, 0, 0];
+        assert!(encode_operation_control_payload(control_message::SIGNAL,
+            OperationSource::Manual, None, &signal).is_ok());
+        signal[8] = 0;
+        assert!(encode_operation_control_payload(control_message::SIGNAL,
+            OperationSource::Manual, None, &signal).is_err());
+        signal[8] = 1;
+        signal[2] = 1;
+        assert!(encode_operation_control_payload(control_message::SIGNAL,
+            OperationSource::Manual, None, &signal).is_err());
+    }
 
     #[test]
     fn checked_in_process_control_fixture_is_shared_and_stable() {
@@ -1215,6 +1267,33 @@ mod tests {
 
 pub mod protocol_fixture {
     use super::*;
+
+    pub fn process_controls() -> Vec<u8> {
+        let list = encode_process_list(&[
+            ListedProcess { token: 1, pid: 41, original_root: true },
+            ListedProcess { token: u64::MAX, pid: 42, original_root: false },
+        ]).unwrap();
+        let mut frames = Vec::new();
+        for (message_type, payload_schema_version, sequence, payload) in [
+            (control_message::LIST_PROCESSES, 1, 1, Vec::new()),
+            (control_message::LIST_PROCESSES_RESPONSE, 1, 1, list),
+        ] {
+            frames.extend(encode_control_frame(ControlFrame {
+                message_type, payload_schema_version, flags: 0, sequence, payload: &payload,
+            }).unwrap());
+        }
+        for source in [OperationSource::Server, OperationSource::Manual] {
+            let mut effect = vec![1, 0, 0, 0, 255, 255, 255, 255];
+            effect.extend_from_slice(&u64::MAX.to_le_bytes());
+            let payload = encode_operation_control_payload(control_message::SIGNAL, source,
+                (source == OperationSource::Server).then_some(&b"opaque"[..]), &effect).unwrap();
+            frames.extend(encode_control_frame(ControlFrame {
+                message_type: control_message::SIGNAL, payload_schema_version: 4,
+                flags: 0, sequence: 7, payload: &payload,
+            }).unwrap());
+        }
+        frames
+    }
 
     pub fn journal() -> Vec<u8> {
         journal_records().concat()

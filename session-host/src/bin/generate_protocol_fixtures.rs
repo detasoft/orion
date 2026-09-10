@@ -8,6 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("protocol")
         .join("fixtures");
     fs::create_dir_all(&directory)?;
+    fs::write(directory.join("process-controls.bin"), protocol_fixture::process_controls())?;
     fs::write(
         directory.join("session-events-v1.hex"),
         protocol_fixture::journal_hex(),

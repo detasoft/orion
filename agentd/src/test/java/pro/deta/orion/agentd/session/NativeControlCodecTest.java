@@ -27,6 +27,45 @@ class NativeControlCodecTest {
     private final NativeControlCodec codec = new NativeControlCodec();
 
     @Test
+    void matchesSharedProcessControlsAndRejectsMalformedLists() throws IOException {
+        List<byte[]> frames = splitFrames(Files.readAllBytes(Path.of(
+                "../session-host/protocol/fixtures/process-controls.bin")));
+        ControlCommand.ListProcesses list = new ControlCommand.ListProcesses();
+        assertThat(codec.encode(list)).isEqualTo(frames.get(0));
+        assertThat(codec.decode(list, frames.get(1))).isEqualTo(new ControlResult.Processes(List.of(
+                new ControlResult.Process(1, 41, true), new ControlResult.Process(-1, 42, false))));
+        for (int index = 0; index < 2; index++) {
+            SessionCommandSource source = index == 0 ? SessionCommandSource.SERVER : SessionCommandSource.MANUAL;
+            Optional<ProtocolBytes> envelope = index == 0
+                    ? Optional.of(ProtocolBytes.copyOf("opaque".getBytes(StandardCharsets.UTF_8))) : Optional.empty();
+            assertThat(codec.encode(new ControlCommand.Signal(7, source, envelope,
+                    AgentMessage.SignalKind.INTERRUPT, -1, OptionalLong.of(-1)))).isEqualTo(frames.get(2 + index));
+        }
+        byte[] validPayload = java.util.Arrays.copyOfRange(frames.get(1), 32, frames.get(1).length);
+        for (int offset : new int[]{0, 4, 12, 20, 24}) {
+            byte[] invalid = validPayload.clone();
+            ByteBuffer bytes = ByteBuffer.wrap(invalid).order(ByteOrder.LITTLE_ENDIAN);
+            if (offset == 0) {
+                bytes.putInt(offset, -1);
+            } else if (offset == 4 || offset == 12) {
+                bytes.putLong(offset, 0);
+            } else {
+                bytes.putInt(offset, 2);
+            }
+            assertThat(codec.decode(list, response(0x8004, 1, invalid))).isInstanceOf(ControlResult.Failed.class);
+        }
+        assertThat(codec.decode(new ControlCommand.Status(), frames.get(1)))
+                .isInstanceOf(ControlResult.Failed.class);
+        assertThat(codec.decode(list, response(0x8004, 1, new byte[4])))
+                .isEqualTo(new ControlResult.Processes(List.of()));
+        assertThat(codec.decode(list, response(0x8004, 1, new byte[]{1, 0, 0, 0})))
+                .isInstanceOf(ControlResult.Failed.class);
+        assertThatIllegalArgumentException().isThrownBy(() -> new ControlCommand.Signal(1,
+                SessionCommandSource.MANUAL, Optional.empty(), AgentMessage.SignalKind.INTERRUPT, -1,
+                OptionalLong.of(0)));
+    }
+
+    @Test
     void encodesAllOperationEffectsForBothSources() {
         UUID inputId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
 
@@ -44,7 +83,7 @@ class NativeControlCodecTest {
         assertOperation(
                 new ControlCommand.Signal(
                         SEQUENCE, SessionCommandSource.SERVER, SERVER_ENVELOPE,
-                        AgentMessage.SignalKind.INTERRUPT, -1),
+                        AgentMessage.SignalKind.INTERRUPT, -1, OptionalLong.empty()),
                 3,
                 SessionCommandSource.SERVER,
                 concatHex("01000000ffffffff"));
@@ -222,7 +261,8 @@ class NativeControlCodecTest {
                 AgentMessage.SignalKind kind =
                         AgentMessage.SignalKind.fromWireCode(Short.toUnsignedInt(decoded.getShort()));
                 decoded.getShort();
-                yield new ControlCommand.Signal(sequence, source, serverEnvelope, kind, decoded.getInt());
+                yield new ControlCommand.Signal(
+                        sequence, source, serverEnvelope, kind, decoded.getInt(), OptionalLong.empty());
             }
             case 4 -> {
                 AgentMessage.TerminationMode mode =

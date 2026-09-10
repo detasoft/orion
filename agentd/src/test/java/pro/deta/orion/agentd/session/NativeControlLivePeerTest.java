@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -42,6 +43,44 @@ class NativeControlLivePeerTest {
 
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void listsAndSignalsAProcessThroughTheRealHost() throws Exception {
+        Path executable = extractSessionHost();
+        Path directory = Files.createDirectory(temporaryDirectory.resolve("processes"));
+        Path log = temporaryDirectory.resolve("processes.log");
+        Process host = startSessionHost(executable, "java-process-list", directory, log);
+        ControlEndpoint endpoint = new ControlEndpoint(ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
+                "control.sock", directory.resolve("control.sock"));
+        SessionControlClient client = new SessionControlClient(Duration.ofSeconds(1));
+        try {
+            awaitStatus(client, endpoint, host, log);
+            ControlResult result = client.send(endpoint, new ControlCommand.ListProcesses());
+            assertThat(result).isInstanceOf(ControlResult.Processes.class);
+            List<ControlResult.Process> processes = ((ControlResult.Processes) result).processes();
+            assertThat(processes).hasSize(1);
+            assertThat(processes.getFirst().originalRoot()).isTrue();
+            ControlCommand.Signal signal = new ControlCommand.Signal(1, SessionCommandSource.MANUAL,
+                    Optional.empty(), AgentMessage.SignalKind.PLATFORM, continueSignal(),
+                    OptionalLong.of(processes.getFirst().token()));
+            assertReceived(client.send(endpoint, signal), 1);
+            JournalReadPage page = awaitCommandResults(directory, List.of(1L));
+            assertCommandResult(page.records(), SessionCommandSource.MANUAL, 1, operationPayload(signal));
+            assertReceived(client.send(endpoint, new ControlCommand.Terminate(1, SessionCommandSource.SERVER,
+                    SERVER_ENVELOPE, AgentMessage.TerminationMode.FORCE)), 1);
+            assertThat(host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)).isTrue();
+            assertThat(host.exitValue()).as(Files.readString(log)).isZero();
+        } finally {
+            if (host.isAlive()) {
+                client.send(endpoint, new ControlCommand.Terminate(2, SessionCommandSource.MANUAL,
+                        Optional.empty(), AgentMessage.TerminationMode.FORCE));
+                if (!host.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                    host.destroyForcibly();
+                    host.waitFor();
+                }
+            }
+        }
+    }
 
     @Test
     void interleavesServerAndRepeatedManualOperationsWithTheRealSessionHost() throws Exception {
@@ -67,7 +106,7 @@ class NativeControlLivePeerTest {
                     1, SessionCommandSource.MANUAL, Optional.empty(), 100, 30);
             ControlCommand.Signal serverSignal = new ControlCommand.Signal(
                     43, SessionCommandSource.SERVER, SERVER_ENVELOPE,
-                    AgentMessage.SignalKind.PLATFORM, continueSignal());
+                    AgentMessage.SignalKind.PLATFORM, continueSignal(), OptionalLong.empty());
             ControlCommand.Resize repeatedManualResize = new ControlCommand.Resize(
                     1, SessionCommandSource.MANUAL, Optional.empty(), 101, 31);
             assertReceived(client.send(endpoint, serverInput), 42);

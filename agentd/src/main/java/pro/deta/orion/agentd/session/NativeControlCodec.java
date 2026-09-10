@@ -8,7 +8,9 @@ import java.nio.ByteOrder;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -20,7 +22,8 @@ public final class NativeControlCodec {
     private static final byte[] MAGIC = {'O', 'R', 'C', 'T'};
     private static final int VERSION = 1;
     private static final int OPERATION_PAYLOAD_SCHEMA = 3;
-    private static final long STATUS_SEQUENCE = 1;
+    private static final long QUERY_SEQUENCE = 1;
+    private static final int MAX_PROCESS_ENTRIES = (MAX_PAYLOAD_LENGTH - 4) / 24;
 
     public byte[] encode(ControlCommand command) {
         if (command instanceof ControlCommand.Input input) {
@@ -39,11 +42,15 @@ public final class NativeControlCodec {
                     2, resize.sequence(), resize.source(), resize.serverCommandEnvelope(), effect.array());
         }
         if (command instanceof ControlCommand.Signal signal) {
-            ByteBuffer effect = payload(8);
+            ByteBuffer effect = payload(signal.processToken().isPresent() ? 16 : 8);
             effect.putShort((short) signal.kind().wireCode()).putShort((short) 0);
             effect.putInt(signal.platformCode());
-            return operationFrame(
-                    3, signal.sequence(), signal.source(), signal.serverCommandEnvelope(), effect.array());
+            if (signal.processToken().isPresent()) {
+                effect.putLong(signal.processToken().getAsLong());
+            }
+            return frame(3, signal.processToken().isPresent() ? 4 : OPERATION_PAYLOAD_SCHEMA,
+                    signal.sequence(),
+                    operationPayload(signal.source(), signal.serverCommandEnvelope(), effect.array()));
         }
         if (command instanceof ControlCommand.Terminate terminate) {
             ByteBuffer effect = payload(4);
@@ -65,12 +72,12 @@ public final class NativeControlCodec {
                     acknowledgement.serverCommandEnvelope(),
                     effect.array());
         }
-        return frame(5, STATUS_SEQUENCE, new byte[0]);
+        return frame(command instanceof ControlCommand.ListProcesses ? 8 : 5, QUERY_SEQUENCE, new byte[0]);
     }
 
     public ControlResult decode(ControlCommand command, byte[] encodedFrame) {
         OptionalLong operationSequence = command.operationSequence();
-        long expectedSequence = operationSequence.orElse(STATUS_SEQUENCE);
+        long expectedSequence = operationSequence.orElse(QUERY_SEQUENCE);
         String framingFailure = validateFrame(expectedSequence, encodedFrame);
         if (framingFailure != null) {
             return new ControlResult.Failed(
@@ -86,6 +93,7 @@ public final class NativeControlCodec {
                 case 0x8000 -> received(command, payload);
                 case 0x8002 -> rejection(operationSequence, payload);
                 case 0x8003 -> status(command, payload);
+                case 0x8004 -> processes(command, payload);
                 default -> failed(operationSequence, "unsupported response message type " + type);
             };
         } catch (IllegalArgumentException error) {
@@ -211,6 +219,32 @@ public final class NativeControlCodec {
         } catch (CharacterCodingException error) {
             throw new IllegalArgumentException("error detail is not valid UTF-8");
         }
+    }
+
+    private static ControlResult processes(ControlCommand command, ByteBuffer payload) {
+        if (!(command instanceof ControlCommand.ListProcesses) || payload.remaining() < 4) {
+            throw new IllegalArgumentException("LIST_PROCESSES response payload or request is invalid");
+        }
+        long count = Integer.toUnsignedLong(payload.getInt());
+        if (count > MAX_PROCESS_ENTRIES || payload.remaining() != count * 24) {
+            throw new IllegalArgumentException("LIST_PROCESSES count or length is invalid");
+        }
+        var entries = new ArrayList<ControlResult.Process>((int) count);
+        var tokens = new HashSet<Long>();
+        var pids = new HashSet<Long>();
+        boolean rootSeen = false;
+        for (int index = 0; index < count; index++) {
+            long token = payload.getLong();
+            long pid = payload.getLong();
+            int flags = payload.getInt();
+            if ((flags & ~1) != 0 || payload.getInt() != 0 || !tokens.add(token) || !pids.add(pid)
+                    || (flags == 1 && rootSeen)) {
+                throw new IllegalArgumentException("LIST_PROCESSES entry flags or identity is invalid");
+            }
+            rootSeen |= flags == 1;
+            entries.add(new ControlResult.Process(token, pid, flags == 1));
+        }
+        return new ControlResult.Processes(entries);
     }
 
     private static ControlResult status(ControlCommand command, ByteBuffer payload) {

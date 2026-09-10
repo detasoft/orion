@@ -1,5 +1,6 @@
 package pro.deta.orion.agentd.session;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
 
@@ -20,6 +21,20 @@ public sealed interface ControlResult {
     record Status(HostStatus status) implements ControlResult {
         public Status {
             Objects.requireNonNull(status, "status");
+        }
+    }
+
+    record Processes(List<Process> processes) implements ControlResult {
+        public Processes {
+            processes = List.copyOf(processes);
+        }
+    }
+
+    record Process(long token, long pid, boolean originalRoot) {
+        public Process {
+            if (token == 0 || pid <= 0 || pid > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("invalid process identity");
+            }
         }
     }
 

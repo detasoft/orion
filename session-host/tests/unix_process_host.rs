@@ -23,6 +23,128 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn lists_owned_processes_and_signals_tokens_after_root_exit() {
+    let directory = temporary_directory("list-processes");
+    let child_file = directory.join("child.pid");
+    let mut host = HostGuard::spawn(directory, &[
+        "/usr/bin/perl", "-e",
+        concat!("$SIG{HUP}=q(IGNORE); defined(my $child = fork) or die; ",
+            "if (!$child) { open my $f, q(>), $ARGV[0] or die; print {$f} $$; close $f; } ",
+            "while (1) { sleep 30; }"),
+        child_file.to_str().unwrap(),
+    ], "xterm-256color", 80, 24);
+    let child = wait_for_pid_file(&child_file) as u64;
+    let mut stream = connect(host.directory());
+    let processes = listed_processes(&mut stream, u64::MAX - 1);
+    let root = *processes.iter().find(|process| process.original_root).unwrap();
+    let descendant = *processes.iter().find(|process| process.pid == child).unwrap();
+    assert_ne!(root.token, descendant.token);
+    assert_eq!(listed_processes(&mut stream, 0), processes);
+    assert_eq!(journal_reader::read(host.directory(), 0).unwrap().events.iter()
+        .filter(|event| event.event_type == event_type::COMMAND_RESULT).count(), 0);
+    let malformed = request(&mut stream, control_message::LIST_PROCESSES, 3, &[0]);
+    assert_eq!(malformed.message_type, control_message::ERROR);
+    let schema = request_with_schema(&mut stream, control_message::LIST_PROCESSES, 2, 4, &[]);
+    assert_eq!(schema.message_type, control_message::ERROR);
+    for (schema, effect) in [(4, vec![1, 0, 0, 0, 255, 255, 255, 255]),
+        (3, vec![1, 0, 0, 0, 255, 255, 255, 255, 1, 0, 0, 0, 0, 0, 0, 0])]
+    {
+        let payload = protocol::encode_operation_control_payload(control_message::SIGNAL,
+            protocol::OperationSource::Server, Some(b"invalid-schema"), &effect).unwrap();
+        assert_received_error(&request_with_schema(&mut stream, control_message::SIGNAL,
+            schema, 1000, &payload), 1000, ERROR_INVALID_REQUEST);
+    }
+
+    addressed_signal(&mut stream, 1, descendant.token, 0xffff, libc::SIGCONT);
+    wait_for_command_result(host.directory(), 1);
+    addressed_signal(&mut stream, 2, u64::MAX, 3, -1);
+    wait_for_command_result(host.directory(), 2);
+    assert!(listed_processes(&mut stream, 5).contains(&descendant));
+
+    addressed_signal(&mut stream, 3, root.token, 3, -1);
+    wait_for_command_result(host.directory(), 3);
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let current = listed_processes(&mut stream, 6);
+        if !current.contains(&root) {
+            assert!(current.contains(&descendant));
+            assert!(current.iter().all(|process| !process.original_root));
+            break;
+        }
+        assert!(Instant::now() < deadline, "root token was not retired");
+        thread::sleep(Duration::from_millis(10));
+    }
+    addressed_signal(&mut stream, 4, root.token, 3, -1);
+    wait_for_command_result(host.directory(), 4);
+    let events = journal_reader::read(host.directory(), 0).unwrap().events;
+    for sequence in [2, 4] {
+        let event = events.iter().find(|event| event.event_type == event_type::COMMAND_RESULT
+            && u64_at(&event.payload[2..10]) == sequence).unwrap();
+        let envelope_length = u32_at(&event.payload[10..14]) as usize;
+        assert_eq!(event.payload[14 + envelope_length], 2);
+    }
+    assert_eq!(events.iter().filter(|event| event.event_type == event_type::SIGNAL).count(), 2);
+    assert!(host.child.as_mut().unwrap().try_wait().unwrap().is_none());
+
+    let mut concurrent = connect(host.directory());
+    concurrent.set_read_timeout(Some(TIMEOUT)).unwrap();
+    let (ready, started) = std::sync::mpsc::channel();
+    let listing = thread::spawn(move || {
+        assert!(listed_processes(&mut concurrent, 100).contains(&descendant));
+        ready.send(()).unwrap();
+        let bytes = protocol::encode_control_frame(ControlFrame {
+            message_type: control_message::LIST_PROCESSES, payload_schema_version: 1,
+            flags: 0, sequence: 100, payload: &[],
+        }).unwrap();
+        for _ in 0..100 {
+            if concurrent.write_all(&bytes).is_err() { break; }
+            match host::read_control_frame(&mut concurrent) {
+                Ok(Some(response)) => {
+                    assert_eq!(response.message_type, control_message::LIST_PROCESSES_RESPONSE);
+                }
+                Ok(None) | Err(_) => break,
+            }
+        }
+    });
+    started.recv_timeout(TIMEOUT).unwrap();
+    let terminated = operation_request(&mut stream, control_message::TERMINATE, 5,
+        b"terminate", &[1, 0, 0, 0]);
+    assert_received(&terminated, 5);
+    listing.join().unwrap();
+    drop(stream);
+    assert!(host.wait().success());
+    wait_for_process_exit(child as i32);
+}
+
+fn listed_processes(stream: &mut UnixStream, sequence: u64) -> Vec<protocol::ListedProcess> {
+    let response = request(stream, control_message::LIST_PROCESSES, sequence, &[]);
+    assert_eq!(response.message_type, control_message::LIST_PROCESSES_RESPONSE);
+    assert_eq!(response.sequence, sequence);
+    assert_eq!(response.payload_schema_version, 1);
+    let count = u32_at(&response.payload[..4]) as usize;
+    assert_eq!(response.payload.len(), 4 + 24 * count);
+    response.payload[4..].chunks_exact(24).map(|entry| {
+        assert_eq!(u32_at(&entry[20..24]), 0);
+        assert!(u32_at(&entry[16..20]) <= 1);
+        protocol::ListedProcess {
+            token: u64_at(&entry[..8]), pid: u64_at(&entry[8..16]),
+            original_root: u32_at(&entry[16..20]) == 1,
+        }
+    }).collect()
+}
+
+fn addressed_signal(stream: &mut UnixStream, sequence: u64, token: u64, kind: u16, signal: i32) {
+    let mut effect = Vec::new();
+    effect.extend_from_slice(&kind.to_le_bytes());
+    effect.extend_from_slice(&0_u16.to_le_bytes());
+    effect.extend_from_slice(&signal.to_le_bytes());
+    effect.extend_from_slice(&token.to_le_bytes());
+    let payload = protocol::encode_operation_control_payload(control_message::SIGNAL,
+        protocol::OperationSource::Server, Some(b"addressed"), &effect).unwrap();
+    assert_received(&request_with_schema(stream, control_message::SIGNAL, 4, sequence, &payload), sequence);
+}
+
+#[test]
 fn failed_exec_records_the_authoritative_start_failure() {
     let directory = DirectoryGuard::new(temporary_directory("failed-exec"));
     let output = Command::new(env!("CARGO_BIN_EXE_session-host"))

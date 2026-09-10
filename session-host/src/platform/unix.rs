@@ -1036,7 +1036,10 @@ fn serve_connection(
 ) -> Result<(), HostError> {
     while let Some(frame) = host::read_control_frame(&mut stream)? {
         stream.set_write_timeout(Some(CONTROL_RESPONSE_WRITE_TIMEOUT))?;
-        if is_operation_control(frame.message_type) && frame.payload_schema_version == 3 {
+        if is_operation_control(frame.message_type)
+            && (frame.payload_schema_version == 3
+                || (frame.message_type == control_message::SIGNAL && frame.payload_schema_version == 4))
+        {
             handle_operation(&mut stream, &frame, &state)?;
         } else if let Some((message_type, sequence, payload)) = handle_request(&frame, &state) {
             host::write_control_frame(&mut stream, message_type, sequence, &payload)?;
@@ -1092,6 +1095,19 @@ fn handle_request(
                 }
             }
         }
+        control_message::LIST_PROCESSES => {
+            let result = if frame.payload_schema_version != 1 {
+                Err((ERROR_UNSUPPORTED_SCHEMA, "LIST_PROCESSES requires schema 1".to_owned()))
+            } else if !frame.payload.is_empty() {
+                Err((ERROR_INVALID_REQUEST, "LIST_PROCESSES payload must be empty".to_owned()))
+            } else {
+                list_processes(state).map_err(|detail| (ERROR_IO, detail))
+            };
+            Some(match result {
+                Ok(payload) => (control_message::LIST_PROCESSES_RESPONSE, frame.sequence, payload),
+                Err((code, detail)) => response_error(frame.sequence, code, &detail),
+            })
+        }
         control_message::APPEND_EVENT => {
             if frame.payload_schema_version != 1 {
                 Some(response_error(
@@ -1139,10 +1155,14 @@ fn handle_operation(
             return send_operation_rejection(stream, frame, &detail);
         }
     };
-    if frame.message_type == control_message::SIGNAL
-        && let Err(detail) = parse_signal(&operation.effect)
-    {
-        return send_received(stream, frame, Some((ERROR_INVALID_REQUEST, detail)));
+    if frame.message_type == control_message::SIGNAL {
+        let expected_length = if frame.payload_schema_version == 4 { 16 } else { 8 };
+        if operation.effect.len() != expected_length {
+            return send_operation_rejection(stream, frame, "SIGNAL effect length does not match schema");
+        }
+        if let Err(detail) = parse_signal(&operation.effect[..8]) {
+            return send_received(stream, frame, Some((ERROR_INVALID_REQUEST, detail)));
+        }
     }
     let admission = match lock_state(shared) {
         Ok(mut state) => {
@@ -1275,8 +1295,12 @@ fn execute_operation_effect(
         control_message::INPUT => apply_input(effect, state),
         control_message::RESIZE => apply_resize(effect, state),
         control_message::SIGNAL => {
-            let (kind, signal) = parse_signal(effect).map_err(str::to_owned)?;
-            apply_foreground_signal(kind, signal, state)
+            let (kind, signal) = parse_signal(&effect[..8]).map_err(str::to_owned)?;
+            if effect.len() == 16 {
+                apply_process_signal(u64::from_le_bytes(effect[8..16].try_into().unwrap()), kind, signal, state)
+            } else {
+                apply_foreground_signal(kind, signal, state)
+            }
         }
         control_message::TERMINATE => apply_terminate(effect, state),
         control_message::ACK_JOURNAL => apply_journal_acknowledgement(effect, state),
@@ -1394,6 +1418,26 @@ fn apply_journal_acknowledgement(
     if let Err(error) = state.journal.apply_retention_through(durable) {
         eprintln!("session-host: journal retention was not applied: {error}");
     }
+    Ok(())
+}
+
+fn list_processes(state: &Arc<Mutex<SharedState>>) -> Result<Vec<u8>, String> {
+    let descendants = Arc::clone(&lock_state(state).map_err(|error| error.to_string())?.descendants);
+    let processes = lock_descendants(&descendants)
+        .map_err(|error| error.to_string())?
+        .list_processes().map_err(|error| error.to_string())?;
+    protocol::encode_process_list(&processes).map_err(|error| error.to_string())
+}
+
+fn apply_process_signal(
+    token: u64, kind: u16, signal: libc::c_int, state: &Arc<Mutex<SharedState>>,
+) -> Result<(), String> {
+    let descendants = Arc::clone(&lock_state(state).map_err(|error| error.to_string())?.descendants);
+    lock_descendants(&descendants).map_err(|error| error.to_string())?
+        .signal_process(token, signal).map_err(|error| error.to_string())?;
+    lock_state(state).map_err(|error| error.to_string())?
+        .append_buffered(JournalEvent::Signal { kind, platform_code: signal })
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1718,7 +1762,8 @@ fn prepare_descendant_tracking() -> io::Result<()> {
 struct DescendantTracker {
     root: libc::pid_t,
     pty: PtySlaveIdentity,
-    live: HashMap<libc::pid_t, u128>,
+    live: HashMap<libc::pid_t, (u128, u64)>,
+    next_token: u64,
 }
 
 #[cfg(target_os = "macos")]
@@ -1732,7 +1777,8 @@ impl DescendantTracker {
         Ok(Self {
             root,
             pty,
-            live: HashMap::from([(root, root_start)]),
+            live: HashMap::from([(root, (root_start, 1))]),
+            next_token: 2,
         })
     }
 
@@ -1742,7 +1788,7 @@ impl DescendantTracker {
 
     fn refresh(&mut self) -> io::Result<()> {
         let processes = macos_processes(self.pty)?;
-        self.live.retain(|pid, start| {
+        self.live.retain(|pid, (start, _)| {
             processes
                 .get(pid)
                 .is_some_and(|process| process.start == *start)
@@ -1751,11 +1797,14 @@ impl DescendantTracker {
             let mut changed = false;
             for (pid, process) in &processes {
                 if !self.live.contains_key(pid)
-                    && (process.session == self.root
+                    && ((process.session == self.root && self.live.contains_key(&self.root))
                         || process.holds_pty
                         || self.live.contains_key(&process.parent))
                 {
-                    self.live.insert(*pid, process.start);
+                    let token = self.next_token;
+                    self.next_token = token.checked_add(1)
+                        .ok_or_else(|| io::Error::other("process token space exhausted"))?;
+                    self.live.insert(*pid, (process.start, token));
                     changed = true;
                 }
             }
@@ -1769,8 +1818,37 @@ impl DescendantTracker {
     fn snapshot(&self) -> Vec<(libc::pid_t, u128)> {
         self.live
             .iter()
-            .map(|(pid, start)| (*pid, *start))
+            .map(|(pid, (start, _))| (*pid, *start))
             .collect()
+    }
+
+    fn list_processes(&mut self) -> io::Result<Vec<protocol::ListedProcess>> {
+        self.refresh()?;
+        let mut processes = Vec::with_capacity(self.live.len());
+        for (&pid, &(_, token)) in &self.live {
+            processes.push(protocol::ListedProcess {
+                token, pid: pid as u64, original_root: token == 1,
+            });
+        }
+        processes.sort_unstable_by_key(|process| process.token);
+        Ok(processes)
+    }
+
+    fn signal_process(&mut self, token: u64, signal: libc::c_int) -> io::Result<()> {
+        self.refresh()?;
+        let pid = self.live.iter().find_map(|(pid, (_, candidate))| (*candidate == token).then_some(*pid))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown or exited process token"))?;
+        let current = macos_processes(self.pty)?;
+        if !current.get(&pid).is_some_and(|process| {
+            self.live.get(&pid).is_some_and(|(start, _)| *start == process.start)
+        }) {
+            self.live.remove(&pid);
+            return Err(io::Error::new(io::ErrorKind::NotFound, "process identity exited or changed"));
+        }
+        if unsafe { libc::kill(pid, signal) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     fn is_live(&mut self) -> io::Result<bool> {

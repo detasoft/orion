@@ -57,11 +57,16 @@ public sealed interface ControlCommand {
             SessionCommandSource source,
             Optional<ProtocolBytes> serverCommandEnvelope,
             AgentMessage.SignalKind kind,
-            int platformCode
+            int platformCode,
+            OptionalLong processToken
     ) implements ControlCommand {
         public Signal {
             serverCommandEnvelope = requireOperation(sequence, source, serverCommandEnvelope);
             Objects.requireNonNull(kind, "kind");
+            Objects.requireNonNull(processToken, "processToken");
+            if (processToken.isPresent() && processToken.getAsLong() == 0) {
+                throw new IllegalArgumentException("processToken must be nonzero");
+            }
             if (kind == AgentMessage.SignalKind.PLATFORM && platformCode < 0) {
                 throw new IllegalArgumentException("platform signal requires a non-negative code");
             }
@@ -113,6 +118,9 @@ public sealed interface ControlCommand {
     }
 
     record Status() implements ControlCommand {
+    }
+
+    record ListProcesses() implements ControlCommand {
     }
 
     private static Optional<ProtocolBytes> requireOperation(

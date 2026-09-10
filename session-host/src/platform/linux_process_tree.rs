@@ -913,24 +913,33 @@ enum SignalResult {
 }
 
 pub(super) struct ProcessRegistry {
-    processes: HashMap<libc::pid_t, OwnedFd>,
+    processes: HashMap<libc::pid_t, (u64, OwnedFd)>,
+    next_token: u64,
 }
 
 impl ProcessRegistry {
     fn new() -> Self {
         Self {
             processes: HashMap::new(),
+            next_token: 1,
         }
     }
 
     fn track<K: LinuxKernel>(&mut self, kernel: &mut K, pid: libc::pid_t) -> io::Result<()> {
-        self.processes.insert(pid, kernel.open_pidfd(pid)?);
+        self.insert(pid, kernel.open_pidfd(pid)?)
+    }
+
+    fn insert(&mut self, pid: libc::pid_t, pidfd: OwnedFd) -> io::Result<()> {
+        let token = self.next_token;
+        self.next_token = token.checked_add(1)
+            .ok_or_else(|| io::Error::other("process token space exhausted"))?;
+        self.processes.insert(pid, (token, pidfd));
         Ok(())
     }
 
     #[cfg(test)]
     fn process(&self, pid: libc::pid_t) -> Option<&OwnedFd> {
-        self.processes.get(&pid)
+        self.processes.get(&pid).map(|(_, pidfd)| pidfd)
     }
 
     fn remove_pid(&mut self, pid: libc::pid_t) {
@@ -943,7 +952,7 @@ impl ProcessRegistry {
         pid: libc::pid_t,
         signal: libc::c_int,
     ) -> io::Result<SignalResult> {
-        let pidfd = self
+        let (_, pidfd) = self
             .processes
             .get(&pid)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("untracked PID {pid}")))?;
@@ -959,7 +968,7 @@ impl ProcessRegistry {
 
     fn remove_exited<K: LinuxKernel>(&mut self, kernel: &mut K) -> io::Result<()> {
         let mut exited = Vec::new();
-        for (&pid, pidfd) in &self.processes {
+        for (&pid, (_, pidfd)) in &self.processes {
             if kernel.pidfd_is_ready(pidfd.as_fd())? {
                 exited.push(pid);
             }
@@ -996,6 +1005,32 @@ impl ProcessRegistry {
 
     fn is_empty(&self) -> bool {
         self.processes.is_empty()
+    }
+
+    fn snapshot(&self, root: Option<libc::pid_t>) -> Vec<crate::protocol::ListedProcess> {
+        let mut processes = Vec::with_capacity(self.processes.len());
+        for (&pid, (token, _)) in &self.processes {
+            processes.push(crate::protocol::ListedProcess {
+                token: *token,
+                pid: pid as u64,
+                original_root: Some(pid) == root,
+            });
+        }
+        processes.sort_unstable_by_key(|process| process.token);
+        processes
+    }
+
+    fn signal_token<K: LinuxKernel>(
+        &mut self, kernel: &mut K, token: u64, signal: libc::c_int,
+    ) -> io::Result<()> {
+        self.remove_exited(kernel)?;
+        let pid = self.processes.iter()
+            .find_map(|(pid, (candidate, _))| (*candidate == token).then_some(*pid))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "unknown or exited process token"))?;
+        match self.send_signal(kernel, pid, signal)? {
+            SignalResult::Delivered => Ok(()),
+            SignalResult::Exited => Err(io::Error::new(io::ErrorKind::NotFound, "process exited")),
+        }
     }
 }
 
@@ -1256,6 +1291,22 @@ pub(super) fn process_start(
 }
 
 impl ActiveProcessTree<SessionCgroup> {
+    pub(super) fn list_processes(&mut self) -> io::Result<Vec<crate::protocol::ListedProcess>> {
+        self.refresh_with(&mut SystemLinuxKernel, &mut ProcProcessSource)?;
+        let registry = match &self.backend {
+            SelectedBackend::Cgroup { registry, .. } | SelectedBackend::Fallback { registry } => registry,
+        };
+        Ok(registry.snapshot((!self.root_reaped).then_some(self.root)))
+    }
+
+    pub(super) fn signal_process(&mut self, token: u64, signal: libc::c_int) -> io::Result<()> {
+        self.refresh_with(&mut SystemLinuxKernel, &mut ProcProcessSource)?;
+        let registry = match &mut self.backend {
+            SelectedBackend::Cgroup { registry, .. } | SelectedBackend::Fallback { registry } => registry,
+        };
+        registry.signal_token(&mut SystemLinuxKernel, token, signal)
+    }
+
     pub(super) fn signal(&mut self, signal: libc::c_int) -> io::Result<super::DescendantDelivery> {
         self.signal_with(&mut SystemLinuxKernel, &mut ProcProcessSource, signal)
     }
@@ -1285,6 +1336,7 @@ fn refresh_cgroup_registry<K: LinuxKernel, G: CgroupOwnership>(
 ) -> io::Result<()> {
     registry.remove_exited(kernel)?;
     let processes = cgroup.process_ids()?;
+    registry.processes.retain(|pid, _| processes.contains(pid));
     for pid in processes {
         if registry.contains_pid(pid) {
             continue;
@@ -1294,8 +1346,8 @@ fn refresh_cgroup_registry<K: LinuxKernel, G: CgroupOwnership>(
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => continue,
             Err(error) => return Err(error),
         };
-        if cgroup.process_ids()?.contains(&pid) {
-            registry.processes.insert(pid, pidfd);
+        if cgroup.process_ids()?.contains(&pid) && !kernel.pidfd_is_ready(pidfd.as_fd())? {
+            registry.insert(pid, pidfd)?;
         }
     }
     Ok(())
@@ -1342,8 +1394,8 @@ fn refresh_fallback_registry<K: LinuxKernel, S: ProcessSource>(
                 .is_some_and(|current| {
                     current == *candidate && owned_by_fallback(&current, root, host_pid, live)
                 });
-            if valid {
-                registry.processes.insert(*pid, pidfd);
+            if valid && !kernel.pidfd_is_ready(pidfd.as_fd())? {
+                registry.insert(*pid, pidfd)?;
                 live.insert(*pid, candidate.start);
                 changed = true;
             }
@@ -1445,6 +1497,7 @@ mod tests {
         pidfd_open_error: Option<i32>,
         opened_pidfds: HashMap<libc::pid_t, Vec<i32>>,
         exited_pidfds: HashSet<i32>,
+        exited_on_open: HashSet<libc::pid_t>,
         signalled_pidfds: Vec<i32>,
         signal_calls: Vec<(i32, libc::c_int)>,
         reap_results: Vec<ReapResult>,
@@ -1750,6 +1803,7 @@ mod tests {
                 pidfd_open_error: None,
                 opened_pidfds: HashMap::new(),
                 exited_pidfds: HashSet::new(),
+                exited_on_open: HashSet::new(),
                 signalled_pidfds: Vec::new(),
                 signal_calls: Vec::new(),
                 reap_results: Vec::new(),
@@ -1795,6 +1849,9 @@ mod tests {
                 return Err(io::Error::from_raw_os_error(error));
             }
             let pidfd = OwnedFd::from(File::open("/dev/null")?);
+            if self.exited_on_open.contains(&pid) {
+                self.exited_pidfds.insert(pidfd.as_raw_fd());
+            }
             self.opened_pidfds
                 .entry(pid)
                 .or_default()
@@ -1891,6 +1948,30 @@ mod tests {
             kernel.calls,
             vec![KernelCall::SetSubreaper, KernelCall::GetSubreaper]
         );
+    }
+
+    #[test]
+    fn process_tokens_retire_on_exit_and_never_resolve_to_reused_pids() {
+        let mut kernel = FakeKernel::default();
+        let mut registry = ProcessRegistry::new();
+        registry.track(&mut kernel, 41).unwrap();
+        let token = registry.snapshot(Some(41))[0].token;
+        let pidfd = registry.process(41).unwrap().as_raw_fd();
+        kernel.reuse_pid(41);
+        registry.signal_token(&mut kernel, token, libc::SIGCONT).unwrap();
+        assert_eq!(kernel.signalled_pidfds(), vec![pidfd]);
+        kernel.mark_exited(pidfd);
+        assert!(registry.signal_token(&mut kernel, token, libc::SIGKILL).is_err());
+        registry.track(&mut kernel, 41).unwrap();
+        kernel.exited_pidfds.clear();
+        let replacement = registry.snapshot(None)[0];
+        assert_ne!(replacement.token, token);
+        assert!(!replacement.original_root);
+        assert!(registry.signal_token(&mut kernel, token, libc::SIGKILL).is_err());
+        assert!(registry.signal_token(&mut kernel, 41, libc::SIGKILL).is_err());
+        assert_eq!(kernel.signalled_pidfds(), vec![pidfd]);
+        registry.signal_token(&mut kernel, replacement.token, libc::SIGCONT).unwrap();
+        assert_eq!(kernel.signal_calls.len(), 2);
     }
 
     #[test]
@@ -2835,6 +2916,63 @@ mod tests {
             100,
             test_pty(),
         )
+    }
+
+    #[test]
+    fn refresh_does_not_issue_tokens_for_unreaped_exited_processes() {
+        let mut kernel = FakeKernel::default();
+        let mut tree = fallback_tree(&mut kernel);
+        let pidfd = match &tree.backend {
+            SelectedBackend::Fallback { registry } => registry.process(41).unwrap().as_raw_fd(),
+            _ => unreachable!(),
+        };
+        kernel.mark_exited(pidfd);
+        kernel.exited_on_open.insert(41);
+        let zombie = process(std::process::id() as libc::pid_t, 41, 41, 100);
+        let mut source = FakeProcessSource {
+            snapshots: vec![HashMap::from([(41, zombie.clone())])],
+            validations: HashMap::from([(41, vec![Some(zombie)])]),
+            ..FakeProcessSource::default()
+        };
+        tree.refresh_with(&mut kernel, &mut source).unwrap();
+        match &tree.backend {
+            SelectedBackend::Fallback { registry } => assert!(registry.snapshot(Some(41)).is_empty()),
+            _ => unreachable!(),
+        }
+        let cgroup = TerminationCgroup {
+            processes: Rc::new(RefCell::new(vec![41])),
+            populated: Rc::new(RefCell::new(vec![true])),
+            kill_count: Rc::new(RefCell::new(0)),
+            removed: Rc::new(RefCell::new(false)),
+        };
+        let mut registry = ProcessRegistry::new();
+        super::refresh_cgroup_registry(&mut registry, &cgroup, &mut kernel).unwrap();
+        assert!(registry.snapshot(Some(41)).is_empty());
+    }
+
+    #[test]
+    fn cgroup_refresh_retires_tokens_that_leave_the_owned_boundary() {
+        let processes = Rc::new(RefCell::new(vec![41, 42]));
+        let cgroup = TerminationCgroup {
+            processes: Rc::clone(&processes),
+            populated: Rc::new(RefCell::new(vec![true])),
+            kill_count: Rc::new(RefCell::new(0)),
+            removed: Rc::new(RefCell::new(false)),
+        };
+        let mut kernel = FakeKernel::default();
+        let mut registry = ProcessRegistry::new();
+        super::refresh_cgroup_registry(&mut registry, &cgroup, &mut kernel).unwrap();
+        let before = registry.snapshot(Some(41));
+        let token = before.iter().find(|entry| entry.pid == 42).unwrap().token;
+        *processes.borrow_mut() = vec![41];
+        super::refresh_cgroup_registry(&mut registry, &cgroup, &mut kernel).unwrap();
+        assert_eq!(registry.snapshot(Some(41)).len(), 1);
+        assert!(registry.signal_token(&mut kernel, token, libc::SIGKILL).is_err());
+        assert!(kernel.signal_calls.is_empty());
+        processes.borrow_mut().push(42);
+        super::refresh_cgroup_registry(&mut registry, &cgroup, &mut kernel).unwrap();
+        let after = registry.snapshot(Some(41));
+        assert_ne!(after.iter().find(|entry| entry.pid == 42).unwrap().token, token);
     }
 
     #[test]
