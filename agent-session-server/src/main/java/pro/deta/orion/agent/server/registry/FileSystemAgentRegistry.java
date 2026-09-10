@@ -1,22 +1,33 @@
 package pro.deta.orion.agent.server.registry;
 
+import pro.deta.orion.agent.protocol.AgentGeneration;
 import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.CLOSED;
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.CONFLICT;
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.INDETERMINATE;
+import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.INVALID_STATE;
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.IO_FAILURE;
+import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.NOT_FOUND;
 import static pro.deta.orion.agent.server.registry.AgentRegistryException.Reason.STORED_CORRUPTION;
 
+/**
+ * Owns durable agent snapshots; recorded launch state is not connection authority.
+ * The recovery caller installs a permit only after making the launch safe and supplies its digest,
+ * expiry, and current time. Credential issuance and lifetime policy remain with that caller.
+ */
 public final class FileSystemAgentRegistry implements AutoCloseable {
     private final Path root;
     private final AgentRecordCodec codec = new AgentRecordCodec();
@@ -75,22 +86,7 @@ public final class FileSystemAgentRegistry implements AutoCloseable {
                 }
                 return existing;
             }
-            try {
-                operations.publishNew(root, recordPath(agentId), codec.encode(candidate));
-            } catch (AgentRegistryFileOperations.PublicationException e) {
-                if (e.indeterminate()) {
-                    indeterminate = true;
-                    throw new AgentRegistryException(
-                            INDETERMINATE,
-                            "Agent registration may have been published without directory durability",
-                            e);
-                }
-                throw new AgentRegistryException(IO_FAILURE, "Could not register the agent", e);
-            } catch (IOException e) {
-                throw new AgentRegistryException(IO_FAILURE, "Could not register the agent", e);
-            }
-            records.put(agentId, candidate);
-            return candidate;
+            return publish(candidate);
         } finally {
             lock.unlock();
         }
@@ -102,6 +98,63 @@ public final class FileSystemAgentRegistry implements AutoCloseable {
         try {
             requireOpen();
             return Optional.ofNullable(records.get(agentId));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public AgentRecord allocateLaunch(AgentId agentId) throws AgentRegistryException {
+        Objects.requireNonNull(agentId, "agentId");
+        lock.lock();
+        try {
+            AgentRecord current = requireRecord(agentId);
+            long generation = current.launch().map(launch -> launch.generation().value()).orElse(0L);
+            if (generation == Long.MAX_VALUE) {
+                throw new AgentRegistryException(INVALID_STATE, "Agent launch generation is exhausted");
+            }
+            AgentRecord.Launch launch = new AgentRecord.Launch(
+                    new AgentGeneration(generation + 1), new AgentLaunchId(UUID.randomUUID()),
+                    AgentRecord.LaunchState.RECOVERING, Optional.empty(), Optional.empty());
+            return publish(new AgentRecord(
+                    agentId, current.displayName(), Optional.of(launch), current.observation()));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public AgentRecord installLaunchPermit(
+            AgentId agentId,
+            AgentGeneration expectedGeneration,
+            AgentLaunchId expectedLaunchId,
+            AgentRecord.Credential permit,
+            Instant now) throws AgentRegistryException {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(expectedGeneration, "expectedGeneration");
+        Objects.requireNonNull(expectedLaunchId, "expectedLaunchId");
+        Objects.requireNonNull(permit, "permit");
+        Objects.requireNonNull(now, "now");
+        lock.lock();
+        try {
+            AgentRecord current = requireRecord(agentId);
+            AgentRecord.Launch launch = current.launch().orElseThrow(
+                    () -> new AgentRegistryException(INVALID_STATE, "Agent has no current launch"));
+            if (!launch.generation().equals(expectedGeneration)
+                    || !launch.launchId().equals(expectedLaunchId)) {
+                throw new AgentRegistryException(CONFLICT, "Agent launch has been superseded");
+            }
+            if (launch.state() != AgentRecord.LaunchState.RECOVERING
+                    || launch.launchPermit().isPresent() || launch.reconnectToken().isPresent()) {
+                throw new AgentRegistryException(INVALID_STATE, "Agent launch is not awaiting a permit");
+            }
+            if (!permit.expiresAt().isAfter(now)) {
+                throw new AgentRegistryException(
+                        INVALID_STATE, "Launch permit must expire after the current time");
+            }
+            AgentRecord.Launch starting = new AgentRecord.Launch(
+                    launch.generation(), launch.launchId(), AgentRecord.LaunchState.STARTING,
+                    Optional.of(permit), Optional.empty());
+            return publish(new AgentRecord(
+                    agentId, current.displayName(), Optional.of(starting), current.observation()));
         } finally {
             lock.unlock();
         }
@@ -157,6 +210,34 @@ public final class FileSystemAgentRegistry implements AutoCloseable {
 
     private Path recordPath(AgentId agentId) {
         return root.resolve(AgentRecordCodec.fileName(agentId));
+    }
+
+    private AgentRecord requireRecord(AgentId agentId) throws AgentRegistryException {
+        requireOpen();
+        AgentRecord record = records.get(agentId);
+        if (record == null) {
+            throw new AgentRegistryException(NOT_FOUND, "Agent is not registered");
+        }
+        return record;
+    }
+
+    private AgentRecord publish(AgentRecord candidate) throws AgentRegistryException {
+        try {
+            operations.publish(root, recordPath(candidate.agentId()), codec.encode(candidate));
+        } catch (AgentRegistryFileOperations.PublicationException e) {
+            if (e.indeterminate()) {
+                indeterminate = true;
+                throw new AgentRegistryException(
+                        INDETERMINATE,
+                        "Agent record may have been published without directory durability",
+                        e);
+            }
+            throw new AgentRegistryException(IO_FAILURE, "Could not persist the agent record", e);
+        } catch (IOException e) {
+            throw new AgentRegistryException(IO_FAILURE, "Could not persist the agent record", e);
+        }
+        records.put(candidate.agentId(), candidate);
+        return candidate;
     }
 
     private void requireOpen() throws AgentRegistryException {

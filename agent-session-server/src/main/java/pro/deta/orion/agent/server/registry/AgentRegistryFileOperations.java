@@ -125,7 +125,7 @@ class AgentRegistryFileOperations {
         forceDirectory(root);
     }
 
-    void publishNew(Path root, Path target, byte[] bytes) throws PublicationException {
+    void publish(Path root, Path target, byte[] bytes) throws PublicationException {
         Path temporary = root.resolve("." + target.getFileName() + "." + UUID.randomUUID() + ".tmp");
         boolean publicationAttempted = false;
         try {
