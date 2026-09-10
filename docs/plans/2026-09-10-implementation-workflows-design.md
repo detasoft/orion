@@ -47,8 +47,9 @@ commit unless repository rules explicitly assign it to the primary agent.
   the integration gate, and cleanup.
 - `orion-task-runner` owns only task-tree modeling, selection, and state edits;
   execution routes to `orion-change-workflow`.
-- `orion-review` owns audits and module reports, choosing the simple or change
-  workflow separately for each authorized repair.
+- `orion-review` owns audits and module reports. For each authorized repair it
+  prefers the simple workflow and uses the change workflow only when the repair
+  does not meet the simple workflow boundary.
 - `orion-change-orchestrator` is removed after its guarantees and consumers have
   moved to the two workflow skills.
 
