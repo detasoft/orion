@@ -1,6 +1,7 @@
 # Persist Registered Agent Records
 
 Status: todo
+Owner: codex, session arr-20260910-1159, started 2026-09-10 11:59 Europe/Amsterdam.
 Depends on: completed Agent identity types and the server-launched identity design.
 Design: ../../../../2026-09-02-agentd-server-launched-identity-design.md
 Plan: ../../../../2026-09-09-agent-server-durable-records.md
