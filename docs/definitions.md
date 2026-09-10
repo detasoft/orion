@@ -123,6 +123,15 @@ committable results, use Simple rather than splitting them inside Quick.
 Simple implements one or more checkpoints sequentially in the current worktree
 and branch. Only one checkpoint may be unfinished at a time.
 
+When Simple executes a task-tree leaf, include task-tree completion in the final
+result checkpoint whenever that checkpoint's verified result satisfies the task
+acceptance. Do not create a separate user-review checkpoint only to remove
+completed task nodes or update their references. If completion cannot be
+prepared until after the final result commit, user approval of that
+checkpoint also authorizes one narrow completion commit containing only the
+removals and reference updates required by `orion-task-runner`; automatically
+review and commit it without another user prompt.
+
 For each checkpoint:
 
 1. Implement the complete checkpoint while preserving unrelated work.
