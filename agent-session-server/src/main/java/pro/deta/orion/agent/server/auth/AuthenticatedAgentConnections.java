@@ -24,7 +24,7 @@ import java.util.function.Function;
  * Availability starts at authentication and advances only from identity-bound heartbeats observed by
  * the server clock. Heartbeat expiry does not revoke the launch; recovery explicitly fences its generation.
  */
-public final class AuthenticatedAgentConnections {
+public final class AuthenticatedAgentConnections implements AutoCloseable {
     public static final Duration DEFAULT_HEARTBEAT_DEADLINE = Duration.ofSeconds(30);
     private static final Duration MAX_HEARTBEAT_DEADLINE = Duration.ofDays(1);
 
@@ -35,6 +35,7 @@ public final class AuthenticatedAgentConnections {
     private final Map<AgentId, Long> revokedThrough = new HashMap<>();
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition stateChanged = lock.newCondition();
+    private boolean closed;
 
     public AuthenticatedAgentConnections(
             Function<AuthenticatedConnectionContext, AgentControlHandler.Session> publisher) {
@@ -136,11 +137,21 @@ public final class AuthenticatedAgentConnections {
         Objects.requireNonNull(generation, "generation");
         ActiveSession revoked = recordRevocation(agentId, generation.value());
         if (revoked != null) {
+            RuntimeException failure = null;
             try {
                 revoked.context.connection().close();
+            } catch (RuntimeException closeFailure) {
+                failure = closeFailure;
+            }
+            try {
                 revoked.delegate.onClosed(null);
+            } catch (RuntimeException closeFailure) {
+                failure = append(failure, closeFailure);
             } finally {
                 revoked.unlock();
+            }
+            if (failure != null) {
+                throw failure;
             }
         }
     }
@@ -184,7 +195,44 @@ public final class AuthenticatedAgentConnections {
     }
 
     private boolean isRevoked(AuthenticatedConnectionContext context) {
-        return context.generation().value() <= revokedThrough.getOrDefault(context.agentId(), 0L);
+        return closed || context.generation().value() <= revokedThrough.getOrDefault(context.agentId(), 0L);
+    }
+
+    @Override
+    public void close() {
+        Map<AgentId, AgentGeneration> generations = new HashMap<>();
+        lock.lock();
+        try {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            for (Map.Entry<AgentId, ActiveSession> entry : active.entrySet()) {
+                generations.put(entry.getKey(), entry.getValue().context.generation());
+            }
+            stateChanged.signalAll();
+        } finally {
+            lock.unlock();
+        }
+        RuntimeException failure = null;
+        for (Map.Entry<AgentId, AgentGeneration> entry : generations.entrySet()) {
+            try {
+                revokeGeneration(entry.getKey(), entry.getValue());
+            } catch (RuntimeException closeFailure) {
+                failure = append(failure, closeFailure);
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    private static RuntimeException append(RuntimeException previous, RuntimeException failure) {
+        if (previous == null) {
+            return failure;
+        }
+        previous.addSuppressed(failure);
+        return previous;
     }
 
     private ActiveSession replace(ActiveSession replacement) {
@@ -270,6 +318,9 @@ public final class AuthenticatedAgentConnections {
         lock.lockInterruptibly();
         try {
             while (!available(agentId, launchId, clock.instant())) {
+                if (closed) {
+                    return false;
+                }
                 if (remaining <= 0) {
                     return false;
                 }
@@ -287,12 +338,15 @@ public final class AuthenticatedAgentConnections {
         long remaining = timeoutNanos(timeout);
         lock.lockInterruptibly();
         try {
+            if (closed) {
+                return false;
+            }
             if (available(agentId, clock.instant())) {
                 return false;
             }
             while (remaining > 0) {
                 remaining = stateChanged.awaitNanos(remaining);
-                if (available(agentId, clock.instant())) {
+                if (closed || available(agentId, clock.instant())) {
                     return false;
                 }
             }
@@ -304,14 +358,15 @@ public final class AuthenticatedAgentConnections {
 
     private boolean available(AgentId agentId, AgentLaunchId launchId, Instant now) {
         ActiveSession session = active.get(agentId);
-        return session != null
+        return !closed
+                && session != null
                 && session.context.launchId().equals(launchId)
                 && now.isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
     }
 
     private boolean available(AgentId agentId, Instant now) {
         ActiveSession session = active.get(agentId);
-        return session != null && now.isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
+        return !closed && session != null && now.isBefore(session.lastHeartbeat.plus(heartbeatDeadline));
     }
 
     private static long timeoutNanos(Duration timeout) {

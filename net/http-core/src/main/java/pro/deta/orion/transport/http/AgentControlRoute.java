@@ -55,17 +55,8 @@ public final class AgentControlRoute implements OrionHttpRoute {
     private final long handshakeTimeoutMillis;
 
     @Inject
-    public AgentControlRoute() {
-        this(connection -> new AgentControlHandler.Session() {
-                @Override
-                public void onMessage(AgentMessage message) {
-                    connection.close();
-                }
-
-                @Override
-                public void onClosed(Throwable failure) {
-                }
-            }, AgentProtocolLimits.defaults(), HANDSHAKE_TIMEOUT);
+    public AgentControlRoute(AgentControlHandler handler) {
+        this(handler, AgentProtocolLimits.defaults(), HANDSHAKE_TIMEOUT);
     }
 
     AgentControlRoute(AgentControlHandler handler, AgentProtocolLimits limits, Duration handshakeTimeout) {

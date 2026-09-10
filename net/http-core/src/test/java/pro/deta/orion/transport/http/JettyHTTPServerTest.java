@@ -346,23 +346,8 @@ class JettyHTTPServerTest {
     }
 
     @Test
-    void rejectsProductionControlAndMalformedInputAfterSuccessfulHeaders() throws Exception {
+    void rejectsMalformedControlInputAfterSuccessfulHeaders() throws Exception {
         try (MaterialFixture material = material()) {
-            AgentControlRoute production = new AgentControlRoute();
-            JettyHTTPServer server = startHttps(
-                    material,
-                    false,
-                    OrionHttpsConfiguration.ClientAuthentication.DISABLED,
-                    List.of(),
-                    production);
-            try (TestAgentClient client = agentClient(server, material.serverCertificate())) {
-                client.connect();
-                client.send(AGENT_CODEC.encode(new AgentMessage.RequestSessionList()));
-                client.terminal.get(5, TimeUnit.SECONDS);
-            } finally {
-                server.onStop();
-            }
-
             CompletableFuture<Throwable> closed = new CompletableFuture<>();
             AgentControlHandler handler = connection -> new AgentControlHandler.Session() {
                 @Override

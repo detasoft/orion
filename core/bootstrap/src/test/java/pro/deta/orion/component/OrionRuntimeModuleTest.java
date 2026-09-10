@@ -44,6 +44,20 @@ class OrionRuntimeModuleTest {
     private final XmlService xmlService = new XmlService();
 
     @Test
+    void runtimeOwnsAgentServerBeforeExternallyVisibleTransports() {
+        OrionComponent component = DaggerOrionComponent.builder()
+                .defaultConfigurationProvider()
+                .build();
+
+        assertThat(component.runtimeStateMachine().childStatuses().keySet()).containsExactly(
+                "executor",
+                "event-manager",
+                "access-control",
+                "agent-session-server",
+                "transports");
+    }
+
+    @Test
     void runtimeComponentExposesNoRawMaterialOwnerOrService() {
         assertThat(OrionComponent.class.getMethods())
                 .noneMatch(method -> method.getReturnType().equals(OrionKeyMaterial.class))

@@ -314,6 +314,25 @@ class AuthenticatedAgentConnectionsTest {
         assertThat(closures).hasSize(2).allMatch(IllegalArgumentException.class::isInstance);
     }
 
+    @Test
+    void shutdownReleasesAnOnlineWaitAndRejectsLaterActivation() throws Exception {
+        AuthenticatedAgentConnections connections = new AuthenticatedAgentConnections(
+                ignored -> recordingSession(new ArrayList<>(), new ArrayList<>()));
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var waiting = executor.submit(() -> connections.awaitOnline(
+                    AGENT_ID, LAUNCH_ID, Duration.ofSeconds(10)));
+
+            connections.close();
+
+            assertThat(waiting.get(1, TimeUnit.SECONDS)).isFalse();
+            TestConnection transport = new TestConnection();
+            assertThatThrownBy(() -> connections.activate(context(
+                    "connection-after-close", transport, new AtomicInteger())))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(transport.closed).isTrue();
+        }
+    }
+
     private static AuthenticatedConnectionContext context(
             String connectionId, TestConnection connection, AtomicInteger renewals) {
         return context(GENERATION, LAUNCH_ID, connectionId, connection, renewals);

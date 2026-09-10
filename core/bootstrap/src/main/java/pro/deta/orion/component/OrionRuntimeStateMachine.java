@@ -25,11 +25,11 @@ import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 /**
  * Root lifecycle state machine for the Orion process.
  *
- * <p>@AiRule Keep startup order explicit: executor, event manager, ACL, then transports. The executor is needed for
- * lifecycle work, the event manager must be running before ACL registers and publishes reload events, ACL must be loaded
- * before any transport exposes authenticated endpoints, and transports are the final externally visible services.
- * Shutdown must use the reverse order so transports close before auth/runtime dependencies and the executor stops
- * last.</p>
+ * <p>@AiRule Keep startup order explicit: executor, event manager, ACL, Agent session server, then transports.
+ * The executor is needed for lifecycle work. The event manager must be running before ACL registers and
+ * publishes reload events. ACL must be loaded before authenticated server state starts, and transports are
+ * the final externally visible services. Shutdown must use the reverse order so transports close before Agent
+ * authentication and durable registries, and the executor stops last.</p>
  */
 @Singleton
 public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachineAdapter {
@@ -39,19 +39,23 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
             OrionExecutorStateMachine executor,
             OrionEventManagerStateMachine eventManager,
             OrionAccessControlStateMachine accessControl,
+            AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports) {
-        super(rootStateMachine(executor, eventManager, accessControl, transports));
+        super(rootStateMachine(executor, eventManager, accessControl, agentSessionServer, transports));
     }
 
     private static AggregateStateMachine rootStateMachine(
             OrionExecutorStateMachine executor,
             OrionEventManagerStateMachine eventManager,
             OrionAccessControlStateMachine accessControl,
+            AgentSessionServerStateMachine agentSessionServer,
             TransportLifecycleStateMachine transports) {
         List<RuntimeChild> startOrder = List.of(
                 child("executor", executor::start, executor::stop, executor::currentState),
                 child("event-manager", eventManager::start, eventManager::stop, eventManager::currentState),
                 child("access-control", accessControl::start, accessControl::stop, accessControl::currentState),
+                child("agent-session-server", agentSessionServer::start, agentSessionServer::stop,
+                        agentSessionServer::currentState),
                 child("transports", transports::start, transports::stop, transports::currentState));
         ActionBinding<pro.deta.orion.lifecycle.state.Void> start =
                 ActionId.START.bind(ignored -> startChildren(startOrder));
@@ -63,6 +67,7 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
                 .child("executor", executor.stateMachine())
                 .child("event-manager", eventManager.stateMachine())
                 .child("access-control", accessControl.stateMachine())
+                .child("agent-session-server", agentSessionServer.stateMachine())
                 .child("transports", transports.stateMachine())
                 .from(NEW, DISABLED).on(start).to(DISABLED, RUNNING, ERR).post(result ->
                         resolveStartState(result, startOrder))
@@ -81,14 +86,16 @@ public final class OrionRuntimeStateMachine extends AggregateLifecycleStateMachi
         return new RuntimeChild(name, start, stop, state);
     }
 
-    private static pro.deta.orion.lifecycle.state.Void startChildren(List<RuntimeChild> children) throws Exception {
+    private static pro.deta.orion.lifecycle.state.Void startChildren(
+            List<RuntimeChild> children) throws Exception {
         for (RuntimeChild child : children) {
             child.start().run();
         }
         return pro.deta.orion.lifecycle.state.Void.EMPTY;
     }
 
-    private static pro.deta.orion.lifecycle.state.Void stopChildren(List<RuntimeChild> children) throws Exception {
+    private static pro.deta.orion.lifecycle.state.Void stopChildren(
+            List<RuntimeChild> children) throws Exception {
         for (int i = children.size() - 1; i >= 0; i--) {
             children.get(i).stop().run();
         }
