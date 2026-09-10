@@ -69,7 +69,10 @@ When splitting a leaf, move all executable scope into numbered children and keep
 only aggregate context in the composite. Do not leave executable scope in both.
 
 Do not create speculative siblings, duplicate production paths, or task nodes
-whose only purpose is routing a direct taskless change.
+whose only purpose is routing a direct taskless change. Changes limited to
+skills or ordinary documentation never create a task. They may still be
+deliverables of an already existing task leaf when that leaf explicitly
+requires them.
 
 ## Change claim
 

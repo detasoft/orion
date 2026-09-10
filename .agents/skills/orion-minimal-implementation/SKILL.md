@@ -174,11 +174,12 @@ behavior and contracts, not source strings or private implementation details.
 
 Do not run a new test while failure is mechanically guaranteed because its
 required production source, type, or symbol does not exist yet. Record that the
-test is not runnable for that exact reason, add the smallest production
-definition needed to compile it, and make the first test run one that can
-provide meaningful behavioral evidence. This avoids spending a test run merely
-confirming an expected compilation failure; it does not waive later test or
-pre-commit verification requirements.
+test is not runnable for that exact reason in the current progress or
+verification summary, add the smallest production definition needed to compile
+it, and make the first test run one that can provide meaningful behavioral
+evidence. This avoids spending a test run merely confirming an expected
+compilation failure; it does not waive later test or pre-commit verification
+requirements.
 
 Review the complete diff against the required delta. Explicitly ask whether it
 can use fewer abstractions, APIs, states, options, dependencies, modules, files,
