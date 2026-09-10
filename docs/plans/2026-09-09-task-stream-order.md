@@ -18,7 +18,7 @@ still creates and loads
 consumers, then finish the single material-store path without rebuilding ACME.
 
 The corresponding independent Agent control candidate was:
-[agent and launch records](current-work/03_agent-session-server/01_control-and-registries/01_agent-and-launch-records.md).
+[agent and launch records](current-work/03_agent-session-server/01_control-and-registries/01_agent-and-launch-records/TASK.md).
 Agent identity and HTTP/2 transport exist; durable registration is the next
 server dependency. AgentD handshake can be developed against the existing
 protocol in parallel.
@@ -70,7 +70,7 @@ control foundation before attaching replication and command routing to it.
 
 | Order | Existing task | Gate / reason |
 | --- | --- | --- |
-| A1 | [Agent/launch records](current-work/03_agent-session-server/01_control-and-registries/01_agent-and-launch-records.md) | **Next server task**, available. |
+| A1 | [Agent/launch records](current-work/03_agent-session-server/01_control-and-registries/01_agent-and-launch-records/TASK.md) | **Next server task**, available. |
 | A2 | [Server launch/reconnect authentication](current-work/03_agent-session-server/01_control-and-registries/02_launch-and-reconnect-authentication.md) | A1; HTTP/2 transport is integrated. |
 | A3 | [Connection ownership/health](current-work/03_agent-session-server/01_control-and-registries/03_connection-ownership-and-health.md) | A2. |
 | A4 | [Session reconciliation/ownership](current-work/03_agent-session-server/01_control-and-registries/04_session-reconciliation-and-ownership.md) | A3. |
