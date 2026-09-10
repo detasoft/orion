@@ -1,7 +1,7 @@
 # Attach a Local Terminal to a Session Host
 
 Status: todo
-Depends on: 01_launch.md, ../02_journal-sync.md,
+Depends on: completed local launch `e3822a4a`, ../02_journal-sync.md,
 ../04_command-orchestration.md, and
 [source-aware native controls](../../05_native-session-host/07_source-aware-controls.md)
 
