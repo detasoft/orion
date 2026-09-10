@@ -233,10 +233,10 @@ fixtures rather than silently changing frozen fields:
 
 Journal-sync sends schema-2 `ACK_JOURNAL` only from a complete server-durable
 prefix and observes its journaled result. It must avoid a feedback loop driven
-solely by ACK results. The
-[native-control task](current-work/agentd/native-control-contract/TASK.md) and
-[alignment task](current-work/04_agentd/03_session-host-contract-alignment/TASK.md)
-track the Java changes needed to conform to the current native contract.
+solely by ACK results. The focused Java native-control alignment was integrated
+in `c298ad34`. Remaining Java/native conformance work is tracked by the
+[alignment task](current-work/04_agentd/03_session-host-contract-alignment/TASK.md),
+using the [current contract comparison](2026-09-03-native-control-journal-idempotency-design.md).
 
 ## Verification Design
 
