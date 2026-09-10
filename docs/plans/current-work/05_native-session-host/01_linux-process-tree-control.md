@@ -1,49 +1,35 @@
-# Harden Linux Process-Tree Control
+# Verify Linux Process-Tree Control on Delegated Cgroup v2
 
-Status: active
-Depends on: completed Unix process host
+Status: paused (a modern delegated cgroup v2 validation host is unavailable)
+Depends on: completed Linux process-control implementation `c0a764d1`,
+an available Linux 5.14+ host with writable delegated cgroup v2 and `cgroup.kill`
 
-Turn the implemented Linux subreaper and `/proc` descendant tracking into the
-production process-lifecycle boundary. macOS remains a development-only,
-best-effort PTY host and is outside this task.
+The Linux process-lifecycle implementation is integrated in `c0a764d1`.
+It verifies subreaper mode before child release, uses retained pidfds for safe
+signal delivery, attempts per-session cgroup v2 ownership, and records a durable
+`HOST_WARNING` before falling back to pidfd/subreaper discovery.
 
-- Owner: codex, session 01a08b4d-b58e-7142-b7ca-449bf4d815db,
-  branch `codex/linux-process-control-reconcile-b58e`,
-  worktree `.worktrees/linux-process-control-reconcile-b58e`, started 2026-09-10 14:44 Europe/Amsterdam.
-- User authorized takeover from `native-process-control-47c2` and integration on 2026-09-10.
-- Next: reconcile the preserved branch with current main and native-control contracts,
-  resolve overlaps, assess remaining acceptance, and verify the retained implementation.
-  Preserved source: branch `codex/linux-process-tree-control-47c2`,
-  worktree `.worktrees/linux-process-tree-control-47c2`.
-  Saved HEAD: `79386060248ea965468fb013f014bef5e32c0d09`;
-  base: `670fce16db491165d88a53f323ba9976e4defc29`. Nine unique commits contain
-  Linux pidfd/cgroup ownership, termination hardening, HOST_WARNING, and tests.
-  The saved worktree was clean when paused; no new verification was run for this handoff.
-  Preserve this work until its progress has been reconciled. Process listing,
-  addressed-signal requests, and PTY_CLOSED are designed there but not implemented.
+The available Linux 5.4.72 host passed 156 unit tests and 26 real process tests,
+including fallback ownership, double-fork/`setsid`, PID reuse, late descendants,
+foreground signalling, and termination during blocked PTY input. Deterministic
+tests cover cgroup setup, rollback, population, cleanup, and `cgroup.kill`.
+See [the reconciliation record](../../2026-09-10-linux-process-control-reconciliation.md).
 
-## Scope
+## Remaining acceptance
 
-- Verify that `PR_SET_CHILD_SUBREAPER` is active before the PTY child can fork
-  and that all adopted descendants are reaped.
-- Use a per-session cgroup v2 and `cgroup.kill` when cgroup delegation is
-  available; define the explicit fallback when it is unavailable.
-- Prefer pidfd/cgroup lifecycle observation over frequent system-wide `/proc`
-  and file-descriptor scans.
-- Cover double-fork, `setsid`, closed PTY descriptors, foreground job groups,
-  PID reuse, and descendants that fork concurrently with `TERMINATE`.
-- Verify graceful termination followed by forced termination until the cgroup
-  or tracked descendant set is empty.
+- Run the real delegated-cgroup lifecycle test on a supporting kernel where the
+  host can create a child cgroup and use `cgroup.kill`; the current host takes
+  the explicitly tested capability fallback because kernel 5.4 lacks it.
+- Verify that the child enters the per-session cgroup before exec, forced
+  termination empties the cgroup, adopted children are reaped, and the empty
+  session cgroup is removed.
+- Record the host/kernel/delegation evidence. Make no production change unless
+  the real run exposes a reproducible defect.
 
-## Reconciliation boundaries
+## Preserved source
 
-- The current native-control contract in
-  `../../2026-09-03-native-control-journal-idempotency-design.md` governs integration.
-  Preserve effect-once admission, result-only journaling, and caller-owned termination
-  timing and escalation; do not restore the old intent ledger or host grace timer.
-- Retain the Linux ownership implementation and meaningful regression coverage from
-  the preserved source after review against current main. Update affected consumers
-  and protocol documentation together where retained HOST_WARNING requires them.
-- LIST_PROCESSES, addressed-signal framing, and PTY_CLOSED remain separate leaves.
-  Preserve their source design for subsequent reconciliation without importing its
-  obsolete control semantics as current requirements.
+Branch `codex/linux-process-tree-control-47c2` and worktree
+`.worktrees/linux-process-tree-control-47c2` retain the earlier design at
+`79386060`. Keep them until the separate LIST_PROCESSES and PTY_CLOSED leaves
+have reconciled their useful design. Its intent ledger, host-owned grace timer,
+repeated signalling, and old operation framing are obsolete.

@@ -20,10 +20,10 @@ available. Replication follows authenticated ownership, then commands and client
 
 ### Native session execution
 
-Linux process-tree control is paused with substantial changes preserved in its
-recorded branch/worktree. Process/PTY work waits for that implementation to be
-reconciled; its leaves retain next steps without inheriting a composite claim.
-Coordinate source-aware controls and Linux discovery fixes with the preserved changes.
+Linux process ownership is integrated in `c0a764d1`; real delegated-cgroup
+acceptance awaits a modern validation host. LIST_PROCESSES and PTY_CLOSED can
+now proceed against the integrated owner and current source-aware controls.
+The preserved Linux branch retains their earlier design.
 
 ### Remote Git
 

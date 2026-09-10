@@ -43,6 +43,6 @@ effect once, records its result, and reports journal failures on `stderr`.
 
 This task coordinates lifecycle simplification and the interaction between
 operation admission and explicit termination. Platform process discovery and
-PID-identity mechanics remain in
-`01_linux-process-tree-control.md`; the protocol and `PTY_CLOSED` contract
-remain in `03_process-control-and-pty-closure/TASK.md`.
+PID-identity mechanics are integrated in `c0a764d1`; their outstanding real
+cgroup validation remains in `01_linux-process-tree-control.md`. The protocol
+and `PTY_CLOSED` contract remain in `03_process-control-and-pty-closure/TASK.md`.

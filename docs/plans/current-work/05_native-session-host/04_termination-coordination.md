@@ -43,5 +43,5 @@ does not own grace periods, escalation deadlines, or retry policy.
 This task owns termination entry and its interaction with operation admission.
 Addressed `SIGNAL` requests and process-list semantics remain in
 `03_process-control-and-pty-closure/TASK.md`; Linux cgroup, pidfd, and
-descendant delivery mechanics remain in
-`01_linux-process-tree-control.md`.
+descendant delivery mechanics are integrated in `c0a764d1`. Their outstanding
+real cgroup validation remains in `01_linux-process-tree-control.md`.

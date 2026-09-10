@@ -41,5 +41,6 @@ liveness.
 
 This is a lifecycle ownership simplification, not a second implementation of
 the prerequisite tasks. Their PTY protocol and process-control contracts
-remain authoritative; Linux process discovery and PID-identity mechanics
-remain in `01_linux-process-tree-control.md`.
+remain authoritative. Linux process discovery and PID-identity mechanics are
+integrated in `c0a764d1`; their outstanding real cgroup validation remains in
+`01_linux-process-tree-control.md`.

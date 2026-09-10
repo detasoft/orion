@@ -2,13 +2,13 @@
 
 Status: todo
 Related: 01_linux-process-tree-control.md
-Evidence: ../../../../session-host/src/platform/unix.rs
+Evidence: ../../../../session-host/src/platform/linux_process_tree.rs
 
-Static inspection found that `linux_processes` probes each discovered process's
-file descriptors and `linux_process_holds_pty` propagates errors other than
-`NotFound`. An access failure for an unrelated `/proc/<pid>/fd` can therefore
-abort tracker initialization or the host's main process-observation loop. This
-has not yet been reproduced on Linux.
+The implementation integrated in `c0a764d1` ignores inaccessible unrelated
+processes during broad `/proc` discovery and preserves errors when a known owned
+process cannot be inspected. This behavior has deterministic coverage, but the
+original unprivileged Linux failure and the resulting diagnostics have not yet
+been reproduced on a real host.
 
 ## Scope
 
