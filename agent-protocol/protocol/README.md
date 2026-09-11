@@ -76,7 +76,14 @@ endpoint must reject an unauthenticated `HELLO`. The frozen five-field
 `WELCOME` prefix may append a 32-through-512-byte reconnect token.
 `SESSION_OPEN` starts each logical replication stream. The server answers with
 `SESSION_SYNC`; a null cursor requests the first available event, otherwise
-AgentD sends records whose EventId is greater than the committed cursor.
+the agent resumes after the returned committed event ID.
+
+The endpoint is `POST /agent/session/{sessionId}` over HTTP/2. The request path
+ID must match the `SESSION_OPEN` payload, and the response cursor comes only
+from durable server storage. The remaining request body carries the journal's
+original CBOR Sequence records. Multiple disposable physical streams may
+overlap for one session; authentication and ownership belong to the surrounding
+control layer.
 
 ## Session Journal Records
 

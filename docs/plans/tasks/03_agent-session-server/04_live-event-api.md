@@ -1,7 +1,8 @@
 # Expose Historical and Live Session Events
 
 Status: todo
-Depends on: completed journal-storage (f8a413ba), 02_session-replication.md
+Depends on: completed journal storage (`f8a413ba`) and session replication
+(`a8aa4b15`, `541c704e`, `8e337a7e`).
 
 Give authorized clients one cursor model for historical replay and live session
 events without exposing uncommitted data.
