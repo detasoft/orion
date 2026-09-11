@@ -5,6 +5,10 @@ package pro.deta.orion.auth;
  */
 public sealed interface TokenRefreshResult permits TokenRefreshResult.Success, TokenRefreshResult.Failure {
     record Success(String token, long expiresAtEpochSecond) implements TokenRefreshResult {
+        @Override
+        public String toString() {
+            return "Success[expiresAtEpochSecond=" + expiresAtEpochSecond + "]";
+        }
     }
 
     record Failure(String reason, Throwable throwable) implements TokenRefreshResult {
