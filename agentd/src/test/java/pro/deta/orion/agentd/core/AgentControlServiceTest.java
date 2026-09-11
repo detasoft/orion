@@ -1,6 +1,7 @@
 package pro.deta.orion.agentd.core;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.*;
 import pro.deta.orion.agentd.session.ChildState;
 import pro.deta.orion.agentd.session.ControlEndpoint;
@@ -8,6 +9,8 @@ import pro.deta.orion.agentd.session.HostObservation;
 import pro.deta.orion.agentd.session.JournalObservation;
 import pro.deta.orion.agentd.session.LocalSession;
 import pro.deta.orion.agentd.session.LocalSessionState;
+import pro.deta.orion.agentd.session.SessionDiscovery;
+import pro.deta.orion.agentd.session.SessionDiscoveryMonitor;
 import pro.deta.orion.agentd.session.SessionManifest;
 import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.session.SessionRegistryFixture;
@@ -15,6 +18,8 @@ import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.SessionStreamRequest;
 import pro.deta.orion.agentd.transport.TransportSignal;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,6 +35,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -38,6 +44,9 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 class AgentControlServiceTest {
     private static final AgentProtocolCodec CODEC = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+
+    @TempDir
+    Path temporaryDirectory;
 
     @Test
     void registersCallbacksBeforeConnectingAndNegotiatesWelcome() throws Exception {
@@ -300,6 +309,50 @@ class AgentControlServiceTest {
                 .extracting(message -> message.sessions().size())
                 .containsExactly(1, 2, 1);
         service.close();
+    }
+
+    @Test
+    void reportsInitialScanAndChangesProducedByTheDiscoveryMonitor() throws Exception {
+        Path sessionsDirectory = Files.createDirectories(temporaryDirectory.resolve("sessions"));
+        SessionRegistry registry = new SessionRegistry();
+        AtomicReference<ChildState> childState = new AtomicReference<>(ChildState.LIVE);
+        SessionDiscovery discovery = new SessionDiscovery(
+                sessionsDirectory,
+                directory -> session(directory.getFileName().toString(), childState.get()).manifest(),
+                (directory, manifest) -> HostObservation.live(childState.get()),
+                directory -> JournalObservation.READABLE,
+                registry);
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+
+        service.start();
+        transport.deliver(new AgentMessage.RequestSessionList());
+        try (SessionDiscoveryMonitor monitor = new SessionDiscoveryMonitor(
+                sessionsDirectory, discovery, Duration.ofMillis(25))) {
+            monitor.start();
+            await(() -> count(transport.controls, AgentMessage.SessionList.class) == 1);
+
+            Path sessionDirectory = Files.createDirectory(sessionsDirectory.resolve("discovered"));
+            await(() -> count(transport.controls, AgentMessage.SessionList.class) == 2);
+            childState.set(ChildState.EXITED);
+            Files.writeString(sessionDirectory.resolve("changed"), "changed");
+            await(() -> count(transport.controls, AgentMessage.SessionStatus.class) == 1);
+
+            assertThat(messages(transport.controls, AgentMessage.SessionList.class))
+                    .extracting(message -> message.sessions().stream()
+                            .map(SessionDescriptor::sessionId)
+                            .map(SessionId::value)
+                            .toList())
+                    .containsExactly(List.of(), List.of("discovered"));
+            assertThat(messages(transport.controls, AgentMessage.SessionStatus.class))
+                    .singleElement()
+                    .extracting(message -> message.session().state())
+                    .isEqualTo(AgentMessage.SessionState.EXITED);
+        } finally {
+            service.close();
+        }
     }
 
     @Test
