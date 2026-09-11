@@ -9,6 +9,8 @@ import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
+import pro.deta.orion.keymaterial.SshHostKeyReference;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
@@ -23,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -34,14 +37,17 @@ public final class BootstrapContext implements AutoCloseable {
     private final ProxyAwareNativeGitRepositoryProvider repositoryProvider;
     private final BootstrapRepositorySources repositorySources;
     private final OrionKeyMaterial keyMaterial;
+    private final SshHostKeyCapability sshHostKeys;
 
     private BootstrapContext(
             ProxyAwareNativeGitRepositoryProvider repositoryProvider,
             BootstrapRepositorySources repositorySources,
-            OrionKeyMaterial keyMaterial) {
+            OrionKeyMaterial keyMaterial,
+            SshHostKeyCapability sshHostKeys) {
         this.repositoryProvider = repositoryProvider;
         this.repositorySources = repositorySources;
         this.keyMaterial = keyMaterial;
+        this.sshHostKeys = sshHostKeys;
     }
 
     public static BootstrapContext open(
@@ -90,9 +96,10 @@ public final class BootstrapContext implements AutoCloseable {
                     environment,
                     provider,
                     materialSource);
+            SshHostKeyCapability sshHostKeys = keyMaterial.sshHostKeys(sshHostKeyReferences(configuration));
             BootstrapRepositorySources sources = new BootstrapRepositorySources(
                     List.of(configurationSource, materialSource));
-            return new BootstrapContext(provider, sources, keyMaterial);
+            return new BootstrapContext(provider, sources, keyMaterial, sshHostKeys);
         } catch (IOException | GeneralSecurityException | RuntimeException failure) {
             if (keyMaterial != null) {
                 keyMaterial.close();
@@ -119,6 +126,10 @@ public final class BootstrapContext implements AutoCloseable {
 
     public TlsCapability tlsKeyMaterial() {
         return keyMaterial.tls();
+    }
+
+    public SshHostKeyCapability sshHostKeys() {
+        return sshHostKeys;
     }
 
     @Override
@@ -193,6 +204,20 @@ public final class BootstrapContext implements AutoCloseable {
                             resolved.path()));
         }
         return OrionKeyMaterialFactory.open(configuration, environment);
+    }
+
+    private static List<SshHostKeyReference> sshHostKeyReferences(OrionConfiguration configuration) {
+        if (configuration.getTransport().getSsh().getHostKeys() == null) {
+            throw new IllegalArgumentException("SSH host key references must not be null");
+        }
+        List<SshHostKeyReference> references = new ArrayList<>();
+        for (var configured : configuration.getTransport().getSsh().getHostKeys()) {
+            if (configured == null) {
+                throw new IllegalArgumentException("SSH host key reference must not be null");
+            }
+            references.add(new SshHostKeyReference(configured.getAlias()));
+        }
+        return List.copyOf(references);
     }
 
     private static Path directFileRoot(

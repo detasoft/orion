@@ -25,13 +25,13 @@ certificate material, and ACME account/domain keys. The design should also make
 it possible to add an Orion-owned certificate authority for issuing certificates
 to users and internal services.
 
-Breaking the current file layout is acceptable. The new design does not need to
-preserve `baseDir/ssh-host-keys`, `baseDir/server-identity`, or `acme/*.keypair`
-as primary storage.
+Breaking the current file layout is acceptable. The new design does not
+preserve or import `baseDir/ssh-host-keys`, `baseDir/server-identity`, or
+`acme/*.keypair`.
 
 The primary writable runtime format is a single `PKCS12` keystore. PEM and
-PKCS#8 stay important as import/export and legacy migration formats, but they are
-not the default storage layout.
+PKCS#8 may be supported as explicit export formats, but are not runtime or
+migration inputs.
 
 ### Requirements
 
@@ -41,8 +41,8 @@ not the default storage layout.
   OpenSSL, and common operations tooling.
 - Treat OpenSSL compatibility as a first-class requirement: Orion-created
   keystores must be inspectable with `openssl pkcs12` and `keytool`.
-- Do not use a custom PEM directory as the primary storage format. PEM/PKCS#8
-  support belongs in import/export, compatibility reads, and migration commands.
+- Do not use a custom PEM directory as a storage format. PEM/PKCS#8 support may
+  be added for explicit export, without compatibility reads or migration paths.
 - Keep `JKS` as a compatibility option where useful, but do not make it the
   default.
 - Consider `BCFKS` only as a later hardening option if the project decides to
@@ -75,11 +75,6 @@ security:
       verifyAliases:
         - server-signing-2026-04
 
-    sshHost:
-      aliases:
-        - ssh-host-rsa-2026-05
-        - ssh-host-ecdsa-2026-05
-
     https:
       activeAlias: https-2026-05
       nextAlias: https-2026-08
@@ -92,6 +87,12 @@ security:
     enabled: true
     issuerAlias: orion-ca-2026-05
     certificateAlias: orion-ca-cert-2026-05
+
+transport:
+  ssh:
+    hostKeys:
+      - alias: node-a-rsa
+      - alias: node-a-ec-v2
 ```
 
 ### Resource Locations
@@ -205,16 +206,14 @@ Replace direct file ownership in current services:
 
 - `ServerIdentityKeyService` reads active and verify-only signing keys from
   `KeyMaterialService`.
-- `SshHostKeyService` reads configured host key aliases from `KeyMaterialService`.
+- SSH transport receives selected host keys through `SshHostKeyCapability`.
 - `JettyHTTPServer` reads HTTPS private key and certificate chain from
   `KeyMaterialService`.
 - `AcmeCertificateService` reads/writes account and domain keys through
   `KeyMaterialService`.
 
-Current file paths can be removed from the primary runtime path. A one-time
-import command should handle existing installations by reading PEM/PKCS#8 files
-from `baseDir/server-identity`, `baseDir/ssh-host-keys`, and `acme/*.keypair`
-and writing the corresponding aliases into the `PKCS12` keystore.
+Legacy private-key files are not imported. Their runtime paths are removed once
+the corresponding consumer uses its typed capability.
 
 ### Rotation Model
 
@@ -284,17 +283,15 @@ format and should be a separate follow-up feature if needed.
 5. Add storage-certificate generation for non-X.509 private key purposes.
 6. Move `ServerIdentityKeyService` to active and verify-only aliases in
    `KeyMaterialService`.
-7. Move `SshHostKeyService` to configured host key aliases in
-   `KeyMaterialService`.
-8. Move HTTPS to a configured `PKCS12` alias while keeping legacy PEM/JKS config
-   as a compatibility path during migration.
+7. Move SSH transport to configured host-key aliases exposed through
+   `SshHostKeyCapability` and remove `SshHostKeyService`.
+8. Move HTTPS to a configured `PKCS12` alias without retaining a legacy runtime
+   path.
 9. Move ACME account and domain key reads/writes to `KeyMaterialService`.
-10. Add PEM/PKCS#8 import/export and one-time migration command for existing key
-    files.
-11. Add rotation tests for signing, SSH host keys, and HTTPS aliases.
-12. Add S3 and Git-backed `ResourceContentStore` implementations after the
+10. Add rotation tests for signing, SSH host keys, and HTTPS aliases.
+11. Add S3 and Git-backed `ResourceContentStore` implementations after the
     shared resource storage boundary is ready.
-13. Add `CertificateAuthorityService`, CA registry storage, and CA
+12. Add `CertificateAuthorityService`, CA registry storage, and CA
     issue/revoke/list flows.
 
 ### Verification
@@ -308,10 +305,10 @@ Cover at least these cases:
 - local path and `file:` locations round-trip atomically.
 - non-X.509 key purposes are stored with storage certificates and can be loaded
   back as private keys.
-- PEM/PKCS#8 legacy keys can be imported into a `PKCS12` keystore.
 - server signing rotation signs with active alias and verifies active plus
   verify-only aliases.
-- SSH host key service serves all configured aliases.
+- SSH transport serves every typed SSH host key by default and resolves
+  configured concrete or logical aliases through `SshHostKeyCapability`.
 - HTTPS starts from a configured keystore alias.
 - ACME account and domain keys persist through `KeyMaterialService`.
 - S3-backed keystore round-trips through a fake S3 unit test and MinIO

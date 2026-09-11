@@ -30,14 +30,14 @@ import pro.deta.orion.command.DefaultCommandDispatcher;
 import pro.deta.orion.command.render.PlainCommandRenderer;
 import pro.deta.orion.internal.OrionExecutor;
 import pro.deta.orion.internal.OrionThreadFactory;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
-import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.lifecycle.state.StateTransitionFailedException;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
 import pro.deta.orion.transport.git.command.SshCredentialCommandCatalog;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
-import pro.deta.orion.util.ConfigurationContext;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -55,6 +55,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -97,7 +98,7 @@ class GitSshTransportStateMachineTest {
     }
 
     @Test
-    void reportsTheDynamicallyBoundPortOnlyWhileRunning() {
+    void reportsTheDynamicallyBoundPortOnlyWhileRunning() throws Exception {
         service = service(0);
         service.onStart();
 
@@ -106,6 +107,30 @@ class GitSshTransportStateMachineTest {
         service.onStop();
         assertEquals(0, service.boundPort());
         service = null;
+    }
+
+    @Test
+    void doesNotCreateALegacyHostKeyDirectory() throws Exception {
+        service = service(0);
+
+        service.onStart();
+
+        assertFalse(Files.exists(tempDir.resolve("ssh-host-keys")));
+    }
+
+    @Test
+    void servesTheHostKeyProvidedByTheMaterialCapability() throws Exception {
+        KeyPair hostKey = keyPair();
+        KeyPair clientKey = keyPair();
+        service = service(0, new RecordingAccessControlService(clientKey), hostKey);
+        service.onStart();
+
+        try (SshClient client = client(List.of(UserAuthPublicKeyFactory.INSTANCE));
+             ClientSession session = connect(client, service.boundPort(), "alice")) {
+            session.addPublicKeyIdentity(clientKey);
+            session.auth().verify(5, TimeUnit.SECONDS);
+            assertArrayEquals(hostKey.getPublic().getEncoded(), session.getServerKey().getEncoded());
+        }
     }
 
     @Test
@@ -234,18 +259,36 @@ class GitSshTransportStateMachineTest {
         return result;
     }
 
-    private GitSshTransportService service(int port) {
+    private GitSshTransportService service(int port) throws Exception {
         return service(port, new RecordingAccessControlService(null));
     }
 
-    private GitSshTransportService service(int port, OrionAccessControlService accessControlService) {
+    private GitSshTransportService service(
+            int port,
+            OrionAccessControlService accessControlService) throws Exception {
+        return service(port, accessControlService, keyPair());
+    }
+
+    private GitSshTransportService service(
+            int port,
+            OrionAccessControlService accessControlService,
+            KeyPair hostKey) {
         OrionConfiguration configuration = new OrionConfiguration();
         configuration.getBootstrap().setBaseDir(tempDir.toString());
         configuration.getTransport().getSsh().setEnabled(true);
         configuration.getTransport().getSsh().setAddress("127.0.0.1");
         configuration.getTransport().getSsh().setPort(port);
-        ConfigurationContext configurationContext = new ConfigurationContext(configuration);
-        SshHostKeyService hostKeyService = new SshHostKeyService(configurationContext);
+        SshHostKeyCapability hostKeys = new SshHostKeyCapability() {
+            @Override
+            public List<KeyMaterialDescriptor> descriptors() {
+                return List.of();
+            }
+
+            @Override
+            public List<KeyPair> keyPairs() {
+                return List.of(hostKey);
+            }
+        };
         CommandDispatcher dispatcher = new DefaultCommandDispatcher(
                 new CommandLineParser(),
                 new SshCredentialCommandCatalog(accessControlService).commandTree(),
@@ -267,7 +310,7 @@ class GitSshTransportStateMachineTest {
                 configuration,
                 commandFactory,
                 shell,
-                () -> hostKeyService,
+                hostKeys,
                 authenticator);
     }
 

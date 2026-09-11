@@ -8,6 +8,7 @@ import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
@@ -22,13 +23,15 @@ final class TestRuntimeBootstrap {
 
     static OrionComponent.Builder componentBuilder(
             OrionConfiguration configuration,
-            ServerIdentityCapability identity) {
-        return componentBuilder(configuration, identity, OrionRuntimeOptions.defaults());
+            ServerIdentityCapability identity,
+            SshHostKeyCapability sshHostKeys) {
+        return componentBuilder(configuration, identity, sshHostKeys, OrionRuntimeOptions.defaults());
     }
 
     static OrionComponent.Builder componentBuilder(
             OrionConfiguration configuration,
             ServerIdentityCapability identity,
+            SshHostKeyCapability sshHostKeys,
             OrionRuntimeOptions runtimeOptions) {
         FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(
                 new ConfigurationContext(configuration).getFileGitStoragePath());
@@ -44,6 +47,7 @@ final class TestRuntimeBootstrap {
                 .serverIdentityCapability(identity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                 .tlsCapability(TlsCapability.unavailable())
+                .sshHostKeyCapability(sshHostKeys)
                 .nativeGitRepositoryProvider(provider)
                 .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(source)));
     }

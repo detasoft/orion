@@ -91,9 +91,9 @@ class GitSshTransportEndToEndIT {
         /*
          * This is the primary end-to-end Git transport scenario.
          *
-         * 1. Load a pregenerated SSH private key from test resources so the scenario does not spend time on RSA key generation.
-         * 2. Start a real Orion runtime with pregenerated server host keys and a pre-seeded ACL repository that trusts
-         *    that public key.
+         * 1. Load a pregenerated client SSH private key from test resources.
+         * 2. Start a real Orion runtime with material-store host keys and a pre-seeded ACL repository that trusts the
+         *    client's public key.
          * 3. Create a normal local Git repository with one commit.
          * 4. Push that commit to Orion through the SSH Git transport. This exercises SSH authentication,
          *    SshCommandFactory, permission checks, repository creation, and receive-pack handling.
@@ -225,7 +225,6 @@ class GitSshTransportEndToEndIT {
         Path orionRoot = tempDir.resolve("orion-root");
         String repositoryName = "read-only-project";
         FileUtils.wipeDirectory(orionRoot);
-        seedServerKeys(orionRoot);
         seedAclRepository(orionRoot, accessControlForReadOnlyRepository(TRUSTED_USER_KEY.getPublic(), repositoryName));
         seedProjectRepository(orionRoot, repositoryName, "read-only seed\n");
         startedOrion = startExistingOrion(orionRoot);
@@ -850,7 +849,6 @@ class GitSshTransportEndToEndIT {
     void componentCanRestartAndServeSshGitOperationsInSameJvm() throws Exception {
         Path orionRoot = tempDir.resolve("orion-root");
         FileUtils.wipeDirectory(orionRoot);
-        seedServerKeys(orionRoot);
         seedAclRepository(orionRoot, TRUSTED_USER_KEY);
 
         startedOrion = startExistingOrion(orionRoot);
@@ -948,19 +946,15 @@ class GitSshTransportEndToEndIT {
 
     private StartedOrion startOrion(Path orionRoot, KeyPair userKey) throws Exception {
         /*
-         * The application normally creates fresh server host keys and a default root user on first startup.
-         * For an automated SSH E2E test we need deterministic test fixtures instead, so the test seeds the
-         * server keys and creates the ACL Git repository before boot with an ACL document that trusts userKey.
+         * Create the ACL Git repository before boot with an ACL document that trusts userKey.
          */
         FileUtils.wipeDirectory(orionRoot);
-        seedServerKeys(orionRoot);
         seedAclRepository(orionRoot, userKey);
         return startOrion(e2eConfiguration(orionRoot));
     }
 
     private StartedOrion startFreshOrion(Path orionRoot) throws Exception {
         FileUtils.wipeDirectory(orionRoot);
-        seedServerKeys(orionRoot);
         return startExistingOrion(orionRoot);
     }
 
@@ -978,7 +972,11 @@ class GitSshTransportEndToEndIT {
         try {
             TestServerIdentityMaterial identity = TestServerIdentityMaterial.open(configuration);
             OrionComponent component = TestRuntimeBootstrap
-                    .componentBuilder(configuration, identity.capability(), runtimeOptions)
+                    .componentBuilder(
+                            configuration,
+                            identity.capability(),
+                            identity.sshHostKeys(),
+                            runtimeOptions)
                     .build();
             OrionApplicationLifecycle lifecycle = component.orionApplicationLifecycle();
             assertThat(lifecycle.runApplication()).isEqualTo(RUNNING);
@@ -1403,17 +1401,6 @@ class GitSshTransportEndToEndIT {
                     .call())
                     .isInstanceOf(TransportException.class);
         }
-    }
-
-    private static void seedServerKeys(Path orionRoot) throws IOException {
-        /*
-         * SshHostKeyService generates host keys when baseDir/ssh-host-keys is empty. The E2E test uses a fresh baseDir
-         * for every scenario, so pregenerated test-only keys avoid paying RSA/ECDSA generation cost on every boot.
-         */
-        Path serverKeysDirectory = orionRoot.resolve("ssh-host-keys");
-        Files.createDirectories(serverKeysDirectory);
-        copyTestResource("e2e/server-rsa.pem", serverKeysDirectory.resolve("rsa.pem"));
-        copyTestResource("e2e/server-ecdsa.pem", serverKeysDirectory.resolve("ecdsa.pem"));
     }
 
     private static void seedAclRepository(Path orionRoot, KeyPair userKey) throws Exception {

@@ -79,6 +79,7 @@ public class App {
                         .serverIdentityCapability(bootstrap.serverIdentity())
                         .acmeKeyMaterialCapability(bootstrap.acmeKeyMaterial())
                         .tlsCapability(bootstrap.tlsKeyMaterial())
+                        .sshHostKeyCapability(bootstrap.sshHostKeys())
                         .nativeGitRepositoryProvider(bootstrap.repositoryProvider())
                         .bootstrapRepositorySources(bootstrap.repositorySources())
                         .build();

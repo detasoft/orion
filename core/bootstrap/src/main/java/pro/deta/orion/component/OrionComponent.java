@@ -16,6 +16,7 @@ import pro.deta.orion.lifecycle.state.AggregateStateMachine;
 import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.config.ConfigurationProvider;
 import pro.deta.orion.schema.config.OrionConfiguration;
@@ -46,6 +47,7 @@ public interface OrionComponent {
         @BindsInstance Builder serverIdentityCapability(ServerIdentityCapability serverIdentityCapability);
         @BindsInstance Builder acmeKeyMaterialCapability(AcmeKeyMaterialCapability capability);
         @BindsInstance Builder tlsCapability(TlsCapability capability);
+        @BindsInstance Builder sshHostKeyCapability(SshHostKeyCapability capability);
         @BindsInstance Builder nativeGitRepositoryProvider(NativeGitRepositoryProvider repositoryProvider);
         @BindsInstance Builder bootstrapRepositorySources(BootstrapRepositorySources repositorySources);
 
@@ -62,6 +64,7 @@ public interface OrionComponent {
                     .serverIdentityCapability(ServerIdentityCapability.unavailable())
                     .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                     .tlsCapability(TlsCapability.unavailable())
+                    .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                     .nativeGitRepositoryProvider(repositoryProvider)
                     .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)));
         }

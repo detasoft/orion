@@ -28,6 +28,7 @@ import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.lifecycle.OrionApplicationLifecycle;
 import pro.deta.orion.keymaterial.AcmeKeyMaterialCapability;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.keymaterial.TlsCapability;
 import pro.deta.orion.schema.acl.ACLUtil;
 import pro.deta.orion.schema.acl.AccessControl;
@@ -835,6 +836,7 @@ class InternalConfigurationRepositoryLifecycleTest {
                 .serverIdentityCapability(serverIdentity)
                 .acmeKeyMaterialCapability(AcmeKeyMaterialCapability.unavailable())
                 .tlsCapability(TlsCapability.unavailable())
+                .sshHostKeyCapability(SshHostKeyCapability.unavailable())
                 .nativeGitRepositoryProvider(provider)
                 .bootstrapRepositorySources(new BootstrapRepositorySources(List.of(configurationSource)))
                 .build();

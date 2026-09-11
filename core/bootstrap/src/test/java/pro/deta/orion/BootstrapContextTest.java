@@ -11,11 +11,13 @@ import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,7 +56,29 @@ class BootstrapContextTest {
             assertThat(context.serverIdentity().activeKeyId()).isNotBlank();
             assertThat(context.acmeKeyMaterial()).isNotNull();
             assertThat(context.tlsKeyMaterial()).isNotNull();
+            assertThat(context.sshHostKeys().descriptors())
+                    .extracting(descriptor -> descriptor.alias().value())
+                    .containsExactly("ssh-host-ec-v1", "ssh-host-rsa-v1");
         }
+    }
+
+    @Test
+    void rejectsAnUnresolvedExplicitSshHostKeyBeforeRuntimeConstruction() throws Exception {
+        OrionConfiguration configuration = configuration();
+        SshHostKeyReferenceConfig reference = new SshHostKeyReferenceConfig();
+        reference.setAlias("missing-ssh-host-key");
+        configuration.getTransport().getSsh().setHostKeys(List.of(reference));
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(
+                configuration,
+                Map.of(
+                        "orion.xml", bytes("configuration"),
+                        "material.p12", materialBytes(configuration)));
+
+        assertThatThrownBy(() -> BootstrapContext.open(configuration, ENVIRONMENT, backend))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap inputs are unavailable or invalid")
+                .rootCause()
+                .hasMessageContaining("missing-ssh-host-key");
     }
 
     @Test

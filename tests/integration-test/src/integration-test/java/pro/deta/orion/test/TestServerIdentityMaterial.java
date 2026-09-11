@@ -6,11 +6,13 @@ import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.LocalKeyMaterialContentStore;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
+import java.util.List;
 import java.util.Map;
 
 final class TestServerIdentityMaterial implements AutoCloseable {
@@ -19,10 +21,15 @@ final class TestServerIdentityMaterial implements AutoCloseable {
 
     private final OrionKeyMaterial material;
     private final KeyPair keyPair;
+    private final SshHostKeyCapability sshHostKeys;
 
-    private TestServerIdentityMaterial(OrionKeyMaterial material, KeyPair keyPair) {
+    private TestServerIdentityMaterial(
+            OrionKeyMaterial material,
+            KeyPair keyPair,
+            SshHostKeyCapability sshHostKeys) {
         this.material = material;
         this.keyPair = keyPair;
+        this.sshHostKeys = sshHostKeys;
     }
 
     static TestServerIdentityMaterial open(OrionConfiguration configuration) throws Exception {
@@ -34,7 +41,10 @@ final class TestServerIdentityMaterial implements AutoCloseable {
         OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration, Map.of(PASSWORD_ENV, PASSWORD));
         try {
-            return new TestServerIdentityMaterial(material, readActiveKey(configuration));
+            return new TestServerIdentityMaterial(
+                    material,
+                    readActiveKey(configuration),
+                    material.sshHostKeys(List.of()));
         } catch (Exception failure) {
             material.close();
             throw failure;
@@ -47,6 +57,10 @@ final class TestServerIdentityMaterial implements AutoCloseable {
 
     KeyPair keyPair() {
         return keyPair;
+    }
+
+    SshHostKeyCapability sshHostKeys() {
+        return sshHostKeys;
     }
 
     @Override

@@ -17,9 +17,9 @@ import org.apache.sshd.common.util.security.eddsa.EdDSASecurityProviderRegistrar
 import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.forward.StaticDecisionForwardingFilter;
 import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.keymaterial.SshHostKeyCapability;
 import pro.deta.orion.schema.config.OrionConfiguration;
 import pro.deta.orion.schema.config.SshTransportConfig;
-import pro.deta.orion.crypto.SshHostKeyService;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter;
 import pro.deta.orion.transport.git.auth.EnrollmentAwarePublicKeyAuthFactory;
 import pro.deta.orion.transport.git.auth.OrionSshAuthenticator;
@@ -27,13 +27,13 @@ import pro.deta.orion.transport.git.auth.PasswordKeyboardInteractiveAuthFactory;
 import pro.deta.orion.transport.git.ssh.SshCommandFactory;
 import pro.deta.orion.util.*;
 
-import jakarta.inject.Provider;
 import java.io.*;
 import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -49,7 +49,7 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
 
     private final SshCommandFactory commandFactory;
     private final OrionShell shellFactory;
-    private final Provider<SshHostKeyService> sshHostKeyService;
+    private final SshHostKeyCapability sshHostKeys;
     private final OrionSshAuthenticator authenticator;
 
 
@@ -83,7 +83,7 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
             sshd.setPort(addr.getPort());
             sshd.setHost(addr.getHostName());
 
-            sshd.setKeyPairProvider(new MappedKeyPairProvider(sshHostKeyService.get().getKeyPairs()));
+            sshd.setKeyPairProvider(new MappedKeyPairProvider(sshHostKeys.keyPairs()));
 
             sshd.setUserAuthFactories(List.of(
                     new EnrollmentAwarePublicKeyAuthFactory(authenticator),
@@ -112,7 +112,7 @@ public class GitSshTransportService implements ServiceLifecycleStateMachineAdapt
             sshd.start();
         } catch (BindException e) {
             throw new IllegalStateException("Cannot bind SSH transport " + config, e);
-        } catch (IOException e) {
+        } catch (IOException | GeneralSecurityException e) {
             throw new RuntimeException(e);
         }
     }
