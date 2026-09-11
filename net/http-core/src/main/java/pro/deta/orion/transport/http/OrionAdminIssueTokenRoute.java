@@ -21,7 +21,9 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
     private final OrionAccessControlService accessControlService;
 
     @Inject
-    public OrionAdminIssueTokenRoute(OrionAccessControlService accessControlService, ObjectMapper objectMapper) {
+    public OrionAdminIssueTokenRoute(
+            OrionAccessControlService accessControlService,
+            ObjectMapper objectMapper) {
         super(OrionAdminPaths.TOKEN, OrionHttpRouteDefinition.Method.POST);
         this.accessControlService = accessControlService;
         this.objectMapper = objectMapper;
@@ -109,5 +111,11 @@ public class OrionAdminIssueTokenRoute extends AbstractOrionHttpRoute {
             String tokenType,
             long expiresInSeconds,
             long expiresAtEpochSecond) {
+        @Override
+        public String toString() {
+            return "AdminTokenResponse[tokenType=" + tokenType
+                    + ", expiresInSeconds=" + expiresInSeconds
+                    + ", expiresAtEpochSecond=" + expiresAtEpochSecond + "]";
+        }
     }
 }

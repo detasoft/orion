@@ -44,6 +44,32 @@ class JwtAccessTokenServiceTest {
     }
 
     @Test
+    void acceptsTokenUntilItsExactExpirationBoundary() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService issuer = new JwtAccessTokenService(identity, CLOCK);
+        JwtAccessTokenService.IssuedToken token = issuer.issue("alice", 600);
+
+        JwtAccessTokenService beforeExpiration = new JwtAccessTokenService(
+                identity,
+                Clock.fixed(Instant.ofEpochSecond(token.expiresAtEpochSecond() - 1), ZoneOffset.UTC));
+        JwtAccessTokenService atExpiration = new JwtAccessTokenService(
+                identity,
+                Clock.fixed(Instant.ofEpochSecond(token.expiresAtEpochSecond()), ZoneOffset.UTC));
+
+        assertVerified(beforeExpiration, token.value(), "alice", null);
+        assertThat(atExpiration.verify(token.value()))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure("JWT is expired"));
+    }
+
+    @Test
+    void issuedTokenDoesNotExposeTokenContentsInDiagnostics() {
+        JwtAccessTokenService.IssuedToken token = new JwtAccessTokenService.IssuedToken(
+                "issued-token-secret", 1_100);
+
+        assertThat(token.toString()).doesNotContain("issued-token-secret");
+    }
+
+    @Test
     void rejectsTokenWithoutAudience() throws Exception {
         TestIdentity identity = TestIdentity.single("server-signing-v1");
         JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);

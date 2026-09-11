@@ -309,6 +309,10 @@ final class JwtAccessTokenService {
     }
 
     record IssuedToken(String value, long expiresAtEpochSecond) {
+        @Override
+        public String toString() {
+            return "IssuedToken[expiresAtEpochSecond=" + expiresAtEpochSecond + "]";
+        }
     }
 
     sealed interface VerificationResult permits VerificationResult.Success, VerificationResult.Failure {
