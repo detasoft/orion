@@ -1,8 +1,10 @@
 package pro.deta.orion.agentd.core;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 
@@ -10,6 +12,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 class AgentConfigurationTest {
+    @TempDir
+    Path temporaryDirectory;
+
     @Test
     void parsesExplicitConfiguration() {
         AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
@@ -69,6 +74,43 @@ class AgentConfigurationTest {
     }
 
     @Test
+    void installsBundledSessionHostWhenTheOverrideIsAbsent() throws Exception {
+        Path state = temporaryDirectory.resolve("state");
+
+        AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
+                "--server", "https://agent.test",
+                "--state-dir", state.toString(),
+                "--agent-id", "agent-1",
+                "--generation", "1",
+                "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
+                "--agent-version", "1.0.0"
+        });
+
+        assertThat(configuration.sessionHostExecutable())
+                .isEqualTo(state.resolve("runtime/session-host").toAbsolutePath());
+        assertThat(configuration.sessionHostExecutable()).isExecutable();
+    }
+
+    @Test
+    void explicitSessionHostBypassesBundledInstallation() throws Exception {
+        Path state = temporaryDirectory.resolve("state");
+        Path executable = temporaryDirectory.resolve("custom-session-host").toAbsolutePath();
+
+        AgentConfiguration configuration = AgentConfiguration.parse(new String[]{
+                "--server", "https://agent.test",
+                "--state-dir", state.toString(),
+                "--agent-id", "agent-1",
+                "--generation", "1",
+                "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
+                "--agent-version", "1.0.0",
+                "--session-host", executable.toString()
+        });
+
+        assertThat(configuration.sessionHostExecutable()).isEqualTo(executable);
+        assertThat(Files.exists(state.resolve("runtime/session-host"))).isFalse();
+    }
+
+    @Test
     void requiresEveryServerAssignedLaunchField() {
         assertThatIllegalArgumentException().isThrownBy(() -> AgentConfiguration.parse(new String[]{
                 "--server", "https://agent.test",
@@ -89,14 +131,6 @@ class AgentConfigurationTest {
                 "--generation", "1",
                 "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f"
         })).withMessageContaining("--agent-version");
-        assertThatIllegalArgumentException().isThrownBy(() -> AgentConfiguration.parse(new String[]{
-                "--server", "https://agent.test",
-                "--state-dir", "target/state",
-                "--agent-id", "agent-1",
-                "--generation", "1",
-                "--launch-id", "10010203-0405-0607-0809-0a0b0c0d0e0f",
-                "--agent-version", "1.0.0"
-        })).withMessageContaining("--session-host");
     }
 
     @Test

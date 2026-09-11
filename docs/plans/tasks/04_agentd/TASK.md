@@ -23,10 +23,10 @@ the AgentD lifecycle.
 
 ## AgentD Orchestration Service
 
-> Contract update, 2026-09-07: native-control and recovery passages below are
-> historical proposals, not a description of current runtime behavior. The
-> [current native contract and Java interface comparison](03_session-host-contract-alignment/TASK.md)
-> define source-aware in-memory admission, journaled command results, ACK, and
+> Contract alignment completed 2026-09-11. Native-control and recovery passages
+> below are historical proposals, not a description of current runtime behavior.
+> The [current native protocol](../../../../session-host/protocol/README.md)
+> defines source-aware in-memory admission, journaled command results, ACK, and
 > start-outcome uncertainty.
 > Recovery from recorded sequence maxima alone is not established when an
 > admitted operation has a pending or missing result. Reconcile affected steps

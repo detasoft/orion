@@ -4,10 +4,14 @@ AgentD can start a local native session and attach the invoking terminal:
 
 ```text
 java -jar agentd.jar terminal start \
-  --session-host /path/to/session-host \
   --state-dir /path/to/state \
   [--session-id ID] [--cwd PATH] -- COMMAND...
 ```
+
+AgentD installs its bundled native `session-host` at
+`<state-dir>/runtime/session-host`. It reuses a matching installation and
+atomically replaces one whose bundled-resource timestamp and SHA-256 differ.
+Pass `--session-host /path/to/session-host` to override the bundled executable.
 
 After the native host publishes its durable session directory, `start` prints
 that directory and enters the same attach path as:

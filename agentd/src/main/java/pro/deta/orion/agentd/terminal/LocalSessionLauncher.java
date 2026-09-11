@@ -2,12 +2,14 @@ package pro.deta.orion.agentd.terminal;
 
 import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.SessionId;
+import pro.deta.orion.agentd.runtime.BundledSessionHost;
 import pro.deta.orion.agentd.runtime.NativeRuntime;
 import pro.deta.orion.agentd.runtime.SessionLaunchResult;
 import pro.deta.orion.agentd.runtime.SessionRuntime;
 import pro.deta.orion.agentd.runtime.SessionSpec;
 import pro.deta.orion.agentd.runtime.WorkspaceReference;
 
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -22,7 +24,7 @@ import java.util.UUID;
 
 final class LocalSessionLauncher {
     private static final String USAGE = """
-            Usage: agentd terminal start --session-host PATH --state-dir PATH
+            Usage: agentd terminal start [--session-host PATH] --state-dir PATH
                    [--session-id ID] [--cwd PATH] -- COMMAND...
             """;
 
@@ -74,8 +76,17 @@ final class LocalSessionLauncher {
             return 2;
         }
 
-        SessionRuntime runtime = runtimes.create(
-                request.sessionHost(), request.stateDirectory().resolve("sessions"));
+        Path executable = request.sessionHost();
+        if (executable == null) {
+            try {
+                executable = BundledSessionHost.install(request.stateDirectory());
+            } catch (IOException failure) {
+                errors.println(TerminalDiagnostics.bounded(
+                        "Cannot install the bundled session-host: " + failure.getMessage()));
+                return 1;
+            }
+        }
+        SessionRuntime runtime = runtimes.create(executable, request.stateDirectory().resolve("sessions"));
         SessionLaunchResult result = runtime.launch(request.spec());
         if (result instanceof SessionLaunchResult.Started started) {
             output.println("session=" + started.sessionId().value() + " directory=" + started.directory());
@@ -113,9 +124,6 @@ final class LocalSessionLauncher {
         List<String> command = List.copyOf(Arrays.asList(arguments).subList(index + 1, arguments.length));
         if (command.isEmpty()) {
             throw new IllegalArgumentException("Missing child command");
-        }
-        if (executable == null) {
-            throw new IllegalArgumentException("Missing required option: --session-host");
         }
         if (stateDirectory == null) {
             throw new IllegalArgumentException("Missing required option: --state-dir");

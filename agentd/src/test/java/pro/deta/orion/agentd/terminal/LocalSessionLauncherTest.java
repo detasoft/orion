@@ -10,6 +10,7 @@ import pro.deta.orion.agentd.runtime.WorkspaceReference;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -88,6 +89,77 @@ class LocalSessionLauncherTest {
         assertThat(launched.get().colorTerminal()).isEmpty();
         assertThat(((WorkspaceReference.ExistingDirectory) launched.get().workspace()).directory())
                 .isEqualTo(Path.of("").toAbsolutePath().normalize());
+    }
+
+    @Test
+    void installsBundledSessionHostWhenTheOverrideIsAbsent() {
+        Path state = temporaryDirectory.resolve("state");
+        AtomicReference<Path> executable = new AtomicReference<>();
+        SessionRuntime runtime = spec -> new SessionLaunchResult.Started(
+                spec.sessionId(), state.resolve("sessions/session"));
+
+        int exit = new LocalSessionLauncher(
+                Map.of(),
+                (host, sessions) -> {
+                    executable.set(host);
+                    return runtime;
+                },
+                (directory, errors) -> 0).execute(new String[]{
+                "--state-dir", state.toString(),
+                "--", "/bin/cat"
+        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
+
+        assertThat(exit).isZero();
+        assertThat(executable.get()).isEqualTo(state.resolve("runtime/session-host").toAbsolutePath());
+        assertThat(executable.get()).isExecutable();
+    }
+
+    @Test
+    void explicitSessionHostBypassesBundledInstallation() {
+        Path state = temporaryDirectory.resolve("state");
+        Path override = temporaryDirectory.resolve("custom-session-host").toAbsolutePath();
+        AtomicReference<Path> executable = new AtomicReference<>();
+        SessionRuntime runtime = spec -> new SessionLaunchResult.Started(
+                spec.sessionId(), state.resolve("sessions/session"));
+
+        int exit = new LocalSessionLauncher(
+                Map.of(),
+                (host, sessions) -> {
+                    executable.set(host);
+                    return runtime;
+                },
+                (directory, errors) -> 0).execute(new String[]{
+                "--session-host", override.toString(),
+                "--state-dir", state.toString(),
+                "--", "/bin/cat"
+        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(new ByteArrayOutputStream()));
+
+        assertThat(exit).isZero();
+        assertThat(executable.get()).isEqualTo(override);
+        assertThat(Files.exists(state.resolve("runtime/session-host"))).isFalse();
+    }
+
+    @Test
+    void reportsBundledInstallationFailureBeforeCreatingTheRuntime() throws Exception {
+        Path state = Files.writeString(temporaryDirectory.resolve("state-file"), "not a directory");
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+
+        int exit = new LocalSessionLauncher(
+                Map.of(),
+                (host, sessions) -> {
+                    throw new AssertionError("failed installation must not create the runtime");
+                },
+                (directory, attachErrors) -> {
+                    throw new AssertionError("failed installation must not attach");
+                }).execute(new String[]{
+                "--state-dir", state.toString(),
+                "--", "/bin/cat"
+        }, new PrintStream(new ByteArrayOutputStream()), new PrintStream(errors));
+
+        assertThat(exit).isEqualTo(1);
+        assertThat(errors.toString(StandardCharsets.UTF_8))
+                .contains("Cannot install the bundled session-host", "runtime directory")
+                .doesNotContain("/bin/cat");
     }
 
     @Test

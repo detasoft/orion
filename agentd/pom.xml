@@ -26,7 +26,8 @@
         <dependency>
             <groupId>pro.deta.orion</groupId>
             <artifactId>session-host</artifactId>
-            <scope>test</scope>
+            <scope>runtime</scope>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>com.github.luben</groupId>
@@ -83,6 +84,61 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>embed-session-host</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <artifactSet>
+                                <includes>
+                                    <include>com.fasterxml.jackson.core:jackson-core</include>
+                                    <include>com.github.luben:zstd-jni</include>
+                                    <include>org.eclipse.jetty:jetty-alpn-client</include>
+                                    <include>org.eclipse.jetty:jetty-alpn-java-client</include>
+                                    <include>org.eclipse.jetty:jetty-http</include>
+                                    <include>org.eclipse.jetty:jetty-io</include>
+                                    <include>org.eclipse.jetty:jetty-util</include>
+                                    <include>org.eclipse.jetty.http2:jetty-http2-client</include>
+                                    <include>org.eclipse.jetty.http2:jetty-http2-common</include>
+                                    <include>org.eclipse.jetty.http2:jetty-http2-hpack</include>
+                                    <include>org.slf4j:slf4j-api</include>
+                                    <include>pro.deta.orion:agent-protocol</include>
+                                    <include>pro.deta.orion:session-host</include>
+                                </includes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>pro.deta.orion:session-host</artifact>
+                                    <includes>
+                                        <include>META-INF/orion/native/session-host/**</include>
+                                    </includes>
+                                </filter>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>module-info.class</exclude>
+                                        <exclude>META-INF/versions/*/module-info.class</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/*.SF</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <configuration>
                     <archive>
@@ -116,8 +172,6 @@
                                     <arguments>
                                         <argument>terminal</argument>
                                         <argument>start</argument>
-                                        <argument>--session-host</argument>
-                                        <argument>session-host/target/release/session-host</argument>
                                         <argument>--state-dir</argument>
                                         <argument>/tmp/orion-agentd-local</argument>
                                         <argument>--</argument>

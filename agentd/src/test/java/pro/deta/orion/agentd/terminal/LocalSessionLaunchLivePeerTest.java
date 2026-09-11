@@ -67,14 +67,12 @@ class LocalSessionLaunchLivePeerTest {
 
     @Test
     void returnsAfterDurableHandoffAndLeavesTheRealHostRunning() throws Exception {
-        Path executable = extractSessionHost();
         stateDirectory = Files.createTempDirectory(Path.of("/tmp"), "orion-local-launch-");
         Path sessionDirectory = stateDirectory.resolve("sessions/local-live");
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         ByteArrayOutputStream errors = new ByteArrayOutputStream();
 
         int exit = LocalSessionLauncher.run(new String[]{
-                "--session-host", executable.toString(),
                 "--state-dir", stateDirectory.toString(),
                 "--session-id", "local-live",
                 "--cwd", temporaryDirectory.toString(),
@@ -86,6 +84,7 @@ class LocalSessionLaunchLivePeerTest {
         assertThat(exit).as(errors.toString(StandardCharsets.UTF_8) + hostLog).isZero();
         assertThat(output.toString(StandardCharsets.UTF_8))
                 .isEqualTo("session=local-live directory=" + sessionDirectory + "\n");
+        assertThat(stateDirectory.resolve("runtime/session-host")).isRegularFile().isExecutable();
         SessionManifest manifest = new JsonSessionManifestReader().read(sessionDirectory);
         ProcessHandle host = ProcessHandle.of(manifest.hostPid()).orElseThrow();
         SessionControlClient client = new SessionControlClient(Duration.ofSeconds(2));

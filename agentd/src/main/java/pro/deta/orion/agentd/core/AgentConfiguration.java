@@ -4,7 +4,9 @@ import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.AgentGeneration;
 import pro.deta.orion.agent.protocol.AgentId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
+import pro.deta.orion.agentd.runtime.BundledSessionHost;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -72,8 +74,11 @@ public record AgentConfiguration(
         requireOption(generation, "--generation");
         requireOption(launchId, "--launch-id");
         requireOption(agentVersion, "--agent-version");
-        requireOption(sessionHostExecutable, "--session-host");
-        return new AgentConfiguration(
+        boolean installBundledHost = sessionHostExecutable == null;
+        if (installBundledHost) {
+            sessionHostExecutable = stateDirectory.toAbsolutePath().normalize().resolve("runtime/session-host");
+        }
+        AgentConfiguration configuration = new AgentConfiguration(
                 serverUri,
                 stateDirectory,
                 agentId,
@@ -82,6 +87,15 @@ public record AgentConfiguration(
                 AgentProtocolLimits.defaults().withMaxFrameBytes(maxFrameBytes),
                 agentVersion,
                 sessionHostExecutable);
+        if (installBundledHost) {
+            try {
+                BundledSessionHost.install(configuration.stateDirectory());
+            } catch (IOException failure) {
+                throw new AgentStartupException(
+                        "Cannot install the bundled session-host: " + failure.getMessage(), failure);
+            }
+        }
+        return configuration;
     }
 
     public Path sessionsDirectory() {

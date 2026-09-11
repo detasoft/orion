@@ -14,7 +14,7 @@ import java.util.Arrays;
 public final class AgentdMain {
     private static final String USAGE = """
             Usage: java -jar agentd.jar --server HTTPS_URI [options]
-                   java -jar agentd.jar terminal start --session-host PATH
+                   java -jar agentd.jar terminal start [--session-host PATH]
                        --state-dir PATH [options] -- COMMAND...
                    java -jar agentd.jar terminal attach --session-dir PATH
 
@@ -25,7 +25,7 @@ public final class AgentdMain {
               --launch-id UUID       server-assigned launch identity
               --max-frame-bytes N    maximum Agent protocol frame size
               --agent-version VALUE  version reported during registration
-              --session-host PATH    bundled native session-host executable
+              --session-host PATH    override bundled native session-host executable
               --help                 show this help
             """;
 
@@ -69,6 +69,9 @@ public final class AgentdMain {
             errors.println(e.getMessage());
             errors.print(USAGE);
             return 2;
+        } catch (pro.deta.orion.agentd.core.AgentStartupException e) {
+            errors.println("AgentD failed: " + e.getMessage());
+            return 1;
         }
 
         try (LaunchPermit permit = new LaunchPermitReader().read(input);

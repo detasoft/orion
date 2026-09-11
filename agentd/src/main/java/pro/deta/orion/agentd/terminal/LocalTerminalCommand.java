@@ -7,7 +7,7 @@ import java.util.Arrays;
 
 public final class LocalTerminalCommand {
     private static final String USAGE = """
-            Usage: agentd terminal start --session-host PATH --state-dir PATH
+            Usage: agentd terminal start [--session-host PATH] --state-dir PATH
                    [--session-id ID] [--cwd PATH] -- COMMAND...
                    agentd terminal attach --session-dir PATH
             """;
