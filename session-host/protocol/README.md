@@ -320,6 +320,12 @@ The sidecar contains only `stateVersion: 1` and `acknowledgedEventId`; it is
 local deletion permission, never a replication cursor or server authority.
 Zero and values beyond the current logical journal tail are invalid.
 
+This is the currently implemented contract. The active AgentD
+[journal-sync task](../../docs/plans/tasks/04_agentd/02_journal-sync.md) replaces
+it with an EventId-only monotonic retention control: no command source, operation
+sequence, envelope, or journaled `COMMAND_RESULT`. Until that task is implemented,
+this section continues to describe the accepted native bytes.
+
 `CLAIM_SERVER_CONTROL` is the atomic recovery barrier for a stateless AgentD.
 Its fixed eight-byte little-endian payload contains the highest
 `SERVER operationSequence` observed in the server journal prefix or local

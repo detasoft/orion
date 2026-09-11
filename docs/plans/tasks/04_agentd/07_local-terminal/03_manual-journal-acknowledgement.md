@@ -9,14 +9,14 @@ non-acknowledging attach behavior.
 ## Requirements
 
 - After a contiguous journal page is fully decoded and its terminal output is
-  successfully written, send that page's last EventId once as a source-aware
-  `MANUAL` `ACK_JOURNAL` operation.
+  successfully written, send that page's last EventId through the monotonic
+  `ACK_JOURNAL` retention control.
 - Never acknowledge an incomplete tail, gap, corrupt page, output failure, or
   partially observed page.
 - Keep watermarks monotonic only in memory for the current invocation. Do not
   persist a local replica cursor or imply server durability.
-- After the first rejected or ambiguously delivered acknowledgement, report it
-  once, disable later acknowledgements, and continue non-acknowledging output.
+- A repeated acknowledgement after ambiguous delivery is harmless. Report
+  definite rejection and continue non-acknowledging output for that invocation.
 - Warn that native retention may delete history required by a later stateless
   attach.
 

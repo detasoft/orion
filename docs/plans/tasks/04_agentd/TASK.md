@@ -26,8 +26,10 @@ the AgentD lifecycle.
 > Contract alignment completed 2026-09-11. Native-control and recovery passages
 > below are historical proposals, not a description of current runtime behavior.
 > The [current native protocol](../../../../session-host/protocol/README.md)
-> defines source-aware in-memory admission, journaled command results, ACK, and
-> start-outcome uncertainty.
+> still describes the implemented source-aware ACK and sequence-floor claim.
+> `02_journal-sync.md` replaces ACK with an EventId-only monotonic retention
+> control, while `04_command-orchestration.md` keeps command sequencing and
+> connection fencing outside journal synchronization.
 > Recovery from recorded sequence maxima alone is not established when an
 > admitted operation has a pending or missing result. Reconcile affected steps
 > with that document before implementing the remaining orchestration work.

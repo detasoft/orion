@@ -95,18 +95,21 @@ The journal contract includes:
 - cursor and gap semantics based on record timestamps.
 
 The control contract includes `INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`,
-`ACK_JOURNAL`, `STATUS`, and generic typed-event submission. Operations receive
+`ACK_JOURNAL`, `STATUS`, and generic typed-event submission. Commands receive
 `RECEIVED` admission responses; queries and failures use their typed response or
 `ERROR`. `SERVER` operation sequences provide host-incarnation replay
-protection, while `MANUAL` sequences are live response-correlation values and
-every valid manual delivery executes. Input IDs remain journal data and do not
-provide another deduplication mechanism. The protocol must not expose
-Unix-domain-socket or named-pipe details.
+protection for effect commands, while `MANUAL` sequences are live
+response-correlation values and every valid manual command executes. Input IDs
+remain journal data and do not provide another deduplication mechanism. The
+protocol must not expose Unix-domain-socket or named-pipe details.
 
-The schema-1 `CLAIM_SERVER_CONTROL` recovery barrier atomically fences older
-connections and returns the host's accepted `SERVER` sequence high-water mark
-and applied journal-acknowledgement watermark. AgentD uses the first value for
-its next in-memory allocation and the second only for retention reconciliation.
+The implemented schema-1 `CLAIM_SERVER_CONTROL` and source-aware
+`ACK_JOURNAL` contracts are superseded by the active AgentD
+[command-orchestration](../04_agentd/04_command-orchestration.md) and
+[journal-sync](../04_agentd/02_journal-sync.md) tasks. Command orchestration will
+own a sequence-independent connection fence. Journal sync will replace ACK with
+an EventId-only monotonic retention control that updates the existing sidecar
+without appending `COMMAND_RESULT`.
 
 ### Session Storage
 
