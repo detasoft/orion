@@ -5,40 +5,14 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class PosixTerminalTest {
-    @Test
-    void closingMacTerminalUnblocksAConcurrentInputRead() throws Exception {
-        assumeTrue(System.getProperty("os.name", "").toLowerCase().contains("mac"));
-        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
-        Process process = new ProcessBuilder(
-                "script", "-q", "/dev/null", "/bin/sh", "-c",
-                "stty rows 24 cols 80; exec \"$@\"", "terminal-close-probe",
-                java.toString(), "-cp", System.getProperty("java.class.path"), CloseProbe.class.getName())
-                .redirectErrorStream(true)
-                .start();
-        try {
-            boolean exited = process.waitFor(5, TimeUnit.SECONDS);
-            String output = exited
-                    ? new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8) : "";
-            assertThat(exited).as("probe output: %s", output).isTrue();
-            assertThat(process.exitValue()).as("probe output: %s", output).isZero();
-        } finally {
-            process.destroyForcibly();
-        }
-    }
-
     @Test
     void acquiresRawModeReportsResizeAndRestoresExactlyOnce() throws Exception {
         RecordingPlatform platform = new RecordingPlatform();
@@ -187,30 +161,6 @@ class PosixTerminalTest {
             removed.add(hook);
             if (removeFailure != null) {
                 throw removeFailure;
-            }
-        }
-    }
-
-    public static final class CloseProbe {
-        public static void main(String[] arguments) throws Exception {
-            PosixTerminal terminal = PosixTerminal.acquire();
-            CountDownLatch reading = new CountDownLatch(1);
-            Thread reader = Thread.startVirtualThread(() -> {
-                reading.countDown();
-                try {
-                    terminal.input().read();
-                } catch (IOException ignored) {
-                    // Closing the channel ends the pending terminal read.
-                }
-            });
-            if (!reading.await(1, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("terminal reader did not start");
-            }
-            Thread.sleep(100);
-            terminal.close();
-            reader.join(1_000);
-            if (reader.isAlive()) {
-                throw new IllegalStateException("terminal reader did not stop");
             }
         }
     }

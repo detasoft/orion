@@ -1,14 +1,12 @@
 package pro.deta.orion.agentd.terminal;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.channels.Channels;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -193,7 +191,7 @@ final class PosixTerminal implements TerminalDevice {
         private final OutputStream output;
 
         private NativePlatform() throws IOException {
-            input = Channels.newInputStream(FileChannel.open(TTY.toPath(), StandardOpenOption.READ));
+            input = new FileInputStream(TTY);
             try {
                 output = new FileOutputStream(TTY);
             } catch (IOException failure) {
