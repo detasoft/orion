@@ -9,10 +9,14 @@ import pro.deta.orion.agentd.transport.TransportSignal;
 
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -20,6 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 class AgentAssemblyTest {
+    private static final AgentProtocolCodec CODEC = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+
     @TempDir
     Path state;
 
@@ -37,6 +43,7 @@ class AgentAssemblyTest {
             holder.start();
             assertThatExceptionOfType(AgentStartupException.class).isThrownBy(agent::start);
             assertThat(transport.connectCalls).isZero();
+            assertThat(configuration.sessionsDirectory()).doesNotExist();
         }
     }
 
@@ -57,6 +64,29 @@ class AgentAssemblyTest {
         assertThat(context.permit().copyBytes()).containsOnly(0);
     }
 
+    @Test
+    void assemblesDiscoveryAndReportsItsInitialSnapshot() throws Exception {
+        AgentConfiguration configuration = configuration();
+        AgentLaunchContext context = AgentLaunchContext.create(configuration, new LaunchPermit(new byte[32]));
+        RecordingTransport transport = new RecordingTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+
+        try (Agent agent = Agent.create(configuration, context, transport,
+                new MachineInfo("runner", "linux", "aarch64"))) {
+            assertThat(configuration.sessionsDirectory()).doesNotExist();
+
+            agent.start();
+            transport.deliver(new AgentMessage.RequestSessionList());
+            await(() -> transport.messages(AgentMessage.SessionList.class).size() == 1);
+
+            assertThat(configuration.sessionsDirectory()).isDirectory();
+            assertThat(transport.messages(AgentMessage.SessionList.class))
+                    .singleElement()
+                    .extracting(AgentMessage.SessionList::sessions)
+                    .satisfies(sessions -> assertThat(sessions).isEmpty());
+        }
+    }
+
     private AgentConfiguration configuration() {
         return new AgentConfiguration(
                 URI.create("https://agent.test"), state,
@@ -66,7 +96,10 @@ class AgentAssemblyTest {
     }
 
     private static final class RecordingTransport implements AgentTransport {
+        private final List<byte[]> controls = new CopyOnWriteArrayList<>();
         private int connectCalls;
+        private AgentMessage reply;
+        private Consumer<SequenceDecodeResult.Outcome<AgentMessage>> controlReceiver;
 
         @Override
         public CompletionStage<Void> connect() {
@@ -76,6 +109,14 @@ class AgentAssemblyTest {
 
         @Override
         public CompletionStage<Void> sendControlCbor(byte[] item) {
+            controls.add(item.clone());
+            try {
+                if (CODEC.decode(item) instanceof AgentMessage.Hello && reply != null) {
+                    controlReceiver.accept(new SequenceDecodeResult.Decoded<>(reply));
+                }
+            } catch (AgentProtocolException failure) {
+                return CompletableFuture.failedFuture(failure);
+            }
             return CompletableFuture.completedFuture(null);
         }
 
@@ -91,6 +132,7 @@ class AgentAssemblyTest {
 
         @Override
         public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
+            controlReceiver = receiver;
         }
 
         @Override
@@ -104,5 +146,33 @@ class AgentAssemblyTest {
         @Override
         public void close() {
         }
+
+        private void deliver(AgentMessage message) {
+            controlReceiver.accept(new SequenceDecodeResult.Decoded<>(message));
+        }
+
+        private <T extends AgentMessage> List<T> messages(Class<T> type) throws AgentProtocolException {
+            List<T> messages = new ArrayList<>();
+            for (byte[] item : controls) {
+                AgentMessage message = CODEC.decode(item);
+                if (type.isInstance(message)) {
+                    messages.add(type.cast(message));
+                }
+            }
+            return messages;
+        }
+    }
+
+    private static void await(CheckedCondition condition) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!condition.evaluate() && System.nanoTime() < deadline) {
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        assertThat(condition.evaluate()).isTrue();
+    }
+
+    @FunctionalInterface
+    private interface CheckedCondition {
+        boolean evaluate() throws Exception;
     }
 }
