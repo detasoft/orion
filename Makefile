@@ -68,7 +68,7 @@ dist: ## Package the bootstrap distribution
 	$(MAVEN) package -Pdist -pl core/bootstrap -am
 
 test: ## Run the Maven/JVM test suite with the dev profile
-	$(MAVEN) test -Pdev -T 4
+	$(MAVEN) test -Pdev -T 4 -q
 
 xml-schema: ## Generate and compile the XML schema model
 	$(MAVEN) compile -Pdev,xml-schema -q -pl core/schema -am -DskipTests
