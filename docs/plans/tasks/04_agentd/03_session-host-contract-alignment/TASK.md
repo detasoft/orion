@@ -5,10 +5,10 @@ Parent: ../TASK.md
 Session-host review: ../../../../../../../../session-host/MODULE_REVIEW.md
 
 Bring every remaining AgentD session-host integration path to the final native
-control, journal, metadata, and lifecycle contracts after the focused control
-model changes are complete. The documentation audit accepts the current native
-implementation as the baseline; it did not change Java or Rust runtime behavior.
-The linked contract records the shared Java/native interface.
+packaging, control, journal, metadata, and lifecycle contracts after the focused
+control model changes are complete. The documentation audit accepts the current
+native implementation as the baseline; it did not change Java or Rust runtime
+behavior. The linked contract records the shared Java/native interface.
 
 ## Scope
 
