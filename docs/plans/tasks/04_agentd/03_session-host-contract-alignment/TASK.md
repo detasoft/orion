@@ -1,20 +1,22 @@
 # Align AgentD with the Stabilized Session-Host Contract
 
-Status: todo (runtime alignment remains; documentation audit completed 2026-09-07)
+Status: todo (bundled native packaging remains; runtime alignment verified 2026-09-11)
 Parent: ../TASK.md
 Session-host review: ../../../../../../../../session-host/MODULE_REVIEW.md
 
-Bring every remaining AgentD session-host integration path to the final native
-packaging, control, journal, metadata, and lifecycle contracts after the focused
-control model changes are complete. The documentation audit accepts the current
-native implementation as the baseline; it did not change Java or Rust runtime
-behavior. The linked contract records the shared Java/native interface.
+Keep AgentD's native packaging and local session-host integration aligned with
+the established control, journal, metadata, and lifecycle contracts. The
+low-level runtime paths and compatibility fixtures are aligned. Bundling the
+native executable remains in this subtree; server journal synchronization and
+command orchestration remain owned by their sibling AgentD tasks.
 
 ## Scope
 
-- Audit AgentD launch, discovery, control transport, journal projection,
-  recovery, retention acknowledgement, and status handling against the current
-  session-host protocol and compatibility fixtures.
+- Package the native session host with AgentD and use it by default without
+  changing the explicit executable override.
+- Keep AgentD launch, discovery, control transport, journal reading, and status
+  handling aligned with the current session-host protocol and compatibility
+  fixtures.
 - Treat `RECEIVED` as transient admission only. Observe operation completion
   through `COMMAND_RESULT` and preserve the documented unknown/partial-effect
   semantics after ambiguous delivery or a missing result record.
@@ -24,12 +26,8 @@ behavior. The linked contract records the shared Java/native interface.
 - Put the operation sequence in the frame header and the explicit source in the
   payload. Use empty or rejected `RECEIVED`; correlate server results by source
   and sequence, while treating manual sequences as live-only values.
-- Preserve uncertain delivery across reconnects: a stale rejection cannot
-  resolve an earlier attempt. A journal suffix does not expose admissions with
-  pending or missing results. Keep operation sequence allocation durable on the
-  server and never reconstruct it from journal or host observations in AgentD.
-- Send server retention acknowledgements through the same source-aware
-  operation contract and advance them only from a server-durable journal prefix.
+- Preserve uncertain delivery at the local control boundary: a stale rejection
+  cannot resolve an earlier attempt, and a missing result remains unknown.
 - Consume the four-byte `TERMINATE` effect and effective sandbox status without
   adding AgentD-owned process-tree or host-shutdown policy.
 - Preserve current start-outcome and journal-failure behavior: output append
@@ -43,25 +41,24 @@ behavior. The linked contract records the shared Java/native interface.
 ## Acceptance
 
 - AgentD can launch and rediscover a real session host, issue every established
-  operation, reconnect after an uncertain control exchange, and distinguish
-  admission from the durable result observed in the journal.
-- Journal resume and `ACK_JOURNAL` use one server-confirmed durable prefix and
-  preserve retention-gap reporting.
+  operation through one native exchange, and distinguish admission from the
+  durable result observed in the journal.
 - Start success, pre-exec start failure, missing operation result, partial
   effect, graceful terminate, force terminate, and sandbox status match the
   current session-host contract, including continued service after journal
   append failure and no fabricated start outcome after exec.
 - Shared protocol fixtures and real-host integration tests cover unsigned
   sequences above `i64::MAX`, unknown envelope fields, reconnect, and ACK.
-- No obsolete operation path, duplicate command identity, private
+- No obsolete operation path, duplicate native command identity, private
   durable command cursor, or AgentD-owned host termination coordinator remains.
 
 ## Boundary
 
-This task owns AgentD conformance with the established native host contracts
-and removal of superseded AgentD paths. It does not change the session-host wire
-or journal formats, implement server command orchestration, or add local terminal
-UI behavior.
+This task owns AgentD conformance with the established native host contracts,
+native executable packaging, and removal of superseded local integration paths.
+It does not change the session-host wire or journal formats, implement server
+journal synchronization or command orchestration, or add local terminal UI
+behavior.
 
 ---
 
@@ -85,8 +82,8 @@ provides the local Java control client. Server command orchestration and
 journal synchronization remain queued work, not completed integration.
 
 The Rust host and Java client use the same checked-in fixtures and operation
-layout. Remaining work in this task concerns higher-level AgentD consumers, not
-a second control codec.
+layout. Higher-level server synchronization and command consumers remain in
+their owning AgentD sibling tasks, not in a second control codec here.
 
 ### Native operation contract
 
@@ -205,8 +202,9 @@ A reader cannot prove complete terminal history from increasing event IDs.
 These are accepted current behaviors, not requests for fatal journal handling.
 
 Metadata remains a discovery manifest, not a lifecycle record or journal
-index. Live STATUS reports current process observations and journal bounds;
-missing journal evidence cannot be reconstructed from metadata.
+index. Live STATUS reports current process observations and protocol versions;
+the journal reader supplies retained bounds. Missing journal evidence cannot be
+reconstructed from metadata or STATUS.
 
 ### Shared Java and native interface
 
@@ -221,7 +219,7 @@ Sources: `ControlCommand`, `NativeControlCodec`, `ControlResult`, and
 | Operation response | `RECEIVED`, empty or carrying an error payload |
 | ACK_JOURNAL | Source-aware operation with a journaled result |
 | Replay | Server high-water rejection; no manual retry or deduplication state |
-| STATUS | Schema-1 snapshot including retained journal bounds |
+| STATUS | Schema-1 process snapshot and protocol versions |
 
 The Java client performs one exchange and never retries an uncertain operation.
 Launch uses the native CLI and a manifest/journal/host handoff probe. Discovery
