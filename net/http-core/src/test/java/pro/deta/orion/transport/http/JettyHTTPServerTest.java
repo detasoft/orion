@@ -39,6 +39,7 @@ import pro.deta.orion.agentd.core.AgentControlService;
 import pro.deta.orion.agentd.core.AgentHandshake;
 import pro.deta.orion.agentd.core.AgentLaunchContext;
 import pro.deta.orion.agentd.core.LaunchPermit;
+import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.keymaterial.AcmeKeyMaterial;
@@ -173,7 +174,8 @@ class JettyHTTPServerTest {
                             context,
                             "1.0.0",
                             new MachineInfo("worker-1", "linux", "aarch64"),
-                            Map.of())) {
+                            Map.of(),
+                            new SessionRegistry())) {
                         service.start();
                         reconnectToken = service.connection().orElseThrow().reconnectToken().copyBytes();
                         assertThat(control.awaitOnline(launchId, Duration.ofSeconds(5))).isTrue();

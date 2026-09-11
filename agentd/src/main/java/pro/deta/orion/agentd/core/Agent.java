@@ -7,6 +7,7 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agentd.platform.LocalMachineInfo;
+import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
 
@@ -50,7 +51,8 @@ public final class Agent implements AutoCloseable {
                 context,
                 configuration.agentVersion(),
                 machine,
-                java.util.Map.of());
+                java.util.Map.of(),
+                new SessionRegistry());
         return new Agent(configuration, List.of(processLock, control), context);
     }
 

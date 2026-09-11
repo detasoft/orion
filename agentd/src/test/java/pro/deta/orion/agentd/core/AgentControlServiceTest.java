@@ -2,15 +2,26 @@ package pro.deta.orion.agentd.core;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.agent.protocol.*;
+import pro.deta.orion.agentd.session.ChildState;
+import pro.deta.orion.agentd.session.ControlEndpoint;
+import pro.deta.orion.agentd.session.HostObservation;
+import pro.deta.orion.agentd.session.JournalObservation;
+import pro.deta.orion.agentd.session.LocalSession;
+import pro.deta.orion.agentd.session.LocalSessionState;
+import pro.deta.orion.agentd.session.SessionManifest;
+import pro.deta.orion.agentd.session.SessionRegistry;
+import pro.deta.orion.agentd.session.SessionRegistryFixture;
 import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.SessionStreamRequest;
 import pro.deta.orion.agentd.transport.TransportSignal;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -222,6 +233,175 @@ class AgentControlServiceTest {
         assertThat(invalidService.connection()).isEmpty();
     }
 
+    @Test
+    void waitsForInitialDiscoveryAndAnswersRepeatedListRequestsFromTheCompletedSnapshot() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        SessionRegistry registry = new SessionRegistry();
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+        service.start();
+
+        transport.deliver(new AgentMessage.RequestSessionList());
+        assertThat(messages(transport.controls, AgentMessage.SessionList.class)).isEmpty();
+
+        SessionRegistryFixture.publish(registry, Map.of("session-1", session("session-1", ChildState.LIVE)));
+        transport.deliver(new AgentMessage.RequestSessionList());
+
+        assertThat(messages(transport.controls, AgentMessage.SessionList.class))
+                .extracting(message -> message.sessions().stream()
+                        .map(SessionDescriptor::sessionId)
+                        .map(SessionId::value)
+                        .toList())
+                .containsExactly(List.of("session-1"), List.of("session-1"));
+        service.close();
+    }
+
+    @Test
+    void answersWithACompleteEmptyListAfterAnEmptyInitialScan() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of());
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+        service.start();
+
+        transport.deliver(new AgentMessage.RequestSessionList());
+
+        assertThat(messages(transport.controls, AgentMessage.SessionList.class))
+                .singleElement()
+                .extracting(AgentMessage.SessionList::sessions)
+                .satisfies(sessions -> assertThat(sessions).isEmpty());
+        service.close();
+    }
+
+    @Test
+    void reportsChangedSessionsAndUsesFullRefreshesForMembershipChanges() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of("session-1", session("session-1", ChildState.LIVE)));
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+        service.start();
+
+        transport.deliver(new AgentMessage.RequestSessionList());
+        SessionRegistryFixture.publish(registry, Map.of("session-1", session("session-1", ChildState.EXITED)));
+        SessionRegistryFixture.publish(registry, Map.of(
+                "session-1", session("session-1", ChildState.EXITED),
+                "session-2", session("session-2", ChildState.LIVE)));
+        SessionRegistryFixture.publish(registry, Map.of("session-2", session("session-2", ChildState.LIVE)));
+
+        assertThat(messages(transport.controls, AgentMessage.SessionStatus.class))
+                .extracting(message -> message.session().state())
+                .containsExactly(AgentMessage.SessionState.EXITED);
+        assertThat(messages(transport.controls, AgentMessage.SessionList.class))
+                .extracting(message -> message.sessions().size())
+                .containsExactly(1, 2, 1);
+        service.close();
+    }
+
+    @Test
+    void dropsAnOldPendingRequestAndReportsOfflineChangesAfterReconnect() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        transport.replies.add(welcome("connection-2", (byte) 10, 1_000));
+        SessionRegistry registry = new SessionRegistry();
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), registry, Duration.ofMillis(100));
+        service.start();
+
+        transport.deliver(new AgentMessage.RequestSessionList());
+        transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+        SessionRegistryFixture.publish(registry, Map.of("offline", session("offline", ChildState.LIVE)));
+        await(() -> service.connection().orElseThrow().connectionId().equals(new ConnectionId("connection-2")));
+        transport.deliver(new AgentMessage.RequestSessionList());
+
+        assertThat(messages(transport.controls, AgentMessage.SessionList.class))
+                .singleElement()
+                .satisfies(message -> assertThat(message.sessions())
+                        .extracting(descriptor -> descriptor.sessionId().value())
+                        .containsExactly("offline"));
+        service.close();
+    }
+
+    @Test
+    void recordsOversizedReportsAndReconnectsWithoutSendingATruncatedList() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        transport.replies.add(welcome("connection-2", (byte) 10, 1_000));
+        SessionRegistry registry = new SessionRegistry();
+        Map<String, LocalSession> sessions = new LinkedHashMap<>();
+        for (int index = 1; index <= 13; index++) {
+            String sessionId = "session-" + index;
+            sessions.put(sessionId, session(sessionId, ChildState.LIVE));
+        }
+        SessionRegistryFixture.publish(registry, sessions);
+        AgentProtocolLimits smallCollections = new AgentProtocolLimits(
+                AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES, 12, 256 * 1024,
+                AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES, 64);
+        AgentControlService service = service(
+                transport, new AgentProtocolCodec(smallCollections), AgentHandshakeTest.context(),
+                registry, Duration.ofMillis(100));
+        service.start();
+
+        transport.deliver(new AgentMessage.RequestSessionList());
+
+        await(() -> service.lastSessionReportingFailure().isPresent());
+        await(() -> transport.connectCount.get() >= 2);
+        assertThat(messages(transport.controls, AgentMessage.SessionList.class)).isEmpty();
+        service.close();
+    }
+
+    @Test
+    void recordsControlQueueCapacityFailureAndReconnectsTheAffectedConnection() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        transport.replies.add(welcome("connection-2", (byte) 10, 1_000));
+        transport.reportFailures.set(1);
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of("session-1", session("session-1", ChildState.LIVE)));
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), registry, Duration.ofMillis(100));
+        service.start();
+
+        transport.deliver(new AgentMessage.RequestSessionList());
+
+        await(() -> service.lastSessionReportingFailure().isPresent());
+        await(() -> transport.connectCount.get() >= 2);
+        assertThat(service.lastSessionReportingFailure().orElseThrow())
+                .hasMessageContaining("queue is full");
+        assertThat(messages(transport.controls, AgentMessage.SessionList.class)).isEmpty();
+        service.close();
+    }
+
+    @Test
+    void ignoresALateSendFailureFromAReplacedConnection() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        transport.replies.add(welcome("connection-2", (byte) 10, 1_000));
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of("session-1", session("session-1", ChildState.LIVE)));
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), registry, Duration.ofMillis(100));
+        service.start();
+        CompletableFuture<Void> oldSend = new CompletableFuture<>();
+        transport.heldReport = oldSend;
+
+        transport.deliver(new AgentMessage.RequestSessionList());
+        transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+        await(() -> service.connection().orElseThrow().connectionId().equals(new ConnectionId("connection-2")));
+        oldSend.completeExceptionally(new IllegalStateException("old connection failed"));
+        TimeUnit.MILLISECONDS.sleep(200);
+
+        assertThat(service.connection()).get().extracting(AgentConnection::connectionId)
+                .isEqualTo(new ConnectionId("connection-2"));
+        assertThat(service.lastSessionReportingFailure()).isEmpty();
+        assertThat(transport.connectCount).hasValue(2);
+        service.close();
+    }
+
     private static void assertStartupFails(AgentMessage reply) {
         FakeTransport transport = new FakeTransport();
         transport.reply = reply;
@@ -232,7 +412,16 @@ class AgentControlServiceTest {
 
     private static AgentControlService service(
             FakeTransport transport, AgentLaunchContext context, Duration timeout) {
-        return service(transport, context, timeout, System::nanoTime);
+        return service(transport, context, new SessionRegistry(), timeout);
+    }
+
+    private static AgentControlService service(
+            FakeTransport transport,
+            AgentLaunchContext context,
+            SessionRegistry registry,
+            Duration timeout
+    ) {
+        return service(transport, CODEC, context, registry, timeout, System::nanoTime);
     }
 
     private static AgentControlService service(
@@ -241,9 +430,45 @@ class AgentControlServiceTest {
             Duration timeout,
             java.util.function.LongSupplier nanoTime
     ) {
+        return service(transport, CODEC, context, new SessionRegistry(), timeout, nanoTime);
+    }
+
+    private static AgentControlService service(
+            FakeTransport transport,
+            AgentProtocolCodec codec,
+            AgentLaunchContext context,
+            SessionRegistry registry,
+            Duration timeout
+    ) {
+        return service(transport, codec, context, registry, timeout, System::nanoTime);
+    }
+
+    private static AgentControlService service(
+            FakeTransport transport,
+            AgentProtocolCodec codec,
+            AgentLaunchContext context,
+            SessionRegistry registry,
+            Duration timeout,
+            java.util.function.LongSupplier nanoTime
+    ) {
         return new AgentControlService(
-                transport, CODEC, new AgentHandshake(), context, "2.4.1",
-                new MachineInfo("runner-1", "Linux", "aarch64"), Map.of("pty", "true"), timeout, nanoTime);
+                transport, codec, new AgentHandshake(), context, "2.4.1",
+                new MachineInfo("runner-1", "Linux", "aarch64"), Map.of("pty", "true"),
+                registry, timeout, nanoTime);
+    }
+
+    private static LocalSession session(String sessionId, ChildState childState) {
+        SessionManifest manifest = new SessionManifest(
+                1, 1, 1, sessionId, 1, 2, List.of("sh"), "/workspace", 42,
+                OptionalLong.of(43), 80, 24, 80, 24, "xterm-256color",
+                new SessionManifest.Sandbox(false, "none", "fail", List.of(), List.of()),
+                new ControlEndpoint(
+                        ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
+                        "control.sock",
+                        java.nio.file.Path.of("session", "control.sock")));
+        return new LocalSession(
+                java.nio.file.Path.of("session", sessionId), manifest,
+                HostObservation.live(childState), JournalObservation.READABLE, LocalSessionState.LIVE);
     }
 
     private static AgentMessage.Welcome welcome(String connectionId, byte tokenByte, long heartbeatMillis) {
@@ -292,10 +517,12 @@ class AgentControlServiceTest {
         private final AtomicInteger connectCount = new AtomicInteger();
         private final AtomicInteger connectFailures = new AtomicInteger();
         private final AtomicInteger disconnectsAfterReplies = new AtomicInteger();
+        private final AtomicInteger reportFailures = new AtomicInteger();
         private Consumer<SequenceDecodeResult.Outcome<AgentMessage>> controlReceiver;
         private Consumer<TransportSignal> signalReceiver;
         private AgentMessage reply;
         private RuntimeException connectFailure;
+        private CompletableFuture<Void> heldReport;
         private AtomicLong nanoTime;
         private long connectElapsedNanos;
         private long sendElapsedNanos;
@@ -317,10 +544,16 @@ class AgentControlServiceTest {
 
         @Override
         public CompletionStage<Void> sendControlCbor(byte[] item) {
-            controls.add(item.clone());
             advance(sendElapsedNanos);
             try {
-                if (CODEC.decode(item) instanceof AgentMessage.Hello) {
+                AgentMessage message = CODEC.decode(item);
+                if (!(message instanceof AgentMessage.Hello)
+                        && reportFailures.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
+                    return CompletableFuture.failedFuture(
+                            new IllegalStateException("outbound transport queue is full"));
+                }
+                controls.add(item.clone());
+                if (message instanceof AgentMessage.Hello) {
                     AgentMessage next = replies.poll();
                     if (next != null) {
                         controlReceiver.accept(new SequenceDecodeResult.Decoded<>(next));
@@ -330,6 +563,8 @@ class AgentControlServiceTest {
                     } else if (reply != null) {
                         controlReceiver.accept(new SequenceDecodeResult.Decoded<>(reply));
                     }
+                } else if (heldReport != null) {
+                    return heldReport;
                 }
             } catch (AgentProtocolException failure) {
                 return CompletableFuture.failedFuture(failure);
@@ -370,6 +605,10 @@ class AgentControlServiceTest {
             if (nanoTime != null) {
                 nanoTime.addAndGet(elapsedNanos);
             }
+        }
+
+        private void deliver(AgentMessage message) {
+            controlReceiver.accept(new SequenceDecodeResult.Decoded<>(message));
         }
     }
 

@@ -1,6 +1,9 @@
 package pro.deta.orion.agentd.core;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -9,6 +12,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.random.RandomGenerator;
 
@@ -17,6 +21,10 @@ import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
+import pro.deta.orion.agent.protocol.SessionDescriptor;
+import pro.deta.orion.agentd.session.DiscoverySnapshot;
+import pro.deta.orion.agentd.session.LocalSession;
+import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.TransportSignal;
 
@@ -36,6 +44,9 @@ public final class AgentControlService implements AgentService {
     private final LongSupplier nanoTime;
     private final LongSupplier epochMillis;
     private final ControlConnectionLoop controlLoop;
+    private final SessionRegistry registry;
+    private final SessionRegistry.Observation registryObservation;
+    private final AtomicReference<Exception> lastSessionReportingFailure = new AtomicReference<>();
     private Attempt attempt;
     private boolean closed;
 
@@ -46,10 +57,11 @@ public final class AgentControlService implements AgentService {
             AgentLaunchContext context,
             String agentVersion,
             MachineInfo machine,
-            Map<String, String> capabilities
+            Map<String, String> capabilities,
+            SessionRegistry registry
     ) {
         this(transport, codec, handshake, context, agentVersion, machine, capabilities,
-                DEFAULT_HANDSHAKE_TIMEOUT, System::nanoTime);
+                registry, DEFAULT_HANDSHAKE_TIMEOUT, System::nanoTime);
     }
 
     AgentControlService(
@@ -60,10 +72,11 @@ public final class AgentControlService implements AgentService {
             String agentVersion,
             MachineInfo machine,
             Map<String, String> capabilities,
+            SessionRegistry registry,
             Duration timeout
     ) {
         this(transport, codec, handshake, context, agentVersion, machine, capabilities,
-                timeout, System::nanoTime);
+                registry, timeout, System::nanoTime);
     }
 
     AgentControlService(
@@ -74,6 +87,7 @@ public final class AgentControlService implements AgentService {
             String agentVersion,
             MachineInfo machine,
             Map<String, String> capabilities,
+            SessionRegistry registry,
             Duration timeout,
             LongSupplier nanoTime
     ) {
@@ -87,11 +101,13 @@ public final class AgentControlService implements AgentService {
         this.timeout = Objects.requireNonNull(timeout, "timeout");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         this.epochMillis = System::currentTimeMillis;
-        this.controlLoop = new ControlConnectionLoop(
-                this::reconnect, this::sendHeartbeat, nanoTime, RandomGenerator.getDefault());
         if (timeout.isNegative()) {
             throw new IllegalArgumentException("handshake timeout must not be negative");
         }
+        this.registry = Objects.requireNonNull(registry, "registry");
+        this.controlLoop = new ControlConnectionLoop(
+                this::reconnect, this::sendHeartbeat, nanoTime, RandomGenerator.getDefault());
+        this.registryObservation = registry.observe(this::sessionsReplaced);
     }
 
     @Override
@@ -116,6 +132,10 @@ public final class AgentControlService implements AgentService {
         return handshake.connection();
     }
 
+    public Optional<Exception> lastSessionReportingFailure() {
+        return Optional.ofNullable(lastSessionReportingFailure.get());
+    }
+
     @Override
     public synchronized void close() {
         if (closed) {
@@ -125,6 +145,7 @@ public final class AgentControlService implements AgentService {
         if (attempt != null) {
             attempt.negotiated.completeExceptionally(new HandshakeException("AgentD control service closed"));
         }
+        registryObservation.close();
         controlLoop.close();
         handshake.close();
         context.close();
@@ -171,6 +192,7 @@ public final class AgentControlService implements AgentService {
             current = attempt;
         }
         if (current == null || current.negotiated.isDone()) {
+            receiveAuthenticatedControl(outcome);
             return;
         }
         if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
@@ -197,6 +219,98 @@ public final class AgentControlService implements AgentService {
         } catch (Exception failure) {
             current.negotiated.completeExceptionally(failure instanceof HandshakeException
                     ? failure : new HandshakeException("Invalid server WELCOME"));
+        }
+    }
+
+    private void receiveAuthenticatedControl(SequenceDecodeResult.Outcome<AgentMessage> outcome) {
+        if (!(outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded)
+                || !(decoded.value() instanceof AgentMessage.RequestSessionList)) {
+            return;
+        }
+        AgentConnection expected = onlineConnection();
+        if (expected == null) {
+            return;
+        }
+        registry.readySnapshot().whenComplete((snapshot, failure) -> {
+            if (failure != null) {
+                sessionReportingFailed(expected, failure);
+            } else {
+                sendSessionList(expected, snapshot);
+            }
+        });
+    }
+
+    private void sessionsReplaced(DiscoverySnapshot previous, DiscoverySnapshot next) {
+        AgentConnection expected = onlineConnection();
+        if (expected == null) {
+            return;
+        }
+        if (!previous.sessions().keySet().equals(next.sessions().keySet())) {
+            sendSessionList(expected, next);
+            return;
+        }
+        List<String> sessionIds = new ArrayList<>(next.sessions().keySet());
+        sessionIds.sort(Comparator.naturalOrder());
+        for (String sessionId : sessionIds) {
+            LocalSession current = next.sessions().get(sessionId);
+            if (!current.equals(previous.sessions().get(sessionId))) {
+                sendSessionReport(expected, new AgentMessage.SessionStatus(current.descriptor()));
+            }
+        }
+    }
+
+    private void sendSessionList(AgentConnection expected, DiscoverySnapshot snapshot) {
+        List<LocalSession> sessions = new ArrayList<>(snapshot.sessions().values());
+        sessions.sort(Comparator.comparing(session -> session.manifest().sessionId()));
+        List<SessionDescriptor> descriptors = new ArrayList<>(sessions.size());
+        for (LocalSession session : sessions) {
+            descriptors.add(session.descriptor());
+        }
+        sendSessionReport(expected, new AgentMessage.SessionList(descriptors));
+    }
+
+    private void sendSessionReport(AgentConnection expected, AgentMessage report) {
+        if (!current(expected)) {
+            return;
+        }
+        CompletionStage<Void> sending;
+        try {
+            sending = Objects.requireNonNull(
+                    transport.sendControlCbor(codec.encode(report)), "session report send");
+        } catch (Exception failure) {
+            sessionReportingFailed(expected, failure);
+            return;
+        }
+        sending.whenComplete((ignored, failure) -> {
+            if (failure != null) {
+                sessionReportingFailed(expected, failure);
+            }
+        });
+    }
+
+    private AgentConnection onlineConnection() {
+        synchronized (this) {
+            if (closed || !controlLoop.isOnline()) {
+                return null;
+            }
+            return handshake.connection().orElse(null);
+        }
+    }
+
+    private boolean current(AgentConnection expected) {
+        synchronized (this) {
+            return !closed && controlLoop.isOnline() && handshake.connection().orElse(null) == expected;
+        }
+    }
+
+    private void sessionReportingFailed(AgentConnection expected, Throwable failure) {
+        synchronized (this) {
+            if (!current(expected)) {
+                return;
+            }
+            lastSessionReportingFailure.set(failure instanceof Exception exception
+                    ? exception : new IllegalStateException("session reporting failed", failure));
+            controlLoop.heartbeatFailed();
         }
     }
 

@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import pro.deta.orion.agent.protocol.*;
+import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
 import pro.deta.orion.util.CertUtils;
 
@@ -47,7 +48,7 @@ class AgentControlLivePeerTest {
             AgentLaunchContext context = AgentHandshakeTest.context();
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), context, "1.0.0",
-                    new MachineInfo("runner", "linux", "aarch64"), Map.of());
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of(), new SessionRegistry());
 
             service.start();
 
@@ -68,7 +69,7 @@ class AgentControlLivePeerTest {
         try (Peer peer = new Peer(codec, received, Reply.SEMANTIC_THEN_SUPPORTED, 4)) {
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
-                    new MachineInfo("runner", "linux", "aarch64"), Map.of());
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of(), new SessionRegistry());
 
             service.start();
 
@@ -85,7 +86,7 @@ class AgentControlLivePeerTest {
         try (Peer peer = new Peer(codec, received, Reply.SUPPORTED, Integer.MAX_VALUE)) {
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
-                    new MachineInfo("runner", "linux", "aarch64"), Map.of());
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of(), new SessionRegistry());
 
             service.start();
             peer.disconnectControl();
@@ -109,7 +110,8 @@ class AgentControlLivePeerTest {
         try (Peer peer = new Peer(codec, received, Reply.UNSUPPORTED, Integer.MAX_VALUE)) {
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
-                    new MachineInfo("runner", "linux", "aarch64"), Map.of(), Duration.ofSeconds(1));
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of(),
+                    new SessionRegistry(), Duration.ofSeconds(1));
 
             assertThatExceptionOfType(HandshakeException.class)
                     .isThrownBy(service::start)
@@ -129,7 +131,8 @@ class AgentControlLivePeerTest {
         try (Peer peer = new Peer(codec, received, Reply.UNSUPPORTED_THEN_SUPPORTED, chunkSize)) {
             AgentControlService service = new AgentControlService(
                     peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
-                    new MachineInfo("runner", "linux", "aarch64"), Map.of(), Duration.ofSeconds(1));
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of(),
+                    new SessionRegistry(), Duration.ofSeconds(1));
 
             assertThatExceptionOfType(HandshakeException.class)
                     .isThrownBy(service::start)
