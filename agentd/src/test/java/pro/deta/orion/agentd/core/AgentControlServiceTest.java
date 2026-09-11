@@ -11,8 +11,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -105,6 +110,118 @@ class AgentControlServiceTest {
         service.close();
     }
 
+    @Test
+    void reconnectsWithTheCurrentTokenAndKeepsSendingHeartbeats() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 10));
+        transport.replies.add(welcome("connection-2", (byte) 10, 10));
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), Duration.ofMillis(100));
+
+        service.start();
+        AgentMessage.Hello initial = first(transport.controls, AgentMessage.Hello.class);
+        transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+
+        await(() -> count(transport.controls, AgentMessage.Hello.class) == 2);
+        List<AgentMessage.Hello> hellos = messages(transport.controls, AgentMessage.Hello.class);
+        AgentMessage.Hello reconnect = hellos.get(1);
+        assertThat(reconnect.agentId()).isEqualTo(initial.agentId());
+        assertThat(reconnect.instanceId()).isEqualTo(initial.instanceId());
+        assertThat(reconnect.authentication()).hasValueSatisfying(authentication -> {
+            assertThat(authentication.kind()).isEqualTo(AgentAuthentication.Kind.RECONNECT_TOKEN);
+            assertThat(authentication.credential().toByteArray()).containsOnly(9);
+        });
+        await(() -> count(transport.controls, AgentMessage.Heartbeat.class) > 0);
+        assertThat(service.connection()).get().extracting(AgentConnection::connectionId)
+                .isEqualTo(new ConnectionId("connection-2"));
+        service.close();
+    }
+
+    @Test
+    void reconnectsWhenTheInitialStreamClosesImmediatelyAfterWelcome() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        transport.replies.add(welcome("connection-2", (byte) 10, 1_000));
+        transport.disconnectsAfterReplies.set(1);
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), Duration.ofMillis(100));
+
+        service.start();
+
+        await(() -> count(transport.controls, AgentMessage.Hello.class) == 2);
+        assertThat(service.connection()).get().extracting(AgentConnection::connectionId)
+                .isEqualTo(new ConnectionId("connection-2"));
+        service.close();
+    }
+
+    @Test
+    void retriesReconnectFailureAndStopsAfterClose() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        transport.replies.add(welcome("connection-2", (byte) 10, 1_000));
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), Duration.ofMillis(25));
+
+        service.start();
+        transport.connectFailures.set(1);
+        transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+
+        await(() -> transport.connectCount.get() >= 3);
+        await(() -> count(transport.controls, AgentMessage.Hello.class) == 2);
+        assertThat(service.connection()).get().extracting(AgentConnection::connectionId)
+                .isEqualTo(new ConnectionId("connection-2"));
+        service.close();
+        int connectionsAfterClose = transport.connectCount.get();
+        transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+        TimeUnit.MILLISECONDS.sleep(100);
+        assertThat(transport.connectCount).hasValue(connectionsAfterClose);
+    }
+
+    @Test
+    void retriesALostReconnectWelcomeWithTheSameToken() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), Duration.ofMillis(25));
+
+        service.start();
+        transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+        await(() -> count(transport.controls, AgentMessage.Hello.class) == 2);
+        transport.replies.add(welcome("connection-2", (byte) 10, 1_000));
+
+        await(() -> count(transport.controls, AgentMessage.Hello.class) == 3);
+        List<AgentMessage.Hello> hellos = messages(transport.controls, AgentMessage.Hello.class);
+        assertThat(hellos.get(1).authentication().orElseThrow().credential())
+                .isEqualTo(hellos.get(2).authentication().orElseThrow().credential());
+        await(() -> service.connection().orElseThrow().connectionId().equals(new ConnectionId("connection-2")));
+        service.close();
+    }
+
+    @Test
+    void ignoresSessionStreamFailuresAndRejectsInvalidHeartbeatConfiguration() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.replies.add(welcome("connection-1", (byte) 9, 1_000));
+        AgentControlService service = service(
+                transport, AgentHandshakeTest.context(), Duration.ofMillis(100));
+
+        service.start();
+        transport.signalReceiver.accept(new TransportSignal(
+                TransportSignal.Kind.STREAM_RESET, new SessionId("session-1"), null));
+        TimeUnit.MILLISECONDS.sleep(400);
+
+        assertThat(transport.connectCount).hasValue(1);
+        service.close();
+
+        FakeTransport invalid = new FakeTransport();
+        invalid.replies.add(welcome("invalid", (byte) 11, 0));
+        AgentControlService invalidService = service(
+                invalid, AgentHandshakeTest.context(), Duration.ofMillis(100));
+        assertThatExceptionOfType(HandshakeException.class)
+                .isThrownBy(invalidService::start)
+                .withMessageContaining("heartbeat interval");
+        assertThat(invalidService.connection()).isEmpty();
+    }
+
     private static void assertStartupFails(AgentMessage reply) {
         FakeTransport transport = new FakeTransport();
         transport.reply = reply;
@@ -129,8 +246,52 @@ class AgentControlServiceTest {
                 new MachineInfo("runner-1", "Linux", "aarch64"), Map.of("pty", "true"), timeout, nanoTime);
     }
 
+    private static AgentMessage.Welcome welcome(String connectionId, byte tokenByte, long heartbeatMillis) {
+        AgentMessage.Welcome welcome = AgentHandshakeTest.welcome(connectionId, tokenByte);
+        return new AgentMessage.Welcome(
+                welcome.protocolVersion(), welcome.journalFormatVersion(), welcome.connectionId(),
+                Map.of("heartbeatMillis", Long.toString(heartbeatMillis)), welcome.reconnectToken());
+    }
+
+    private static <T extends AgentMessage> T first(List<byte[]> controls, Class<T> type) throws Exception {
+        return messages(controls, type).getFirst();
+    }
+
+    private static <T extends AgentMessage> int count(List<byte[]> controls, Class<T> type) throws Exception {
+        return messages(controls, type).size();
+    }
+
+    private static <T extends AgentMessage> List<T> messages(List<byte[]> controls, Class<T> type)
+            throws Exception {
+        List<T> result = new ArrayList<>();
+        for (byte[] control : controls) {
+            AgentMessage message = CODEC.decode(control);
+            if (type.isInstance(message)) {
+                result.add(type.cast(message));
+            }
+        }
+        return result;
+    }
+
+    private static void await(CheckedCondition condition) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!condition.evaluate() && System.nanoTime() < deadline) {
+            TimeUnit.MILLISECONDS.sleep(5);
+        }
+        assertThat(condition.evaluate()).isTrue();
+    }
+
+    @FunctionalInterface
+    private interface CheckedCondition {
+        boolean evaluate() throws Exception;
+    }
+
     private static final class FakeTransport implements AgentTransport {
-        private final List<byte[]> controls = new ArrayList<>();
+        private final List<byte[]> controls = new CopyOnWriteArrayList<>();
+        private final Queue<AgentMessage> replies = new ConcurrentLinkedQueue<>();
+        private final AtomicInteger connectCount = new AtomicInteger();
+        private final AtomicInteger connectFailures = new AtomicInteger();
+        private final AtomicInteger disconnectsAfterReplies = new AtomicInteger();
         private Consumer<SequenceDecodeResult.Outcome<AgentMessage>> controlReceiver;
         private Consumer<TransportSignal> signalReceiver;
         private AgentMessage reply;
@@ -143,8 +304,12 @@ class AgentControlServiceTest {
 
         @Override
         public CompletionStage<Void> connect() {
+            connectCount.incrementAndGet();
             callbacksPresentAtConnect = controlReceiver != null && signalReceiver != null;
             advance(connectElapsedNanos);
+            if (connectFailures.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
+                return CompletableFuture.failedFuture(new IllegalStateException("connect failed"));
+            }
             return connectFailure == null
                     ? CompletableFuture.completedFuture(null)
                     : CompletableFuture.failedFuture(connectFailure);
@@ -154,8 +319,20 @@ class AgentControlServiceTest {
         public CompletionStage<Void> sendControlCbor(byte[] item) {
             controls.add(item.clone());
             advance(sendElapsedNanos);
-            if (reply != null) {
-                controlReceiver.accept(new SequenceDecodeResult.Decoded<>(reply));
+            try {
+                if (CODEC.decode(item) instanceof AgentMessage.Hello) {
+                    AgentMessage next = replies.poll();
+                    if (next != null) {
+                        controlReceiver.accept(new SequenceDecodeResult.Decoded<>(next));
+                        if (disconnectsAfterReplies.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
+                            signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+                        }
+                    } else if (reply != null) {
+                        controlReceiver.accept(new SequenceDecodeResult.Decoded<>(reply));
+                    }
+                }
+            } catch (AgentProtocolException failure) {
+                return CompletableFuture.failedFuture(failure);
             }
             return CompletableFuture.completedFuture(null);
         }
@@ -195,4 +372,5 @@ class AgentControlServiceTest {
             }
         }
     }
+
 }

@@ -1,7 +1,8 @@
 # Report Discovered Sessions over the Control Connection
 
 Status: todo
-Depends on: 01_handshake-and-authentication.md and completed session discovery.
+Depends on: completed authenticated AgentD reconnect lifecycle and completed
+session discovery.
 Server contract: session reconciliation completed in `f518679c`, `8168ae6e`, and `b751cfc9`.
 
 Expose existing local session discovery through authenticated Agent control

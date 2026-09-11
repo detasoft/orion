@@ -28,9 +28,11 @@ import java.nio.ByteBuffer;
 import java.security.KeyStore;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,6 +74,30 @@ class AgentControlLivePeerTest {
 
             assertThat(received.get(5, TimeUnit.SECONDS)).isNotNull();
             assertThat(service.connection()).isPresent();
+            service.close();
+        }
+    }
+
+    @Test
+    void reconnectsAcrossRealHttp2ConnectionsWithTheServerToken() throws Exception {
+        AgentProtocolCodec codec = new AgentProtocolCodec(AgentProtocolLimits.defaults());
+        CompletableFuture<AgentMessage.Hello> received = new CompletableFuture<>();
+        try (Peer peer = new Peer(codec, received, Reply.SUPPORTED, Integer.MAX_VALUE)) {
+            AgentControlService service = new AgentControlService(
+                    peer.transport(), codec, new AgentHandshake(), AgentHandshakeTest.context(), "1.0.0",
+                    new MachineInfo("runner", "linux", "aarch64"), Map.of());
+
+            service.start();
+            peer.disconnectControl();
+
+            peer.awaitHellos(2);
+            AgentMessage.Hello reconnect = peer.hellos.get(1);
+            assertThat(reconnect.authentication()).hasValueSatisfying(authentication -> {
+                assertThat(authentication.kind()).isEqualTo(AgentAuthentication.Kind.RECONNECT_TOKEN);
+                assertThat(authentication.credential().toByteArray()).containsOnly(9);
+            });
+            assertThat(service.connection()).get().extracting(AgentConnection::connectionId)
+                    .isEqualTo(new ConnectionId("connection-live-2"));
             service.close();
         }
     }
@@ -131,6 +157,8 @@ class AgentControlLivePeerTest {
         private final CompletableFuture<AgentMessage.Hello> received;
         private final Reply reply;
         private final int responseChunkSize;
+        private final List<AgentMessage.Hello> hellos = new CopyOnWriteArrayList<>();
+        private final List<Stream> streams = new CopyOnWriteArrayList<>();
         private MetaData.Request request;
 
         private Peer(
@@ -149,6 +177,7 @@ class AgentControlLivePeerTest {
                     return new ServerSessionListener() {
                         @Override
                         public Stream.Listener onNewStream(Stream stream, HeadersFrame frame) {
+                            streams.add(stream);
                             request = (MetaData.Request) frame.getMetaData();
                             MetaData.Response response = new MetaData.Response(
                                     200, null, HttpVersion.HTTP_2, HttpFields.EMPTY);
@@ -177,6 +206,20 @@ class AgentControlLivePeerTest {
                     AgentProtocolLimits.defaults(), 8, 8);
         }
 
+        private void disconnectControl() {
+            Stream stream = streams.getFirst();
+            stream.reset(new org.eclipse.jetty.http2.frames.ResetFrame(
+                    stream.getId(), org.eclipse.jetty.http2.ErrorCode.CANCEL_STREAM_ERROR.code), Callback.NOOP);
+        }
+
+        private void awaitHellos(int count) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (hellos.size() < count && System.nanoTime() < deadline) {
+                TimeUnit.MILLISECONDS.sleep(5);
+            }
+            assertThat(hellos).hasSize(count);
+        }
+
         @Override
         public void close() throws Exception {
             if (!clientTls.isStopped()) {
@@ -200,8 +243,14 @@ class AgentControlLivePeerTest {
                     try {
                         byte[] item = new byte[data.frame().getByteBuffer().remaining()];
                         data.frame().getByteBuffer().get(item);
-                        received.complete((AgentMessage.Hello) codec.decode(item));
-                        AgentMessage.Welcome welcome = AgentHandshakeTest.welcome("connection-live", (byte) 9);
+                        AgentMessage decoded = codec.decode(item);
+                        if (!(decoded instanceof AgentMessage.Hello hello)) {
+                            continue;
+                        }
+                        hellos.add(hello);
+                        received.complete(hello);
+                        AgentMessage.Welcome welcome = AgentHandshakeTest.welcome(
+                                "connection-live-" + hellos.size(), (byte) (8 + hellos.size()));
                         byte[] supported = codec.encode(welcome);
                         byte[] unsupported = supported.clone();
                         unsupported[4] = 2;

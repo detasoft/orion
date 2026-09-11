@@ -27,17 +27,30 @@ public final class AgentHandshake implements AutoCloseable {
             AgentAuthentication authentication = new AgentAuthentication(
                     context.generation(), context.launchId(), AgentAuthentication.Kind.LAUNCH_PERMIT,
                     ProtocolBytes.copyOf(permit));
-            return new AgentMessage.Hello(
-                    AgentProtocolVersion.CURRENT,
-                    JournalFormatVersion.CURRENT,
-                    context.agentId(),
-                    context.instanceId(),
-                    agentVersion,
-                    machine,
-                    capabilities,
-                    Optional.of(authentication));
+            return hello(context, agentVersion, machine, capabilities, authentication);
         } finally {
             Arrays.fill(permit, (byte) 0);
+        }
+    }
+
+    public synchronized AgentMessage.Hello reconnectHello(
+            AgentLaunchContext context,
+            String agentVersion,
+            MachineInfo machine,
+            Map<String, String> capabilities
+    ) throws HandshakeException {
+        Objects.requireNonNull(context, "context");
+        if (connection == null) {
+            throw new HandshakeException("AgentD has no reconnect authentication");
+        }
+        byte[] token = connection.reconnectToken().copyBytes();
+        try {
+            AgentAuthentication authentication = new AgentAuthentication(
+                    context.generation(), context.launchId(), AgentAuthentication.Kind.RECONNECT_TOKEN,
+                    ProtocolBytes.copyOf(token));
+            return hello(context, agentVersion, machine, capabilities, authentication);
+        } finally {
+            Arrays.fill(token, (byte) 0);
         }
     }
 
@@ -65,6 +78,24 @@ public final class AgentHandshake implements AutoCloseable {
             previous.close();
         }
         return replacement;
+    }
+
+    private static AgentMessage.Hello hello(
+            AgentLaunchContext context,
+            String agentVersion,
+            MachineInfo machine,
+            Map<String, String> capabilities,
+            AgentAuthentication authentication
+    ) {
+        return new AgentMessage.Hello(
+                AgentProtocolVersion.CURRENT,
+                JournalFormatVersion.CURRENT,
+                context.agentId(),
+                context.instanceId(),
+                agentVersion,
+                machine,
+                capabilities,
+                Optional.of(authentication));
     }
 
     public synchronized Optional<AgentConnection> connection() {

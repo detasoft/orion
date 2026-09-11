@@ -48,6 +48,23 @@ class AgentHandshakeTest {
     }
 
     @Test
+    void createsReconnectHelloWithTheStableProcessIdentity() throws Exception {
+        AgentLaunchContext context = context();
+        AgentHandshake handshake = new AgentHandshake();
+        handshake.accept(welcome("connection-1", (byte) 11));
+
+        AgentMessage.Hello hello = handshake.reconnectHello(
+                context, "2.4.1", MACHINE, Map.of("pty", "true"));
+
+        assertThat(hello.agentId()).isEqualTo(context.agentId());
+        assertThat(hello.instanceId()).isEqualTo(context.instanceId());
+        assertThat(hello.authentication()).hasValueSatisfying(authentication -> {
+            assertThat(authentication.kind()).isEqualTo(AgentAuthentication.Kind.RECONNECT_TOKEN);
+            assertThat(authentication.credential().toByteArray()).containsOnly(11);
+        });
+    }
+
+    @Test
     void rejectsMissingTokenAndUnsupportedVersionWithoutChangingConnection() throws Exception {
         AgentHandshake handshake = new AgentHandshake();
         AgentConnection accepted = handshake.accept(welcome("connection-1", (byte) 11));

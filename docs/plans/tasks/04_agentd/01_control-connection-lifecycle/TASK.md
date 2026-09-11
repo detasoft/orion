@@ -3,13 +3,14 @@
 Status: todo
 Server counterpart: completed server control work (`3e4a6156`, `3758705a`, `490b458b`)
 
-Extend the existing initial `HELLO`/`WELCOME` exchange into a reusable
-authenticated control lifecycle with reconnect, heartbeat, and session reports.
+Complete session reporting and runtime acceptance on top of the implemented
+authenticated control lifecycle, reconnect loop, and heartbeat.
 
 ## Boundaries
 
-- Handshake comes first. Reconnect/heartbeat and session reporting can then
-  proceed independently; runtime assembly and shared acceptance follow both.
+- Authenticated handshake, reconnect with bounded exponential jitter, and
+  heartbeat are implemented by the existing control lifecycle owner. Session
+  reporting remains next; runtime assembly and shared acceptance follow it.
 - Reuse `AgentHandshake`, `AgentControlService`, `JettyHttp2Transport`, and the
   existing discovery registry and monitor. Keep one control lifecycle owner.
 - Preserve server-assigned launch identity, process-local credentials, and
