@@ -25,6 +25,8 @@ import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.AccessTokenIdentity;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
@@ -573,11 +575,11 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
     }
 
     @Override
-    public AuthenticationResult authenticateToken(byte[] token) {
+    public TokenAuthenticationResult verifyToken(byte[] token) {
         String tokenValue = new String(token, StandardCharsets.UTF_8);
         return switch (jwtAccessTokenService.verify(tokenValue)) {
             case JwtAccessTokenService.VerificationResult.Failure(var reason) ->
-                    AuthenticationResult.failure(reason);
+                    TokenAuthenticationResult.failure(reason);
             case JwtAccessTokenService.VerificationResult.Success(
                     var subject,
                     var authenticationGeneration,
@@ -585,16 +587,22 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
                 Result<AccessControl.User> user = findSingleUser(subject);
                 if (user instanceof Result.Success<AccessControl.User>(var u)) {
                     if (isLockedRoot(u)) {
-                        yield AuthenticationResult.failure("authentication failed");
+                        yield TokenAuthenticationResult.failure("authentication failed");
                     }
                     String currentGeneration = rootAuthenticationGeneration(u);
                     if (isGenerationAwareRoot(u)
                             && (currentGeneration == null || !currentGeneration.equals(authenticationGeneration))) {
-                        yield AuthenticationResult.failure("authentication failed");
+                        yield TokenAuthenticationResult.failure("authentication failed");
                     }
-                    yield createUserIdentity(u);
+                    AuthenticationResult authenticated = createUserIdentity(u);
+                    if (authenticated instanceof AuthenticationResult.Success(var userIdentity)) {
+                        yield TokenAuthenticationResult.success(
+                                userIdentity,
+                                new AccessTokenIdentity(tokenId, subject));
+                    }
+                    yield TokenAuthenticationResult.failure("authentication failed");
                 }
-                yield AuthenticationResult.failure("authentication failed");
+                yield TokenAuthenticationResult.failure("authentication failed");
             }
         };
     }

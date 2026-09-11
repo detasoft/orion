@@ -15,6 +15,7 @@ import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
@@ -364,8 +365,8 @@ class OrionAccessControlServiceImplTest {
             assertThat(fixture.service.authenticateUser("root", "anything".getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(AuthenticationResult.Failure.class);
             String token = ((TokenIssueResult.Success) issued).token();
-            assertThat(fixture.service.authenticateToken(token.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Failure.class);
+            assertThat(fixture.service.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
+                    .isInstanceOf(TokenAuthenticationResult.Failure.class);
             assertThat(fixture.service.issueTokenFor(
                     ((AuthenticationResult.Success) authentication).userIdentity(),
                     60)).isInstanceOf(TokenIssueResult.Failure.class);
@@ -375,6 +376,29 @@ class OrionAccessControlServiceImplTest {
                     .extracting(AccessControl.Credential::getKeyId)
                     .asString()
                     .startsWith("root-auth-locked:");
+        }
+    }
+
+    @Test
+    void tokenAuthenticationReturnsValidatedTokenIdentity() {
+        AccessControlDraft primary = new AccessControlDraft();
+        primary.getUsers().add(user("alice")
+                .addCredential(AccessControl.CredentialType.OPENSSH_PUBLIC_KEY, key(KEY_ONE.getPublic())));
+
+        try (ServiceFixture fixture = fixture(primary, new AccessControlDraft())) {
+            AuthenticationResult authentication = fixture.service.authenticateSshUser(
+                    "alice",
+                    KEY_ONE.getPublic().getEncoded());
+            var userIdentity = ((AuthenticationResult.Success) authentication).userIdentity();
+            TokenIssueResult issued = fixture.service.issueTokenFor(userIdentity, 60);
+            String token = ((TokenIssueResult.Success) issued).token();
+
+            TokenAuthenticationResult result = fixture.service.verifyToken(
+                    token.getBytes(StandardCharsets.UTF_8));
+            assertThat(result).isInstanceOf(TokenAuthenticationResult.Success.class);
+            TokenAuthenticationResult.Success success = (TokenAuthenticationResult.Success) result;
+            assertThat(success.tokenIdentity().tokenId()).isNotBlank();
+            assertThat(success.tokenIdentity().subject()).isEqualTo("alice");
         }
     }
 

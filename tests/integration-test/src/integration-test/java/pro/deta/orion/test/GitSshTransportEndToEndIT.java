@@ -417,8 +417,8 @@ class GitSshTransportEndToEndIT {
         String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
 
         assertThat(token).isNotBlank();
-        assertThat(startedOrion.accessControlService().authenticateToken(token.getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+        assertThat(startedOrion.accessControlService().verifyToken(token.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Success.class);
         HttpResponse response = getAdminAclWithBearerToken(startedOrion, token);
         assertThat(response.status()).isEqualTo(HttpURLConnection.HTTP_OK);
         assertThat(response.contentType()).startsWith("application/xml");
@@ -534,12 +534,12 @@ class GitSshTransportEndToEndIT {
                 oldRootKey,
                 "/auth/key rm " + rootFingerprint + " --force").exitStatus())
                 .isZero();
-        assertThat(startedOrion.accessControlService().authenticateToken(
+        assertThat(startedOrion.accessControlService().verifyToken(
                 rootToken.getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Failure.class);
-        assertThat(startedOrion.accessControlService().authenticateToken(
+                .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Failure.class);
+        assertThat(startedOrion.accessControlService().verifyToken(
                 userToken.getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+                .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Success.class);
         assertThatThrownBy(() -> executeStateOverSsh(startedOrion, oldRootKey))
                 .isInstanceOf(IOException.class);
         assertThat(executeCommandOverSsh(
@@ -821,8 +821,8 @@ class GitSshTransportEndToEndIT {
 
         String token = issueTokenOverSsh(startedOrion, serverIdentityKey, 600);
         assertThat(token).isNotBlank();
-        assertThat(startedOrion.accessControlService().authenticateToken(token.getBytes(StandardCharsets.UTF_8)))
-                .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+        assertThat(startedOrion.accessControlService().verifyToken(token.getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Success.class);
 
         HttpResponse acl = getAdminAclWithBearerToken(startedOrion, token);
         assertThat(acl.status()).isEqualTo(HttpURLConnection.HTTP_OK);
@@ -883,12 +883,12 @@ class GitSshTransportEndToEndIT {
         char[] rootPassword = startedOrion.accessControlService()
                 .plainRootToken(PlainRootTokenAccessForTests.create());
         try {
-            assertThat(startedOrion.accessControlService().authenticateToken(
+            assertThat(startedOrion.accessControlService().verifyToken(
                     oldRootToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Failure.class);
-            assertThat(startedOrion.accessControlService().authenticateToken(
+                    .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Failure.class);
+            assertThat(startedOrion.accessControlService().verifyToken(
                     nonRootToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+                    .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Success.class);
             assertThat(executeCommandOverSsh(
                     startedOrion, USERNAME, TRUSTED_USER_KEY, "issue-token 600").exitStatus())
                     .isZero();
@@ -903,9 +903,9 @@ class GitSshTransportEndToEndIT {
                     .contains("Root SSH key enrolled");
             assertThat(executeStateOverSsh(startedOrion, enrolledKey)).contains("orion: RUNNING");
             String newRootToken = issueTokenOverSsh(startedOrion, enrolledKey, 600);
-            assertThat(startedOrion.accessControlService().authenticateToken(
+            assertThat(startedOrion.accessControlService().verifyToken(
                     newRootToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(pro.deta.orion.auth.AuthenticationResult.Success.class);
+                    .isInstanceOf(pro.deta.orion.auth.TokenAuthenticationResult.Success.class);
             assertThatThrownBy(() -> attemptPasswordOnlyEnrollment(
                     startedOrion,
                     "root",

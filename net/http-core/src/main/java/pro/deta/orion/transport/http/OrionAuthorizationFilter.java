@@ -9,8 +9,8 @@ import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -46,8 +46,9 @@ public class OrionAuthorizationFilter implements Filter {
             return securityContext;
         }
 
-        AuthenticationResult authentication = accessControlService.authenticateToken(bearerToken.getBytes(StandardCharsets.UTF_8));
-        if (authentication instanceof AuthenticationResult.Success(var userIdentity)) {
+        TokenAuthenticationResult authentication = accessControlService.verifyToken(
+                bearerToken.getBytes(StandardCharsets.UTF_8));
+        if (authentication instanceof TokenAuthenticationResult.Success(var userIdentity, var tokenIdentity)) {
             securityContext.withUserIdentity(userIdentity);
         }
         return securityContext;

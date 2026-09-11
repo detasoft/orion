@@ -19,6 +19,7 @@ import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandFailureCode;
 import pro.deta.orion.command.CommandDispatcher;
@@ -420,7 +421,7 @@ class GitSshTransportStateMachineTest {
         }
 
         @Override
-        public AuthenticationResult authenticateToken(byte[] token) {
+        public TokenAuthenticationResult verifyToken(byte[] token) {
             throw new UnsupportedOperationException();
         }
 

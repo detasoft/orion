@@ -3,6 +3,7 @@ package pro.deta.orion;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
@@ -60,7 +61,7 @@ public interface OrionAccessControlService {
 
     AuthenticationResult authenticateGitSshKey(byte[] encodedPublicKey);
 
-    AuthenticationResult authenticateToken(byte[] token);
+    TokenAuthenticationResult verifyToken(byte[] token);
 
     TokenIssueResult authenticateUserAndIssueToken(String userName, byte[] credential, long expiresInSeconds);
 

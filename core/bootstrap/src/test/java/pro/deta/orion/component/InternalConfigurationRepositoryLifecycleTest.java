@@ -6,6 +6,7 @@ import org.apache.sshd.common.config.keys.PublicKeyEntry;
 import pro.deta.orion.acl.XmlService;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.PlainRootTokenAccessForTests;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
@@ -228,12 +229,12 @@ class InternalConfigurationRepositoryLifecycleTest {
                     .isInstanceOf(AuthenticationResult.Failure.class);
             assertSshAuthenticationFailed(reset, "root", rootKey);
             assertSshAuthenticated(reset, "alice", aliceKey);
-            assertThat(reset.orionAccessControlService().authenticateToken(
+            assertThat(reset.orionAccessControlService().verifyToken(
                     oldRootToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Failure.class);
-            assertThat(reset.orionAccessControlService().authenticateToken(
+                    .isInstanceOf(TokenAuthenticationResult.Failure.class);
+            assertThat(reset.orionAccessControlService().verifyToken(
                     aliceToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Success.class);
+                    .isInstanceOf(TokenAuthenticationResult.Success.class);
             assertThat(reset.orionAccessControlService().userExists("alice")).isTrue();
 
             GitRepositoryFileSnapshot snapshot = repository(reset).loadFiles(
@@ -306,9 +307,9 @@ class InternalConfigurationRepositoryLifecycleTest {
                     .isInstanceOf(AuthenticationResult.Failure.class);
             assertSshAuthenticated(reset, "root", recoveredRootKey);
             String newRootToken = issueTokenForSshKey(reset, "root", recoveredRootKey);
-            assertThat(reset.orionAccessControlService().authenticateToken(
+            assertThat(reset.orionAccessControlService().verifyToken(
                     newRootToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Success.class);
+                    .isInstanceOf(TokenAuthenticationResult.Success.class);
             assertThat(reset.orionAccessControlService().completeRootSshKeyEnrollment(
                     "stale-generation",
                     List.of(PublicKeyEntry.toString(rootKey.getPublic()))))
@@ -720,9 +721,9 @@ class InternalConfigurationRepositoryLifecycleTest {
             assertThat(initial.orionAccessControlService().removeSshCredential("root", rootFingerprint, true))
                     .isInstanceOf(SshCredentialUpdateResult.Success.class);
             assertSshAuthenticationFailed(initial, "root", rootKey);
-            assertThat(initial.orionAccessControlService().authenticateToken(
+            assertThat(initial.orionAccessControlService().verifyToken(
                     rootToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Failure.class);
+                    .isInstanceOf(TokenAuthenticationResult.Failure.class);
         } finally {
             assertThat(initialLifecycle.shutdownApplication()).isEqualTo(FIN);
         }
@@ -733,12 +734,12 @@ class InternalConfigurationRepositoryLifecycleTest {
             assertThat(restartedLifecycle.runApplication()).isEqualTo(RUNNING);
             assertSshAuthenticationFailed(restarted, "root", rootKey);
             assertSshAuthenticated(restarted, "alice", aliceKey);
-            assertThat(restarted.orionAccessControlService().authenticateToken(
+            assertThat(restarted.orionAccessControlService().verifyToken(
                     rootToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Failure.class);
-            assertThat(restarted.orionAccessControlService().authenticateToken(
+                    .isInstanceOf(TokenAuthenticationResult.Failure.class);
+            assertThat(restarted.orionAccessControlService().verifyToken(
                     aliceToken.getBytes(StandardCharsets.UTF_8)))
-                    .isInstanceOf(AuthenticationResult.Success.class);
+                    .isInstanceOf(TokenAuthenticationResult.Success.class);
             assertThat(restarted.orionAccessControlService().addSshCredentials(
                     "root",
                     List.of(PublicKeyEntry.toString(keyPair().getPublic()))))

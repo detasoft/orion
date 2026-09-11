@@ -13,9 +13,11 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.auth.AccessTokenIdentity;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.UserIdentity;
 
 import java.io.ByteArrayInputStream;
@@ -252,10 +254,10 @@ class OrionAuthorizationFilterTest {
         }
 
         @Override
-        public AuthenticationResult authenticateToken(byte[] token) {
+        public TokenAuthenticationResult verifyToken(byte[] token) {
             lastToken = new String(token, StandardCharsets.UTF_8);
             if (!ACCESS_TOKEN.equals(lastToken)) {
-                return AuthenticationResult.failure("authentication failed");
+                return TokenAuthenticationResult.failure("authentication failed");
             }
 
             List<AccessControl.Grant> grants = new ArrayList<>();
@@ -264,7 +266,9 @@ class OrionAuthorizationFilterTest {
                         .addKey(AccessControl.GrantKey.ADMIN, AccessControl.TRUE_STRING)
                         .toAccessControl());
             }
-            return AuthenticationResult.success(new InternalUserImpl("token-user", grants));
+            return TokenAuthenticationResult.success(
+                    new InternalUserImpl("token-user", grants),
+                    new AccessTokenIdentity("token-id", "token-user"));
         }
 
         @Override
