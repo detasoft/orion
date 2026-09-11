@@ -3,7 +3,7 @@
 Status: todo
 Depends on: completed configuration-secret-cryptography (d17476ab),
 completed remaining-key-owner-migration,
-02_short-lived-jwt-rotation-and-refresh.md
+completed short-lived-jwt-rotation-and-refresh (8847a4a1)
 
 Complete the unified material bootstrap with explicit rotation and recovery
 semantics.
