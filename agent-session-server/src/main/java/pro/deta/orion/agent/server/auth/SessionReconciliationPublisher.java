@@ -1,10 +1,12 @@
 package pro.deta.orion.agent.server.auth;
 
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
 import pro.deta.orion.agent.server.registry.SessionRegistryException;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -71,9 +73,15 @@ public final class SessionReconciliationPublisher {
                 if (!acceptingMessages) {
                     return;
                 }
+                List<SessionDescriptor> reported = null;
                 if (message instanceof AgentMessage.SessionList sessionList) {
+                    reported = sessionList.sessions();
+                } else if (message instanceof AgentMessage.SessionStatus sessionStatus) {
+                    reported = List.of(sessionStatus.session());
+                }
+                if (reported != null) {
                     try {
-                        registry.reconcile(context.agentId(), sessionList.sessions());
+                        registry.reconcile(context.agentId(), reported);
                     } catch (SessionRegistryException failure) {
                         acceptingMessages = false;
                         failed = true;

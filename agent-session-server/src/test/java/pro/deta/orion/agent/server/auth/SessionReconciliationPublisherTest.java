@@ -61,6 +61,32 @@ class SessionReconciliationPublisherTest {
     }
 
     @Test
+    void consumesSessionStatusAsASingletonDurableReconciliation() throws Exception {
+        SessionDescriptor updated = descriptor(FIRST, "exited");
+        try (FileSystemSessionRegistry registry = registry()) {
+            List<AgentMessage> downstreamMessages = new ArrayList<>();
+            TestConnection connection = new TestConnection();
+            SessionReconciliationPublisher publisher = new SessionReconciliationPublisher(
+                    registry, ignored -> recordingSession(downstreamMessages, new ArrayList<>()));
+            AgentControlHandler.Session session = publisher.publish(context("connection-1", connection));
+            authenticate(session);
+            SessionDescriptor initial = descriptor(FIRST, "running");
+            registry.reconcile(AGENT, List.of(initial));
+
+            session.onMessage(new AgentMessage.SessionStatus(updated));
+
+            assertThat(registry.find(FIRST)).get().extracting(record -> record.reported())
+                    .isEqualTo(updated);
+            assertThat(downstreamMessages).isEmpty();
+            assertThat(connection.closed).isFalse();
+        }
+        try (FileSystemSessionRegistry recovered = registry()) {
+            assertThat(recovered.find(FIRST)).get().extracting(record -> record.reported())
+                    .isEqualTo(updated);
+        }
+    }
+
+    @Test
     void connectionTakeoverIgnoresOldReportAndReconcilesReplacementReport() throws Exception {
         try (FileSystemSessionRegistry registry = registry()) {
             SessionReconciliationPublisher publisher = new SessionReconciliationPublisher(
@@ -74,8 +100,8 @@ class SessionReconciliationPublisherTest {
                     context("connection-2", secondConnection));
             authenticate(second);
 
-            first.onMessage(new AgentMessage.SessionList(List.of(descriptor(FIRST, "obsolete"))));
-            second.onMessage(new AgentMessage.SessionList(List.of(descriptor(SECOND, "current"))));
+            first.onMessage(new AgentMessage.SessionStatus(descriptor(FIRST, "obsolete")));
+            second.onMessage(new AgentMessage.SessionStatus(descriptor(SECOND, "current")));
 
             assertThat(firstConnection.closed).isTrue();
             assertThat(firstConnection.sent).containsExactly(new AgentMessage.RequestSessionList());
@@ -108,6 +134,25 @@ class SessionReconciliationPublisherTest {
     }
 
     @Test
+    void foreignSessionStatusClosesConnectionWithoutChangingRegistry() throws Exception {
+        try (FileSystemSessionRegistry registry = registry()) {
+            SessionDescriptor owned = descriptor(FIRST, "owned elsewhere");
+            registry.reconcile(OTHER_AGENT, List.of(owned));
+            TestConnection connection = new TestConnection();
+            SessionReconciliationPublisher publisher = new SessionReconciliationPublisher(
+                    registry, ignored -> recordingSession(new ArrayList<>(), new ArrayList<>()));
+            AgentControlHandler.Session session = publisher.publish(context("connection-1", connection));
+            authenticate(session);
+
+            session.onMessage(new AgentMessage.SessionStatus(descriptor(FIRST, "foreign update")));
+
+            assertThat(connection.closed).isTrue();
+            assertThat(registry.find(FIRST)).get().extracting(record -> record.reported())
+                    .isEqualTo(owned);
+        }
+    }
+
+    @Test
     void durableRegistryFailureClosesConnection() throws Exception {
         FileSystemSessionRegistry registry = registry();
         TestConnection connection = new TestConnection();
@@ -117,7 +162,7 @@ class SessionReconciliationPublisherTest {
         authenticate(session);
         registry.close();
 
-        session.onMessage(new AgentMessage.SessionList(List.of(descriptor(FIRST, "late"))));
+        session.onMessage(new AgentMessage.SessionStatus(descriptor(FIRST, "late")));
 
         assertThat(connection.closed).isTrue();
     }
