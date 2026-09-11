@@ -147,34 +147,22 @@ class NativeControlCodecTest {
     }
 
     @Test
-    void matchesSharedServerRecoveryFixtureAndRejectsMalformedClaims() throws IOException {
+    void matchesSharedSequenceIndependentServerControlClaimFixture() throws IOException {
         List<byte[]> frames = splitFrames(Files.readAllBytes(Path.of(
                 "../session-host/protocol/fixtures/server-sequence-recovery.bin")));
         assertThat(frames).hasSize(2);
         ByteBuffer.wrap(frames.get(0)).order(ByteOrder.LITTLE_ENDIAN).putLong(16, 1);
         ByteBuffer.wrap(frames.get(1)).order(ByteOrder.LITTLE_ENDIAN).putLong(16, 1);
 
-        ControlCommand.ClaimServerControl claim = new ControlCommand.ClaimServerControl(
-                OptionalLong.of(0x8000_0000_0000_0006L));
+        ControlCommand.ClaimServerControl claim = new ControlCommand.ClaimServerControl();
         assertThat(codec.encode(claim)).isEqualTo(frames.get(0));
         assertThat(codec.decode(claim, frames.get(1))).isEqualTo(
-                new ControlResult.ServerControlClaimed(
-                        OptionalLong.of(0x8000_0000_0000_0008L), OptionalLong.of(-1)));
+                new ControlResult.ServerControlClaimed());
 
-        byte[] absent = codec.encode(new ControlCommand.ClaimServerControl(OptionalLong.empty()));
-        assertThat(ByteBuffer.wrap(absent).order(ByteOrder.LITTLE_ENDIAN).getLong(32)).isZero();
         assertThat(codec.decode(claim, response(0x8005, 1, new byte[8])))
                 .isInstanceOf(ControlResult.Failed.class);
         assertThat(codec.decode(new ControlCommand.Status(), frames.get(1)))
                 .isInstanceOf(ControlResult.Failed.class);
-        assertThatIllegalArgumentException().isThrownBy(() ->
-                new ControlCommand.ClaimServerControl(OptionalLong.of(0)));
-        assertThatIllegalArgumentException().isThrownBy(() ->
-                new ControlCommand.ClaimServerControl(OptionalLong.of(-1)));
-        assertThatIllegalArgumentException().isThrownBy(() ->
-                new ControlResult.ServerControlClaimed(OptionalLong.of(-1), OptionalLong.empty()));
-        assertThatIllegalArgumentException().isThrownBy(() ->
-                new ControlResult.ServerControlClaimed(OptionalLong.empty(), OptionalLong.of(0)));
     }
 
     @Test

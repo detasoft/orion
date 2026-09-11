@@ -67,10 +67,8 @@ public final class NativeControlCodec {
             effect.putLong(acknowledgement.acknowledgedEventId());
             return frame(7, QUERY_SEQUENCE, effect.array());
         }
-        if (command instanceof ControlCommand.ClaimServerControl claim) {
-            ByteBuffer recovery = payload(Long.BYTES);
-            recovery.putLong(claim.observedServerSequenceFloor().orElse(0));
-            return frame(9, QUERY_SEQUENCE, recovery.array());
+        if (command instanceof ControlCommand.ClaimServerControl) {
+            return frame(9, QUERY_SEQUENCE, new byte[0]);
         }
         return frame(command instanceof ControlCommand.ListProcesses ? 8 : 5, QUERY_SEQUENCE, new byte[0]);
     }
@@ -300,18 +298,11 @@ public final class NativeControlCodec {
     }
 
     private static ControlResult serverControlClaimed(ControlCommand command, ByteBuffer payload) {
-        if (!(command instanceof ControlCommand.ClaimServerControl) || payload.remaining() != 16) {
+        if (!(command instanceof ControlCommand.ClaimServerControl) || payload.hasRemaining()) {
             throw new IllegalArgumentException(
                     "SERVER_CONTROL_CLAIMED response payload or request is invalid");
         }
-        long acceptedSequence = payload.getLong();
-        long acknowledgedEventId = payload.getLong();
-        return new ControlResult.ServerControlClaimed(
-                optionalUnsigned(acceptedSequence), optionalUnsigned(acknowledgedEventId));
-    }
-
-    private static OptionalLong optionalUnsigned(long value) {
-        return value == 0 ? OptionalLong.empty() : OptionalLong.of(value);
+        return new ControlResult.ServerControlClaimed();
     }
 
     private static ControlResult failed(OptionalLong operationSequence, String detail) {

@@ -5,12 +5,6 @@ Depends on: completed AgentD HTTP/2 transport, session discovery, runtime and
 control; 02_journal-sync.md; completed source-aware native controls
 (`5005ae2a`); and the native control-journal contract
 
-- Owner: codex, session command-orchestration-d8e4, branch
-  `codex/agentd-command-orchestration-d8e4`, worktree
-  `.worktrees/agentd-command-orchestration-d8e4`, paused 2026-09-03 19:51
-  Europe/Amsterdam; next: after journal sync integrates, rebase and route
-  commands through its recovered SERVER control context.
-
 Validate and route server commands while deriving durable outcomes exclusively
 from each session journal.
 

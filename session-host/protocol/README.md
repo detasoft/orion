@@ -214,7 +214,7 @@ Unknown request types receive `ERROR_UNSUPPORTED_MESSAGE`.
 | `0x0006` | `APPEND_EVENT` | v1 producer event UUID and typed payload |
 | `0x0007` | `ACK_JOURNAL` | v1 little-endian u64 journal EventId |
 | `0x0008` | `LIST_PROCESSES` | v1 empty payload |
-| `0x0009` | `CLAIM_SERVER_CONTROL` | v1 recorded SERVER sequence floor |
+| `0x0009` | `CLAIM_SERVER_CONTROL` | v1 empty connection fence |
 
 Every schema-3 operation, and schema-4 addressed `SIGNAL`, has this little-endian
 prefix before its command-specific effect payload:
@@ -321,18 +321,16 @@ cursor or server authority. Zero, `u64::MAX`, and values beyond the current
 logical journal tail are invalid.
 
 `CLAIM_SERVER_CONTROL` is the atomic recovery barrier for a stateless AgentD.
-Its fixed eight-byte little-endian payload contains the highest
-`SERVER operationSequence` observed in the server journal prefix or local
-suffix, with zero meaning absent. Under the operation-admission lock, the host
-rejects an observed floor above its accepted high-water mark, fences control
-connections accepted before the claim, and snapshots its accepted sequence and
-durable retention watermark.
+Its schema-1 payload is empty. Under the operation-admission lock, the host
+fences control connections accepted before the claim. The claim does not carry
+or return an operation sequence, allocator state, journal cursor, or retention
+watermark.
 
 Only `SERVER` operations are fenced. An older connection reaching admission
-after the claim receives `ERROR_INVALID_STATE` through `RECEIVED` and applies
-no effect. An operation admitted before the claim is included in the returned
-high-water mark. `MANUAL` operations ignore the fence and remain outside
-server sequence recovery.
+after the claim receives `ERROR_INVALID_STATE` through `RECEIVED` and applies no
+effect. A stale connection cannot reclaim control; a claim on the current or a
+later connection succeeds. `MANUAL` operations ignore the fence and remain
+outside server connection ownership.
 
 ## Control Responses
 
@@ -353,21 +351,12 @@ echoes its control sequence in the response header:
 | `0x8002` | `ERROR` | u32 error code and UTF-8 detail |
 | `0x8003` | `STATUS_RESPONSE` | Fixed 64-byte status |
 | `0x8004` | `LIST_PROCESSES_RESPONSE` | u32 count followed by count fixed 24-byte entries |
-| `0x8005` | `SERVER_CONTROL_CLAIMED` | accepted sequence and retention watermark |
+| `0x8005` | `SERVER_CONTROL_CLAIMED` | empty payload |
 
 `SERVER_CONTROL_CLAIMED` echoes the claim frame's correlation sequence and
-contains two little-endian unsigned `u64` values:
-
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 8 | Accepted `SERVER operationSequence` high-water mark; zero when absent |
-| 8 | 8 | Applied `ACK_JOURNAL` event ID; zero when absent |
-
-The accepted sequence is the live-host admission authority. The journal-derived
-claim floor only checks consistency. The second value is local deletion
-permission and never replaces the server's durable replication cursor.
-`server-sequence-recovery.bin` freezes the claim and response at unsigned
-values above `i64::MAX`.
+has an empty payload. `server-sequence-recovery.bin` freezes the empty claim and
+response. The fixture name is retained for compatibility with fixture consumers;
+the wire contract no longer exchanges recovery state.
 
 `LIST_PROCESSES` and its response use payload schema 1. The request must be
 empty; its unsigned sequence is correlation only (including zero and

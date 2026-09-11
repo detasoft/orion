@@ -106,9 +106,8 @@ protocol must not expose Unix-domain-socket or named-pipe details.
 The implemented `ACK_JOURNAL` is an EventId-only monotonic retention control. It
 updates the existing sidecar without a command source, operation sequence,
 envelope, or journaled `COMMAND_RESULT`. The schema-1 `CLAIM_SERVER_CONTROL`
-contract is still superseded by the active AgentD
-[command-orchestration](../04_agentd/04_command-orchestration.md) task, which
-will own a sequence-independent connection fence.
+contract is an implemented sequence-independent connection fence with empty
+request and response payloads; it exchanges no allocator or recovery state.
 
 ### Session Storage
 

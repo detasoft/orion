@@ -1177,10 +1177,10 @@ fn handle_request(
                 claim_server_control(connection_ordinal, &frame.payload, state)
             };
             Some(match result {
-                Ok(payload) => (
+                Ok(()) => (
                     control_message::SERVER_CONTROL_CLAIMED,
                     frame.sequence,
-                    payload.to_vec(),
+                    Vec::new(),
                 ),
                 Err((code, detail)) => response_error(frame.sequence, code, &detail),
             })
@@ -1341,9 +1341,13 @@ fn claim_server_control(
     connection_ordinal: u64,
     payload: &[u8],
     shared: &Arc<Mutex<SharedState>>,
-) -> Result<[u8; 16], (u32, String)> {
-    let observed_floor = protocol::decode_server_control_claim_payload(payload)
-        .map_err(|error| (ERROR_INVALID_REQUEST, error.to_string()))?;
+) -> Result<(), (u32, String)> {
+    if !payload.is_empty() {
+        return Err((
+            ERROR_INVALID_REQUEST,
+            "CLAIM_SERVER_CONTROL payload must be empty".to_owned(),
+        ));
+    }
     let mut state = lock_state(shared).map_err(|error| (ERROR_IO, error.to_string()))?;
     if state
         .active_server_connection_floor
@@ -1354,22 +1358,8 @@ fn claim_server_control(
             "server control connection is fenced".to_owned(),
         ));
     }
-    if observed_floor.is_some_and(|floor| {
-        state
-            .accepted_sequence_high_watermark
-            .is_none_or(|accepted| floor > accepted)
-    }) {
-        return Err((
-            ERROR_INVALID_STATE,
-            "recorded server sequence exceeds host admission".to_owned(),
-        ));
-    }
     state.active_server_connection_floor = Some(connection_ordinal);
-    protocol::server_control_claimed_payload(
-        state.accepted_sequence_high_watermark,
-        state.acknowledgement.acknowledged_event_id(),
-    )
-    .map_err(|error| (ERROR_INVALID_STATE, error.to_string()))
+    Ok(())
 }
 
 fn send_operation_rejection(

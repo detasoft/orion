@@ -39,26 +39,7 @@ public sealed interface ControlResult {
         }
     }
 
-    record ServerControlClaimed(
-            OptionalLong acceptedServerSequenceHighWatermark,
-            OptionalLong acknowledgedJournalEventId
-    ) implements ControlResult {
-        public ServerControlClaimed {
-            acceptedServerSequenceHighWatermark = Objects.requireNonNull(
-                    acceptedServerSequenceHighWatermark, "acceptedServerSequenceHighWatermark");
-            acknowledgedJournalEventId = Objects.requireNonNull(
-                    acknowledgedJournalEventId, "acknowledgedJournalEventId");
-            if (acceptedServerSequenceHighWatermark.isPresent()
-                    && (acceptedServerSequenceHighWatermark.getAsLong() == 0
-                    || acceptedServerSequenceHighWatermark.getAsLong() == -1)) {
-                throw new IllegalArgumentException(
-                        "accepted server sequence high-watermark must be between 1 and u64::MAX - 1");
-            }
-            if (acknowledgedJournalEventId.isPresent()
-                    && acknowledgedJournalEventId.getAsLong() == 0) {
-                throw new IllegalArgumentException("acknowledged journal event ID must be non-zero");
-            }
-        }
+    record ServerControlClaimed() implements ControlResult {
     }
 
     record Process(long token, long pid, boolean originalRoot) {

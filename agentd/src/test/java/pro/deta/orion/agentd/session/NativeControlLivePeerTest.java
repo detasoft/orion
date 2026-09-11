@@ -135,9 +135,8 @@ class NativeControlLivePeerTest {
 
             try (SocketChannel stale = SocketChannel.open(StandardProtocolFamily.UNIX)) {
                 stale.connect(UnixDomainSocketAddress.of(sessionDirectory.resolve("control.sock")));
-                assertThat(client.send(endpoint, new ControlCommand.ClaimServerControl(OptionalLong.of(43))))
-                        .isEqualTo(new ControlResult.ServerControlClaimed(
-                                OptionalLong.of(43), OptionalLong.of(acknowledgedEventId)));
+                assertThat(client.send(endpoint, new ControlCommand.ClaimServerControl()))
+                        .isEqualTo(new ControlResult.ServerControlClaimed());
 
                 ControlCommand.Resize fenced = new ControlCommand.Resize(
                         44, SessionCommandSource.SERVER, SERVER_ENVELOPE, 102, 32);

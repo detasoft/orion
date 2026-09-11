@@ -754,7 +754,7 @@ fn orders_controls_and_rejects_duplicate_sequences_after_reconnect() {
 }
 
 #[test]
-fn claim_fences_older_server_connections_and_reports_watermarks() {
+fn claim_fences_older_server_connections_without_exchanging_recovery_state() {
     let directory = temporary_directory("server-control-claim");
     let mut host = HostGuard::spawn(
         directory,
@@ -789,23 +789,29 @@ fn claim_fences_older_server_connections_and_reports_watermarks() {
         &mut claiming,
         CLAIM_SERVER_CONTROL,
         41,
-        &accepted_sequence.to_le_bytes(),
+        &[],
     );
     assert_eq!(claimed.message_type, SERVER_CONTROL_CLAIMED);
     assert_eq!(claimed.sequence, 41);
-    assert_eq!(claimed.payload.len(), 16);
-    assert_eq!(u64_at(&claimed.payload[0..8]), accepted_sequence);
-    assert_eq!(u64_at(&claimed.payload[8..16]), acknowledged_event_id);
+    assert!(claimed.payload.is_empty());
+    assert_eq!(
+        fs::read_to_string(host.directory().join(STATE_FILE_NAME)).unwrap(),
+        format!(r#"{{"stateVersion":1,"acknowledgedEventId":{acknowledged_event_id}}}"#),
+    );
 
     let stale_claim = request(
         &mut older,
         CLAIM_SERVER_CONTROL,
         42,
-        &accepted_sequence.to_le_bytes(),
+        &[],
     );
     assert_eq!(stale_claim.message_type, control_message::ERROR);
     assert_eq!(stale_claim.sequence, 42);
     assert_eq!(u32_at(&stale_claim.payload[0..4]), ERROR_INVALID_STATE);
+
+    let repeated_claim = request(&mut claiming, CLAIM_SERVER_CONTROL, 43, &[]);
+    assert_eq!(repeated_claim.message_type, SERVER_CONTROL_CLAIMED);
+    assert!(repeated_claim.payload.is_empty());
 
     let fenced = operation_request(
         &mut older,
@@ -826,6 +832,9 @@ fn claim_fences_older_server_connections_and_reports_watermarks() {
     );
 
     let mut current = connect(host.directory());
+    let later_claim = request(&mut current, CLAIM_SERVER_CONTROL, 44, &[]);
+    assert_eq!(later_claim.message_type, SERVER_CONTROL_CLAIMED);
+    assert!(later_claim.payload.is_empty());
     send_operation(
         &mut current,
         control_message::TERMINATE,
@@ -840,7 +849,7 @@ fn claim_fences_older_server_connections_and_reports_watermarks() {
 }
 
 #[test]
-fn claim_rejects_a_recorded_floor_ahead_of_host_admission() {
+fn claim_rejects_payload_and_accepts_an_empty_connection_fence() {
     let directory = temporary_directory("server-control-claim-floor");
     let mut host = HostGuard::spawn(
         directory,
@@ -858,16 +867,16 @@ fn claim_rejects_a_recorded_floor_ahead_of_host_admission() {
     );
     assert_eq!(rejected.message_type, control_message::ERROR);
     assert_eq!(rejected.sequence, 42);
-    assert_eq!(u32_at(&rejected.payload[0..4]), ERROR_INVALID_STATE);
+    assert_eq!(u32_at(&rejected.payload[0..4]), ERROR_INVALID_REQUEST);
 
     let claimed = request(
         &mut claiming,
         CLAIM_SERVER_CONTROL,
         43,
-        &0_u64.to_le_bytes(),
+        &[],
     );
     assert_eq!(claimed.message_type, SERVER_CONTROL_CLAIMED);
-    assert_eq!(claimed.payload, [0; 16]);
+    assert!(claimed.payload.is_empty());
 
     let mut current = connect(host.directory());
     send_operation(

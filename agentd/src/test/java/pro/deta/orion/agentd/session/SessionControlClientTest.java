@@ -62,20 +62,16 @@ class SessionControlClientTest {
     }
 
     @Test
-    void claimsServerControlAndReturnsBothRecoveryValues() throws Exception {
+    void claimsServerControlWithoutExchangingRecoveryValues() throws Exception {
         try (ServerSocketChannel server = listen("claim.sock")) {
-            Future<Void> peer = serve(server, request -> {
-                ByteBuffer payload = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
-                payload.putLong(73).putLong(-1);
-                return NativeControlCodec.frame(0x8005, sequence(request), payload.array());
-            });
+            Future<Void> peer = serve(server, request ->
+                    NativeControlCodec.frame(0x8005, sequence(request), new byte[0]));
 
             ControlResult result = new SessionControlClient(Duration.ofSeconds(2)).send(
                     endpoint("claim.sock"),
-                    new ControlCommand.ClaimServerControl(OptionalLong.of(71)));
+                    new ControlCommand.ClaimServerControl());
 
-            assertThat(result).isEqualTo(new ControlResult.ServerControlClaimed(
-                    OptionalLong.of(73), OptionalLong.of(-1)));
+            assertThat(result).isEqualTo(new ControlResult.ServerControlClaimed());
             await(peer);
         }
     }

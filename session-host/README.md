@@ -129,6 +129,12 @@ repeat an already accepted server effect. Manual sequences are live response
 correlation values only: every valid delivery executes, and the host retains
 no manual ordering or deduplication state.
 
+Before sending server controls, AgentD uses an empty `CLAIM_SERVER_CONTROL`
+request as a connection fence. The host atomically prevents older control
+connections from admitting later `SERVER` operations and returns an empty
+`SERVER_CONTROL_CLAIMED`. The exchange contains no operation sequence, journal
+cursor, retention watermark, or allocator state.
+
 The host applies each new effect synchronously and writes one `COMMAND_RESULT`
 with an empty detail on success or diagnostic detail on an application failure.
 After a new operation is admitted, the host returns `RECEIVED`
@@ -165,11 +171,10 @@ executed it before the journal append failed. A later server command with a new
 sequence is a new attempt and may repeat an earlier partial effect; a manual
 client does not retry an uncertain delivery.
 
-Planned AgentD recovery uses the server's durably committed prefix plus the
-later suffix in the still-running host journal. Recorded sequences do not
-reveal admissions whose result is pending or missing; sequence allocation on
-reconnect remains an AgentD integration concern, and manual sequences are never
-inputs to that recovery. The host does not reconstruct a failed incarnation.
+Recorded journal sequences do not reveal admissions whose result is pending or
+missing. Sequence allocation remains server-owned, and reconnect fencing does
+not reconstruct or exchange allocator state. Manual sequences are never inputs
+to recovery. The host does not reconstruct a failed incarnation.
 After the server durably commits a complete journal prefix, AgentD may send its
 event ID through `ACK_JOURNAL`. The request carries only the EventId; it has no
 command source, operation sequence, or server command envelope. The host
