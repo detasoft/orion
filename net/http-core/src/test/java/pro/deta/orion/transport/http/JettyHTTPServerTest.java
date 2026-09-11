@@ -39,6 +39,12 @@ import pro.deta.orion.agentd.core.AgentControlService;
 import pro.deta.orion.agentd.core.AgentHandshake;
 import pro.deta.orion.agentd.core.AgentLaunchContext;
 import pro.deta.orion.agentd.core.LaunchPermit;
+import pro.deta.orion.agentd.session.ChildState;
+import pro.deta.orion.agentd.session.ControlEndpoint;
+import pro.deta.orion.agentd.session.HostObservation;
+import pro.deta.orion.agentd.session.JournalObservation;
+import pro.deta.orion.agentd.session.SessionDiscovery;
+import pro.deta.orion.agentd.session.SessionManifest;
 import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.JettyHttp2Transport;
 import pro.deta.orion.config.OrionDesiredState;
@@ -79,6 +85,7 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyStore;
@@ -94,6 +101,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -129,21 +137,18 @@ class JettyHTTPServerTest {
     Path agentServerRoot;
 
     @Test
-    void realAgentdAndLivePeerExerciseDurableServerControlLifecycle() throws Exception {
+    void realAgentdReconnectsToRestartedServerAndReportsOfflineDiscovery() throws Exception {
         AgentId agentId = new AgentId("live-agent");
         AgentInstanceId instanceId = new AgentInstanceId(UUID.randomUUID());
         MutableClock clock = new MutableClock(Instant.parse("2026-09-10T12:00:00Z"));
         AgentSessionServer agentServer =
                 AgentSessionServer.withPolicy(agentServerRoot, clock, Duration.ofSeconds(30));
-        byte[] reconnectToken;
-        AgentGeneration generation;
-        AgentLaunchId launchId;
-        SessionDescriptor reported = new SessionDescriptor(
-                new SessionId("live-session"),
-                AgentMessage.SessionState.RUNNING,
-                Optional.empty(),
-                Optional.empty(),
-                "running");
+        Path localSessions = Files.createDirectories(agentServerRoot.resolve("agent/sessions"));
+        SessionRegistry localRegistry = new SessionRegistry();
+        SessionDiscovery discovery = discovery(localSessions, localRegistry);
+        Files.createDirectory(localSessions.resolve("live-session"));
+        discovery.reconcile();
+        ObservedAgentControlHandler observed = new ObservedAgentControlHandler(agentServer);
 
         try (MaterialFixture material = material()) {
             agentServer.onStart();
@@ -153,17 +158,19 @@ class JettyHTTPServerTest {
                     false,
                     OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                     List.of(),
-                    new AgentControlRoute(agentServer));
+                    new AgentControlRoute(observed));
             try {
                 URI endpoint = URI.create(firstServer.relativiseHttps("").toString());
                 var control = agentServer.provisioningControl(
                         agentId, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
                 try (var attempt = control.nextAttempt()) {
-                    generation = attempt.request().generation();
-                    launchId = attempt.request().launchId();
                     byte[] permit = Base64.getUrlDecoder().decode(attempt.permit().copyBytes());
                     AgentLaunchContext context = new AgentLaunchContext(
-                            agentId, generation, launchId, instanceId, new LaunchPermit(permit));
+                            agentId,
+                            attempt.request().generation(),
+                            attempt.request().launchId(),
+                            instanceId,
+                            new LaunchPermit(permit));
                     JettyHttp2Transport transport = new JettyHttp2Transport(
                             endpoint, agentdTls(material.serverCertificate()),
                             AgentProtocolLimits.defaults(), 8, 8);
@@ -175,67 +182,45 @@ class JettyHTTPServerTest {
                             "1.0.0",
                             new MachineInfo("worker-1", "linux", "aarch64"),
                             Map.of(),
-                            new SessionRegistry())) {
+                            localRegistry)) {
                         service.start();
-                        reconnectToken = service.connection().orElseThrow().reconnectToken().copyBytes();
+                        AgentLaunchId launchId = attempt.request().launchId();
                         assertThat(control.awaitOnline(launchId, Duration.ofSeconds(5))).isTrue();
+
+                        clock.advance(Duration.ofSeconds(31));
+                        assertThat(control.awaitOnline(launchId, Duration.ZERO)).isFalse();
+                        assertThat(control.awaitOnline(launchId, Duration.ofSeconds(15))).isTrue();
+
+                        int port = firstServer.boundHttpsPort();
+                        firstServer.onStop();
+                        agentServer.onStop();
+                        Files.createDirectory(localSessions.resolve("offline-session"));
+                        discovery.reconcile();
+
+                        agentServer.onStart();
+                        JettyHTTPServer restarted = startHttps(
+                                material,
+                                false,
+                                OrionHttpsConfiguration.ClientAuthentication.DISABLED,
+                                List.of(),
+                                () -> port,
+                                new AgentControlRoute(observed));
+                        try {
+                            var restartedControl = agentServer.provisioningControl(
+                                    agentId, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
+                            assertThat(restartedControl.awaitOnline(launchId, Duration.ofSeconds(10))).isTrue();
+                            observed.awaitSessionList("live-session", "offline-session");
+
+                            try (var replacement = restartedControl.nextAttempt()) {
+                                assertThat(restartedControl.awaitOnline(launchId, Duration.ZERO)).isFalse();
+                            }
+                        } finally {
+                            restarted.onStop();
+                        }
                     }
                 }
             } finally {
                 firstServer.onStop();
-                agentServer.onStop();
-            }
-
-            agentServer.onStart();
-            JettyHTTPServer restarted = startHttps(
-                    material,
-                    false,
-                    OrionHttpsConfiguration.ClientAuthentication.DISABLED,
-                    List.of(),
-                    new AgentControlRoute(agentServer));
-            try {
-                URI endpoint = URI.create(restarted.relativiseHttps("").toString());
-                var control = agentServer.provisioningControl(
-                        agentId, endpoint, "/var/lib/orion/agent", 1024 * 1024, "1.0.0");
-                try (TestAgentClient reconnect = agentClient(
-                        restarted, material.serverCertificate())) {
-                    reconnect.connect();
-                    reconnect.send(AGENT_CODEC.encode(hello(
-                            agentId, generation, launchId, instanceId,
-                            AgentAuthentication.Kind.RECONNECT_TOKEN, reconnectToken)));
-                    assertAuthenticated(reconnect);
-
-                    clock.advance(Duration.ofSeconds(31));
-                    assertThat(control.awaitOnline(launchId, Duration.ZERO)).isFalse();
-                    reconnect.send(AGENT_CODEC.encode(new AgentMessage.SessionList(List.of(reported))));
-                    reconnect.send(AGENT_CODEC.encode(new AgentMessage.Heartbeat(agentId, instanceId, 1)));
-                    assertThat(control.awaitOnline(launchId, Duration.ofSeconds(5))).isTrue();
-
-                    clock.advance(Duration.ofSeconds(31));
-                    assertThat(control.awaitOnline(launchId, Duration.ZERO)).isFalse();
-
-                    try (var replacement = control.nextAttempt();
-                         TestAgentClient replacementPeer = agentClient(
-                                 restarted, material.serverCertificate())) {
-                        assertThat(control.awaitOnline(
-                                replacement.request().launchId(), Duration.ZERO)).isFalse();
-                        replacementPeer.connect();
-                        byte[] permit = Base64.getUrlDecoder().decode(replacement.permit().copyBytes());
-                        replacementPeer.send(AGENT_CODEC.encode(hello(
-                                agentId,
-                                replacement.request().generation(),
-                                replacement.request().launchId(),
-                                new AgentInstanceId(UUID.randomUUID()),
-                                AgentAuthentication.Kind.LAUNCH_PERMIT,
-                                permit)));
-                        assertAuthenticated(replacementPeer);
-                        assertThat(control.awaitOnline(
-                                replacement.request().launchId(), Duration.ZERO)).isTrue();
-                        reconnect.terminal.get(5, TimeUnit.SECONDS);
-                    }
-                }
-            } finally {
-                restarted.onStop();
                 agentServer.onStop();
             }
         }
@@ -243,9 +228,8 @@ class JettyHTTPServerTest {
         try (FileSystemSessionRegistry sessions =
                      new FileSystemSessionRegistry(agentServerRoot.resolve("sessions"))) {
             assertThat(sessions.ownedBy(agentId))
-                    .singleElement()
-                    .extracting(record -> record.reported())
-                    .isEqualTo(reported);
+                    .extracting(record -> record.reported().sessionId().value())
+                    .containsExactly("live-session", "offline-session");
         }
     }
 
@@ -769,6 +753,39 @@ class JettyHTTPServerTest {
         return tls;
     }
 
+    private static SessionDiscovery discovery(Path sessionsDirectory, SessionRegistry registry) {
+        return new SessionDiscovery(
+                sessionsDirectory,
+                directory -> sessionManifest(directory.getFileName().toString(), directory),
+                (directory, manifest) -> HostObservation.live(ChildState.LIVE),
+                directory -> JournalObservation.READABLE,
+                registry);
+    }
+
+    private static SessionManifest sessionManifest(String sessionId, Path directory) {
+        return new SessionManifest(
+                1,
+                1,
+                1,
+                sessionId,
+                1,
+                2,
+                List.of("sh"),
+                "/workspace",
+                42,
+                OptionalLong.of(43),
+                80,
+                24,
+                80,
+                24,
+                "xterm-256color",
+                new SessionManifest.Sandbox(false, "none", "fail", List.of(), List.of()),
+                new ControlEndpoint(
+                        ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
+                        "control.sock",
+                        directory.resolve("control.sock")));
+    }
+
     private static AgentMessage.Hello hello(
             AgentId agentId,
             AgentGeneration generation,
@@ -1156,6 +1173,50 @@ class JettyHTTPServerTest {
 
         private void release() {
             release.countDown();
+        }
+    }
+
+    private static final class ObservedAgentControlHandler implements AgentControlHandler {
+        private final AgentControlHandler delegate;
+        private final List<List<String>> sessionLists = new CopyOnWriteArrayList<>();
+
+        private ObservedAgentControlHandler(AgentControlHandler delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public AgentControlHandler.Session open(AgentControlHandler.Connection connection) {
+            AgentControlHandler.Session session = delegate.open(connection);
+            return new AgentControlHandler.Session() {
+                @Override
+                public void onMessage(AgentMessage message) {
+                    session.onMessage(message);
+                    if (message instanceof AgentMessage.SessionList sessionList) {
+                        List<String> ids = new ArrayList<>();
+                        for (SessionDescriptor descriptor : sessionList.sessions()) {
+                            ids.add(descriptor.sessionId().value());
+                        }
+                        sessionLists.add(List.copyOf(ids));
+                    }
+                }
+
+                @Override
+                public void onClosed(Throwable failure) {
+                    session.onClosed(failure);
+                }
+            };
+        }
+
+        private void awaitSessionList(String... expected) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!containsSessionList(expected) && System.nanoTime() < deadline) {
+                TimeUnit.MILLISECONDS.sleep(10);
+            }
+            assertThat(sessionLists).contains(List.of(expected));
+        }
+
+        private boolean containsSessionList(String... expected) {
+            return sessionLists.contains(List.of(expected));
         }
     }
 

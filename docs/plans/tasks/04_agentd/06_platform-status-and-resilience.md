@@ -1,8 +1,7 @@
 # Add Platform Status and Lifecycle Resilience
 
 Status: todo
-Depends on: 01_control-connection-lifecycle/TASK.md, 02_journal-sync.md,
-04_command-orchestration.md
+Depends on: 02_journal-sync.md, 04_command-orchestration.md
 
 Extend the established control lifecycle with machine reporting, isolation
 under journal and command load, observability, and coordinated shutdown.
@@ -22,4 +21,4 @@ under journal and command load, observability, and coordinated shutdown.
 - Test slow metrics, noisy and corrupt sessions, offline operation, fairness,
   heartbeat under load, and shutdown or restart with active commands and journals.
 - Reconnect backoff, basic heartbeat, and control/discovery resource ownership
-  are implemented once in 01_control-connection-lifecycle/TASK.md.
+  are already implemented by the shared control lifecycle.

@@ -243,7 +243,7 @@ class AgentControlServiceTest {
     }
 
     @Test
-    void waitsForInitialDiscoveryAndAnswersRepeatedListRequestsFromTheCompletedSnapshot() throws Exception {
+    void waitsForInitialDiscoveryAndAnswersRepeatedListRequestsFromTheCurrentSnapshot() throws Exception {
         FakeTransport transport = new FakeTransport();
         transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
         SessionRegistry registry = new SessionRegistry();
@@ -255,6 +255,9 @@ class AgentControlServiceTest {
         assertThat(messages(transport.controls, AgentMessage.SessionList.class)).isEmpty();
 
         SessionRegistryFixture.publish(registry, Map.of("session-1", session("session-1", ChildState.LIVE)));
+        transport.controls.clear();
+        SessionRegistryFixture.publish(registry, Map.of("session-2", session("session-2", ChildState.LIVE)));
+        transport.controls.clear();
         transport.deliver(new AgentMessage.RequestSessionList());
 
         assertThat(messages(transport.controls, AgentMessage.SessionList.class))
@@ -262,7 +265,7 @@ class AgentControlServiceTest {
                         .map(SessionDescriptor::sessionId)
                         .map(SessionId::value)
                         .toList())
-                .containsExactly(List.of("session-1"), List.of("session-1"));
+                .containsExactly(List.of("session-2"));
         service.close();
     }
 

@@ -231,11 +231,11 @@ public final class AgentControlService implements AgentService {
         if (expected == null) {
             return;
         }
-        registry.readySnapshot().whenComplete((snapshot, failure) -> {
+        registry.readySnapshot().whenComplete((ignored, failure) -> {
             if (failure != null) {
                 sessionReportingFailed(expected, failure);
             } else {
-                sendSessionList(expected, snapshot);
+                sendSessionList(expected, registry.snapshot());
             }
         });
     }
