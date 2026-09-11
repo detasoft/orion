@@ -89,6 +89,9 @@ class OrionConfigurationBootstrapShapeTest {
                   ssh:
                     enabled: false
                     port: 8022
+                    hostKeys:
+                      - alias: ssh-host-node-2-rsa-v2
+                      - alias: ssh-host-node-2-ed25519-v1
                   http:
                     enabled: false
                     port: 8000
@@ -141,6 +144,9 @@ class OrionConfigurationBootstrapShapeTest {
         assertFalse(configuration.getStorage().isCreateOnPush());
         assertEquals(8000, configuration.getTransport().getHttp().getPort());
         assertFalse(configuration.getTransport().getHttp().isEnabled());
+        assertEquals(
+                "ssh-host-node-2-rsa-v2",
+                configuration.getTransport().getSsh().getHostKeys().getFirst().getAlias());
         assertEquals(
                 "https://git.example/r",
                 configuration.getTransport().getGit().getPackfileUri().getBaseUri());

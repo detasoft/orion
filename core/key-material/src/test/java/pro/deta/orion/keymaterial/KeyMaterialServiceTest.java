@@ -143,6 +143,38 @@ class KeyMaterialServiceTest {
     }
 
     @Test
+    void discoversTypedPrivateKeysByPurposeAndScope() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        KeyMaterialScope node = KeyMaterialScope.node("orion-prod", "node-7");
+        KeyMaterialDescriptor rsa = descriptor(
+                "ssh-host-z-rsa-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.RSA, node);
+        KeyMaterialDescriptor ec = descriptor(
+                "ssh-host-a-ec-v1", KeyMaterialPurpose.SSH_HOST, KeyMaterialAlgorithm.EC, node);
+        KeyMaterialDescriptor otherNode = descriptor(
+                "ssh-host-other-v1",
+                KeyMaterialPurpose.SSH_HOST,
+                KeyMaterialAlgorithm.RSA,
+                KeyMaterialScope.node("orion-prod", "node-8"));
+        KeyMaterialDescriptor signing = descriptor(
+                "server-signing-v1",
+                KeyMaterialPurpose.SERVER_SIGNING,
+                KeyMaterialAlgorithm.RSA,
+                KeyMaterialScope.cluster("orion-prod"));
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            service.generateKeyIfMissing(rsa, 2048);
+            service.generateKeyIfMissing(ec, 256);
+            service.generateKeyIfMissing(otherNode, 2048);
+            service.generateKeyIfMissing(signing, 2048);
+            service.save();
+        }
+
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            assertThat(service.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST, node))
+                    .containsExactly(ec, rsa);
+        }
+    }
+
+    @Test
     void refusesPrivateKeyWhenCertificateChainHasDifferentPublicKey() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialService service = KeyMaterialService.open(store, options());
@@ -310,6 +342,19 @@ class KeyMaterialServiceTest {
                 new KeyMaterialAlias(alias),
                 KeyMaterialAlgorithm.RSA,
                 new KeyMaterialVersion(version),
+                scope);
+    }
+
+    private static KeyMaterialDescriptor descriptor(
+            String alias,
+            KeyMaterialPurpose purpose,
+            KeyMaterialAlgorithm algorithm,
+            KeyMaterialScope scope) {
+        return new KeyMaterialDescriptor(
+                new KeyMaterialAlias(alias),
+                purpose,
+                algorithm,
+                new KeyMaterialVersion(1),
                 scope);
     }
 }

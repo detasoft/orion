@@ -369,6 +369,21 @@ transport:
     port: 8022
 ```
 
+SSH host keys are typed `SSH_HOST` entries in the material store. By default,
+the SSH transport serves every cluster-scoped entry of that type and creates
+`ssh-host-rsa-v1` and `ssh-host-ec-v1` when none exist. A node can select its
+own logical key families explicitly. A logical alias selects the highest stored
+version; a concrete alias with a `-v<version>` suffix selects that exact entry:
+
+```yaml
+transport:
+  ssh:
+    hostKeys:
+      - alias: node-a-rsa
+      - alias: node-a-ec
+      - alias: node-a-ed25519-v2
+```
+
 ### Orion XML schema
 
 [orion-v2.xsd](docs/schemas/orion-v2.xsd) provides XML completion and structural

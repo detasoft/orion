@@ -13,6 +13,9 @@ semantics.
 - Implement staged add, activate, verify or decrypt-only retention, and retire
   transitions without requiring cross-store atomic commits.
 - Define coordinated backup and restore of material and versioned configuration.
+- Move SSH host-key creation and reissue policy out of `OrionKeyMaterial` into
+  a transport-owned lifecycle; keep key material as the generic typed storage
+  and capability boundary.
 - Keep the last valid configuration inactive until all referenced material is
   available and validated.
 - Cover lost material, stale aliases, rollback, concurrent updates, and startup

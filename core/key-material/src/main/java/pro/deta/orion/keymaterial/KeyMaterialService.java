@@ -379,6 +379,55 @@ public class KeyMaterialService implements AutoCloseable {
         validateDescriptorMetadata(descriptor);
     }
 
+    public synchronized List<KeyMaterialDescriptor> privateKeyDescriptors(
+            KeyMaterialPurpose purpose,
+            KeyMaterialScope scope) throws GeneralSecurityException {
+        requireOpen();
+        if (purpose == null) {
+            throw new IllegalArgumentException("Key material purpose must not be null");
+        }
+        if (scope == null) {
+            throw new IllegalArgumentException("Key material scope must not be null");
+        }
+        String encodedScope = encodeScope(scope);
+        List<String> aliases = new ArrayList<>();
+        keyStore.aliases().asIterator().forEachRemaining(aliases::add);
+        aliases.sort(String::compareTo);
+        List<KeyMaterialDescriptor> descriptors = new ArrayList<>();
+        for (String alias : aliases) {
+            if (!keyStore.entryInstanceOf(alias, KeyStore.PrivateKeyEntry.class)) {
+                continue;
+            }
+            String metadata = descriptorMetadataIfPresent(alias);
+            if (metadata == null) {
+                continue;
+            }
+            String[] fields = metadata.split(";", -1);
+            if (fields.length != 4) {
+                throw new GeneralSecurityException("Typed key material metadata has invalid format: " + alias);
+            }
+            if (!purpose.name().equals(fields[0]) || !encodedScope.equals(fields[3])) {
+                continue;
+            }
+            KeyMaterialDescriptor descriptor;
+            try {
+                descriptor = new KeyMaterialDescriptor(
+                        new KeyMaterialAlias(alias),
+                        purpose,
+                        KeyMaterialAlgorithm.valueOf(fields[1]),
+                        new KeyMaterialVersion(Long.parseLong(fields[2])),
+                        scope);
+            } catch (IllegalArgumentException failure) {
+                throw new GeneralSecurityException(
+                        "Typed key material metadata has invalid format: " + alias,
+                        failure);
+            }
+            validateExisting(descriptor);
+            descriptors.add(descriptor);
+        }
+        return List.copyOf(descriptors);
+    }
+
     public synchronized void validateExisting(TrustedCertificateDescriptor descriptor)
             throws GeneralSecurityException {
         requireOpen();
@@ -560,6 +609,14 @@ public class KeyMaterialService implements AutoCloseable {
     }
 
     private String descriptorMetadata(String alias) throws GeneralSecurityException {
+        String metadata = descriptorMetadataIfPresent(alias);
+        if (metadata != null) {
+            return metadata;
+        }
+        throw new GeneralSecurityException("Typed key material metadata is missing for alias: " + alias);
+    }
+
+    private String descriptorMetadataIfPresent(String alias) throws GeneralSecurityException {
         char[] password = options.password();
         try {
             KeyStore.Entry entry = keyStore.getEntry(alias, new KeyStore.PasswordProtection(password));
@@ -571,7 +628,7 @@ public class KeyMaterialService implements AutoCloseable {
                     return attribute.getValue();
                 }
             }
-            throw new GeneralSecurityException("Typed key material metadata is missing for alias: " + alias);
+            return null;
         } finally {
             clear(password);
         }

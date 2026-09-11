@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 public final class OrionKeyMaterial implements AutoCloseable {
+    private static final KeyMaterialVersion INITIAL_SSH_HOST_KEY_VERSION = new KeyMaterialVersion(1);
     private final KeyMaterialService owner;
     private final KeyMaterialScope.Cluster clusterScope;
     private final ServerIdentityCapability serverIdentity;
@@ -68,6 +69,24 @@ public final class OrionKeyMaterial implements AutoCloseable {
 
     public TlsCapability tls() {
         return tls;
+    }
+
+    public SshHostKeyCapability sshHostKeys(List<SshHostKeyReference> references)
+            throws IOException, GeneralSecurityException {
+        if (references == null) {
+            throw new IllegalArgumentException("SSH host key references must not be null");
+        }
+        List<KeyMaterialDescriptor> available = owner.privateKeyDescriptors(
+                KeyMaterialPurpose.SSH_HOST, clusterScope);
+        if (references.isEmpty() && available.isEmpty()) {
+            generateDefaultSshHostKeys();
+            owner.save();
+            available = owner.privateKeyDescriptors(KeyMaterialPurpose.SSH_HOST, clusterScope);
+        }
+        List<KeyMaterialDescriptor> selected = references.isEmpty()
+                ? available
+                : selectSshHostKeys(available, references);
+        return KeyMaterialCapabilities.open(owner, selected).sshHostKeys(selected);
     }
 
     @Override
@@ -229,4 +248,83 @@ public final class OrionKeyMaterial implements AutoCloseable {
         }
         return cluster;
     }
+
+    private void generateDefaultSshHostKeys() throws GeneralSecurityException {
+        owner.generateKeyIfMissing(
+                sshHostKeyDescriptor("ssh-host-rsa", KeyMaterialAlgorithm.RSA, INITIAL_SSH_HOST_KEY_VERSION),
+                KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+        owner.generateKeyIfMissing(
+                sshHostKeyDescriptor("ssh-host-ec", KeyMaterialAlgorithm.EC, INITIAL_SSH_HOST_KEY_VERSION),
+                KeyMaterialConstants.EC_KEY_SIZE_BITS);
+    }
+
+    private KeyMaterialDescriptor sshHostKeyDescriptor(
+            String logicalAlias,
+            KeyMaterialAlgorithm algorithm,
+            KeyMaterialVersion version) {
+        return new KeyMaterialDescriptor(
+                new KeyMaterialAlias(logicalAlias + "-v" + version.value()),
+                KeyMaterialPurpose.SSH_HOST,
+                algorithm,
+                version,
+                clusterScope);
+    }
+
+    private static List<KeyMaterialDescriptor> selectSshHostKeys(
+            List<KeyMaterialDescriptor> available,
+            List<SshHostKeyReference> references) throws GeneralSecurityException {
+        List<KeyMaterialDescriptor> selected = new ArrayList<>();
+        for (SshHostKeyReference reference : references) {
+            if (reference == null) {
+                throw new IllegalArgumentException("SSH host key reference must not be null");
+            }
+            KeyMaterialDescriptor match = null;
+            for (KeyMaterialDescriptor candidate : available) {
+                if (reference.alias().equals(candidate.alias().value())) {
+                    match = candidate;
+                    break;
+                }
+            }
+            if (match == null && !isConcreteAlias(reference.alias())) {
+                for (KeyMaterialDescriptor candidate : available) {
+                    if (reference.alias().equals(logicalAlias(candidate))
+                            && (match == null || candidate.version().compareTo(match.version()) > 0)) {
+                        match = candidate;
+                    }
+                }
+            }
+            if (match == null) {
+                throw new GeneralSecurityException("SSH host key reference not found: " + reference.alias());
+            }
+            if (selected.contains(match)) {
+                throw new IllegalArgumentException("Duplicate SSH host key reference: " + reference.alias());
+            }
+            selected.add(match);
+        }
+        return List.copyOf(selected);
+    }
+
+    private static boolean isConcreteAlias(String alias) {
+        int versionMarker = alias.lastIndexOf("-v");
+        if (versionMarker <= 0 || versionMarker + 2 == alias.length()) {
+            return false;
+        }
+        for (int index = versionMarker + 2; index < alias.length(); index++) {
+            if (!Character.isDigit(alias.charAt(index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String logicalAlias(KeyMaterialDescriptor descriptor) throws GeneralSecurityException {
+        String suffix = "-v" + descriptor.version().value();
+        String concreteAlias = descriptor.alias().value();
+        if (!concreteAlias.endsWith(suffix) || concreteAlias.length() == suffix.length()) {
+            throw new GeneralSecurityException(
+                    "SSH host key alias does not identify its version: " + concreteAlias);
+        }
+        return concreteAlias.substring(0, concreteAlias.length() - suffix.length());
+    }
+
 }
