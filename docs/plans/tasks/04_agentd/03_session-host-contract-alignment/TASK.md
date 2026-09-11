@@ -26,8 +26,8 @@ behavior. The linked contract records the shared Java/native interface.
   and sequence, while treating manual sequences as live-only values.
 - Preserve uncertain delivery across reconnects: a stale rejection cannot
   resolve an earlier attempt. A journal suffix does not expose admissions with
-  pending or missing results, so recorded maxima alone do not prove a fresh
-  sequence. Resolve allocation with command orchestration before completion.
+  pending or missing results. Keep operation sequence allocation durable on the
+  server and never reconstruct it from journal or host observations in AgentD.
 - Send server retention acknowledgements through the same source-aware
   operation contract and advance them only from a server-durable journal prefix.
 - Consume the four-byte `TERMINATE` effect and effective sandbox status without
@@ -231,16 +231,18 @@ ACK forwarding has been completed.
 
 ### Recovery limits and future implementation
 
-The server-durable prefix plus local journal suffix provide recorded server
-operation and lifecycle evidence. They do not expose the host's complete
-admission high-water mark: an admitted server operation may have no result
-record, or its effect
-may still be running. Therefore `max(recorded sequence) + 1` is not proven to
-be a fresh sequence on reconnect. No native API currently returns that mark.
-The orchestration task must resolve this under the existing admission contract;
-this documentation does not invent an intent log, replay ledger, or recovery
-protocol. Missing results never authorize automatic effect replay, and manual
-result sequences are excluded from server recovery.
+The server durably assigns and retains each command's operation sequence. The
+server-durable journal prefix plus local suffix provide result and lifecycle
+evidence, not sequence allocation. An admitted server operation may have no
+result record or may still be running, so missing results remain unknown.
+
+AgentD makes one native delivery attempt for each server delivery and does not
+originate retries. A server redelivery retains the command's original sequence;
+the host high-watermark rejects a sequence it has already accepted. The atomic
+claim fences stale native connections and exposes admission and retention
+observations, but neither observation becomes a command allocator or journal
+cursor. This model adds no AgentD intent log, replay ledger, or durable recovery
+state. Manual result sequences remain outside server command state.
 
 The host does not restart a failed incarnation to resume its live process tree.
 Windows ConPTY remains separate queued work. Source-aware controls, addressed

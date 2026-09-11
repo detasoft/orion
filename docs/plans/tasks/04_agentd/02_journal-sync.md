@@ -5,8 +5,8 @@ Status: todo
 ## Goal
 
 Resume each session from the server's durable journal state, stream original
-journal records, forward durable acknowledgements to `session-host`, and expose
-one recovered `SERVER` control context for later command routing.
+journal records, and forward server-authorized durable acknowledgements to
+`session-host` without owning command sequence allocation or retry.
 
 ## Dependencies
 
@@ -14,21 +14,23 @@ one recovered `SERVER` control context for later command routing.
 - Completed paged journal reader (`02e74a3a`).
 - Completed source-aware native controls and atomic server-control claim
   (`5005ae2a`, `d2ad19d6`, `433b4083`).
-- The server replication contract must return the durable journal EventId cursor
-  and the maximum recorded `SERVER operationSequence` covered by that prefix.
+- The server replication contract must return the durable journal EventId cursor,
+  the server's last allocated per-session `SERVER operationSequence`, and an exact
+  authorization item with its own stable sequence for each requested journal ACK.
 
-This leaf no longer depends on command orchestration. It owns the shared
-recovery gate and allocator required by both journal ACK forwarding and
-`04_command-orchestration.md`, removing the former dependency cycle.
+This leaf no longer depends on command orchestration. It owns journal resume and
+ACK forwarding only; the server durably owns command and ACK operation sequences.
 
 ## State Ownership
 
 - The server cursor is the sole replication authority and is always an EventId.
-- The host claim's accepted sequence is the sole live admission authority for
-  allocating the next `SERVER operationSequence`.
+- The server's per-session operation sequence is the sole allocation authority
+  for `SERVER` commands and ACKs. AgentD neither allocates nor persists it.
+- The host's accepted sequence high-watermark provides live duplicate rejection;
+  it is not a command-result ledger or a journal cursor.
 - The host claim's acknowledged EventId is local deletion permission only.
-- AgentD persists none of these values. It reconstructs them after every
-  reconnect and restart.
+- AgentD persists none of these values. It obtains the server-owned values after
+  every reconnect and restart.
 - Metadata timestamps, host status range, and MANUAL sequences are never used as
   recovery values.
 
@@ -37,28 +39,22 @@ recovery gate and allocator required by both journal ACK forwarding and
 After `SESSION_OPEN`, consume one server synchronization response containing:
 
 1. the server's durably committed journal EventId cursor; and
-2. the maximum recorded SERVER sequence in that durable prefix, when present.
+2. the server's last allocated per-session SERVER operation sequence, when present.
 
-Preserve the exact synchronization item used to authorize any resulting native
-ACK. Scan the local journal strictly after the server cursor through a stable
-tail and find the maximum recorded SERVER sequence in the suffix. Unknown
-records still participate in cursor progression; MANUAL results do not
-participate in SERVER sequence recovery.
-
-Send the unsigned maximum of the prefix and suffix sequence values to
-`CLAIM_SERVER_CONTROL`. The claim atomically fences stale server connections and
-returns exactly two host facts:
+Call `CLAIM_SERVER_CONTROL` to fence stale native connections and obtain the
+host's current admission and retention observations. Do not derive or advance a
+command allocator from either observation. The claim returns exactly two host
+facts:
 
 - accepted SERVER sequence high-watermark; and
 - applied `ACK_JOURNAL` EventId watermark.
 
-Reject or pause only that session when the claim is ambiguous, the host value is
-below the observed floor, the next unsigned sequence is exhausted, the local
-suffix has a required-history gap or corrupt complete record, or the host ACK
-watermark is ahead of the server cursor. A successful claim initializes one
-in-memory allocator at the unsigned successor of the host sequence and makes a
-narrow recovered server-control context available to ACK forwarding and command
-orchestration.
+Pause only that session when the claim is ambiguous, the host has accepted a
+sequence beyond the server's last allocated value, the local journal has a
+required-history gap or corrupt complete record, or the host ACK watermark is
+ahead of the server cursor. A successful claim establishes the current fenced
+native connection; later commands and ACK instructions retain their exact
+server-assigned sequences.
 
 ## Journal Synchronization
 
@@ -68,10 +64,10 @@ orchestration.
 - Interrupted or unacknowledged batches may be resent. Never advance from a
   transient send result.
 - Accept only monotonic acknowledgements issued after durable server commit.
-- When the server cursor is ahead of the host ACK watermark, allocate one SERVER
-  sequence and send one source-aware `ACK_JOURNAL` carrying the exact server
-  authorization envelope. `RECEIVED` proves admission only; observe completion
-  through the journaled result.
+- When the server cursor is ahead of the host ACK watermark, request or consume
+  one server-authorized `ACK_JOURNAL` instruction carrying its stable operation
+  sequence and exact envelope, then make one native delivery attempt. `RECEIVED`
+  proves admission only; observe completion through the journaled result.
 - Do not schedule another ACK solely because uploading that ACK's own
   `COMMAND_RESULT` advanced the server cursor.
 - If the server cursor precedes the retained floor, report an integrity gap and
@@ -82,22 +78,21 @@ orchestration.
 ## Implementation Plan
 
 1. Extend the backward-readable synchronization protocol and transport callback
-   so AgentD receives the durable EventId cursor, optional recorded SERVER
-   sequence maximum, and exact encoded authorization item.
-2. Add failing recovery tests for prefix/suffix maxima, MANUAL exclusion,
-   concurrent tail growth, gaps, corruption, missing results, ambiguous claim,
-   inconsistent host values, unsigned exhaustion, and both claim watermarks.
-3. Implement the stable suffix scan and atomic claim. Expose one bounded,
-   in-memory recovered server-control context rather than separate ACK and
-   command allocators.
+   so AgentD receives the durable EventId cursor, the server's last allocated
+   operation sequence, and exact server-authorized ACK instructions.
+2. Add failing recovery tests for command and journal cursor separation, gaps,
+   corruption, missing results, ambiguous claims, inconsistent host values, and
+   both claim watermarks.
+3. Fence stale native connections through the atomic claim without creating an
+   AgentD command allocator or treating the host watermark as durable history.
 4. Add failing synchronization tests for initial catch-up, reconnect, restart,
    original-byte preservation, page bounds, resend, live tailing, gaps, unknown
    records, completed sessions, and fair multi-session progress.
 5. Implement session streams and bounded journal pumping without any AgentD
    cursor file.
-6. Add failing ACK tests for monotonic server commits, host/server watermark
-   comparison, journaled completion, missing result uncertainty, and feedback
-   suppression. Implement ACK through the recovered context.
+6. Add failing ACK tests for stable server-assigned sequences, monotonic server
+   commits, host/server watermark comparison, one native delivery attempt,
+   journaled completion, missing-result uncertainty, and feedback suppression.
 7. Verify protocol compatibility, AgentD recovery/sync behavior, and a real
    native host before full Maven verification.
 
@@ -105,11 +100,12 @@ orchestration.
 
 - Initial sync, reconnect, and AgentD restart resume strictly after the server's
   durable EventId cursor without persisting AgentD recovery state.
-- The atomic claim uses recorded history only as a consistency floor and returns
-  the authoritative accepted sequence plus applied retention watermark.
-- ACK and later server commands share one recovered allocator and cannot bypass
-  the claim gate.
+- The server durably owns per-session operation sequence allocation; AgentD does
+  not reconstruct an allocator from the journal or host watermark.
+- The atomic claim fences stale native connections and returns admission and
+  retention observations without making either a server cursor.
 - A higher server cursor sends one recovered ACK; a higher host ACK watermark
   pauses only the inconsistent session.
-- Missing results remain unknown, duplicate acknowledgements are harmless, gaps
-  are explicit, and no ACK-result feedback loop is introduced.
+- Every server-authorized ACK receives one native delivery attempt. Missing
+  results remain unknown, duplicate acknowledgements are harmless, gaps are
+  explicit, and no ACK-result feedback loop is introduced.

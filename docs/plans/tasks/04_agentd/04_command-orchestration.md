@@ -20,11 +20,11 @@ from each session journal.
   cursor.
 - `session-host` owns effect execution, SERVER sequence admission, the process
   tree, and durable command-result records.
-- Journal sync owns suffix recovery, `CLAIM_SERVER_CONTROL`, the resulting
-  in-memory SERVER allocator/control context, journal upload, and ACK forwarding.
+- Journal sync owns journal resume, native connection fencing, journal upload,
+  and server-authorized ACK forwarding.
 - This leaf owns command validation, bounded per-session scheduling, exact
-  command-envelope delivery, start routing, and live observation needed to
-  report transient command progress.
+  command-envelope delivery with the server-assigned operation sequence, start
+  routing, and live observation needed to report transient command progress.
 - AgentD persists no command ledger, operation counter, journal cursor, start
   failure file, or host lifecycle fact.
 
@@ -35,28 +35,29 @@ forwarding, server journal projection, or host operation idempotency here.
 
 `START_SESSION` is keyed by the server-issued unique SessionId and CommandId and
 has no native operation sequence. Established-session `INPUT`, `RESIZE`,
-`SIGNAL`, and `TERMINATE` use the one recovered SERVER control context supplied
-by journal sync.
+`SIGNAL`, and `TERMINATE` retain the stable per-session operation sequence
+durably assigned by the server.
 
 Preserve the exact inbound CBOR command item, including future fields, beside
 its typed view. When a command reaches the head of its session lane, validate
-its current local preconditions, allocate one sequence, and send the sequence,
-typed effect, and unchanged envelope to the host. Never reconstruct the
-envelope by re-encoding the typed message.
+its current local preconditions and make one native delivery attempt with the
+server-assigned sequence, typed effect, and unchanged envelope. Never
+reconstruct the envelope by re-encoding the typed message.
 
 An empty native `RECEIVED` is transient admission evidence only. A rejection,
 timeout, queue-capacity failure, missing session, or connection failure may be
 reported as transient delivery state, but successful command completion comes
-only from a durably replicated `COMMAND_RESULT`. An ambiguous delivery is never
-automatically retried; a missing result remains unknown.
+only from a durably replicated `COMMAND_RESULT`. AgentD never retries a native
+delivery after rejection, timeout, ambiguous delivery, reconnect, or a missing
+result; a missing result remains unknown.
 
 ## Scheduling and Isolation
 
 - Commands for one session use a bounded FIFO lane and execute serially.
 - Different sessions may progress concurrently through a shared executor.
-- A lane does not drain until journal sync installs its recovered SERVER
-  context. Reconnect closes the old context and gates new delivery until the new
-  claim succeeds.
+- A lane does not drain until journal sync fences stale native connections.
+  Reconnect closes the old connection and gates new delivery until the new claim
+  succeeds.
 - A full, failed, corrupt, or unreachable session lane does not block another
   lane, heartbeat, or journal upload.
 - Shutdown stops admission and boundedly drains or cancels AgentD work without
@@ -83,9 +84,9 @@ task.
 2. Add bounded per-session FIFO lanes with cross-session concurrency, capacity
    results, recovery gating, reconnect fencing, isolated failure, and safe
    close behavior.
-3. Route established-session commands through journal sync's recovered SERVER
-   context. Cover exact envelopes, monotonic allocation shared with ACK,
-   validation, rejection, timeout, ambiguous delivery, and no automatic replay.
+3. Route established-session commands once with their server-assigned sequences.
+   Cover exact envelopes, monotonic server allocation shared with ACK,
+   validation, rejection, timeout, ambiguous delivery, and no AgentD retry.
 4. Route `START_SESSION` through the existing runtime. Cover collision,
    journaled start outcomes, pre-journal failure-only streams, reconnect until
    durable commit, and diagnostic bounds.
@@ -102,11 +103,11 @@ task.
 
 - Every supported server command is validated and routed to the intended
   session; same-session order and cross-session independence are preserved.
-- Established-session commands and journal ACKs share the one allocator created
-  by the current atomic host claim.
+- Established-session commands and journal ACKs retain sequences from the one
+  durable server allocator; AgentD creates no allocator or retry identity.
 - Exact server envelopes reach native journal results unchanged, and durable
   completion is derived only from replicated journal evidence.
-- Missing results, ambiguous delivery, stale connections, and reconnect never
-  cause automatic replay.
+- Missing results, rejection, ambiguous delivery, stale connections, and
+  reconnect never cause AgentD to repeat a native command.
 - Pre-journal start failure uses only the bounded in-memory journal path, and
   AgentD shutdown never owns or terminates a session host.
