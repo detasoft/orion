@@ -27,6 +27,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         protocol_fixture::control_source_aware(),
     )?;
     fs::write(
+        directory.join("journal-acknowledgement.bin"),
+        protocol_fixture::journal_acknowledgement(),
+    )?;
+    fs::write(
         directory.join("server-sequence-recovery.bin"),
         protocol_fixture::server_sequence_recovery(),
     )?;

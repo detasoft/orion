@@ -8,6 +8,15 @@ public sealed interface ControlResult {
     record Received(long operationSequence) implements ControlResult {
     }
 
+    record JournalAcknowledged(long acknowledgedEventId) implements ControlResult {
+        public JournalAcknowledged {
+            if (acknowledgedEventId == 0 || acknowledgedEventId == -1) {
+                throw new IllegalArgumentException(
+                        "acknowledgedEventId must be between 1 and u64::MAX - 1");
+            }
+        }
+    }
+
     record Rejected(OptionalLong operationSequence, int errorCode, String detail) implements ControlResult {
         public Rejected {
             operationSequence = Objects.requireNonNull(operationSequence, "operationSequence");

@@ -129,10 +129,9 @@ class NativeControlLivePeerTest {
             assertCommandResult(
                     effects.records(), SessionCommandSource.MANUAL, 1, operationPayload(repeatedManualResize));
             long acknowledgedEventId = effects.records().getLast().eventId().value();
-            ControlCommand.AckJournal acknowledgement = new ControlCommand.AckJournal(
-                    2, SessionCommandSource.MANUAL, Optional.empty(), acknowledgedEventId);
-            assertReceived(client.send(endpoint, acknowledgement), 2);
-            awaitCommandResults(sessionDirectory, List.of(2L), 5);
+            ControlCommand.AckJournal acknowledgement = new ControlCommand.AckJournal(acknowledgedEventId);
+            assertThat(client.send(endpoint, acknowledgement))
+                    .isEqualTo(new ControlResult.JournalAcknowledged(acknowledgedEventId));
 
             try (SocketChannel stale = SocketChannel.open(StandardProtocolFamily.UNIX)) {
                 stale.connect(UnixDomainSocketAddress.of(sessionDirectory.resolve("control.sock")));
@@ -154,11 +153,9 @@ class NativeControlLivePeerTest {
             assertThat(host.exitValue()).as(Files.readString(log)).isZero();
 
             JournalReadPage completed = awaitCommandResults(
-                    sessionDirectory, List.of(42L, 1L, 43L, 2L, 3L), 6);
+                    sessionDirectory, List.of(42L, 1L, 43L, 3L), 5);
             assertThat(completed.issue()).isEmpty();
             assertSignal(completed.records(), 3, 9);
-            assertCommandResult(
-                    completed.records(), SessionCommandSource.MANUAL, 2, operationPayload(acknowledgement));
             assertCommandResult(
                     completed.records(), SessionCommandSource.MANUAL, 3, operationPayload(terminate));
         } finally {

@@ -65,12 +65,7 @@ public final class NativeControlCodec {
         if (command instanceof ControlCommand.AckJournal acknowledgement) {
             ByteBuffer effect = payload(8);
             effect.putLong(acknowledgement.acknowledgedEventId());
-            return operationFrame(
-                    7,
-                    acknowledgement.sequence(),
-                    acknowledgement.source(),
-                    acknowledgement.serverCommandEnvelope(),
-                    effect.array());
+            return frame(7, QUERY_SEQUENCE, effect.array());
         }
         if (command instanceof ControlCommand.ClaimServerControl claim) {
             ByteBuffer recovery = payload(Long.BYTES);
@@ -197,6 +192,12 @@ public final class NativeControlCodec {
     }
 
     private static ControlResult received(ControlCommand command, ByteBuffer payload) {
+        if (command instanceof ControlCommand.AckJournal acknowledgement) {
+            if (payload.hasRemaining()) {
+                return rejection(OptionalLong.empty(), payload);
+            }
+            return new ControlResult.JournalAcknowledged(acknowledgement.acknowledgedEventId());
+        }
         if (command.operationSequence().isEmpty()) {
             throw new IllegalArgumentException("RECEIVED response request is invalid");
         }

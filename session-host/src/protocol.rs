@@ -619,7 +619,6 @@ fn validate_operation_effect(message_type: u16, effect: &[u8]) -> Result<(), Enc
                 && u16::from_le_bytes(effect[0..2].try_into().unwrap()) <= 1
                 && u16::from_le_bytes(effect[2..4].try_into().unwrap()) == 0
         }
-        control_message::ACK_JOURNAL => effect.len() == 8,
         _ => {
             return Err(EncodeError::InvalidPayload(
                 "operation control message type is unsupported",
@@ -884,6 +883,16 @@ mod tests {
     }
 
     #[test]
+    fn checked_in_journal_acknowledgement_fixture_is_stable() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("protocol/fixtures/journal-acknowledgement.bin");
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            protocol_fixture::journal_acknowledgement()
+        );
+    }
+
+    #[test]
     fn server_control_claim_payloads_and_fixture_are_stable() {
         let high = (i64::MAX as u64) + 7;
         assert_eq!(
@@ -958,10 +967,6 @@ mod tests {
             (
                 control_message::TERMINATE,
                 concat_slices(&[&0_u16.to_le_bytes(), &0_u16.to_le_bytes()]),
-            ),
-            (
-                control_message::ACK_JOURNAL,
-                ((i64::MAX as u64) + 6).to_le_bytes().to_vec(),
             ),
         ];
 
@@ -1123,33 +1128,6 @@ mod tests {
                 "effect payload",
             );
         }
-    }
-
-    #[test]
-    fn acknowledgement_is_a_source_aware_operation_effect() {
-        let watermark = (i64::MAX as u64) + 1;
-        let encoded = encode_operation_control_payload(
-            control_message::ACK_JOURNAL,
-            OperationSource::Server,
-            Some(&[0x81, 0x07]),
-            &watermark.to_le_bytes(),
-        )
-        .unwrap();
-        let decoded =
-            decode_operation_control_payload(control_message::ACK_JOURNAL, watermark, &encoded)
-                .unwrap();
-        assert_eq!(decoded.effect, watermark.to_le_bytes());
-    }
-
-    #[test]
-    fn acknowledgement_effect_must_contain_one_event_id() {
-        assert_invalid_operation_payload(
-            control_message::ACK_JOURNAL,
-            OperationSource::Server,
-            Some(&[0x81, 0x07]),
-            &[0_u8; 7],
-            "effect payload",
-        );
     }
 
     #[test]
@@ -1443,14 +1421,12 @@ pub mod protocol_fixture {
                 &(-1_i32).to_le_bytes(),
             ]),
             concat_parts(&[&0_u16.to_le_bytes(), &0_u16.to_le_bytes()]),
-            ((i64::MAX as u64) + 5).to_le_bytes().to_vec(),
         ];
         let message_types = [
             control_message::INPUT,
             control_message::RESIZE,
             control_message::SIGNAL,
             control_message::TERMINATE,
-            control_message::ACK_JOURNAL,
         ];
         let mut frames = Vec::new();
         for source in [OperationSource::Server, OperationSource::Manual] {
@@ -1481,6 +1457,27 @@ pub mod protocol_fixture {
             }
         }
         frames.concat()
+    }
+
+    pub fn journal_acknowledgement() -> Vec<u8> {
+        let event_id = u64::MAX - 1;
+        let request = encode_control_frame(ControlFrame {
+            message_type: control_message::ACK_JOURNAL,
+            payload_schema_version: 1,
+            flags: 0,
+            sequence: 1,
+            payload: &event_id.to_le_bytes(),
+        })
+        .unwrap();
+        let response = encode_control_frame(ControlFrame {
+            message_type: control_message::RECEIVED,
+            payload_schema_version: 1,
+            flags: 0,
+            sequence: 1,
+            payload: &[],
+        })
+        .unwrap();
+        [request, response].concat()
     }
 
     pub fn server_sequence_recovery() -> Vec<u8> {

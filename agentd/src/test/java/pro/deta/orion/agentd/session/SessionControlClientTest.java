@@ -99,6 +99,37 @@ class SessionControlClientTest {
     }
 
     @Test
+    void acknowledgesJournalCursorWithoutAnOperationSequence() throws Exception {
+        try (ServerSocketChannel server = listen("journal-ack.sock")) {
+            Future<Void> peer = serve(server, request ->
+                    NativeControlCodec.frame(0x8000, sequence(request), new byte[0]));
+            ControlCommand.AckJournal acknowledgement = new ControlCommand.AckJournal(73);
+
+            ControlResult result = new SessionControlClient(Duration.ofSeconds(2))
+                    .send(endpoint("journal-ack.sock"), acknowledgement);
+
+            assertThat(result).isEqualTo(new ControlResult.JournalAcknowledged(73));
+            await(peer);
+        }
+    }
+
+    @Test
+    void malformedJournalAcknowledgementResponseIsAmbiguous() {
+        ControlTransport transport = (endpoint, request, deadline) -> {
+            byte[] response = NativeControlCodec.frame(0x8000, sequence(request), new byte[0]);
+            response[28] ^= 1;
+            return new ControlTransport.Exchange.Response(response);
+        };
+        SessionControlClient client = new SessionControlClient(
+                Duration.ofSeconds(1),
+                endpoint -> new ControlTransportFactory.Selection.Available(transport));
+
+        ControlResult result = client.send(endpoint("unused.sock"), new ControlCommand.AckJournal(73));
+
+        assertFailure(result, ControlResult.FailureKind.AMBIGUOUS_DELIVERY, OptionalLong.empty());
+    }
+
+    @Test
     void doesNotRetryAnOperationAfterUncertainDelivery() throws Exception {
         try (ServerSocketChannel server = listen("no-retry.sock")) {
             AtomicInteger connections = new AtomicInteger();

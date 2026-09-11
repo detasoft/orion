@@ -94,17 +94,34 @@ class NativeControlCodecTest {
                 4,
                 SessionCommandSource.MANUAL,
                 concatHex("00000000"));
-        assertOperation(new ControlCommand.AckJournal(
-                SEQUENCE, SessionCommandSource.SERVER, SERVER_ENVELOPE, -2), 7,
-                SessionCommandSource.SERVER,
-                concatHex("feffffffffffffff"));
+    }
+
+    @Test
+    void matchesSharedEventIdOnlyJournalAcknowledgementFixture() throws IOException {
+        List<byte[]> frames = splitFrames(Files.readAllBytes(Path.of(
+                "../session-host/protocol/fixtures/journal-acknowledgement.bin")));
+        assertThat(frames).hasSize(2);
+        ControlCommand.AckJournal acknowledgement = new ControlCommand.AckJournal(-2);
+        byte[] encoded = codec.encode(acknowledgement);
+        ByteBuffer frame = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+
+        assertThat(encoded).isEqualTo(frames.getFirst());
+        assertThat(Short.toUnsignedInt(frame.getShort(8))).isEqualTo(7);
+        assertThat(Short.toUnsignedInt(frame.getShort(10))).isEqualTo(1);
+        assertThat(frame.getLong(16)).isEqualTo(1);
+        assertThat(frame.getInt(24)).isEqualTo(Long.BYTES);
+        assertThat(frame.getLong(NativeControlCodec.HEADER_LENGTH)).isEqualTo(-2);
+        assertThat(codec.decode(acknowledgement, frames.getLast()))
+                .isEqualTo(new ControlResult.JournalAcknowledged(-2));
+        assertThatIllegalArgumentException().isThrownBy(() -> new ControlCommand.AckJournal(0));
+        assertThatIllegalArgumentException().isThrownBy(() -> new ControlCommand.AckJournal(-1));
     }
 
     @Test
     void matchesEveryRequestInTheSharedNativeFixture() throws IOException {
         List<byte[]> frames = splitFrames(Files.readAllBytes(Path.of(
                 "../session-host/protocol/fixtures/control-source-aware.bin")));
-        assertThat(frames).hasSize(10);
+        assertThat(frames).hasSize(8);
 
         for (byte[] frame : frames) {
             ByteBuffer header = ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN);
@@ -122,7 +139,7 @@ class NativeControlCodecTest {
 
             assertThat(sequence).isNegative();
             assertThat(sequence).isNotEqualTo(-1);
-            if (source == SessionCommandSource.SERVER && type != 7) {
+            if (source == SessionCommandSource.SERVER) {
                 assertThat(envelope).contains((byte) 0x66, (byte) 'f', (byte) 'u', (byte) 't');
             }
             assertThat(codec.encode(command(type, sequence, source, envelope, effect))).isEqualTo(frame);
@@ -301,7 +318,6 @@ class NativeControlCodecTest {
                 decoded.getShort();
                 yield new ControlCommand.Terminate(sequence, source, serverEnvelope, mode);
             }
-            case 7 -> new ControlCommand.AckJournal(sequence, source, serverEnvelope, decoded.getLong());
             default -> throw new IllegalArgumentException("unexpected fixture message type " + type);
         };
     }

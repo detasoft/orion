@@ -1100,7 +1100,6 @@ fn is_operation_control(message_type: u16) -> bool {
             | control_message::RESIZE
             | control_message::SIGNAL
             | control_message::TERMINATE
-            | control_message::ACK_JOURNAL
     )
 }
 
@@ -1113,8 +1112,7 @@ fn handle_request(
         control_message::INPUT
         | control_message::RESIZE
         | control_message::SIGNAL
-        | control_message::TERMINATE
-        | control_message::ACK_JOURNAL => {
+        | control_message::TERMINATE => {
             if frame.payload_schema_version != 3 {
                 Some(response_error(
                     frame.sequence,
@@ -1124,6 +1122,21 @@ fn handle_request(
             } else {
                 unreachable!("operation controls are handled by serve_connection")
             }
+        }
+        control_message::ACK_JOURNAL => {
+            let result = if frame.payload_schema_version != 1 {
+                Err((
+                    ERROR_UNSUPPORTED_SCHEMA,
+                    "ACK_JOURNAL requires schema 1".to_owned(),
+                ))
+            } else {
+                apply_journal_acknowledgement(&frame.payload, state)
+                    .map_err(|detail| (ERROR_INVALID_REQUEST, detail))
+            };
+            Some(match result {
+                Ok(()) => (control_message::RECEIVED, frame.sequence, Vec::new()),
+                Err((code, detail)) => response_error(frame.sequence, code, &detail),
+            })
         }
         control_message::STATUS => {
             if frame.payload_schema_version != 1 {
@@ -1412,7 +1425,6 @@ fn execute_operation_effect(
             }
         }
         control_message::TERMINATE => apply_terminate(effect, state),
-        control_message::ACK_JOURNAL => apply_journal_acknowledgement(effect, state),
         _ => Err("unsupported operation control".to_owned()),
     }
 }
@@ -2259,14 +2271,14 @@ mod tests {
     }
 
     #[test]
-    fn command_result_append_failure_does_not_authorize_server_replay() {
+    fn journal_acknowledgement_does_not_enter_command_admission_or_result_paths() {
         let directory = std::env::temp_dir().join(format!(
-            "session-host-command-result-failure-{}-{}",
+            "session-host-journal-ack-{}-{}",
             std::process::id(),
             epoch_millis().unwrap()
         ));
         let options = SessionOptions {
-            session_id: "command-result-failure".to_owned(),
+            session_id: "journal-ack".to_owned(),
             start_command_id: "command.start".to_owned(),
             session_dir: directory.clone(),
             cwd: PathBuf::from("/tmp"),
@@ -2306,31 +2318,18 @@ mod tests {
             exit_signal: -1,
         }));
         let sequence = 42;
-        let payload = protocol::encode_operation_control_payload(
-            control_message::ACK_JOURNAL,
-            protocol::OperationSource::Server,
-            Some(&[0x80]),
-            &final_event_id.to_le_bytes(),
-        )
-        .unwrap();
         let frame = OwnedControlFrame {
             message_type: control_message::ACK_JOURNAL,
-            payload_schema_version: 3,
+            payload_schema_version: 1,
             sequence,
-            payload,
+            payload: final_event_id.to_le_bytes().to_vec(),
         };
-        let (mut host_stream, mut client_stream) = UnixStream::pair().unwrap();
 
-        handle_operation(&mut host_stream, &frame, 1, &state).unwrap();
-        let received = host::read_control_frame(&mut client_stream)
-            .unwrap()
-            .unwrap();
-        assert_eq!(received.message_type, control_message::RECEIVED);
-        assert_eq!(received.sequence, sequence);
-        assert!(received.payload.is_empty());
+        let received = handle_request(&frame, 1, &state).unwrap();
+        assert_eq!(received, (control_message::RECEIVED, sequence, Vec::new()));
         {
             let state = lock_state(&state).unwrap();
-            assert_eq!(state.accepted_sequence_high_watermark, Some(sequence));
+            assert_eq!(state.accepted_sequence_high_watermark, None);
             assert_eq!(
                 state.acknowledgement.acknowledged_event_id(),
                 Some(final_event_id)
@@ -2341,21 +2340,14 @@ mod tests {
             journal_before_operation
         );
 
-        handle_operation(&mut host_stream, &frame, 1, &state).unwrap();
-        let rejected = host::read_control_frame(&mut client_stream)
-            .unwrap()
-            .unwrap();
-        assert_eq!(rejected.message_type, control_message::RECEIVED);
-        assert_eq!(rejected.sequence, sequence);
-        assert_eq!(host::u32_at(&rejected.payload[0..4]), ERROR_INVALID_REQUEST);
+        let repeated = handle_request(&frame, 1, &state).unwrap();
+        assert_eq!(repeated, (control_message::RECEIVED, sequence, Vec::new()));
         assert_eq!(
             fs::read(directory.join("00000001.cbor")).unwrap(),
             journal_before_operation
         );
 
         assert!(libc::WIFEXITED(wait_for_child(child_pid).unwrap()));
-        drop(host_stream);
-        drop(client_stream);
         drop(state);
         fs::remove_dir_all(directory).unwrap();
     }

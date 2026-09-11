@@ -103,13 +103,12 @@ response-correlation values and every valid manual command executes. Input IDs
 remain journal data and do not provide another deduplication mechanism. The
 protocol must not expose Unix-domain-socket or named-pipe details.
 
-The implemented schema-1 `CLAIM_SERVER_CONTROL` and source-aware
-`ACK_JOURNAL` contracts are superseded by the active AgentD
-[command-orchestration](../04_agentd/04_command-orchestration.md) and
-[journal-sync](../04_agentd/02_journal-sync.md) tasks. Command orchestration will
-own a sequence-independent connection fence. Journal sync will replace ACK with
-an EventId-only monotonic retention control that updates the existing sidecar
-without appending `COMMAND_RESULT`.
+The implemented `ACK_JOURNAL` is an EventId-only monotonic retention control. It
+updates the existing sidecar without a command source, operation sequence,
+envelope, or journaled `COMMAND_RESULT`. The schema-1 `CLAIM_SERVER_CONTROL`
+contract is still superseded by the active AgentD
+[command-orchestration](../04_agentd/04_command-orchestration.md) task, which
+will own a sequence-independent connection fence.
 
 ### Session Storage
 

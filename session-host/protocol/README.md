@@ -192,10 +192,10 @@ The hard control payload maximum is 16 MiB. CRC fields use CRC-32C
 (Castagnoli), reflected polynomial `0x82f63b78`, initial value `0xffffffff`,
 and final XOR `0xffffffff`.
 
-The control sequence is the one sequence used to correlate a response and to
-identify an operation. `u64::MAX` is reserved as the response sequence when a
-request has no associated sequence. Source-aware operation controls use the
-sequence from this header and the command envelope described below.
+The control sequence correlates a response. For source-aware effect commands it
+also identifies the operation. `u64::MAX` is reserved as the response sequence
+when a request has no associated sequence. EventId-only `ACK_JOURNAL` uses the
+header for live request/response correlation only.
 
 The host closes the connection after bad magic, framing version, length, or
 checksum. A semantic error receives `ERROR` or, for an operation with a known
@@ -212,7 +212,7 @@ Unknown request types receive `ERROR_UNSUPPORTED_MESSAGE`.
 | `0x0004` | `TERMINATE` | v3 source-aware wrapper and termination |
 | `0x0005` | `STATUS` | v1 empty payload |
 | `0x0006` | `APPEND_EVENT` | v1 producer event UUID and typed payload |
-| `0x0007` | `ACK_JOURNAL` | v3 source-aware wrapper and journal event ID |
+| `0x0007` | `ACK_JOURNAL` | v1 little-endian u64 journal EventId |
 | `0x0008` | `LIST_PROCESSES` | v1 empty payload |
 | `0x0009` | `CLAIM_SERVER_CONTROL` | v1 recorded SERVER sequence floor |
 
@@ -234,7 +234,9 @@ identifier, but that identifier is not duplicated in the native operation
 wrapper. Only server controls check and advance the sequence high-water mark;
 manual sequences may repeat and do not change server admission. The envelope
 remains opaque. The 16 MiB maximum applies to the complete wrapped payload.
-`control-source-aware.bin` freezes both sources for the five operation controls.
+`control-source-aware.bin` freezes both sources for the four operation controls.
+`journal-acknowledgement.bin` freezes the EventId-only ACK and its durable
+success response.
 The live host rejects operation schemas 1 and 2. Schema 4 is accepted only for
 addressed `SIGNAL`; it does not introduce a second execution path.
 
@@ -307,24 +309,16 @@ host-assigned journal event ID and no producer UUID deduplication semantics.
 The current Unix host rejects `APPEND_EVENT` with an unsupported-message error;
 ordered harness ingress is not implemented yet.
 
-`ACK_JOURNAL` is recorded as `COMMAND_RESULT` using its source, operation
-sequence, and exact source envelope: the opaque server envelope for `SERVER`,
-or the complete operation payload for `MANUAL`. Its effect is the supplied
-journal event ID. Higher-level AgentD server forwarding must send it only after
-the server confirms durable storage through that event ID; the shared Java
-command model and codec already support ACK. The host
-first durably publishes the monotonic
-`control-retention-state` sidecar and only then allows newly covered closed
-segments to be deleted. A repeated or lower value does not lower the watermark.
-The sidecar contains only `stateVersion: 1` and `acknowledgedEventId`; it is
-local deletion permission, never a replication cursor or server authority.
-Zero and values beyond the current logical journal tail are invalid.
-
-This is the currently implemented contract. The active AgentD
-[journal-sync task](../../docs/plans/tasks/04_agentd/02_journal-sync.md) replaces
-it with an EventId-only monotonic retention control: no command source, operation
-sequence, envelope, or journaled `COMMAND_RESULT`. Until that task is implemented,
-this section continues to describe the accepted native bytes.
+`ACK_JOURNAL` has one eight-byte little-endian EventId payload. It has no command
+source, operation sequence, command envelope, or journaled `COMMAND_RESULT`.
+Higher-level AgentD journal sync sends it only after the server confirms durable
+storage through that EventId. The host first durably publishes the monotonic
+`control-retention-state` sidecar, then applies retention, and only then reports
+success. A repeated or lower value is a successful no-op and never lowers the
+watermark. The sidecar contains only `stateVersion: 1` and
+`acknowledgedEventId`; it is local deletion permission, never a replication
+cursor or server authority. Zero, `u64::MAX`, and values beyond the current
+logical journal tail are invalid.
 
 `CLAIM_SERVER_CONTROL` is the atomic recovery barrier for a stateless AgentD.
 Its fixed eight-byte little-endian payload contains the highest
@@ -342,14 +336,16 @@ server sequence recovery.
 
 ## Control Responses
 
-Successful operation controls, including `ACK_JOURNAL`, receive a transient
-`RECEIVED` response after admission and before the effect is applied. The
-response header carries the operation sequence and its payload is empty. If an
-operation cannot be admitted, the response is `RECEIVED` with the same
-sequence and an error payload. `ERROR` uses the same response-header sequence;
-when no sequence can be associated with the request it is `u64::MAX` (the
-logical value `-1`). `STATUS` returns a state snapshot and echoes its control
-sequence in the response header:
+Successful operation controls receive a transient `RECEIVED` response after
+admission and before the effect is applied. The response header carries the
+operation sequence and its payload is empty. If an operation cannot be
+admitted, the response is `RECEIVED` with the same sequence and an error
+payload. Successful `ACK_JOURNAL` also receives empty `RECEIVED`, but only after
+the retention sidecar has been durably advanced; its echoed header sequence is
+correlation only. ACK validation failures use `ERROR`. `ERROR` uses the same
+response-header sequence; when no sequence can be associated with the request
+it is `u64::MAX` (the logical value `-1`). `STATUS` returns a state snapshot and
+echoes its control sequence in the response header:
 
 | ID | Name | Payload schema |
 | ---: | --- | --- |

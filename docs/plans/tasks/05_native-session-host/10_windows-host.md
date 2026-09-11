@@ -17,9 +17,10 @@ control behavior.
 - Replace the unsupported platform stub with ConPTY execution and named-pipe
   control. Keep the host and its child independent of the launching AgentD.
 - Reuse the common journal and metadata contracts, in-memory sequence
-  admission, transient `RECEIVED`, and journaled `COMMAND_RESULT`. All operation
-  controls, including `ACK_JOURNAL`, use the source-aware operation wrapper;
-  response framing uses schema 1.
+  admission, transient `RECEIVED`, and journaled `COMMAND_RESULT`. Effect
+  commands use the source-aware operation wrapper. `ACK_JOURNAL` remains the
+  EventId-only retention control and never appends `COMMAND_RESULT`; response
+  framing uses schema 1.
 - Own the Windows child process tree and terminal handles through exit and
   cleanup. Execute each requested signal/termination effect once; keep grace
   periods, escalation, and recovery policy outside the host.

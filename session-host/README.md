@@ -119,8 +119,8 @@ oldest remaining segment.
 
 ## Session Controls
 
-Established-session `INPUT`, `RESIZE`, `SIGNAL`, `TERMINATE`, and `ACK_JOURNAL`
-requests use the source-aware operation payload. A control client supplies an
+Established-session `INPUT`, `RESIZE`, `SIGNAL`, and `TERMINATE` requests use
+the source-aware operation payload. A control client supplies an
 explicit `SERVER` or `MANUAL` source, a nonzero sequence in the frame header,
 and the typed effect bytes. `SERVER` also supplies the exact opaque server CBOR
 command item, which the host never decodes or re-encodes. A server sequence at
@@ -170,17 +170,16 @@ later suffix in the still-running host journal. Recorded sequences do not
 reveal admissions whose result is pending or missing; sequence allocation on
 reconnect remains an AgentD integration concern, and manual sequences are never
 inputs to that recovery. The host does not reconstruct a failed incarnation.
-After the server durably commits a complete journal prefix, a client may send
-its event ID through a `SERVER` `ACK_JOURNAL` operation. A delivered manual ACK
-has the normal retention effect but carries no server durability authority by
-itself.
-The host atomically persists that monotonic watermark beside the journal before
-requesting deletion. The sidecar
+After the server durably commits a complete journal prefix, AgentD may send its
+event ID through `ACK_JOURNAL`. The request carries only the EventId; it has no
+command source, operation sequence, or server command envelope. The host
+atomically persists that monotonic watermark beside the journal before
+reporting success and requesting deletion. The sidecar
 is local deletion permission only: it is not an AgentD recovery cursor or
-evidence that the server committed anything by itself. ACK follows the ordinary
-operation result path and creates a `COMMAND_RESULT` when the journal is writable.
+evidence that the server committed anything by itself. Repeated and lower ACKs
+are harmless, and ACK never creates a `COMMAND_RESULT` or other journal record.
 
-The Java control client uses the same source-aware operation wrapper and
-response model, including `ACK_JOURNAL`. See the
+The Java control client uses the same source-aware operation wrapper for effect
+commands and the EventId-only acknowledgement model for `ACK_JOURNAL`. See the
 [integration contract](../docs/plans/tasks/04_agentd/03_session-host-contract-alignment/TASK.md)
 for the remaining AgentD orchestration work.

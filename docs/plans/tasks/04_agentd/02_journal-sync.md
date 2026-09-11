@@ -2,10 +2,6 @@
 
 Status: todo
 
-- Owner: codex, session command-orchestration-recovery-d8e4, branch
-  `codex/agentd-journal-sync-d8e4`, worktree
-  `.worktrees/agentd-journal-sync-d8e4`, started 2026-09-11 10:56 Europe/Amsterdam.
-
 ## Goal
 
 Resume each session from the server's durable journal state, stream original

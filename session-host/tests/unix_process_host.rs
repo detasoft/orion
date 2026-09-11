@@ -779,31 +779,29 @@ fn claim_fences_older_server_connections_and_reports_watermarks() {
         .last()
         .unwrap()
         .event_id;
-    send_journal_ack(
-        &mut older,
+    assert_received(
+        &send_journal_ack(&mut older, accepted_sequence + 1, acknowledged_event_id),
         accepted_sequence + 1,
-        acknowledged_event_id,
     );
-    wait_for_command_result(host.directory(), accepted_sequence + 1);
 
     let mut claiming = connect(host.directory());
     let claimed = request(
         &mut claiming,
         CLAIM_SERVER_CONTROL,
         41,
-        &(accepted_sequence + 1).to_le_bytes(),
+        &accepted_sequence.to_le_bytes(),
     );
     assert_eq!(claimed.message_type, SERVER_CONTROL_CLAIMED);
     assert_eq!(claimed.sequence, 41);
     assert_eq!(claimed.payload.len(), 16);
-    assert_eq!(u64_at(&claimed.payload[0..8]), accepted_sequence + 1);
+    assert_eq!(u64_at(&claimed.payload[0..8]), accepted_sequence);
     assert_eq!(u64_at(&claimed.payload[8..16]), acknowledged_event_id);
 
     let stale_claim = request(
         &mut older,
         CLAIM_SERVER_CONTROL,
         42,
-        &(accepted_sequence + 1).to_le_bytes(),
+        &accepted_sequence.to_le_bytes(),
     );
     assert_eq!(stale_claim.message_type, control_message::ERROR);
     assert_eq!(stale_claim.sequence, 42);
@@ -983,22 +981,7 @@ fn interleaves_sources_and_executes_every_repeated_manual_delivery() {
         None,
         &reconnect_effect,
     );
-    let manual_ack_effect = acknowledged_event_id.to_le_bytes();
-    let manual_ack_payload = protocol::encode_operation_control_payload(
-        control_message::ACK_JOURNAL,
-        protocol::OperationSource::Manual,
-        None,
-        &manual_ack_effect,
-    )
-    .unwrap();
-    send_operation_from(
-        &mut second,
-        control_message::ACK_JOURNAL,
-        5,
-        protocol::OperationSource::Manual,
-        None,
-        &manual_ack_effect,
-    );
+    assert_received(&send_journal_ack(&mut second, 5, acknowledged_event_id), 5);
     let manual_terminate_effect = [1, 0, 0, 0];
     let manual_terminate_payload = protocol::encode_operation_control_payload(
         control_message::TERMINATE,
@@ -1063,7 +1046,6 @@ fn interleaves_sources_and_executes_every_repeated_manual_delivery() {
             (protocol::OperationSource::Manual.wire_code(), 3),
             (protocol::OperationSource::Manual.wire_code(), 4),
             (protocol::OperationSource::Manual.wire_code(), 1),
-            (protocol::OperationSource::Manual.wire_code(), 5),
             (protocol::OperationSource::Manual.wire_code(), 6),
         ]
     );
@@ -1078,7 +1060,6 @@ fn interleaves_sources_and_executes_every_repeated_manual_delivery() {
     for (sequence, expected_envelope) in [
         (3, manual_input_payload.as_slice()),
         (4, manual_signal_payload.as_slice()),
-        (5, manual_ack_payload.as_slice()),
         (6, manual_terminate_payload.as_slice()),
     ] {
         let result = journal.events.iter().find(|event| {
@@ -1304,26 +1285,26 @@ fn durable_acknowledgement_controls_retention() {
         b"server-envelope-resize-11",
         &resize,
     );
+    wait_for_command_result(host.directory(), 11);
 
-    send_journal_ack(&mut stream, 12, 0);
-    wait_for_command_result(host.directory(), 12);
-    send_journal_ack(&mut stream, 13, u64::MAX);
-    wait_for_command_result(host.directory(), 13);
+    assert_eq!(send_journal_ack(&mut stream, 12, 0).message_type, control_message::ERROR);
+    assert_eq!(
+        send_journal_ack(&mut stream, 13, u64::MAX).message_type,
+        control_message::ERROR,
+    );
 
     wait_for_compressed_segment(host.directory());
     let segment_count_before = journal_file_count(host.directory());
     assert!(segment_count_before > 1);
 
-    send_journal_ack(&mut stream, 14, first_result_id);
-    wait_for_command_result(host.directory(), 14);
+    assert_received(&send_journal_ack(&mut stream, 14, first_result_id), 14);
     assert_eq!(
         fs::read_to_string(host.directory().join(STATE_FILE_NAME)).unwrap(),
         format!(r#"{{"stateVersion":1,"acknowledgedEventId":{first_result_id}}}"#),
     );
     wait_for_journal_file_count_below(host.directory(), segment_count_before);
 
-    send_journal_ack(&mut stream, 15, first_result_id - 1);
-    wait_for_command_result(host.directory(), 15);
+    assert_received(&send_journal_ack(&mut stream, 15, first_result_id - 1), 15);
 
     let stale = operation_request(
         &mut stream,
@@ -1348,6 +1329,10 @@ fn durable_acknowledgement_controls_retention() {
             .iter()
             .all(|event| event.event_type != control_message::ACK_JOURNAL)
     );
+    assert!(result.events.iter().all(|event| {
+        event.event_type != event_type::COMMAND_RESULT
+            || !matches!(u64_at(&event.payload[2..10]), 12..=15)
+    }));
     let metadata = fs::read_to_string(host.directory().join("metadata")).unwrap();
     assert!(!metadata.contains("acknowledg"));
 
@@ -1607,7 +1592,10 @@ fn blocked_pty_input_does_not_block_admission_on_another_connection() {
     assert_eq!(status.message_type, control_message::STATUS_RESPONSE);
     let latest_event_id = u64_at(&status.payload[36..44]);
     let mut acknowledgement_stream = connect(host.directory());
-    send_journal_ack(&mut acknowledgement_stream, 2, latest_event_id);
+    assert_received(
+        &send_journal_ack(&mut acknowledgement_stream, 2, latest_event_id),
+        2,
+    );
 
     let input = protocol::pty_input_payload([0x62; 16], &vec![b'x'; 1024 * 1024]).unwrap();
     let pending = operation_request(
@@ -1622,7 +1610,6 @@ fn blocked_pty_input_does_not_block_admission_on_another_connection() {
     kill_recorded_child(host.directory());
     input_thread.join().unwrap();
     wait_for_command_result(host.directory(), 1);
-    wait_for_command_result(host.directory(), 2);
     drop(acknowledgement_stream);
     assert!(host.wait().success());
     let result = journal_reader::read_after(host.directory(), latest_event_id).unwrap();
@@ -1967,8 +1954,7 @@ fn force_terminate_accelerates_an_active_graceful_shutdown() {
         })
         .unwrap()
         .event_id;
-    send_journal_ack(&mut stream, 2, graceful_result_id);
-    wait_for_command_result(host.directory(), 2);
+    assert_received(&send_journal_ack(&mut stream, 2, graceful_result_id), 2);
 
     let started = Instant::now();
     send_operation(
@@ -2409,14 +2395,14 @@ fn send_operation_from(
     assert_received(&response, operation_sequence);
 }
 
-fn send_journal_ack(stream: &mut UnixStream, operation_sequence: u64, event_id: u64) {
-    send_operation(
+fn send_journal_ack(stream: &mut UnixStream, correlation_sequence: u64, event_id: u64) -> OwnedControlFrame {
+    request_with_schema(
         stream,
         control_message::ACK_JOURNAL,
-        operation_sequence,
-        &[0x81, 0x07],
+        1,
+        correlation_sequence,
         &event_id.to_le_bytes(),
-    );
+    )
 }
 
 fn request_with_schema(

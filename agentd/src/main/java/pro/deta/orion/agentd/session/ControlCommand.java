@@ -98,22 +98,12 @@ public sealed interface ControlCommand {
         }
     }
 
-    record AckJournal(
-            long sequence,
-            SessionCommandSource source,
-            Optional<ProtocolBytes> serverCommandEnvelope,
-            long acknowledgedEventId
-    ) implements ControlCommand {
+    record AckJournal(long acknowledgedEventId) implements ControlCommand {
         public AckJournal {
-            serverCommandEnvelope = requireOperation(sequence, source, serverCommandEnvelope);
-            if (acknowledgedEventId == 0) {
-                throw new IllegalArgumentException("acknowledgedEventId must be non-zero");
+            if (acknowledgedEventId == 0 || acknowledgedEventId == -1) {
+                throw new IllegalArgumentException(
+                        "acknowledgedEventId must be between 1 and u64::MAX - 1");
             }
-        }
-
-        @Override
-        public OptionalLong operationSequence() {
-            return OptionalLong.of(sequence);
         }
     }
 

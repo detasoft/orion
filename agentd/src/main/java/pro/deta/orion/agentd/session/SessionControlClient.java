@@ -46,7 +46,7 @@ public final class SessionControlClient {
             ControlResult decoded = new NativeControlCodec().decode(command, response.frame());
             if (decoded instanceof ControlResult.Failed failure
                     && failure.kind() == ControlResult.FailureKind.FRAMING
-                    && command.operationSequence().isPresent()) {
+                    && mayHaveApplied(command)) {
                 return failed(command, ControlResult.FailureKind.AMBIGUOUS_DELIVERY, failure.detail());
             }
             return decoded;
@@ -56,6 +56,11 @@ public final class SessionControlClient {
                 ? ControlResult.FailureKind.AMBIGUOUS_DELIVERY
                 : failure.kind();
         return failed(command, kind, failure.detail());
+    }
+
+    private static boolean mayHaveApplied(ControlCommand command) {
+        return command.operationSequence().isPresent()
+                || command instanceof ControlCommand.AckJournal;
     }
 
     private static ControlResult failed(
