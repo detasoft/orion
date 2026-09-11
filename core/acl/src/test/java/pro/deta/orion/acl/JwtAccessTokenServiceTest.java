@@ -16,12 +16,137 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class JwtAccessTokenServiceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-09-02T21:00:00Z"), ZoneOffset.UTC);
+
+    @Test
+    void issuesPurposeBoundAccessTokenWithCompleteTimeAndIdentityClaims() throws Exception {
+        JwtAccessTokenService service = new JwtAccessTokenService(
+                TestIdentity.single("server-signing-v1"), CLOCK);
+
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+
+        String payload = payload(token.value());
+        assertThat(payload)
+                .contains("\"iss\":\"orion\"")
+                .contains("\"aud\":\"orion\"")
+                .contains("\"sub\":\"alice\"")
+                .contains("\"purpose\":\"orion-access\"")
+                .contains("\"iat\":1788382800")
+                .contains("\"nbf\":1788382800")
+                .contains("\"exp\":1788383400");
+        UUID.fromString(stringClaim(payload, "jti"));
+    }
+
+    @Test
+    void rejectsTokenWithoutAudience() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        String token = signedToken(
+                identity,
+                "{\"iss\":\"orion\",\"sub\":\"alice\",\"purpose\":\"orion-access\","
+                        + "\"jti\":\"1fc784e3-3238-4279-8627-d8a2e64bc17f\","
+                        + "\"iat\":1788382800,\"nbf\":1788382800,\"exp\":1788383400}");
+
+        assertThat(service.verify(token))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT audience is invalid"));
+    }
+
+    @Test
+    void rejectsExpirationBeyondShortLivedTokenLimit() throws Exception {
+        JwtAccessTokenService service = new JwtAccessTokenService(
+                TestIdentity.single("server-signing-v1"), CLOCK);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.issue("alice", 3_601))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Token expiration exceeds 3600 seconds");
+    }
+
+    @Test
+    void rejectsTokenWithoutAccessPurpose() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        String token = signedToken(identity, validPayload().replace(
+                ",\"purpose\":\"orion-access\"", ""));
+
+        assertThat(service.verify(token))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT purpose is invalid"));
+    }
+
+    @Test
+    void rejectsTokenWithoutValidTokenId() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        String token = signedToken(identity, validPayload().replace(
+                "1fc784e3-3238-4279-8627-d8a2e64bc17f", "not-a-uuid"));
+
+        assertThat(service.verify(token))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT token id is invalid"));
+    }
+
+    @Test
+    void rejectsTokenWithoutIssuedAtOrNotBefore() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        String withoutIssuedAt = signedToken(identity, validPayload().replace(
+                ",\"iat\":1788382800", ""));
+        String withoutNotBefore = signedToken(identity, validPayload().replace(
+                ",\"nbf\":1788382800", ""));
+
+        assertThat(service.verify(withoutIssuedAt))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT issued-at is required"));
+        assertThat(service.verify(withoutNotBefore))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT not-before is required"));
+    }
+
+    @Test
+    void rejectsSignedTokenWhoseLifetimeExceedsLimit() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        String token = signedToken(identity, validPayload().replace(
+                "\"exp\":1788383400", "\"exp\":1788386401"));
+
+        assertThat(service.verify(token))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT lifetime exceeds 3600 seconds"));
+    }
+
+    @Test
+    void rejectsTokenThatExpiresBeforeItBecomesActive() throws Exception {
+        TestIdentity identity = TestIdentity.single("server-signing-v1");
+        JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
+        String token = signedToken(identity, validPayload()
+                .replace("\"nbf\":1788382800", "\"nbf\":1788383500"));
+
+        assertThat(service.verify(token))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
+                        "JWT time range is invalid"));
+    }
+
+    @Test
+    void returnsTokenIdInVerifiedIdentity() throws Exception {
+        JwtAccessTokenService service = new JwtAccessTokenService(
+                TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
+
+        JwtAccessTokenService.VerificationResult result = service.verify(token.value());
+
+        assertThat(result).isInstanceOf(JwtAccessTokenService.VerificationResult.Success.class);
+        JwtAccessTokenService.VerificationResult.Success success =
+                (JwtAccessTokenService.VerificationResult.Success) result;
+        assertThat(success.tokenId())
+                .isEqualTo(stringClaim(payload(token.value()), "jti"));
+    }
 
     @Test
     void usesActiveMaterialAliasAsKid() throws Exception {
@@ -31,8 +156,7 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
 
         assertThat(header(token.value())).contains("\"kid\":\"server-signing-v2\"");
-        assertThat(service.verify(token.value()))
-                .isEqualTo(JwtAccessTokenService.VerificationResult.success("alice"));
+        assertVerified(service, token.value(), "alice", null);
     }
 
     @Test
@@ -43,8 +167,7 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
 
         assertThat(header(token.value())).contains("\"kid\":\"server-\\\"signing\\\\v2\"");
-        assertThat(service.verify(token.value()))
-                .isEqualTo(JwtAccessTokenService.VerificationResult.success("alice"));
+        assertVerified(service, token.value(), "alice", null);
     }
 
     @Test
@@ -62,8 +185,7 @@ class JwtAccessTokenServiceTest {
 
         String newToken = rotatedService.issue("alice", 600).value();
 
-        assertThat(rotatedService.verify(oldToken))
-                .isEqualTo(JwtAccessTokenService.VerificationResult.success("alice"));
+        assertVerified(rotatedService, oldToken, "alice", null);
         assertThat(header(newToken)).contains("\"kid\":\"server-signing-v2\"");
     }
 
@@ -81,24 +203,24 @@ class JwtAccessTokenServiceTest {
 
     @Test
     void roundTripsOptionalAuthenticationGeneration() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = new JwtAccessTokenService(
+                TestIdentity.single("server-signing-v1"), CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("root", 600, "generation-1");
 
         assertThat(payload(token.value())).contains("\"orion_auth_generation\":\"generation-1\"");
-        assertThat(service.verify(token.value()))
-                .isEqualTo(JwtAccessTokenService.VerificationResult.success("root", "generation-1"));
+        assertVerified(service, token.value(), "root", "generation-1");
     }
 
     @Test
     void claimFreeTokensRemainCompatible() throws Exception {
-        JwtAccessTokenService service = new JwtAccessTokenService(TestIdentity.single("server-signing-v1"), CLOCK);
+        JwtAccessTokenService service = new JwtAccessTokenService(
+                TestIdentity.single("server-signing-v1"), CLOCK);
 
         JwtAccessTokenService.IssuedToken token = service.issue("alice", 600);
 
         assertThat(payload(token.value())).doesNotContain("orion_auth_generation");
-        assertThat(service.verify(token.value()))
-                .isEqualTo(JwtAccessTokenService.VerificationResult.success("alice"));
+        assertVerified(service, token.value(), "alice", null);
     }
 
     @Test
@@ -107,8 +229,11 @@ class JwtAccessTokenServiceTest {
         JwtAccessTokenService service = new JwtAccessTokenService(identity, CLOCK);
         String malformedToken = signedToken(
                 identity,
-                "{\"iss\":\"orion\",\"sub\":\"root\",\"exp\":1788383400,"
-                        + "\"orion_auth_generation\":42}");
+                validPayload().replace(
+                        "\"sub\":\"alice\"",
+                        "\"sub\":\"root\"").replace(
+                        "}",
+                        ",\"orion_auth_generation\":42}"));
 
         assertThat(service.verify(malformedToken))
                 .isEqualTo(JwtAccessTokenService.VerificationResult.failure(
@@ -125,6 +250,28 @@ class JwtAccessTokenServiceTest {
         return new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
     }
 
+    private static String stringClaim(String json, String claim) {
+        String prefix = "\"" + claim + "\":\"";
+        int start = json.indexOf(prefix);
+        assertThat(start).isGreaterThanOrEqualTo(0);
+        int valueStart = start + prefix.length();
+        int end = json.indexOf('"', valueStart);
+        assertThat(end).isGreaterThan(valueStart);
+        return json.substring(valueStart, end);
+    }
+
+    private static void assertVerified(
+            JwtAccessTokenService service,
+            String token,
+            String subject,
+            String authenticationGeneration) {
+        assertThat(service.verify(token))
+                .isEqualTo(JwtAccessTokenService.VerificationResult.success(
+                        subject,
+                        authenticationGeneration,
+                        stringClaim(payload(token), "jti")));
+    }
+
     private static String signedToken(TestIdentity identity, String payload) throws GeneralSecurityException {
         Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
         String header = "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\""
@@ -135,6 +282,13 @@ class JwtAccessTokenServiceTest {
                 + encoder.encodeToString(payload.getBytes(StandardCharsets.UTF_8));
         return signingInput + "." + encoder.encodeToString(
                 identity.sign(signingInput.getBytes(StandardCharsets.US_ASCII)));
+    }
+
+    private static String validPayload() {
+        return "{\"iss\":\"orion\",\"aud\":\"orion\",\"sub\":\"alice\","
+                + "\"purpose\":\"orion-access\","
+                + "\"jti\":\"1fc784e3-3238-4279-8627-d8a2e64bc17f\","
+                + "\"iat\":1788382800,\"nbf\":1788382800,\"exp\":1788383400}";
     }
 
     private static Map<String, KeyPair> orderedKeys(

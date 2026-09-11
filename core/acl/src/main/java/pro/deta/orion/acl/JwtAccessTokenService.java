@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.time.Clock;
 import java.util.Base64;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -13,6 +14,9 @@ final class JwtAccessTokenService {
     private static final String HEADER_ALGORITHM = "RS256";
     private static final String JWT_TYPE = "JWT";
     private static final String ISSUER = "orion";
+    private static final String AUDIENCE = "orion";
+    private static final String ACCESS_PURPOSE = "orion-access";
+    private static final long MAX_EXPIRES_IN_SECONDS = 3_600;
     private static final String AUTHENTICATION_GENERATION_CLAIM = "orion_auth_generation";
     private static final int MAX_AUTHENTICATION_GENERATION_LENGTH = 128;
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
@@ -49,6 +53,10 @@ final class JwtAccessTokenService {
         if (expiresInSeconds <= 0) {
             throw new IllegalArgumentException("Token expiration must be positive");
         }
+        if (expiresInSeconds > MAX_EXPIRES_IN_SECONDS) {
+            throw new IllegalArgumentException(
+                    "Token expiration exceeds " + MAX_EXPIRES_IN_SECONDS + " seconds");
+        }
         if (authenticationGeneration != null
                 && (authenticationGeneration.isBlank()
                 || authenticationGeneration.length() > MAX_AUTHENTICATION_GENERATION_LENGTH)) {
@@ -57,6 +65,7 @@ final class JwtAccessTokenService {
 
         long issuedAt = clock.instant().getEpochSecond();
         long expiresAt = Math.addExact(issuedAt, expiresInSeconds);
+        String tokenId = UUID.randomUUID().toString();
         String header = "{\"alg\":\"%s\",\"typ\":\"%s\",\"kid\":%s}".formatted(
                 HEADER_ALGORITHM,
                 JWT_TYPE,
@@ -66,8 +75,17 @@ final class JwtAccessTokenService {
                 : ",\"%s\":%s".formatted(
                         AUTHENTICATION_GENERATION_CLAIM,
                         jsonString(authenticationGeneration));
-        String payload = "{\"iss\":\"%s\",\"sub\":%s,\"iat\":%d,\"exp\":%d%s}".formatted(
-                ISSUER, jsonString(subject), issuedAt, expiresAt, generationClaim);
+        String payload = ("{\"iss\":\"%s\",\"aud\":\"%s\",\"sub\":%s,\"purpose\":\"%s\","
+                + "\"jti\":%s,\"iat\":%d,\"nbf\":%d,\"exp\":%d%s}").formatted(
+                ISSUER,
+                AUDIENCE,
+                jsonString(subject),
+                ACCESS_PURPOSE,
+                jsonString(tokenId),
+                issuedAt,
+                issuedAt,
+                expiresAt,
+                generationClaim);
         String signingInput = base64Url(header.getBytes(StandardCharsets.UTF_8))
                 + "."
                 + base64Url(payload.getBytes(StandardCharsets.UTF_8));
@@ -116,16 +134,50 @@ final class JwtAccessTokenService {
         if (!ISSUER.equals(issuer)) {
             return VerificationResult.failure("JWT issuer is invalid");
         }
+        String audience = stringClaim(payload, "aud");
+        if (!AUDIENCE.equals(audience)) {
+            return VerificationResult.failure("JWT audience is invalid");
+        }
+        String purpose = stringClaim(payload, "purpose");
+        if (!ACCESS_PURPOSE.equals(purpose)) {
+            return VerificationResult.failure("JWT purpose is invalid");
+        }
+        String tokenId = stringClaim(payload, "jti");
+        if (!isUuid(tokenId)) {
+            return VerificationResult.failure("JWT token id is invalid");
+        }
         String subject = stringClaim(payload, "sub");
+        Long issuedAt = longClaim(payload, "iat");
+        Long notBefore = longClaim(payload, "nbf");
         Long expiresAt = longClaim(payload, "exp");
         String authenticationGeneration = stringClaim(payload, AUTHENTICATION_GENERATION_CLAIM);
         if (subject == null || subject.isBlank()) {
             return VerificationResult.failure("JWT subject is required");
         }
+        if (issuedAt == null) {
+            return VerificationResult.failure("JWT issued-at is required");
+        }
+        if (notBefore == null) {
+            return VerificationResult.failure("JWT not-before is required");
+        }
         if (expiresAt == null) {
             return VerificationResult.failure("JWT expiration is required");
         }
-        if (expiresAt <= clock.instant().getEpochSecond()) {
+        if (expiresAt < issuedAt || expiresAt - issuedAt > MAX_EXPIRES_IN_SECONDS) {
+            return VerificationResult.failure(
+                    "JWT lifetime exceeds " + MAX_EXPIRES_IN_SECONDS + " seconds");
+        }
+        if (expiresAt <= notBefore) {
+            return VerificationResult.failure("JWT time range is invalid");
+        }
+        long now = clock.instant().getEpochSecond();
+        if (issuedAt > now) {
+            return VerificationResult.failure("JWT issued-at is in the future");
+        }
+        if (notBefore > now) {
+            return VerificationResult.failure("JWT is not active");
+        }
+        if (expiresAt <= now) {
             return VerificationResult.failure("JWT is expired");
         }
         if (containsClaim(payload, AUTHENTICATION_GENERATION_CLAIM)
@@ -134,7 +186,18 @@ final class JwtAccessTokenService {
                 || authenticationGeneration.length() > MAX_AUTHENTICATION_GENERATION_LENGTH)) {
             return VerificationResult.failure("JWT authentication generation is invalid");
         }
-        return VerificationResult.success(subject, authenticationGeneration);
+        return VerificationResult.success(subject, authenticationGeneration, tokenId);
+    }
+
+    private boolean isUuid(String value) {
+        if (value == null) {
+            return false;
+        }
+        try {
+            return UUID.fromString(value).toString().equals(value);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private boolean verify(String keyId, String signingInput, byte[] signatureBytes) {
@@ -249,18 +312,20 @@ final class JwtAccessTokenService {
     }
 
     sealed interface VerificationResult permits VerificationResult.Success, VerificationResult.Failure {
-        record Success(String subject, String authenticationGeneration) implements VerificationResult {
+        record Success(
+                String subject,
+                String authenticationGeneration,
+                String tokenId) implements VerificationResult {
         }
 
         record Failure(String reason) implements VerificationResult {
         }
 
-        static VerificationResult success(String subject) {
-            return new Success(subject, null);
-        }
-
-        static VerificationResult success(String subject, String authenticationGeneration) {
-            return new Success(subject, authenticationGeneration);
+        static VerificationResult success(
+                String subject,
+                String authenticationGeneration,
+                String tokenId) {
+            return new Success(subject, authenticationGeneration, tokenId);
         }
 
         static VerificationResult failure(String reason) {

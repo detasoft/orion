@@ -578,7 +578,10 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return switch (jwtAccessTokenService.verify(tokenValue)) {
             case JwtAccessTokenService.VerificationResult.Failure(var reason) ->
                     AuthenticationResult.failure(reason);
-            case JwtAccessTokenService.VerificationResult.Success(var subject, var authenticationGeneration) -> {
+            case JwtAccessTokenService.VerificationResult.Success(
+                    var subject,
+                    var authenticationGeneration,
+                    var tokenId) -> {
                 Result<AccessControl.User> user = findSingleUser(subject);
                 if (user instanceof Result.Success<AccessControl.User>(var u)) {
                     if (isLockedRoot(u)) {
