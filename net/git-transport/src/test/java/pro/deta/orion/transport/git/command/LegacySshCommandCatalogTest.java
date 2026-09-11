@@ -9,6 +9,7 @@ import pro.deta.orion.auth.SecurityContext;
 import pro.deta.orion.auth.SshCredential;
 import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
@@ -235,9 +236,11 @@ class LegacySshCommandCatalogTest {
         }
 
         @Override
-        public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
+        public TokenRefreshResult refreshToken(
+                AuthenticationResult.Success renewalAuthority,
+                long expiresInSeconds) {
             expiries.add(expiresInSeconds);
-            return new TokenIssueResult.Success("issued-secret", 1_000L);
+            return new TokenRefreshResult.Success("issued-secret", 1_000L);
         }
 
         @Override

@@ -27,6 +27,7 @@ import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.AccessTokenIdentity;
 import pro.deta.orion.auth.TokenAuthenticationResult;
+import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.config.OrionDesiredState;
 import pro.deta.orion.schema.config.OrionRuntimeOptions;
@@ -612,12 +613,26 @@ public class OrionAccessControlServiceImpl implements OrionAccessControlService,
         return switch (authenticateUser(userName, credential)) {
             case AuthenticationResult.Failure(var reason, var throwable) ->
                     TokenIssueResult.failure(reason, throwable);
-            case AuthenticationResult.Success(var userIdentity) -> issueTokenFor(userIdentity, expiresInSeconds);
+            case AuthenticationResult.Success(var userIdentity) -> issueToken(userIdentity, expiresInSeconds);
         };
     }
 
     @Override
-    public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
+    public TokenRefreshResult refreshToken(
+            AuthenticationResult.Success renewalAuthority,
+            long expiresInSeconds) {
+        if (renewalAuthority == null) {
+            return TokenRefreshResult.failure("primary authentication is required");
+        }
+        return switch (issueToken(renewalAuthority.userIdentity(), expiresInSeconds)) {
+            case TokenIssueResult.Success(var token, var expiresAtEpochSecond) ->
+                    TokenRefreshResult.success(token, expiresAtEpochSecond);
+            case TokenIssueResult.Failure(var reason, var throwable) ->
+                    TokenRefreshResult.failure(reason, throwable);
+        };
+    }
+
+    private TokenIssueResult issueToken(UserIdentity userIdentity, long expiresInSeconds) {
         if (userIdentity == null
                 || userIdentity.isAnonymous()
                 || userIdentity.getUserId() == null

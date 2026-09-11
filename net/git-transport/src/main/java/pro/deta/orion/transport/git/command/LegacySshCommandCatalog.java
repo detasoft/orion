@@ -3,7 +3,8 @@ package pro.deta.orion.transport.git.command;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import pro.deta.orion.OrionAccessControlService;
-import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.AuthenticationResult;
+import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.check.AccessDecision;
 import pro.deta.orion.auth.check.rule.ApplicationAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
@@ -175,12 +176,13 @@ public final class LegacySshCommandCatalog {
         if (expiresInSeconds <= 0) {
             return failure(CommandFailureCode.INVALID_ARGUMENTS, "Token expiration must be positive");
         }
-        TokenIssueResult result = accessControlService.issueTokenFor(
-                invocation.context().securityContext().getUserIdentity(),
+        TokenRefreshResult result = accessControlService.refreshToken(
+                new AuthenticationResult.Success(
+                        invocation.context().securityContext().getUserIdentity()),
                 expiresInSeconds);
         return switch (result) {
-            case TokenIssueResult.Success success -> new CommandResult.Message(success.token());
-            case TokenIssueResult.Failure ignored ->
+            case TokenRefreshResult.Success success -> new CommandResult.Message(success.token());
+            case TokenRefreshResult.Failure ignored ->
                     failure(CommandFailureCode.HANDLER_FAILED, "Token issuance failed");
         };
     }

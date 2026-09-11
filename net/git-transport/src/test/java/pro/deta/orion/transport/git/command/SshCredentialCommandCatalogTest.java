@@ -14,6 +14,7 @@ import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
+import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
 import pro.deta.orion.auth.UserIdentity;
 import pro.deta.orion.command.CommandCancellation;
@@ -290,7 +291,9 @@ class SshCredentialCommandCatalogTest {
         }
 
         @Override
-        public TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds) {
+        public TokenRefreshResult refreshToken(
+                AuthenticationResult.Success renewalAuthority,
+                long expiresInSeconds) {
             throw new UnsupportedOperationException();
         }
 

@@ -16,6 +16,7 @@ import pro.deta.orion.auth.SshCredentialListResult;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
+import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.event.OrionEventManager;
 import pro.deta.orion.event.type.RequestToAclUpdate;
 import pro.deta.orion.keymaterial.ServerIdentityCapability;
@@ -339,10 +340,10 @@ class OrionAccessControlServiceImplTest {
                     "root",
                     KEY_ONE.getPublic().getEncoded());
             assertThat(authentication).isInstanceOf(AuthenticationResult.Success.class);
-            TokenIssueResult issued = fixture.service.issueTokenFor(
-                    ((AuthenticationResult.Success) authentication).userIdentity(),
+            TokenRefreshResult issued = fixture.service.refreshToken(
+                    (AuthenticationResult.Success) authentication,
                     60);
-            assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
+            assertThat(issued).isInstanceOf(TokenRefreshResult.Success.class);
 
             assertThat(fixture.service.removeSshCredential(
                     "root",
@@ -364,12 +365,12 @@ class OrionAccessControlServiceImplTest {
                     .isInstanceOf(AuthenticationResult.Failure.class);
             assertThat(fixture.service.authenticateUser("root", "anything".getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(AuthenticationResult.Failure.class);
-            String token = ((TokenIssueResult.Success) issued).token();
+            String token = ((TokenRefreshResult.Success) issued).token();
             assertThat(fixture.service.verifyToken(token.getBytes(StandardCharsets.UTF_8)))
                     .isInstanceOf(TokenAuthenticationResult.Failure.class);
-            assertThat(fixture.service.issueTokenFor(
-                    ((AuthenticationResult.Success) authentication).userIdentity(),
-                    60)).isInstanceOf(TokenIssueResult.Failure.class);
+            assertThat(fixture.service.refreshToken(
+                    (AuthenticationResult.Success) authentication,
+                    60)).isInstanceOf(TokenRefreshResult.Failure.class);
             assertThat(sshValues(fixture.storage.snapshot, ACL_PATH, "root")).isEmpty();
             assertThat(credentials(fixture.storage.snapshot, ACL_PATH, "root"))
                     .singleElement()
@@ -389,9 +390,10 @@ class OrionAccessControlServiceImplTest {
             AuthenticationResult authentication = fixture.service.authenticateSshUser(
                     "alice",
                     KEY_ONE.getPublic().getEncoded());
-            var userIdentity = ((AuthenticationResult.Success) authentication).userIdentity();
-            TokenIssueResult issued = fixture.service.issueTokenFor(userIdentity, 60);
-            String token = ((TokenIssueResult.Success) issued).token();
+            TokenRefreshResult issued = fixture.service.refreshToken(
+                    (AuthenticationResult.Success) authentication,
+                    60);
+            String token = ((TokenRefreshResult.Success) issued).token();
 
             TokenAuthenticationResult result = fixture.service.verifyToken(
                     token.getBytes(StandardCharsets.UTF_8));

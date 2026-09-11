@@ -13,7 +13,7 @@ import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.SshCredentialFailureCode;
 import pro.deta.orion.auth.SshCredentialUpdateResult;
 import pro.deta.orion.auth.TokenIssueResult;
-import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.crypto.OrionPasswordHashingService;
 import pro.deta.orion.crypto.PasswordHashingAlgorithm;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
@@ -1083,10 +1083,11 @@ class InternalConfigurationRepositoryLifecycleTest {
                 userId,
                 keyPair.getPublic().getEncoded());
         assertThat(authentication).isInstanceOf(AuthenticationResult.Success.class);
-        UserIdentity identity = ((AuthenticationResult.Success) authentication).userIdentity();
-        TokenIssueResult issued = component.orionAccessControlService().issueTokenFor(identity, 600);
-        assertThat(issued).isInstanceOf(TokenIssueResult.Success.class);
-        return ((TokenIssueResult.Success) issued).token();
+        TokenRefreshResult issued = component.orionAccessControlService().refreshToken(
+                (AuthenticationResult.Success) authentication,
+                600);
+        assertThat(issued).isInstanceOf(TokenRefreshResult.Success.class);
+        return ((TokenRefreshResult.Success) issued).token();
     }
 
     private static void assertAuthenticated(OrionComponent component, String userId, String password) {

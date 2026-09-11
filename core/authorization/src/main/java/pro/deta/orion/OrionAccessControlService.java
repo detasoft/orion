@@ -4,7 +4,7 @@ import pro.deta.orion.auth.AccessControlUserUpdate;
 import pro.deta.orion.auth.AuthenticationResult;
 import pro.deta.orion.auth.TokenIssueResult;
 import pro.deta.orion.auth.TokenAuthenticationResult;
-import pro.deta.orion.auth.UserIdentity;
+import pro.deta.orion.auth.TokenRefreshResult;
 import pro.deta.orion.auth.SshKeyEnrollmentAuthentication;
 import pro.deta.orion.auth.SshKeyEnrollmentResult;
 import pro.deta.orion.auth.SshCredentialFailureCode;
@@ -65,7 +65,9 @@ public interface OrionAccessControlService {
 
     TokenIssueResult authenticateUserAndIssueToken(String userName, byte[] credential, long expiresInSeconds);
 
-    TokenIssueResult issueTokenFor(UserIdentity userIdentity, long expiresInSeconds);
+    TokenRefreshResult refreshToken(
+            AuthenticationResult.Success renewalAuthority,
+            long expiresInSeconds);
 
     byte[] accessControlConfigurationFile();
 
