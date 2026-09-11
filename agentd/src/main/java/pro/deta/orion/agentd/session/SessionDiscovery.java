@@ -86,7 +86,7 @@ public final class SessionDiscovery {
         } catch (IOException | RuntimeException error) {
             journalFailure = error;
         }
-        if (journal == JournalObservation.MISSING && journalFailure == null) {
+        if (!journal.readable() && journalFailure == null) {
             issues.put(manifest.sessionId(), new DiscoveryIssue(
                     directory, DiscoveryIssue.Kind.INCOMPLETE, "journal is not initialized"));
             return;

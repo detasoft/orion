@@ -219,7 +219,7 @@ public final class NativeRuntime implements SessionRuntime {
                 SessionManifest manifest = manifestReader.read(sessionDirectory);
                 if (manifest.hostPid() != process.pid()) {
                     lastDetail = "manifest host PID does not match the launched process";
-                } else if (journalProbe.probe(sessionDirectory) != JournalObservation.READABLE) {
+                } else if (!journalProbe.probe(sessionDirectory).readable()) {
                     lastDetail = "session journal is not readable";
                 } else {
                     HostObservation host = handoffProbe.probe(sessionDirectory, manifest, deadline);
@@ -350,7 +350,7 @@ public final class NativeRuntime implements SessionRuntime {
             }
             JournalObservation journal = Objects.requireNonNull(
                     journalProbe.probe(directory), "journal observation");
-            if (journal == JournalObservation.MISSING) {
+            if (!journal.readable()) {
                 deleteTree(directory);
             }
             return SessionLaunchResult.failed(originalKind, originalDetail);

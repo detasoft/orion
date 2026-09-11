@@ -1,17 +1,29 @@
 package pro.deta.orion.agentd.session;
 
+import com.github.luben.zstd.Zstd;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.EventId;
+import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.SessionDescriptor;
+import pro.deta.orion.agent.protocol.SessionEventCodec;
+import pro.deta.orion.agent.protocol.SessionEventPayload;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SessionDiscoveryTest {
+    private static final SessionEventCodec EVENT_CODEC =
+            new SessionEventCodec(AgentProtocolLimits.journalDefaults());
+
     @TempDir
     Path temporaryDirectory;
 
@@ -111,6 +123,32 @@ class SessionDiscoveryTest {
         assertThat(third.issues()).containsKey("replace-session");
     }
 
+    @Test
+    void mapsDiscoveredSessionStatesAndJournalRangesToSafeDescriptors() throws Exception {
+        SessionManifest manifest = new JsonSessionManifestReader().read(
+                createSession(Files.createDirectories(temporaryDirectory.resolve("sessions")),
+                        "completed-session", "00000001.cbor"));
+        JournalObservation journal = JournalObservation.readable(new EventId(4), new EventId(9));
+        LocalSession completed = new LocalSession(
+                temporaryDirectory, manifest, HostObservation.live(ChildState.EXITED),
+                journal, LocalSessionState.LIVE);
+        LocalSession lost = new LocalSession(
+                temporaryDirectory, manifest, HostObservation.unreachable(),
+                journal, LocalSessionState.LOST);
+        LocalSession degraded = new LocalSession(
+                temporaryDirectory, manifest, HostObservation.live(ChildState.UNKNOWN),
+                journal, LocalSessionState.DEGRADED);
+
+        assertThat(completed.descriptor()).isEqualTo(new SessionDescriptor(
+                new pro.deta.orion.agent.protocol.SessionId("completed-session"),
+                AgentMessage.SessionState.EXITED,
+                Optional.of(new EventId(4)), Optional.of(new EventId(9)), "process exited"));
+        assertThat(lost.descriptor().state()).isEqualTo(AgentMessage.SessionState.LOST);
+        assertThat(lost.descriptor().detail()).isEqualTo("session host unreachable");
+        assertThat(degraded.descriptor().state()).isEqualTo(AgentMessage.SessionState.DEGRADED);
+        assertThat(degraded.descriptor().detail()).isEqualTo("session discovery degraded");
+    }
+
     private SessionDiscovery discovery(
             Path sessions, SessionRegistry registry, HostProbe hosts, JournalProbe journals) {
         return new SessionDiscovery(sessions, new JsonSessionManifestReader(), hosts, journals, registry);
@@ -118,7 +156,11 @@ class SessionDiscoveryTest {
 
     private Path createSession(Path root, String sessionId, String journalName) throws Exception {
         Path directory = Files.createDirectories(root.resolve(sessionId));
-        Files.writeString(directory.resolve(journalName), "journal");
+        byte[] event = EVENT_CODEC.encode(
+                new EventId(1),
+                new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{1})));
+        Files.write(directory.resolve(journalName),
+                journalName.endsWith(".zst") ? Zstd.compress(event) : event);
         Files.writeString(directory.resolve("metadata"), manifest(sessionId));
         return directory;
     }
