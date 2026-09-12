@@ -68,7 +68,7 @@ class GitWorkflowScenariosTest {
     }
 }
 
-class GitWorkflowScenarioExecutionTest extends GitInteroperabilityMatrixRunner {
+class GitWorkflowScenarioExecutionIT extends GitInteroperabilityMatrixRunner {
     @Override
     protected Stream<GitMatrixInvocation> matrixInvocations() {
         try {

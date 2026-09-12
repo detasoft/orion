@@ -7,7 +7,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class ReferenceEngineSmokeMatrixTest extends GitInteroperabilityMatrixRunner {
+class ReferenceEngineSmokeMatrixIT extends GitInteroperabilityMatrixRunner {
     private static final GitScenario SMOKE = new GitScenario() {
         @Override
         public String name() {

@@ -27,7 +27,7 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class OrionEngineInteroperabilityTest extends GitInteroperabilityMatrixRunner {
+class OrionEngineInteroperabilityIT extends GitInteroperabilityMatrixRunner {
     private static final String UPDATED_CONTENT = "fast-forward\n";
     private static final Set<EnginePair> REQUIRED_PAIRS = Set.of(
             new EnginePair("orion", "jgit"),
