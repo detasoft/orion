@@ -114,7 +114,7 @@ class SessionReplicationConcurrencyTest {
     }
 
     private static SessionReplicationService service(FileSystemSessionJournalStorage storage) {
-        return new SessionReplicationService(storage, (agentId, sessionId, gap) -> { });
+        return new SessionReplicationService(storage);
     }
 
     private static List<SessionEventRecord> events(long first, long last, byte payloadOffset)

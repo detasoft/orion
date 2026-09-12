@@ -129,7 +129,7 @@ public final class AgentControlService implements AgentService {
     }
 
     public Optional<AgentConnection> connection() {
-        return handshake.connection();
+        return Optional.ofNullable(onlineConnection());
     }
 
     public Optional<Exception> lastSessionReportingFailure() {

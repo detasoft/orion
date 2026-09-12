@@ -131,6 +131,10 @@ class AgentAssemblyTest {
         }
 
         @Override
+        public void closeSession(SessionId sessionId) {
+        }
+
+        @Override
         public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
             controlReceiver = receiver;
         }

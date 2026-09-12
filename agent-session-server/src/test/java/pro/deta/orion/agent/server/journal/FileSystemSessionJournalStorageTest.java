@@ -116,7 +116,7 @@ class FileSystemSessionJournalStorageTest {
     }
 
     @Test
-    void readsAfterAcrossSegmentsAndReportsGaps() throws Exception {
+    void readsSpacedEventsAfterCursorsAndRetention() throws Exception {
         SessionEventRecord first = event(10);
         SessionEventRecord second = event(20);
         SessionEventRecord third = event(30);
@@ -127,15 +127,12 @@ class FileSystemSessionJournalStorageTest {
             storage.append(SESSION, List.of(first, second, third));
 
             JournalReadResult beforeFirst = storage.readAfter(SESSION, Optional.of(new EventId(5)));
-            assertThat(beforeFirst.gap()).contains(new JournalGap(new EventId(5), new EventId(10)));
             assertThat(beforeFirst.records()).containsExactly(first, second, third);
             assertThat(storage.readAfter(SESSION, Optional.of(new EventId(10))).records())
                     .containsExactly(second, third);
             JournalReadResult between = storage.readAfter(SESSION, Optional.of(new EventId(15)));
-            assertThat(between.gap()).isEmpty();
             assertThat(between.records()).containsExactly(second, third);
             JournalReadResult afterLast = storage.readAfter(SESSION, Optional.of(new EventId(30)));
-            assertThat(afterLast.gap()).isEmpty();
             assertThat(afterLast.records()).isEmpty();
         }
 
@@ -145,7 +142,6 @@ class FileSystemSessionJournalStorageTest {
             assertThat(recovered.firstEventId(SESSION)).contains(new EventId(20));
             JournalReadResult retained = recovered.readAfter(
                     SESSION, Optional.of(new EventId(5)));
-            assertThat(retained.gap()).contains(new JournalGap(new EventId(5), new EventId(20)));
             assertThat(retained.records()).containsExactly(second, third);
         }
 
@@ -233,8 +229,7 @@ class FileSystemSessionJournalStorageTest {
             assertThat(storage.lastEventId(new SessionId("missing"))).isEmpty();
             assertThat(storage.readAfter(new SessionId("missing"), Optional.of(new EventId(1))).records())
                     .isEmpty();
-            assertThat(storage.readAfter(new SessionId("missing"), Optional.of(new EventId(1))).gap())
-                    .isEmpty();
+
             assertThat(storage.firstEventId(SESSION)).contains(new EventId(1));
             assertThat(storage.lastEventId(SESSION)).contains(new EventId(3));
             assertThat(storage.firstEventId(new SessionId("active-tail"))).contains(new EventId(10));
@@ -256,7 +251,6 @@ class FileSystemSessionJournalStorageTest {
             JournalReadResult all = storage.readAfter(SESSION, Optional.empty());
             JournalReadResult afterFirst = storage.readAfter(SESSION, Optional.of(new EventId(1)));
 
-            assertThat(all.gap()).isEmpty();
             assertThat(all.records()).extracting(record -> record.encodedRecord().toByteArray())
                     .containsExactly(
                             first.encodedRecord().toByteArray(),
@@ -264,7 +258,6 @@ class FileSystemSessionJournalStorageTest {
                             last.encodedRecord().toByteArray());
             assertThat(all.records().get(1).eventType()).isEqualTo(0x7ffe);
             assertThat(all.records().get(1).trailingFieldCount()).isOne();
-            assertThat(afterFirst.gap()).isEmpty();
             assertThat(afterFirst.records()).extracting(SessionEventRecord::eventId)
                     .containsExactly(new EventId(2), new EventId(3));
             assertThat(storage.readAfter(SESSION, Optional.of(new EventId(3))).records()).isEmpty();
@@ -673,7 +666,6 @@ class FileSystemSessionJournalStorageTest {
 
             JournalReadResult retained = storage.readAfter(
                     new SessionId("retained"), Optional.of(new EventId(3)));
-            assertThat(retained.gap()).contains(new JournalGap(new EventId(3), new EventId(7)));
             assertThat(retained.records()).extracting(SessionEventRecord::eventId)
                     .containsExactly(new EventId(7), new EventId(8));
         }

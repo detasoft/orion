@@ -225,15 +225,11 @@ final class SessionJournal {
             releaseReadLease(snapshot.leases());
         }
         if (snapshotRecords.isEmpty()) {
-            return new JournalReadResult(List.of(), Optional.empty());
+            return new JournalReadResult(List.of());
         }
 
-        EventId firstAvailable = snapshotRecords.getFirst().eventId();
-        Optional<JournalGap> gap = after
-                .filter(cursor -> cursor.compareTo(firstAvailable) < 0)
-                .map(cursor -> new JournalGap(cursor, firstAvailable));
-        if (after.isEmpty() || gap.isPresent()) {
-            return new JournalReadResult(snapshotRecords, gap);
+        if (after.isEmpty()) {
+            return new JournalReadResult(snapshotRecords);
         }
 
         EventId cursor = after.get();
@@ -243,7 +239,7 @@ final class SessionJournal {
                 records.add(record);
             }
         }
-        return new JournalReadResult(records, Optional.empty());
+        return new JournalReadResult(records);
     }
 
     private JournalAppendResult appendDurably(

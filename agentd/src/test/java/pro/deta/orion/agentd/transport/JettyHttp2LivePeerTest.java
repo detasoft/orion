@@ -518,6 +518,93 @@ class JettyHttp2LivePeerTest {
     }
 
     @Test
+    void explicitSessionCloseDropsQueuedRepliesAndKeepsControlUsable() throws Exception {
+        SessionId sessionId = new SessionId("closed");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            respond(stream, 200, false, () -> {
+                if (request.getHttpURI().getPath().equals(sessionPath(sessionId))) {
+                    stream.data(data(stream, sequence(FIRST_RECORD, SECOND_RECORD)), Callback.NOOP);
+                }
+            });
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessage> received = new LinkedBlockingQueue<>();
+            transport.onSessionMessage((id, message) -> {
+                received.add(message);
+                entered.countDown();
+                await(release);
+            });
+            try {
+                transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                        .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                assertThat(entered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+                transport.closeSession(sessionId);
+                release.countDown();
+                transport.sendControlCbor(FIRST_RECORD).toCompletableFuture()
+                        .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
+                assertThat(received.poll(100, TimeUnit.MILLISECONDS)).isNull();
+                transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                        .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
+    void closesOpeningSessionAndFailsQueuedSendBeforeAllowingReopen() throws Exception {
+        SessionId sessionId = new SessionId("opening");
+        CountDownLatch requested = new CountDownLatch(1);
+        CountDownLatch reset = new CountDownLatch(1);
+        AtomicInteger sessions = new AtomicInteger();
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            if (request.getHttpURI().getPath().equals(sessionPath(sessionId))
+                    && sessions.incrementAndGet() == 1) {
+                requested.countDown();
+                return new Stream.Listener() {
+                    @Override
+                    public void onReset(Stream stream, ResetFrame frame, Callback callback) {
+                        reset.countDown();
+                        callback.succeeded();
+                    }
+                };
+            }
+            respond(stream, 200, false, () -> { });
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            CompletableFuture<Void> opening = transport
+                    .openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders).toCompletableFuture();
+            assertThat(requested.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<Void> queued = transport.sendSessionCbor(sessionId, FIRST_RECORD)
+                    .toCompletableFuture();
+            assertThat(opening).isNotDone();
+            assertThat(queued).isNotDone();
+
+            transport.closeSession(sessionId);
+
+            assertThatThrownBy(() -> opening.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> queued.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(IllegalStateException.class);
+            assertThat(reset.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+            transport.sendControlCbor(FIRST_RECORD).toCompletableFuture()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                    .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            transport.sendSessionCbor(sessionId, SECOND_RECORD).toCompletableFuture()
+                    .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void rejectedSessionFailsItsOpenAndQueuedSendWithoutDisconnectingOthers() throws Exception {
         SessionId rejected = new SessionId("rejected");
         SessionId healthy = new SessionId("healthy");

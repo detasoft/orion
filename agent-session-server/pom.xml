@@ -15,6 +15,24 @@
 
     <dependencies>
         <dependency>
+            <groupId>pro.deta.orion.core</groupId>
+            <artifactId>common</artifactId>
+            <version>${revision}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jetty</groupId>
+            <artifactId>jetty-alpn-java-server</artifactId>
+            <version>${jetty.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>pro.deta.orion</groupId>
+            <artifactId>agentd</artifactId>
+            <version>${revision}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion</groupId>
             <artifactId>agent-protocol</artifactId>
         </dependency>

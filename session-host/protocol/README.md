@@ -39,9 +39,10 @@ recovered ID even when its current monotonic reading is lower.
 `readAfter(requestedEventId)` discovers each segment range from its first
 event, starts at the last segment whose first ID is at most the requested ID,
 skips records through that ID, and reads later segments in file order. A
-requested ID below the first available ID produces an explicit retention gap
-alongside the available events. No persistent index, cursor, or first/last
-metadata is required for correctness.
+requested ID below the first available ID resumes at the first available event.
+EventIds are strictly increasing but may skip values: their numeric difference
+cannot prove loss. Verifiable lost-record continuity is separate unfinished work.
+No persistent reader index, cursor, or first/last metadata is required.
 
 An incomplete CBOR item at the end of the active `.cbor` file is a recoverable
 crash tail. Readers return all preceding complete items, and recovery may
@@ -56,7 +57,7 @@ Physical-size retention deletes only the oldest closed prefix that is fully
 covered by an acknowledged journal-event watermark and never deletes the
 active raw segment. Without a watermark, or when meeting the configured
 maximum would require deleting unacknowledged events, files remain over the
-limit. After deletion, the retention-gap floor is derived from the first
+limit. After deletion, the first available EventId is read from the first
 record in the oldest remaining segment.
 
 ## Event Type Allocation
@@ -521,4 +522,4 @@ Bits 0 through 16 respectively mean `execute`, `write-file`, `read-file`,
   uncompressed form.
 - Closed segments are not deleted before their last event ID is acknowledged.
 - Missing or damaged persistent indexes cannot prevent journal discovery.
-- A reader behind the first available event ID receives a retention gap.
+- A reader behind the first available event ID resumes at that event without inferring loss.

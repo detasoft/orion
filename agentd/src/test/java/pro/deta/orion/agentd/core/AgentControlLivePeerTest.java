@@ -97,6 +97,12 @@ class AgentControlLivePeerTest {
                 assertThat(authentication.kind()).isEqualTo(AgentAuthentication.Kind.RECONNECT_TOKEN);
                 assertThat(authentication.credential().toByteArray()).containsOnly(9);
             });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (service.connection().filter(connection -> connection.connectionId()
+                    .equals(new ConnectionId("connection-live-2"))).isEmpty()
+                    && System.nanoTime() < deadline) {
+                Thread.sleep(5);
+            }
             assertThat(service.connection()).get().extracting(AgentConnection::connectionId)
                     .isEqualTo(new ConnectionId("connection-live-2"));
             service.close();

@@ -163,10 +163,6 @@ public final class FileSystemSessionJournalReader {
             return;
         }
         EventId requested = accumulator.cursor.orElseThrow();
-        if (requested.compareTo(availableFirst) < 0) {
-            accumulator.gapFirst = availableFirst;
-            return;
-        }
 
         int start = 0;
         EventId previousFirst = availableFirst;
@@ -675,7 +671,6 @@ public final class FileSystemSessionJournalReader {
         private long encodedBytes;
         private EventId first;
         private EventId orderLast;
-        private EventId gapFirst;
         private JournalReadIssue issue;
         private boolean incompleteTail;
         private boolean pageLimit;
@@ -789,7 +784,6 @@ public final class FileSystemSessionJournalReader {
             issue = staleIssue;
             incompleteTail = false;
             pageLimit = false;
-            gapFirst = null;
             staleSnapshot = true;
             checkpointSegment = null;
             checkpointFile = null;
@@ -800,15 +794,9 @@ public final class FileSystemSessionJournalReader {
 
         private JournalReadPage result() {
             EventId confirmedFirst = orderLast == null ? null : first;
-            EventId availableFirst = gapFirst == null ? confirmedFirst : gapFirst;
-            Optional<JournalCursorGap> gap = cursor
-                    .filter(ignored -> gapFirst != null)
-                    .map(requested -> new JournalCursorGap(requested, gapFirst));
             JournalReadBoundary boundary;
             Optional<JournalReadIssue> resultIssue = Optional.empty();
-            if (gap.isPresent()) {
-                boundary = JournalReadBoundary.GAP;
-            } else if (pageLimit) {
+            if (pageLimit) {
                 boundary = JournalReadBoundary.PAGE_LIMIT;
             } else if (issue != null) {
                 boundary = JournalReadBoundary.ISSUE;
@@ -819,11 +807,10 @@ public final class FileSystemSessionJournalReader {
                 boundary = JournalReadBoundary.COMPLETE;
             }
             return new JournalReadPage(
-                    gap.isPresent() ? List.of() : records,
-                    Optional.ofNullable(availableFirst),
-                    gap.isPresent() ? Optional.empty() : position(confirmedFirst),
+                    records,
+                    Optional.ofNullable(confirmedFirst),
+                    position(confirmedFirst),
                     boundary,
-                    gap,
                     resultIssue);
         }
 

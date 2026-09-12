@@ -3,7 +3,8 @@
 ## Control runtime
 
 `Agent.create` assembles the production control runtime around one process lock,
-one session-discovery registry, and one authenticated HTTP/2 control lifecycle.
+one session-discovery registry, one authenticated HTTP/2 control lifecycle,
+and independent session journal pumps.
 Startup acquires the process lock before discovery or network activity begins.
 If startup fails, already-started services are closed in reverse order; normal
 shutdown likewise stops reconnect and heartbeat work, closes the transport and
@@ -25,6 +26,26 @@ alter their journals.
 The control connection uses HTTPS with the configured server URI. Certificate
 trust and hostname verification are performed by the production TLS client;
 there is no plaintext or trust-all control path.
+
+## Journal relay
+
+After each authenticated connection, AgentD opens `/agent/session/{sessionId}`
+streams for discovered sessions and resumes strictly after the server's durable
+`SESSION_SYNC` cursor. Each pump reads at most 256 records and one maximum-record
+byte budget per page, sends the original bytes in bounded chunks, and waits for
+durable acknowledgement before reading the next page. Control and other
+sessions keep separate transport capacity.
+
+AgentD persists no replication state. Only server cursors authorize the
+EventId-only native `ACK_JOURNAL` retention control; ambiguous ACK delivery is
+repeated naturally on reconnect. An ahead-of-server host retention watermark
+or corrupt complete journal record pauses that session. EventIds are ordered
+but may skip numbers, so a cursor before the first available record resumes at
+that record without reporting fabricated data loss. Reliable lost-record
+continuity remains separate unfinished work.
+
+The relay uses the server replication endpoint contract. Composition of that
+endpoint into the full server runtime remains part of server MVP integration.
 
 ## Local terminal
 

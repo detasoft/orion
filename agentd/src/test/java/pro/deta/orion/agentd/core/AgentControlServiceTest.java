@@ -213,7 +213,8 @@ class AgentControlServiceTest {
         List<AgentMessage.Hello> hellos = messages(transport.controls, AgentMessage.Hello.class);
         assertThat(hellos.get(1).authentication().orElseThrow().credential())
                 .isEqualTo(hellos.get(2).authentication().orElseThrow().credential());
-        await(() -> service.connection().orElseThrow().connectionId().equals(new ConnectionId("connection-2")));
+        await(() -> service.connection()
+                .filter(value -> value.connectionId().equals(new ConnectionId("connection-2"))).isPresent());
         service.close();
     }
 
@@ -370,8 +371,10 @@ class AgentControlServiceTest {
 
         transport.deliver(new AgentMessage.RequestSessionList());
         transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
+        assertThat(service.connection()).isEmpty();
         SessionRegistryFixture.publish(registry, Map.of("offline", session("offline", ChildState.LIVE)));
-        await(() -> service.connection().orElseThrow().connectionId().equals(new ConnectionId("connection-2")));
+        await(() -> service.connection()
+                .filter(value -> value.connectionId().equals(new ConnectionId("connection-2"))).isPresent());
         transport.deliver(new AgentMessage.RequestSessionList());
 
         assertThat(messages(transport.controls, AgentMessage.SessionList.class))
@@ -447,7 +450,8 @@ class AgentControlServiceTest {
 
         transport.deliver(new AgentMessage.RequestSessionList());
         transport.signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
-        await(() -> service.connection().orElseThrow().connectionId().equals(new ConnectionId("connection-2")));
+        await(() -> service.connection()
+                .filter(value -> value.connectionId().equals(new ConnectionId("connection-2"))).isPresent());
         oldSend.completeExceptionally(new IllegalStateException("old connection failed"));
         TimeUnit.MILLISECONDS.sleep(200);
 
@@ -636,6 +640,10 @@ class AgentControlServiceTest {
         @Override
         public CompletionStage<Void> openSession(SessionId id, SessionStreamRequest request) {
             return CompletableFuture.failedFuture(new UnsupportedOperationException());
+        }
+
+        @Override
+        public void closeSession(SessionId sessionId) {
         }
 
         @Override

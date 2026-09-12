@@ -165,6 +165,28 @@ public final class JettyHttp2Transport implements AgentTransport {
     }
 
     @Override
+    public void closeSession(SessionId id) {
+        Generation generation;
+        SessionState state;
+        synchronized (this) {
+            generation = current;
+            state = generation == null ? null : generation.sessions.get(id);
+            if (state == null) {
+                return;
+            }
+        }
+        Stream stream = sessionFailed(generation, id, state, null, TransportSignal.Kind.CLOSED,
+                new IllegalStateException("session relay closed"));
+        if (stream != null) {
+            try {
+                stream.reset(new ResetFrame(stream.getId(), ErrorCode.CANCEL_STREAM_ERROR.code), Callback.NOOP);
+            } catch (RuntimeException ignored) {
+                // The session and pending sends are already closed even if resetting the stream fails.
+            }
+        }
+    }
+
+    @Override
     public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
         controlReceivers.add(Objects.requireNonNull(receiver, "receiver"));
     }
@@ -383,15 +405,20 @@ public final class JettyHttp2Transport implements AgentTransport {
         emit(new TransportSignal(kind, error));
     }
 
-    private void sessionFailed(Generation generation, SessionId id, SessionState state, Stream stream,
-                               TransportSignal.Kind kind, Throwable failure) {
+    private Stream sessionFailed(Generation generation, SessionId id, SessionState state, Stream stream,
+                                 TransportSignal.Kind kind, Throwable failure) {
         List<OutboundQueues.Entry<Pending>> queued;
         Pending activeSession = null;
+        Stream detached;
         synchronized (this) {
             if (!current(generation) || generation.sessions.get(id) != state
                     || (stream != null && state.stream != null && state.stream != stream)) {
-                return;
+                return null;
             }
+            if (kind == TransportSignal.Kind.CLOSED) {
+                state.cancelled = true;
+            }
+            detached = state.stream;
             generation.sessions.remove(id, state);
             state.decoder.reset();
             activeSession = activeSessions.remove(id);
@@ -407,6 +434,7 @@ public final class JettyHttp2Transport implements AgentTransport {
         }
         emit(new TransportSignal(kind, id, failure));
         drain();
+        return detached;
     }
 
     private void clearSessions(Generation generation, Throwable failure) {
@@ -569,7 +597,7 @@ public final class JettyHttp2Transport implements AgentTransport {
             SessionId id,
             SessionState state
     ) {
-        if (closed || generation.id != sequence) {
+        if (closed || generation.id != sequence || state.cancelled) {
             return false;
         }
         SessionState active = generation.sessions.get(id);
@@ -829,6 +857,7 @@ public final class JettyHttp2Transport implements AgentTransport {
         private final CompletableFuture<Void> ready = new CompletableFuture<>();
         private volatile Stream stream;
         private volatile boolean accepted;
+        private volatile boolean cancelled;
         private volatile boolean terminalAccepted;
 
         private SessionState(AgentProtocolLimits limits) {

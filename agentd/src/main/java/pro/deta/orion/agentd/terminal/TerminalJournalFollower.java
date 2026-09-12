@@ -8,7 +8,6 @@ import pro.deta.orion.agent.protocol.SessionEventPayload;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agentd.journal.FileSystemSessionJournalReader;
 import pro.deta.orion.agentd.journal.JournalAvailabilityMonitor;
-import pro.deta.orion.agentd.journal.JournalCursorGap;
 import pro.deta.orion.agentd.journal.JournalReadBoundary;
 import pro.deta.orion.agentd.journal.JournalReadLimits;
 import pro.deta.orion.agentd.journal.JournalReadPage;
@@ -64,10 +63,6 @@ final class TerminalJournalFollower {
                 }
                 return new Inspection.Active();
             }
-            if (page.boundary() == JournalReadBoundary.GAP) {
-                JournalCursorGap gap = page.gap().orElseThrow();
-                return new Inspection.Failed(gapDetail(gap));
-            }
             if (page.boundary() == JournalReadBoundary.ISSUE) {
                 return failed("journal failure: " + page.issue().orElseThrow().detail());
             }
@@ -92,10 +87,6 @@ final class TerminalJournalFollower {
                         return new Result.Exited(exited.exitCode());
                     }
                 }
-                if (page.boundary() == JournalReadBoundary.GAP) {
-                    JournalCursorGap gap = page.gap().orElseThrow();
-                    return new Result.Failed(gapDetail(gap));
-                }
                 if (page.boundary() == JournalReadBoundary.ISSUE) {
                     return failedResult("journal failure: " + page.issue().orElseThrow().detail());
                 }
@@ -115,13 +106,6 @@ final class TerminalJournalFollower {
             Thread.currentThread().interrupt();
             return new Result.Detached();
         }
-    }
-
-    private static String gapDetail(JournalCursorGap gap) {
-        return "required journal history gap after event "
-                + Long.toUnsignedString(gap.requestedEventId().value())
-                + "; first available event is "
-                + Long.toUnsignedString(gap.firstAvailableEventId().value());
     }
 
     private static Inspection.Failed failed(String detail) {

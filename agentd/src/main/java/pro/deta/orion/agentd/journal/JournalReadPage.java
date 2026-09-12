@@ -12,7 +12,6 @@ public record JournalReadPage(
         Optional<EventId> firstAvailableEventId,
         Optional<JournalReadPosition> nextPosition,
         JournalReadBoundary boundary,
-        Optional<JournalCursorGap> gap,
         Optional<JournalReadIssue> issue
 ) {
     public JournalReadPage {
@@ -25,11 +24,7 @@ public record JournalReadPage(
                 "firstAvailableEventId");
         nextPosition = Objects.requireNonNull(nextPosition, "nextPosition");
         boundary = Objects.requireNonNull(boundary, "boundary");
-        gap = Objects.requireNonNull(gap, "gap");
         issue = Objects.requireNonNull(issue, "issue");
-        if ((boundary == JournalReadBoundary.GAP) != gap.isPresent()) {
-            throw new IllegalArgumentException("gap must be present exactly at a gap boundary");
-        }
         if ((boundary == JournalReadBoundary.ISSUE) != issue.isPresent()) {
             throw new IllegalArgumentException("issue must be present exactly at an issue boundary");
         }
@@ -38,9 +33,6 @@ public record JournalReadPage(
         }
         if (!records.isEmpty() && firstAvailableEventId.isEmpty()) {
             throw new IllegalArgumentException("a non-empty page must have an available event range");
-        }
-        if (boundary == JournalReadBoundary.GAP && (!records.isEmpty() || nextPosition.isPresent())) {
-            throw new IllegalArgumentException("a gap page must not contain records or a next position");
         }
         if ((boundary == JournalReadBoundary.PAGE_LIMIT
                 || boundary == JournalReadBoundary.INCOMPLETE_TAIL)

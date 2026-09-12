@@ -83,7 +83,6 @@ class FileSystemSessionJournalReaderTest {
         assertThat(result.records()).extracting(record -> record.encodedRecord().toByteArray())
                 .containsExactly(first, second);
         assertThat(result.firstAvailableEventId()).contains(new EventId(1));
-        assertThat(result.gap()).isEmpty();
         assertThat(result.issue()).isEmpty();
         assertThat(result.ignoredIncompleteTail()).isFalse();
     }
@@ -111,7 +110,6 @@ class FileSystemSessionJournalReaderTest {
             assertThat(record.encodedRecord().toByteArray()).containsExactly(encoded);
         });
         assertThat(result.firstAvailableEventId()).contains(new EventId(1));
-        assertThat(result.gap()).isEmpty();
         assertThat(result.ignoredIncompleteTail()).isFalse();
     }
 
@@ -166,7 +164,6 @@ class FileSystemSessionJournalReaderTest {
                 Optional.empty(),
                 source.nextPosition(),
                 JournalReadBoundary.COMPLETE,
-                Optional.empty(),
                 Optional.empty()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> emptyPageAt(JournalReadBoundary.PAGE_LIMIT))
@@ -174,20 +171,11 @@ class FileSystemSessionJournalReaderTest {
         assertThatThrownBy(() -> emptyPageAt(JournalReadBoundary.INCOMPLETE_TAIL))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        assertThatThrownBy(() -> new JournalReadPage(
-                source.records(),
-                source.firstAvailableEventId(),
-                source.nextPosition(),
-                JournalReadBoundary.GAP,
-                Optional.of(new JournalCursorGap(new EventId(0), new EventId(1))),
-                Optional.empty()))
-                .isInstanceOf(IllegalArgumentException.class);
         JournalReadPage issuePrefix = new JournalReadPage(
                 source.records(),
                 source.firstAvailableEventId(),
                 source.nextPosition(),
                 JournalReadBoundary.ISSUE,
-                Optional.empty(),
                 Optional.of(new JournalReadIssue.Cbor(Optional.empty(), "damaged suffix")));
 
         assertThat(issuePrefix.records()).hasSize(1);
@@ -218,7 +206,6 @@ class FileSystemSessionJournalReaderTest {
                 .containsExactly(new EventId(1), new EventId(2));
         assertThat(firstPage.firstAvailableEventId()).contains(new EventId(1));
         assertThat(firstPage.boundary()).isEqualTo(JournalReadBoundary.PAGE_LIMIT);
-        assertThat(firstPage.gap()).isEmpty();
         assertThat(firstPage.issue()).isEmpty();
         assertThat(position.lastEventId()).contains(new EventId(2));
         assertThat(secondPage.records()).extracting(SessionEventRecord::eventId)
@@ -391,11 +378,11 @@ class FileSystemSessionJournalReaderTest {
     }
 
     @Test
-    void returnsExplicitGapAndIssuePageBoundaries() throws Exception {
-        Path gapDirectory = Files.createDirectory(temporaryDirectory.resolve("gap"));
-        Files.write(gapDirectory.resolve("00000003.cbor"), event(10, new byte[]{1}));
-        JournalReadPage gap = new FileSystemSessionJournalReader().readPage(
-                gapDirectory,
+    void returnsAvailableRecordsAndIssuePageBoundaries() throws Exception {
+        Path retainedDirectory = Files.createDirectory(temporaryDirectory.resolve("retained"));
+        Files.write(retainedDirectory.resolve("00000003.cbor"), event(10, new byte[]{1}));
+        JournalReadPage retained = new FileSystemSessionJournalReader().readPage(
+                retainedDirectory,
                 Optional.of(new EventId(5)),
                 Optional.empty(),
                 limits(10));
@@ -409,10 +396,9 @@ class FileSystemSessionJournalReaderTest {
                 Optional.empty(),
                 limits(10));
 
-        assertThat(gap.boundary()).isEqualTo(JournalReadBoundary.GAP);
-        assertThat(gap.gap()).contains(new JournalCursorGap(new EventId(5), new EventId(10)));
-        assertThat(gap.records()).isEmpty();
-        assertThat(gap.nextPosition()).isEmpty();
+        assertThat(retained.boundary()).isEqualTo(JournalReadBoundary.COMPLETE);
+        assertThat(retained.records()).extracting(SessionEventRecord::eventId).containsExactly(new EventId(10));
+        assertThat(retained.nextPosition()).isPresent();
         assertThat(issue.boundary()).isEqualTo(JournalReadBoundary.ISSUE);
         assertThat(issue.records()).extracting(SessionEventRecord::eventId)
                 .containsExactly(new EventId(1));
@@ -689,7 +675,7 @@ class FileSystemSessionJournalReaderTest {
     }
 
     @Test
-    void fallsBackAndReportsGapAfterPositionedSegmentRetention() throws Exception {
+    void resumesAfterPositionedSegmentRetention() throws Exception {
         Files.write(temporaryDirectory.resolve("00000001.cbor"), event(1, new byte[]{1}));
         Files.write(temporaryDirectory.resolve("00000002.cbor"), event(2, new byte[]{2}));
         FileSystemSessionJournalReader reader = new FileSystemSessionJournalReader();
@@ -707,15 +693,14 @@ class FileSystemSessionJournalReaderTest {
                 Optional.of(position),
                 limits(10));
 
-        assertThat(recovered.records()).isEmpty();
-        assertThat(recovered.nextPosition()).isEmpty();
-        assertThat(recovered.boundary()).isEqualTo(JournalReadBoundary.GAP);
-        assertThat(recovered.gap()).contains(new JournalCursorGap(new EventId(1), new EventId(2)));
+        assertThat(recovered.records()).extracting(SessionEventRecord::eventId).containsExactly(new EventId(2));
+        assertThat(recovered.nextPosition()).isPresent();
+        assertThat(recovered.boundary()).isEqualTo(JournalReadBoundary.COMPLETE);
         assertThat(recovered.firstAvailableEventId()).contains(new EventId(2));
     }
 
     @Test
-    void reportsRetentionGapWithoutReturningAvailableRecords() throws Exception {
+    void readsSpacedEventIdsAfterAnOlderCursor() throws Exception {
         Files.write(
                 temporaryDirectory.resolve("00000004.cbor"),
                 concatenate(event(10, new byte[]{1}), event(20, new byte[]{2})));
@@ -724,8 +709,8 @@ class FileSystemSessionJournalReaderTest {
                 temporaryDirectory,
                 Optional.of(new EventId(5)));
 
-        assertThat(result.gap()).contains(new JournalCursorGap(new EventId(5), new EventId(10)));
-        assertThat(result.records()).isEmpty();
+        assertThat(result.records()).extracting(SessionEventRecord::eventId)
+                .containsExactly(new EventId(10), new EventId(20));
         assertThat(result.firstAvailableEventId()).contains(new EventId(10));
         assertThat(result.issue()).isEmpty();
     }
@@ -849,7 +834,6 @@ class FileSystemSessionJournalReaderTest {
 
         assertThat(result.records()).isEmpty();
         assertThat(result.firstAvailableEventId()).isEmpty();
-        assertThat(result.gap()).isEmpty();
         assertThat(result.issue()).isEmpty();
     }
 
@@ -871,7 +855,6 @@ class FileSystemSessionJournalReaderTest {
         assertThat(result.records()).extracting(SessionEventRecord::eventId)
                 .containsExactly(new EventId(3), new EventId(4), new EventId(5));
         assertThat(result.firstAvailableEventId()).contains(new EventId(1));
-        assertThat(result.gap()).isEmpty();
         assertThat(result.issue()).isEmpty();
     }
 
@@ -1102,7 +1085,7 @@ class FileSystemSessionJournalReaderTest {
     }
 
     @Test
-    void reconstructsStateAfterRestartAndReportsRetentionAdvance() throws Exception {
+    void reconstructsStateAfterRestartAndRetentionAdvance() throws Exception {
         Files.write(temporaryDirectory.resolve("00000001.cbor"), event(1, new byte[]{1}));
         Files.write(temporaryDirectory.resolve("00000002.cbor"), event(2, new byte[]{2}));
         PagedReadResult beforeRestart = readAll(
@@ -1118,8 +1101,8 @@ class FileSystemSessionJournalReaderTest {
                 Optional.of(new EventId(1)));
 
         assertThat(afterRestart).isEqualTo(beforeRestart);
-        assertThat(afterRetention.records()).isEmpty();
-        assertThat(afterRetention.gap()).contains(new JournalCursorGap(new EventId(1), new EventId(2)));
+        assertThat(afterRetention.records()).extracting(SessionEventRecord::eventId)
+                .containsExactly(new EventId(2));
         assertThat(afterRetention.firstAvailableEventId()).contains(new EventId(2));
     }
 
@@ -1158,7 +1141,6 @@ class FileSystemSessionJournalReaderTest {
             return new PagedReadResult(
                     records,
                     firstAvailable,
-                    page.gap(),
                     page.boundary() == JournalReadBoundary.INCOMPLETE_TAIL,
                     page.issue());
         }
@@ -1167,7 +1149,6 @@ class FileSystemSessionJournalReaderTest {
     private record PagedReadResult(
             List<SessionEventRecord> records,
             Optional<EventId> firstAvailableEventId,
-            Optional<JournalCursorGap> gap,
             boolean ignoredIncompleteTail,
             Optional<JournalReadIssue> issue
     ) {
@@ -1188,7 +1169,6 @@ class FileSystemSessionJournalReaderTest {
                 Optional.empty(),
                 Optional.empty(),
                 boundary,
-                Optional.empty(),
                 Optional.empty());
     }
 

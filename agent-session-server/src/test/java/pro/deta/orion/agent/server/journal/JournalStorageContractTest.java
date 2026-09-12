@@ -90,7 +90,7 @@ class JournalStorageContractTest {
     @Test
     void readResultOwnsItsRecords() {
         List<SessionEventRecord> source = new ArrayList<>(List.of(event(1)));
-        JournalReadResult result = new JournalReadResult(source, Optional.empty());
+        JournalReadResult result = new JournalReadResult(source);
 
         source.clear();
 
@@ -103,84 +103,37 @@ class JournalStorageContractTest {
     @Test
     void readResultRejectsNullInputsAndElements() {
         assertThatNullPointerException().isThrownBy(
-                () -> new JournalReadResult(null, Optional.empty()));
+                () -> new JournalReadResult(null));
         assertThatNullPointerException().isThrownBy(
-                () -> new JournalReadResult(List.of(), null));
-        assertThatNullPointerException().isThrownBy(
-                () -> new JournalReadResult(Arrays.asList(event(1), null), Optional.empty()));
+                () -> new JournalReadResult(Arrays.asList(event(1), null)));
     }
 
     @Test
-    void readResultAllowsEmptyRecordsWithoutAGap() {
-        JournalReadResult result = new JournalReadResult(List.of(), Optional.empty());
+    void readResultAllowsEmptyRecords() {
+        JournalReadResult result = new JournalReadResult(List.of());
 
         assertThat(result.records()).isEmpty();
-        assertThat(result.gap()).isEmpty();
     }
 
     @Test
     void readResultRejectsDuplicateEventIds() {
         assertThatIllegalArgumentException().isThrownBy(
-                () -> new JournalReadResult(List.of(event(2), event(2)), Optional.empty()));
+                () -> new JournalReadResult(List.of(event(2), event(2))));
     }
 
     @Test
     void readResultRejectsDecreasingEventIds() {
         assertThatIllegalArgumentException().isThrownBy(
-                () -> new JournalReadResult(List.of(event(3), event(2)), Optional.empty()));
+                () -> new JournalReadResult(List.of(event(3), event(2))));
     }
 
     @Test
     void readResultUsesUnsignedEventOrdering() {
         JournalReadResult result = new JournalReadResult(
-                List.of(event(Long.MAX_VALUE), event(Long.MIN_VALUE)),
-                Optional.empty());
+                List.of(event(Long.MAX_VALUE), event(Long.MIN_VALUE)));
 
         assertThat(result.records()).extracting(SessionEventRecord::eventId)
                 .containsExactly(new EventId(Long.MAX_VALUE), new EventId(Long.MIN_VALUE));
-    }
-
-    @Test
-    void gapRequiresRequestedCursorBeforeFirstAvailableEvent() {
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new JournalGap(new EventId(5), new EventId(5)));
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new JournalGap(new EventId(6), new EventId(5)));
-    }
-
-    @Test
-    void gapUsesUnsignedEventOrdering() {
-        JournalGap gap = new JournalGap(new EventId(Long.MAX_VALUE), new EventId(Long.MIN_VALUE));
-
-        assertThat(gap.requested()).isEqualTo(new EventId(Long.MAX_VALUE));
-        assertThat(gap.firstAvailable()).isEqualTo(new EventId(Long.MIN_VALUE));
-    }
-
-    @Test
-    void gapRejectsNullEventIds() {
-        assertThatNullPointerException().isThrownBy(
-                () -> new JournalGap(null, new EventId(1)));
-        assertThatNullPointerException().isThrownBy(
-                () -> new JournalGap(new EventId(0), null));
-    }
-
-    @Test
-    void readResultRejectsGapInconsistentWithItsFirstRecord() {
-        JournalGap gap = new JournalGap(new EventId(4), new EventId(5));
-
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new JournalReadResult(List.of(event(6)), Optional.of(gap)));
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new JournalReadResult(List.of(), Optional.of(gap)));
-    }
-
-    @Test
-    void readResultAcceptsGapAtItsFirstRecord() {
-        JournalGap gap = new JournalGap(new EventId(4), new EventId(5));
-
-        JournalReadResult result = new JournalReadResult(List.of(event(5), event(6)), Optional.of(gap));
-
-        assertThat(result.gap()).contains(gap);
     }
 
     @Test

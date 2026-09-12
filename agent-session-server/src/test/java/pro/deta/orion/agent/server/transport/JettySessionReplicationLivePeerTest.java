@@ -245,8 +245,7 @@ class JettySessionReplicationLivePeerTest {
         private final Session session;
 
         private Peer(Optional<AgentId> agentId) throws Exception {
-            SessionReplicationService service = new SessionReplicationService(
-                    storage, (ignoredAgent, ignoredSession, ignoredGap) -> { });
+            SessionReplicationService service = new SessionReplicationService(storage);
             endpoint = new JettySessionReplicationEndpoint(service, ignored -> agentId, LIMITS);
             HTTP2ServerConnectionFactory h2 = new HTTP2ServerConnectionFactory() {
                 @Override

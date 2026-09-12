@@ -51,9 +51,6 @@ public final class FileSystemJournalProbe implements JournalProbe {
                 throw new IOException("session journal is not readable: "
                         + page.issue().orElseThrow().detail());
             }
-            if (page.boundary() == JournalReadBoundary.GAP) {
-                throw new IOException("session journal changed while its range was read");
-            }
             if (first.isEmpty()) {
                 first = page.firstAvailableEventId();
             }

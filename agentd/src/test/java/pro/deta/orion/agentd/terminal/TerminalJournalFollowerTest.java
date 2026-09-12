@@ -71,7 +71,7 @@ class TerminalJournalFollowerTest {
     }
 
     @Test
-    void reportsRequiredHistoryGapsAndCompleteCorruption() throws Exception {
+    void resumesAcrossSpacedEventIdsAndReportsCompleteCorruption() throws Exception {
         Path segment = sessionDirectory.resolve("00000001.cbor");
         Files.write(segment, output(1, "first"));
         ByteArrayOutputStream terminal = new ByteArrayOutputStream();
@@ -85,9 +85,8 @@ class TerminalJournalFollowerTest {
             Files.move(replacement, segment, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
 
             assertThat(result.get(5, TimeUnit.SECONDS))
-                    .isInstanceOf(TerminalJournalFollower.Result.Failed.class);
-            assertThat(((TerminalJournalFollower.Result.Failed) result.get()).detail())
-                    .contains("gap", "1", "5");
+                    .isEqualTo(new TerminalJournalFollower.Result.Exited(0));
+            assertThat(terminal.toString()).isEqualTo("firstlost");
         }
 
         Files.write(segment, new byte[]{(byte) 0xff}, StandardOpenOption.TRUNCATE_EXISTING);
@@ -98,7 +97,7 @@ class TerminalJournalFollowerTest {
     }
 
     @Test
-    void reportsAGapBeforeHonoringAConcurrentStop() throws Exception {
+    void honorsAConcurrentStopAfterResumingRetainedRecords() throws Exception {
         Path segment = sessionDirectory.resolve("00000001.cbor");
         Files.write(segment, concat(output(1, "first"), output(2, "second")));
         TerminalJournalFollower follower = new TerminalJournalFollower(
@@ -122,9 +121,8 @@ class TerminalJournalFollowerTest {
                     return true;
                 });
 
-        assertThat(result).isInstanceOf(TerminalJournalFollower.Result.Failed.class);
-        assertThat(((TerminalJournalFollower.Result.Failed) result).detail()).contains("gap", "1", "5");
-        assertThat(stopChecks).hasValue(1);
+        assertThat(result).isInstanceOf(TerminalJournalFollower.Result.Detached.class);
+        assertThat(stopChecks).hasValue(2);
     }
 
     @Test

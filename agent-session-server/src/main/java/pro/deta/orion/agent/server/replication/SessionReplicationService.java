@@ -6,7 +6,6 @@ import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.journal.JournalAppendResult;
-import pro.deta.orion.agent.server.journal.JournalGap;
 import pro.deta.orion.agent.server.journal.JournalStorageException;
 import pro.deta.orion.agent.server.journal.SessionJournalStorage;
 
@@ -16,13 +15,9 @@ import java.util.Optional;
 
 public final class SessionReplicationService {
     private final SessionJournalStorage storage;
-    private final ReplicationGapRecorder gaps;
 
-    public SessionReplicationService(
-            SessionJournalStorage storage,
-            ReplicationGapRecorder gaps) {
+    public SessionReplicationService(SessionJournalStorage storage) {
         this.storage = Objects.requireNonNull(storage, "storage");
-        this.gaps = Objects.requireNonNull(gaps, "gaps");
     }
 
     public AgentMessage.SessionSync open(
@@ -32,15 +27,8 @@ public final class SessionReplicationService {
         Objects.requireNonNull(open, "open");
         try {
             Optional<EventId> durableThrough = storage.lastEventId(open.sessionId());
-            if (durableThrough.isPresent() && open.firstAvailableEventId().isPresent()) {
-                EventId cursor = durableThrough.orElseThrow();
-                EventId firstAvailable = open.firstAvailableEventId().orElseThrow();
-                if (cursor.compareTo(firstAvailable) < 0) {
-                    gaps.record(agentId, open.sessionId(), new JournalGap(cursor, firstAvailable));
-                }
-            }
             return new AgentMessage.SessionSync(open.sessionId(), durableThrough);
-        } catch (JournalStorageException | GapRecordingException failure) {
+        } catch (JournalStorageException failure) {
             throw new SessionReplicationException(
                     SessionReplicationException.Kind.INTERNAL,
                     "Could not establish session replication cursor",

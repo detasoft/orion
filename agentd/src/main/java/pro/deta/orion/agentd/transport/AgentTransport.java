@@ -18,6 +18,8 @@ public interface AgentTransport extends AutoCloseable {
 
     CompletionStage<Void> openSession(SessionId sessionId, SessionStreamRequest request);
 
+    void closeSession(SessionId sessionId);
+
     void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver);
 
     void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver);
