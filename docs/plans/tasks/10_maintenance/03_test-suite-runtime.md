@@ -1,9 +1,11 @@
 # Reduce the warm full-test runtime below twenty seconds
 
-Status: in progress
+Status: paused
 
 - Owner: codex, session test-runtime-6b8f, branch `codex/test-suite-runtime-6b8f`,
-  worktree `.worktrees/test-suite-runtime-6b8f`, started 2026-09-11 16:18 Europe/Amsterdam.
+  worktree `.worktrees/test-suite-runtime-6b8f`, paused 2026-09-12 10:24 Europe/Amsterdam;
+  next: determine a verified redesign of full-suite execution that preserves all
+  tests and can close the measured 19-second gap from the fastest experiment.
 
 ## Requirements
 
