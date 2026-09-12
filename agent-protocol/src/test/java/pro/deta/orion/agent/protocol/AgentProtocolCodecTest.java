@@ -131,6 +131,34 @@ class AgentProtocolCodecTest {
     }
 
     @Test
+    void rejectsEstablishedCommandWithoutServerSequence() throws Exception {
+        CborWriter writer = new CborWriter(LIMITS);
+        writer.array(5);
+        writer.unsigned(AgentMessageType.RESIZE.code());
+        writer.text(COMMAND_ID.value());
+        writer.text(SESSION_ID.value());
+        writer.unsigned(80);
+        writer.unsigned(24);
+
+        assertThatExceptionOfType(AgentProtocolException.class)
+                .isThrownBy(() -> CODEC.decode(writer.toByteArray()))
+                .extracting(AgentProtocolException::reason)
+                .isEqualTo(AgentProtocolException.Reason.MISSING_FIELD);
+    }
+
+    @Test
+    void preservesUnsignedServerSequenceAndRejectsReservedValues() throws Exception {
+        AgentMessage.Resize resize = new AgentMessage.Resize(
+                COMMAND_ID, SESSION_ID, 80, 24, Long.MIN_VALUE);
+
+        assertThat(CODEC.decode(CODEC.encode(resize))).isEqualTo(resize);
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new AgentMessage.Resize(COMMAND_ID, SESSION_ID, 80, 24, 0));
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new AgentMessage.Resize(COMMAND_ID, SESSION_ID, 80, 24, -1));
+    }
+
+    @Test
     void rejectsUnsupportedNegotiatedVersions() throws Exception {
         byte[] encoded = CODEC.encode(hello(Map.of()));
         encoded[2] = 2;
@@ -149,7 +177,8 @@ class AgentProtocolCodecTest {
                 COMMAND_ID,
                 SESSION_ID,
                 UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-                ProtocolBytes.copyOf(new byte[]{1, 2, 3, 4, 5}));
+                ProtocolBytes.copyOf(new byte[]{1, 2, 3, 4, 5}),
+                7);
 
         assertThatExceptionOfType(AgentProtocolException.class)
                 .isThrownBy(() -> codec.encode(input))
@@ -333,12 +362,13 @@ class AgentProtocolCodecTest {
                         COMMAND_ID,
                         SESSION_ID,
                         UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-                        ProtocolBytes.copyOf(new byte[]{'p', 'w', 'd', '\r'})),
-                new AgentMessage.Resize(COMMAND_ID, SESSION_ID, 160, 48),
-                new AgentMessage.Signal(COMMAND_ID, SESSION_ID, AgentMessage.SignalKind.INTERRUPT, -1),
-                new AgentMessage.Signal(COMMAND_ID, SESSION_ID, AgentMessage.SignalKind.PLATFORM, 9),
+                        ProtocolBytes.copyOf(new byte[]{'p', 'w', 'd', '\r'}),
+                        1),
+                new AgentMessage.Resize(COMMAND_ID, SESSION_ID, 160, 48, 2),
+                new AgentMessage.Signal(COMMAND_ID, SESSION_ID, AgentMessage.SignalKind.INTERRUPT, -1, 3),
+                new AgentMessage.Signal(COMMAND_ID, SESSION_ID, AgentMessage.SignalKind.PLATFORM, 9, 4),
                 new AgentMessage.Terminate(
-                        COMMAND_ID, SESSION_ID, AgentMessage.TerminationMode.GRACEFUL),
+                        COMMAND_ID, SESSION_ID, AgentMessage.TerminationMode.GRACEFUL, 5),
                 new AgentMessage.SessionOpen(
                         SESSION_ID,
                         Optional.of(new EventId(4)),

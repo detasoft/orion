@@ -48,10 +48,10 @@ decoding and is distinct from semantic recovery within the sequence decoder.
 | `0x8001` | server to agent | `WELCOME` | protocol version, journal version, ConnectionId, configuration, optional reconnect token |
 | `0x8002` | server to agent | `REQUEST_SESSION_LIST` | none |
 | `0x8100` | server to agent | `START_SESSION` | IDs, workspace, argv, cwd, env, PTY size, sandbox, runtime |
-| `0x8101` | server to agent | `INPUT` | CommandId, SessionId, input UUID, bytes |
-| `0x8102` | server to agent | `RESIZE` | CommandId, SessionId, columns, rows |
-| `0x8103` | server to agent | `SIGNAL` | CommandId, SessionId, signal kind, signed platform code |
-| `0x8104` | server to agent | `TERMINATE` | CommandId, SessionId, mode |
+| `0x8101` | server to agent | `INPUT` | CommandId, SessionId, input UUID, bytes, operationSequence |
+| `0x8102` | server to agent | `RESIZE` | CommandId, SessionId, columns, rows, operationSequence |
+| `0x8103` | server to agent | `SIGNAL` | CommandId, SessionId, signal kind, signed platform code, operationSequence |
+| `0x8104` | server to agent | `TERMINATE` | CommandId, SessionId, mode, operationSequence |
 | `0x8110` | server to agent | `SESSION_SYNC` | SessionId, optional committed EventId |
 
 Machine is `[hostname, operatingSystem, architecture]`. A session descriptor is
@@ -64,6 +64,9 @@ gap `5`, lost `6`, and failed `7`. Command outcomes are succeeded `1`, failed
 `2`, rejected `3`, and duplicate `4`. Signal kinds are interrupt `1`, terminate
 `2`, kill `3`, hangup `4`, quit `5`, and platform-specific `0xffff`.
 Termination modes are graceful `0` and force `1`.
+Established-session commands carry the server-assigned per-session
+`operationSequence` as an unsigned 64-bit value from 1 through `u64::MAX - 1`.
+`START_SESSION` has no operation sequence.
 
 `HELLO` and `WELCOME` negotiate the Agent protocol and session journal format
 independently. Version 1 uses protocol version `1` and journal version `1`.

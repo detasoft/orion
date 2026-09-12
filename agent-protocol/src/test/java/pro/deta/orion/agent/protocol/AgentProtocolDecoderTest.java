@@ -36,7 +36,8 @@ class AgentProtocolDecoderTest {
                 new CommandId("command-1"),
                 SESSION_ID,
                 UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-                ProtocolBytes.copyOf(new byte[]{1, 2, 3}));
+                ProtocolBytes.copyOf(new byte[]{1, 2, 3}),
+                7);
         byte[] encoded = CODEC.encode(expected);
         byte[] source = concatenate(new byte[]{99}, encoded, new byte[]{100});
         ByteBuffer input = ByteBuffer.wrap(source, 1, encoded.length).slice();

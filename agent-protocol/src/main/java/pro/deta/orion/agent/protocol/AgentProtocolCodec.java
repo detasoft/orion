@@ -113,25 +113,29 @@ public final class AgentProtocolCodec {
                         new CommandId(fields.text(1, "commandId")),
                         new SessionId(fields.text(2, "sessionId")),
                         fields.uuid(3, "inputId"),
-                        ProtocolBytes.copyOf(fields.bytes(4, "bytes")));
+                        ProtocolBytes.copyOf(fields.bytes(4, "bytes")),
+                        fields.operationSequence(5));
                 case RESIZE -> new AgentMessage.Resize(
                         new CommandId(fields.text(1, "commandId")),
                         new SessionId(fields.text(2, "sessionId")),
                         fields.unsignedShort(3, "columns"),
-                        fields.unsignedShort(4, "rows"));
+                        fields.unsignedShort(4, "rows"),
+                        fields.operationSequence(5));
                 case SIGNAL -> new AgentMessage.Signal(
                         new CommandId(fields.text(1, "commandId")),
                         new SessionId(fields.text(2, "sessionId")),
                         requiredEnum(
                                 AgentMessage.SignalKind.fromWireCode(fields.unsignedShort(3, "signal")),
                                 "signal kind"),
-                        fields.signedInt(4, "platformCode"));
+                        fields.signedInt(4, "platformCode"),
+                        fields.operationSequence(5));
                 case TERMINATE -> new AgentMessage.Terminate(
                         new CommandId(fields.text(1, "commandId")),
                         new SessionId(fields.text(2, "sessionId")),
                         requiredEnum(
                                 AgentMessage.TerminationMode.fromWireCode(fields.unsignedShort(3, "mode")),
-                                "termination mode"));
+                                "termination mode"),
+                        fields.operationSequence(4));
                 case SESSION_OPEN -> decodeSessionOpen(fields);
                 case SESSION_SYNC -> new AgentMessage.SessionSync(
                         new SessionId(fields.text(1, "sessionId")),
@@ -194,8 +198,8 @@ public final class AgentProtocolCodec {
     private static int minimumFields(AgentMessageType type) {
         return switch (type) {
             case HELLO, AGENT_STATUS -> 8;
-            case WELCOME, COMMAND_RESULT, INPUT, RESIZE, SIGNAL, SESSION_OPEN -> 5;
-            case TERMINATE -> 4;
+            case INPUT, RESIZE, SIGNAL -> 6;
+            case WELCOME, COMMAND_RESULT, TERMINATE, SESSION_OPEN -> 5;
             case HEARTBEAT -> 4;
             case SESSION_SYNC -> 3;
             case SESSION_STATUS, SESSION_LIST -> 2;
@@ -308,39 +312,43 @@ public final class AgentProtocolCodec {
     }
 
     private void encodeInput(CborWriter writer, AgentMessage.Input value) throws AgentProtocolException {
-        writer.array(5);
+        writer.array(6);
         writer.unsigned(value.typeCode());
         writer.text(value.commandId().value());
         writer.text(value.sessionId().value());
         writer.uuid(value.inputId());
         writer.bytes(value.bytes());
+        writer.unsigned(value.operationSequence());
     }
 
     private void encodeResize(CborWriter writer, AgentMessage.Resize value) throws AgentProtocolException {
-        writer.array(5);
+        writer.array(6);
         writer.unsigned(value.typeCode());
         writer.text(value.commandId().value());
         writer.text(value.sessionId().value());
         writer.unsigned(value.columns());
         writer.unsigned(value.rows());
+        writer.unsigned(value.operationSequence());
     }
 
     private void encodeSignal(CborWriter writer, AgentMessage.Signal value) throws AgentProtocolException {
-        writer.array(5);
+        writer.array(6);
         writer.unsigned(value.typeCode());
         writer.text(value.commandId().value());
         writer.text(value.sessionId().value());
         writer.unsigned(value.signal().wireCode());
         writer.signed(value.platformCode());
+        writer.unsigned(value.operationSequence());
     }
 
     private void encodeTerminate(CborWriter writer, AgentMessage.Terminate value)
             throws AgentProtocolException {
-        writer.array(4);
+        writer.array(5);
         writer.unsigned(value.typeCode());
         writer.text(value.commandId().value());
         writer.text(value.sessionId().value());
         writer.unsigned(value.mode().wireCode());
+        writer.unsigned(value.operationSequence());
     }
 
     private void encodeSessionOpen(CborWriter writer, AgentMessage.SessionOpen value)
@@ -620,6 +628,14 @@ public final class AgentProtocolCodec {
             BigInteger value = integer(index, name);
             if (value.signum() < 0 || value.bitLength() > Integer.SIZE) {
                 throw failure(INVALID_FIELD, name + " must fit an unsigned 32-bit integer");
+            }
+            return value.longValue();
+        }
+
+        long operationSequence(int index) throws AgentProtocolException {
+            BigInteger value = integer(index, "operationSequence");
+            if (value.signum() < 0 || value.bitLength() > Long.SIZE) {
+                throw failure(INVALID_FIELD, "operationSequence must fit an unsigned 64-bit integer");
             }
             return value.longValue();
         }

@@ -59,7 +59,8 @@ class AgentProtocolFixtureTest {
                 new CommandId("server-command-3"),
                 new SessionId("session-1"),
                 UUID.fromString("00010203-0405-0607-0809-0a0b0c0d0e0f"),
-                ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff}));
+                ProtocolBytes.copyOf(new byte[]{0, (byte) 0xff}),
+                7);
         List<byte[]> records = List.of(
                 EVENT_CODEC.encode(
                         new EventId(1),

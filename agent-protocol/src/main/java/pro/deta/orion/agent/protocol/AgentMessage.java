@@ -207,13 +207,15 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         }
     }
 
-    record Input(CommandId commandId, SessionId sessionId, UUID inputId, ProtocolBytes bytes)
+    record Input(CommandId commandId, SessionId sessionId, UUID inputId, ProtocolBytes bytes,
+                 long operationSequence)
             implements AgentMessage {
         public Input {
             Objects.requireNonNull(commandId, "commandId");
             Objects.requireNonNull(sessionId, "sessionId");
             Objects.requireNonNull(inputId, "inputId");
             Objects.requireNonNull(bytes, "bytes");
+            requireOperationSequence(operationSequence);
         }
 
         @Override
@@ -222,12 +224,14 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         }
     }
 
-    record Resize(CommandId commandId, SessionId sessionId, int columns, int rows) implements AgentMessage {
+    record Resize(CommandId commandId, SessionId sessionId, int columns, int rows,
+                  long operationSequence) implements AgentMessage {
         public Resize {
             Objects.requireNonNull(commandId, "commandId");
             Objects.requireNonNull(sessionId, "sessionId");
             columns = ProtocolValidation.terminalDimension(columns, "columns");
             rows = ProtocolValidation.terminalDimension(rows, "rows");
+            requireOperationSequence(operationSequence);
         }
 
         @Override
@@ -236,7 +240,8 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         }
     }
 
-    record Signal(CommandId commandId, SessionId sessionId, SignalKind signal, int platformCode)
+    record Signal(CommandId commandId, SessionId sessionId, SignalKind signal, int platformCode,
+                  long operationSequence)
             implements AgentMessage {
         public Signal {
             Objects.requireNonNull(commandId, "commandId");
@@ -249,6 +254,7 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
             if (signal != SignalKind.PLATFORM && platformCode != -1) {
                 throw new IllegalArgumentException("portable signals must use platform code -1");
             }
+            requireOperationSequence(operationSequence);
         }
 
         @Override
@@ -257,17 +263,25 @@ public sealed interface AgentMessage permits AgentMessage.Hello, AgentMessage.We
         }
     }
 
-    record Terminate(CommandId commandId, SessionId sessionId, TerminationMode mode)
+    record Terminate(CommandId commandId, SessionId sessionId, TerminationMode mode,
+                     long operationSequence)
             implements AgentMessage {
         public Terminate {
             Objects.requireNonNull(commandId, "commandId");
             Objects.requireNonNull(sessionId, "sessionId");
             Objects.requireNonNull(mode, "mode");
+            requireOperationSequence(operationSequence);
         }
 
         @Override
         public int typeCode() {
             return AgentMessageType.TERMINATE.code();
+        }
+    }
+
+    private static void requireOperationSequence(long sequence) {
+        if (sequence == 0 || sequence == -1) {
+            throw new IllegalArgumentException("operationSequence must be between 1 and u64::MAX - 1");
         }
     }
 
