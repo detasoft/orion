@@ -1,18 +1,16 @@
 # Rework Verifiable Session Journal Continuity
 
 Status: todo
-Depends on: completed AgentD journal relay (04/02) and server and AgentD MVP
+Depends on: completed AgentD journal relay (`e31d32e3`) and server and AgentD MVP
 acceptance (03/06 and 04/08). This is follow-up work, not an MVP gate.
 
 ## Problem
 
 Session EventIds are unique and strictly increasing, but are derived from a
-monotonic clock and need not be consecutive. The current server replication and
-AgentD reader paths infer a gap when a durable cursor is numerically below the
-first locally available EventId. That comparison cannot distinguish normal ID
-spacing from a lost journal record; the server journal read API has the same
-problem. The MVP relay must remove these false claims; it does not guarantee
-detection of every lost record.
+monotonic clock and need not be consecutive. The MVP relay removed numeric-gap
+claims from AgentD and the server: a cursor below the first locally available
+EventId cannot distinguish normal ID spacing from a lost journal record.
+The current contract does not guarantee detection of every lost record.
 
 ## Requirements
 
@@ -30,8 +28,8 @@ detection of every lost record.
 1. Compare a consecutive record ordinal, an explicit predecessor link, and
    weaker evidence from the existing journal layout. Record the chosen contract
    and its compatibility consequences in this task before changing code.
-2. Implement only the selected continuity mechanism and remove superseded gap
-   inference in the same change.
+2. Implement only the selected continuity mechanism and remove any superseded
+   continuity path in the same change.
 3. Exercise normal nonconsecutive EventIds, actual loss before and after server
    commit, reconnect, restart, retention, and unaffected sessions.
 

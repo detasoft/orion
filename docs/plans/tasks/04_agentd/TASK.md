@@ -27,7 +27,7 @@ the AgentD lifecycle.
 > below are historical proposals, not a description of current runtime behavior.
 > The [current native protocol](../../../../session-host/protocol/README.md)
 > now describes the implemented EventId-only ACK and sequence-independent empty
-> connection claim. `02_journal-sync.md` owns retention acknowledgement, while
+> connection claim. Journal relay (`e31d32e3`) owns retention acknowledgement, while
 > `04_command-orchestration.md` keeps command sequencing and connection fencing
 > outside journal synchronization.
 > Recovery from recorded sequence maxima alone is not established when an

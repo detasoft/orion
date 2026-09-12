@@ -2,7 +2,7 @@
 
 Status: todo
 Depends on: completed AgentD HTTP/2 transport, session discovery, runtime and
-control; 02_journal-sync.md; completed source-aware native controls
+control; completed AgentD journal relay (`e31d32e3`); completed source-aware native controls
 (`5005ae2a`); and the native control-journal contract
 
 Validate and route server commands while deriving durable outcomes exclusively

@@ -1,7 +1,7 @@
 # Add Platform Status and Lifecycle Resilience
 
 Status: todo
-Depends on: 02_journal-sync.md, 04_command-orchestration.md
+Depends on: completed AgentD journal relay (`e31d32e3`), 04_command-orchestration.md
 
 Extend the established control lifecycle with machine reporting, isolation
 under journal and command load, observability, and coordinated shutdown.
