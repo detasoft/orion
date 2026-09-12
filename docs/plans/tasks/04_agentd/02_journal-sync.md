@@ -1,6 +1,7 @@
 # Relay Session Journals to Durable Server Storage
 
 Status: todo
+- Owner: codex, session 01a09483-7d39-7c02-8477-54dc55c120a7, branch `codex/agentd-journal-relay-04-02`, worktree `.worktrees/agentd-journal-relay-04-02`, started 2026-09-12 09:43 Europe/Amsterdam.
 
 ## Goal
 
