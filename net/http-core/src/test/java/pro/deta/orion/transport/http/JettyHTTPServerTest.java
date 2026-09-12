@@ -22,6 +22,7 @@ import pro.deta.orion.agent.protocol.AgentId;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentLaunchId;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolDecoder;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
@@ -1281,10 +1282,11 @@ class JettyHTTPServerTest {
                     Stream.Data data;
                     while ((data = stream.readData()) != null) {
                         try {
-                            SequenceDecodeResult<AgentMessage> result = decoder.accept(data.frame().getByteBuffer());
-                            for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-                                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
-                                    replies.add(decoded.value());
+                            SequenceDecodeResult<AgentMessageRecord> result =
+                                    decoder.accept(data.frame().getByteBuffer());
+                            for (SequenceDecodeResult.Outcome<AgentMessageRecord> outcome : result.outcomes()) {
+                                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded) {
+                                    replies.add(decoded.value().message());
                                 }
                             }
                             result.terminalIssue().ifPresent(issue -> terminal.completeExceptionally(issue.exception()));

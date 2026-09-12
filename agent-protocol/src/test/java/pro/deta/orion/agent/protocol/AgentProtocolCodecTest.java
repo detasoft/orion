@@ -118,10 +118,11 @@ class AgentProtocolCodecTest {
         assertThat(decoder.accept(ByteBuffer.wrap(partial)).outcomes())
                 .isEmpty();
         assertThat(decoder.pendingBytes()).isEqualTo(encoded.length - 1);
-        SequenceDecodeResult<AgentMessage> complete = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> complete = decoder.accept(
                 ByteBuffer.wrap(new byte[]{encoded[encoded.length - 1]}));
         assertThat(complete.outcomes()).containsExactly(
-                new SequenceDecodeResult.Decoded<>(new AgentMessage.RequestSessionList()));
+                new SequenceDecodeResult.Decoded<>(new AgentMessageRecord(
+                        new AgentMessage.RequestSessionList(), ProtocolBytes.copyOf(encoded))));
 
         assertThat(decoder.accept(ByteBuffer.wrap(new byte[]{(byte) 0xff})).terminalIssue())
                 .get()
@@ -175,7 +176,7 @@ class AgentProtocolCodecTest {
 
     @Test
     void journalLimitsDoNotWidenIncrementalAgentProtocolFrames() {
-        SequenceDecodeResult<AgentMessage> result = new AgentProtocolDecoder(
+        SequenceDecodeResult<AgentMessageRecord> result = new AgentProtocolDecoder(
                 AgentProtocolLimits.journalDefaults()).accept(ByteBuffer.wrap(oversizedUnknownAgentMessage()));
 
         assertThat(result.outcomes()).isEmpty();
@@ -409,10 +410,11 @@ class AgentProtocolCodecTest {
         return output.toByteArray();
     }
 
-    private static void addDecoded(List<AgentMessage> messages, SequenceDecodeResult<AgentMessage> result) {
-        for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
-                messages.add(decoded.value());
+    private static void addDecoded(
+            List<AgentMessage> messages, SequenceDecodeResult<AgentMessageRecord> result) {
+        for (SequenceDecodeResult.Outcome<AgentMessageRecord> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded) {
+                messages.add(decoded.value().message());
             }
         }
     }

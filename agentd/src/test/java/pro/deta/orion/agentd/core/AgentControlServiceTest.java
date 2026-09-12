@@ -571,6 +571,15 @@ class AgentControlServiceTest {
         boolean evaluate() throws Exception;
     }
 
+    private static SequenceDecodeResult.Decoded<AgentMessageRecord> decoded(AgentMessage message) {
+        try {
+            return new SequenceDecodeResult.Decoded<>(
+                    new AgentMessageRecord(message, ProtocolBytes.copyOf(CODEC.encode(message))));
+        } catch (AgentProtocolException failure) {
+            throw new AssertionError(failure);
+        }
+    }
+
     private static final class FakeTransport implements AgentTransport {
         private final List<byte[]> controls = new CopyOnWriteArrayList<>();
         private final Queue<AgentMessage> replies = new ConcurrentLinkedQueue<>();
@@ -578,7 +587,7 @@ class AgentControlServiceTest {
         private final AtomicInteger connectFailures = new AtomicInteger();
         private final AtomicInteger disconnectsAfterReplies = new AtomicInteger();
         private final AtomicInteger reportFailures = new AtomicInteger();
-        private Consumer<SequenceDecodeResult.Outcome<AgentMessage>> controlReceiver;
+        private Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> controlReceiver;
         private Consumer<TransportSignal> signalReceiver;
         private AgentMessage reply;
         private RuntimeException connectFailure;
@@ -616,12 +625,12 @@ class AgentControlServiceTest {
                 if (message instanceof AgentMessage.Hello) {
                     AgentMessage next = replies.poll();
                     if (next != null) {
-                        controlReceiver.accept(new SequenceDecodeResult.Decoded<>(next));
+                        controlReceiver.accept(decoded(next));
                         if (disconnectsAfterReplies.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
                             signalReceiver.accept(new TransportSignal(TransportSignal.Kind.DISCONNECTED, null));
                         }
                     } else if (reply != null) {
-                        controlReceiver.accept(new SequenceDecodeResult.Decoded<>(reply));
+                        controlReceiver.accept(decoded(reply));
                     }
                 } else if (heldReport != null) {
                     return heldReport;
@@ -647,7 +656,7 @@ class AgentControlServiceTest {
         }
 
         @Override
-        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
+        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> receiver) {
             controlReceiver = receiver;
         }
 
@@ -672,7 +681,7 @@ class AgentControlServiceTest {
         }
 
         private void deliver(AgentMessage message) {
-            controlReceiver.accept(new SequenceDecodeResult.Decoded<>(message));
+            controlReceiver.accept(decoded(message));
         }
     }
 

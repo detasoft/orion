@@ -3,6 +3,7 @@ package pro.deta.orion.agentd.session;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.ConnectionId;
@@ -323,7 +324,7 @@ class SessionJournalRelayTest {
             return id.equals(blockedSession) ? blockedWrite : connect();
         }
         public void closeSession(SessionId id) { closed.add(id); }
-        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) { }
+        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> receiver) { }
         public void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver) { messages = receiver; }
         public void onSignal(Consumer<TransportSignal> receiver) { }
         public void close() { }

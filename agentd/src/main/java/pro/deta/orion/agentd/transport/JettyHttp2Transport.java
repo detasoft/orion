@@ -32,6 +32,7 @@ import org.eclipse.jetty.http2.frames.ResetFrame;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolDecoder;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.SequenceDecodeIssue;
@@ -51,7 +52,7 @@ public final class JettyHttp2Transport implements AgentTransport {
         thread.setDaemon(true);
         return thread;
     });
-    private final List<Consumer<SequenceDecodeResult.Outcome<AgentMessage>>> controlReceivers =
+    private final List<Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>>> controlReceivers =
             new CopyOnWriteArrayList<>();
     private final List<BiConsumer<SessionId, AgentMessage>> sessionReceivers = new CopyOnWriteArrayList<>();
     private final List<Consumer<TransportSignal>> signals = new CopyOnWriteArrayList<>();
@@ -187,7 +188,7 @@ public final class JettyHttp2Transport implements AgentTransport {
     }
 
     @Override
-    public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
+    public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> receiver) {
         controlReceivers.add(Objects.requireNonNull(receiver, "receiver"));
     }
 
@@ -472,7 +473,7 @@ public final class JettyHttp2Transport implements AgentTransport {
         if (!current(generation) || generation.terminalAccepted) {
             return;
         }
-        SequenceDecodeResult<AgentMessage> result = generation.decoder.accept(data);
+        SequenceDecodeResult<AgentMessageRecord> result = generation.decoder.accept(data);
         SequenceDecodeIssue.Terminal terminal = result.terminalIssue().orElse(null);
         if (terminal == null && endStream) {
             terminal = generation.decoder.finish().terminalIssue().orElse(null);
@@ -491,7 +492,7 @@ public final class JettyHttp2Transport implements AgentTransport {
         if (!sessionCurrent(generation, id, state) || state.terminalAccepted) {
             return;
         }
-        SequenceDecodeResult<AgentMessage> result = state.decoder.accept(data);
+        SequenceDecodeResult<AgentMessageRecord> result = state.decoder.accept(data);
         SequenceDecodeIssue.Terminal terminal = result.terminalIssue().orElse(null);
         if (terminal == null && endStream) {
             terminal = state.decoder.finish().terminalIssue().orElse(null);
@@ -509,17 +510,17 @@ public final class JettyHttp2Transport implements AgentTransport {
 
     private void deliverControl(
             Generation generation,
-            SequenceDecodeResult<AgentMessage> result,
+            SequenceDecodeResult<AgentMessageRecord> result,
             Throwable endFailure
     ) {
         if (!generationDeliveryCurrent(generation)) {
             return;
         }
-        for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-            if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
+        for (SequenceDecodeResult.Outcome<AgentMessageRecord> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessageRecord> rejected) {
                 logRecoverable("control", null, rejected.issue());
             }
-            for (Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver : controlReceivers) {
+            for (Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> receiver : controlReceivers) {
                 receiver.accept(outcome);
             }
             if (!generationDeliveryCurrent(generation)) {
@@ -536,22 +537,22 @@ public final class JettyHttp2Transport implements AgentTransport {
             SessionId id,
             SessionState state,
             Stream stream,
-            SequenceDecodeResult<AgentMessage> result,
+            SequenceDecodeResult<AgentMessageRecord> result,
             SequenceDecodeIssue.Terminal terminal,
             Throwable endFailure
     ) {
         if (!sessionDeliveryCurrent(generation, id, state)) {
             return;
         }
-        for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
+        for (SequenceDecodeResult.Outcome<AgentMessageRecord> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded) {
                 for (BiConsumer<SessionId, AgentMessage> receiver : sessionReceivers) {
-                    receiver.accept(id, decoded.value());
+                    receiver.accept(id, decoded.value().message());
                 }
                 if (!sessionDeliveryCurrent(generation, id, state)) {
                     return;
                 }
-            } else if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
+            } else if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessageRecord> rejected) {
                 logRecoverable("session", id, rejected.issue());
             }
         }

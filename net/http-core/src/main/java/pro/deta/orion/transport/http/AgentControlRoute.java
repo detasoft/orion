@@ -16,6 +16,7 @@ import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.component.LifeCycle;
 import org.eclipse.jetty.util.thread.Scheduler;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolDecoder;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
@@ -237,16 +238,16 @@ public final class AgentControlRoute implements OrionHttpRoute {
         }
 
         private void accept(ByteBuffer bytes) {
-            SequenceDecodeResult<AgentMessage> result;
+            SequenceDecodeResult<AgentMessageRecord> result;
             synchronized (decoderLock) {
                 if (closed.get()) {
                     return;
                 }
                 result = decoder.accept(bytes);
             }
-            for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded
-                        && !inbound.offer(decoded.value())) {
+            for (SequenceDecodeResult.Outcome<AgentMessageRecord> outcome : result.outcomes()) {
+                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded
+                        && !inbound.offer(decoded.value().message())) {
                     fail(new IOException("control input queue is full"));
                     return;
                 }
@@ -255,16 +256,16 @@ public final class AgentControlRoute implements OrionHttpRoute {
         }
 
         private void finishInput() {
-            SequenceDecodeResult<AgentMessage> result;
+            SequenceDecodeResult<AgentMessageRecord> result;
             synchronized (decoderLock) {
                 if (closed.get()) {
                     return;
                 }
                 result = decoder.finish();
             }
-            for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded
-                        && !inbound.offer(decoded.value())) {
+            for (SequenceDecodeResult.Outcome<AgentMessageRecord> outcome : result.outcomes()) {
+                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded
+                        && !inbound.offer(decoded.value().message())) {
                     fail(new IOException("control input queue is full"));
                     return;
                 }

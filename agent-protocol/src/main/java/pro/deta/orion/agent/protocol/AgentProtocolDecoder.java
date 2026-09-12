@@ -4,19 +4,20 @@ import java.nio.ByteBuffer;
 import java.util.Objects;
 
 public final class AgentProtocolDecoder {
-    private final CborSequenceParser<AgentMessage> sequence;
+    private final CborSequenceParser<AgentMessageRecord> sequence;
 
     public AgentProtocolDecoder(AgentProtocolLimits limits) {
         AgentProtocolLimits messageLimits = Objects.requireNonNull(limits, "limits").agentMessageLimits();
         AgentProtocolCodec codec = new AgentProtocolCodec(messageLimits);
-        sequence = new CborSequenceParser<>(messageLimits, codec::decode);
+        sequence = new CborSequenceParser<>(messageLimits, (bytes, from, to) ->
+                new AgentMessageRecord(codec.decode(bytes, from, to), ProtocolBytes.copyOf(bytes, from, to)));
     }
 
-    public SequenceDecodeResult<AgentMessage> accept(ByteBuffer data) {
+    public SequenceDecodeResult<AgentMessageRecord> accept(ByteBuffer data) {
         return sequence.accept(data);
     }
 
-    public SequenceDecodeResult<AgentMessage> finish() {
+    public SequenceDecodeResult<AgentMessageRecord> finish() {
         return sequence.finish();
     }
 

@@ -99,7 +99,7 @@ class AgentAssemblyTest {
         private final List<byte[]> controls = new CopyOnWriteArrayList<>();
         private int connectCalls;
         private AgentMessage reply;
-        private Consumer<SequenceDecodeResult.Outcome<AgentMessage>> controlReceiver;
+        private Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> controlReceiver;
 
         @Override
         public CompletionStage<Void> connect() {
@@ -112,7 +112,7 @@ class AgentAssemblyTest {
             controls.add(item.clone());
             try {
                 if (CODEC.decode(item) instanceof AgentMessage.Hello && reply != null) {
-                    controlReceiver.accept(new SequenceDecodeResult.Decoded<>(reply));
+                    controlReceiver.accept(decoded(reply));
                 }
             } catch (AgentProtocolException failure) {
                 return CompletableFuture.failedFuture(failure);
@@ -135,7 +135,7 @@ class AgentAssemblyTest {
         }
 
         @Override
-        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver) {
+        public void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> receiver) {
             controlReceiver = receiver;
         }
 
@@ -152,7 +152,7 @@ class AgentAssemblyTest {
         }
 
         private void deliver(AgentMessage message) {
-            controlReceiver.accept(new SequenceDecodeResult.Decoded<>(message));
+            controlReceiver.accept(decoded(message));
         }
 
         private <T extends AgentMessage> List<T> messages(Class<T> type) throws AgentProtocolException {
@@ -164,6 +164,15 @@ class AgentAssemblyTest {
                 }
             }
             return messages;
+        }
+    }
+
+    private static SequenceDecodeResult.Decoded<AgentMessageRecord> decoded(AgentMessage message) {
+        try {
+            return new SequenceDecodeResult.Decoded<>(
+                    new AgentMessageRecord(message, ProtocolBytes.copyOf(CODEC.encode(message))));
+        } catch (AgentProtocolException failure) {
+            throw new AssertionError(failure);
         }
     }
 

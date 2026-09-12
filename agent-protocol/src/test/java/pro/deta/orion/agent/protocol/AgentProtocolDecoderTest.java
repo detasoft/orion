@@ -42,11 +42,30 @@ class AgentProtocolDecoderTest {
         ByteBuffer input = ByteBuffer.wrap(source, 1, encoded.length).slice();
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> result = decoder.accept(input);
+        SequenceDecodeResult<AgentMessageRecord> result = decoder.accept(input);
         java.util.Arrays.fill(source, (byte) 0);
 
         assertThat(input.position()).isEqualTo(input.limit());
         assertThat(decoded(result)).containsExactly(expected);
+    }
+
+    @Test
+    void preservesTheExactKnownMessageAcrossFragmentsAndSourceReuse() {
+        byte[] encoded = Hex.parse("82198002f6");
+        byte[] source = concatenate(new byte[]{99}, encoded, new byte[]{100});
+        AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
+
+        assertThat(decoder.accept(ByteBuffer.wrap(source, 1, 2)).outcomes()).isEmpty();
+        SequenceDecodeResult<AgentMessageRecord> result =
+                decoder.accept(ByteBuffer.wrap(source, 3, encoded.length - 2));
+        Arrays.fill(source, (byte) 0);
+
+        assertThat(result.terminalIssue()).isEmpty();
+        assertThat(result.outcomes()).hasSize(1);
+        AgentMessageRecord value = ((SequenceDecodeResult.Decoded<AgentMessageRecord>)
+                result.outcomes().getFirst()).value();
+        assertThat(value.message()).isEqualTo(new AgentMessage.RequestSessionList());
+        assertThat(value.encodedItem()).isEqualTo(ProtocolBytes.copyOf(encoded));
     }
 
     @Test
@@ -55,7 +74,7 @@ class AgentProtocolDecoderTest {
         byte[] invalidKnown = Hex.parse("81198001");
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> result = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> result = decoder.accept(
                 ByteBuffer.wrap(concatenate(valid, invalidKnown, valid)));
 
         assertThat(decoded(result)).containsExactly(
@@ -63,7 +82,7 @@ class AgentProtocolDecoderTest {
         assertThat(result.outcomes()).hasSize(3);
         assertThat(result.outcomes().get(1)).isInstanceOf(SequenceDecodeResult.Rejected.class);
         SequenceDecodeIssue.Recoverable issue =
-                ((SequenceDecodeResult.Rejected<AgentMessage>) result.outcomes().get(1)).issue();
+                ((SequenceDecodeResult.Rejected<AgentMessageRecord>) result.outcomes().get(1)).issue();
         assertThat(issue.exception().reason()).isEqualTo(AgentProtocolException.Reason.MISSING_FIELD);
         assertThat(issue.encodedLength()).isEqualTo(invalidKnown.length);
         assertThat(result.terminalIssue()).isEmpty();
@@ -76,7 +95,7 @@ class AgentProtocolDecoderTest {
         byte[] valid = CODEC.encode(new AgentMessage.RequestSessionList());
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> result = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> result = decoder.accept(
                 ByteBuffer.wrap(concatenate(valid, new byte[]{(byte) 0xff}, valid)));
 
         assertThat(decoded(result)).containsExactly(new AgentMessage.RequestSessionList());
@@ -96,13 +115,13 @@ class AgentProtocolDecoderTest {
         byte[] valid = CODEC.encode(new AgentMessage.SessionSync(SESSION_ID, Optional.empty()));
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> partial = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> partial = decoder.accept(
                 ByteBuffer.wrap(valid, 0, valid.length - 1));
 
         assertThat(partial.outcomes()).isEmpty();
         assertThat(partial.terminalIssue()).isEmpty();
         assertThat(decoder.pendingBytes()).isEqualTo(valid.length - 1);
-        SequenceDecodeResult<AgentMessage> finished = decoder.finish();
+        SequenceDecodeResult<AgentMessageRecord> finished = decoder.finish();
         assertThat(finished.terminalIssue()).isPresent();
         assertThat(finished.terminalIssue().orElseThrow().pendingBytes()).isEqualTo(valid.length - 1);
         assertThat(finished.terminalIssue().orElseThrow().exception().reason())
@@ -123,7 +142,7 @@ class AgentProtocolDecoderTest {
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
         for (int index = 0; index < encoded.length; index++) {
-            SequenceDecodeResult<AgentMessage> result = decoder.accept(
+            SequenceDecodeResult<AgentMessageRecord> result = decoder.accept(
                     ByteBuffer.wrap(encoded, index, 1));
             assertThat(result.terminalIssue()).isEmpty();
             if (index < encoded.length - 1) {
@@ -141,12 +160,12 @@ class AgentProtocolDecoderTest {
         byte[] truncated = Hex.parse("8218635f4201");
         AgentProtocolDecoder truncatedDecoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> partial = truncatedDecoder.accept(ByteBuffer.wrap(truncated));
+        SequenceDecodeResult<AgentMessageRecord> partial = truncatedDecoder.accept(ByteBuffer.wrap(truncated));
 
         assertThat(partial.outcomes()).isEmpty();
         assertThat(partial.terminalIssue()).isEmpty();
         assertThat(truncatedDecoder.pendingBytes()).isEqualTo(truncated.length);
-        SequenceDecodeResult<AgentMessage> finished = truncatedDecoder.finish();
+        SequenceDecodeResult<AgentMessageRecord> finished = truncatedDecoder.finish();
         assertThat(finished.terminalIssue()).isPresent();
         assertThat(finished.terminalIssue().orElseThrow().pendingBytes()).isEqualTo(truncated.length);
         assertThat(finished.terminalIssue().orElseThrow().exception().reason())
@@ -172,13 +191,13 @@ class AgentProtocolDecoderTest {
         byte[] sequence = concatenate(prefix, encoded);
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> first = decoder.accept(ByteBuffer.wrap(sequence, 0, 8 * 1024));
+        SequenceDecodeResult<AgentMessageRecord> first = decoder.accept(ByteBuffer.wrap(sequence, 0, 8 * 1024));
 
         assertThat(decoded(first)).containsExactly(new AgentMessage.RequestSessionList());
         assertThat(first.terminalIssue()).isEmpty();
         assertThat(decoder.pendingBytes()).isEqualTo(8 * 1024 - prefix.length);
 
-        SequenceDecodeResult<AgentMessage> second = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> second = decoder.accept(
                 ByteBuffer.wrap(sequence, 8 * 1024, sequence.length - 8 * 1024));
 
         assertThat(decoded(second)).containsExactly(unknown(encoded));
@@ -196,7 +215,7 @@ class AgentProtocolDecoderTest {
                 Hex.parse("7f6161ff"),
                 Hex.parse("82018102"));
         for (byte[] item : completeSemanticFailures) {
-            SequenceDecodeResult<AgentMessage> result = new AgentProtocolDecoder(limits)
+            SequenceDecodeResult<AgentMessageRecord> result = new AgentProtocolDecoder(limits)
                     .accept(ByteBuffer.wrap(item));
             assertThat(result.outcomes()).hasSize(1);
             assertThat(result.terminalIssue()).isEmpty();
@@ -209,7 +228,7 @@ class AgentProtocolDecoderTest {
                 Hex.parse("5f6101ff"),
                 Hex.parse("818181818100"));
         for (byte[] item : malformed) {
-            SequenceDecodeResult<AgentMessage> result = new AgentProtocolDecoder(limits)
+            SequenceDecodeResult<AgentMessageRecord> result = new AgentProtocolDecoder(limits)
                     .accept(ByteBuffer.wrap(item));
             assertThat(result.terminalIssue()).isPresent();
         }
@@ -223,12 +242,13 @@ class AgentProtocolDecoderTest {
         byte[][] items = new byte[20][];
         java.util.Arrays.fill(items, item);
 
-        SequenceDecodeResult<AgentMessage> coalesced = decoder.accept(ByteBuffer.wrap(concatenate(items)));
+        SequenceDecodeResult<AgentMessageRecord> coalesced =
+                decoder.accept(ByteBuffer.wrap(concatenate(items)));
 
         assertThat(decoded(coalesced)).hasSize(20);
         assertThat(decoder.pendingBytes()).isZero();
 
-        SequenceDecodeResult<AgentMessage> oversized = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> oversized = decoder.accept(
                 ByteBuffer.wrap(Hex.parse("5f4741424344454647")));
         assertThat(oversized.terminalIssue()).isPresent();
         assertThat(oversized.terminalIssue().orElseThrow().exception().reason())
@@ -245,11 +265,11 @@ class AgentProtocolDecoderTest {
         return values;
     }
 
-    private static List<AgentMessage> decoded(SequenceDecodeResult<AgentMessage> result) {
+    private static List<AgentMessage> decoded(SequenceDecodeResult<AgentMessageRecord> result) {
         List<AgentMessage> values = new ArrayList<>();
-        for (SequenceDecodeResult.Outcome<AgentMessage> outcome : result.outcomes()) {
-            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
-                values.add(decoded.value());
+        for (SequenceDecodeResult.Outcome<AgentMessageRecord> outcome : result.outcomes()) {
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded) {
+                values.add(decoded.value().message());
             }
         }
         return values;
@@ -259,14 +279,14 @@ class AgentProtocolDecoderTest {
         byte[] encoded = Hex.parse(hexadecimal);
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> partial = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> partial = decoder.accept(
                 ByteBuffer.wrap(encoded, 0, fragmentLength));
 
         assertThat(partial.outcomes()).isEmpty();
         assertThat(partial.terminalIssue()).isEmpty();
         assertThat(decoder.pendingBytes()).isEqualTo(fragmentLength);
 
-        SequenceDecodeResult<AgentMessage> complete = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> complete = decoder.accept(
                 ByteBuffer.wrap(encoded, fragmentLength, encoded.length - fragmentLength));
 
         assertThat(decoded(complete)).containsExactly(unknown(encoded));
@@ -277,9 +297,9 @@ class AgentProtocolDecoderTest {
     private static void assertMalformedChunk(String prefixHexadecimal, String suffixHexadecimal) {
         AgentProtocolDecoder decoder = new AgentProtocolDecoder(LIMITS);
 
-        SequenceDecodeResult<AgentMessage> prefix = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> prefix = decoder.accept(
                 ByteBuffer.wrap(Hex.parse(prefixHexadecimal)));
-        SequenceDecodeResult<AgentMessage> malformed = decoder.accept(
+        SequenceDecodeResult<AgentMessageRecord> malformed = decoder.accept(
                 ByteBuffer.wrap(Hex.parse(suffixHexadecimal)));
 
         assertThat(prefix.outcomes()).isEmpty();

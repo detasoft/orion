@@ -5,6 +5,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionId;
 
@@ -20,7 +21,7 @@ public interface AgentTransport extends AutoCloseable {
 
     void closeSession(SessionId sessionId);
 
-    void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessage>> receiver);
+    void onControlOutcome(Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> receiver);
 
     void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver);
 

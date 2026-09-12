@@ -17,6 +17,7 @@ import java.util.function.LongSupplier;
 import java.util.random.RandomGenerator;
 
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.MachineInfo;
@@ -186,7 +187,7 @@ public final class AgentControlService implements AgentService {
         }
     }
 
-    private void receiveControl(SequenceDecodeResult.Outcome<AgentMessage> outcome) {
+    private void receiveControl(SequenceDecodeResult.Outcome<AgentMessageRecord> outcome) {
         Attempt current;
         synchronized (this) {
             current = attempt;
@@ -195,14 +196,14 @@ public final class AgentControlService implements AgentService {
             receiveAuthenticatedControl(outcome);
             return;
         }
-        if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessage> rejected) {
+        if (outcome instanceof SequenceDecodeResult.Rejected<AgentMessageRecord> rejected) {
             if (rejected.issue().exception().reason() == AgentProtocolException.Reason.UNSUPPORTED_VERSION) {
                 current.negotiated.completeExceptionally(new HandshakeException(
                         "Server selected an unsupported protocol version", rejected.issue().exception()));
             }
             return;
         }
-        AgentMessage message = ((SequenceDecodeResult.Decoded<AgentMessage>) outcome).value();
+        AgentMessage message = ((SequenceDecodeResult.Decoded<AgentMessageRecord>) outcome).value().message();
         try {
             if (!(message instanceof AgentMessage.Welcome welcome)) {
                 throw new HandshakeException("First server control message is not WELCOME");
@@ -222,9 +223,9 @@ public final class AgentControlService implements AgentService {
         }
     }
 
-    private void receiveAuthenticatedControl(SequenceDecodeResult.Outcome<AgentMessage> outcome) {
-        if (!(outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded)
-                || !(decoded.value() instanceof AgentMessage.RequestSessionList)) {
+    private void receiveAuthenticatedControl(SequenceDecodeResult.Outcome<AgentMessageRecord> outcome) {
+        if (!(outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded)
+                || !(decoded.value().message() instanceof AgentMessage.RequestSessionList)) {
             return;
         }
         AgentConnection expected = onlineConnection();

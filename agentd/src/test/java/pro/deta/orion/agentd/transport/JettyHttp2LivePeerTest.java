@@ -46,6 +46,7 @@ import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.Test;
 
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
@@ -90,6 +91,34 @@ class JettyHttp2LivePeerTest {
             assertThat(request.getHttpURI().getPath()).isEqualTo("/agent/control");
             assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
             assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(SECOND_MESSAGE);
+        }
+    }
+
+    @Test
+    void deliversExactKnownControlItemWithFutureField() throws Exception {
+        byte[] original = HexFormat.of().parseHex("82198002f6");
+        try (Peer peer = new Peer((server, stream, request, count) -> {
+            respond(stream, 200, false, () -> stream.data(
+                    data(stream, java.util.Arrays.copyOf(original, 2)), Callback.from(() ->
+                            stream.data(
+                                    data(stream, java.util.Arrays.copyOfRange(original, 2, original.length)),
+                                    Callback.NOOP))));
+            return Stream.Listener.AUTO_DISCARD;
+        })) {
+            JettyHttp2Transport transport = peer.transport(true);
+            LinkedBlockingQueue<AgentMessageRecord> received = new LinkedBlockingQueue<>();
+            transport.onControlOutcome(outcome -> {
+                if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded) {
+                    received.add(decoded.value());
+                }
+            });
+
+            transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            AgentMessageRecord record = received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            assertThat(record).isNotNull();
+            assertThat(record.message()).isEqualTo(FIRST_MESSAGE);
+            assertThat(record.encodedItem().toByteArray()).isEqualTo(original);
         }
     }
 
@@ -1064,8 +1093,8 @@ class JettyHttp2LivePeerTest {
             Consumer<AgentMessage> receiver
     ) {
         transport.onControlOutcome(outcome -> {
-            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessage> decoded) {
-                receiver.accept(decoded.value());
+            if (outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded) {
+                receiver.accept(decoded.value().message());
             }
         });
     }

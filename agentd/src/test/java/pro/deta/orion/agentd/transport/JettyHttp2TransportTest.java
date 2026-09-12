@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionId;
 
@@ -102,7 +103,7 @@ class JettyHttp2TransportTest {
         }
     }
 
-    private static void assertThatOutcomeIsTyped(SequenceDecodeResult.Outcome<AgentMessage> outcome) {
+    private static void assertThatOutcomeIsTyped(SequenceDecodeResult.Outcome<AgentMessageRecord> outcome) {
         if (outcome == null) {
             throw new AssertionError("typed outcome must not be null");
         }
