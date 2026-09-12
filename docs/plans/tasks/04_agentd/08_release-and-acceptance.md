@@ -16,8 +16,8 @@ that transport and orchestration remain independent from session execution.
   resume from the server's durable event IDs, and continue commands without
   stopping child process trees.
 - Disconnect the server, verify journals continue independently, reconnect and
-  catch up retained data, then force retention and verify the server records
-  the exact missing range.
+  catch up retained data, then verify local retention follows only the server's
+  durably committed cursor. Numeric EventId jumps must not imply missing data.
 - Exercise a corrupt session alongside healthy sessions and verify heartbeat,
   commands, fair journal progress, credential redaction, and graceful shutdown.
 - Publish the MVP support matrix, operational defaults, compatibility versions,

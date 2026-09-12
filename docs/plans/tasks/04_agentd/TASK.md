@@ -14,7 +14,7 @@ the AgentD lifecycle.
 - Discover, launch, control, and recover local sessions without owning their
   PTYs or process trees.
 - Synchronize durable journal events through per-session streams with durable
-  server cursors, gaps, reconnect, and idempotent resume.
+  server cursors, reconnect, and idempotent resume.
 - Isolate control, heartbeat, and sessions from output backpressure and
   per-session failures.
 - Report machine status and capabilities and support safe service shutdown.
@@ -211,9 +211,8 @@ cause full reconciliation. A periodic rescan is always retained as a safety
 net.
 
 Failure classification is per session. Invalid metadata, a corrupt journal,
-an unreachable host, or a retention gap can move one session to `DEGRADED`,
-`LOST`, or `JOURNAL_GAP` without terminating AgentD or disrupting other
-sessions.
+or an unreachable host can move one session to `DEGRADED` or `LOST` without
+terminating AgentD or disrupting other sessions.
 
 ### Session Launch and Local Control
 
@@ -290,11 +289,14 @@ the cursor is `null`. Transport chunks may split records arbitrarily. Bounded
 chunks and fair scheduling limit memory use, while HTTP/2 flow control slows
 only replication when the server storage path is backpressured.
 
-No separate acknowledgement protocol or persisted AgentD cursor is required.
-After reconnect, the server derives `afterEventId` from committed storage and
-AgentD may harmlessly resend records that were in flight. If the server cursor
-predates the advertised first available event, the server records a session
-gap and synchronization continues from that first available event.
+The server's `SESSION_SYNC` cursor confirms durable storage; AgentD persists no
+replication cursor or journal copy. After reconnect, the server derives
+`afterEventId` from committed storage and AgentD may harmlessly resend records
+that were in flight. AgentD passes a committed EventId to `session-host` through
+the existing `ACK_JOURNAL` control only to permit local retention. If the server
+cursor predates the advertised first available event, synchronization continues
+from that event. EventIds may skip values, so their numeric difference alone
+cannot establish that a record was lost.
 
 `PROCESS_EXITED` is transported from the journal like every other event; a
 transient control-socket status is not the authoritative exit record. Harness
@@ -323,7 +325,7 @@ isolation mechanism.
 
 When the server is slow or offline, `session-host` continues appending to its
 journal. AgentD accumulates lag by leaving its cursor behind rather than by
-blocking the host. Retention may create an explicit gap. Protocol errors,
+blocking the host. Protocol errors,
 journal corruption, and command delivery failures are contained at the
 narrowest possible connection or session boundary.
 
@@ -341,9 +343,9 @@ Git, Claude, Codex, and supported sandbox modes.
 Metric collection must be bounded and must not delay heartbeat. Useful logs
 and metrics include connection lifecycle, registration, reconnect count,
 session discovery and launch, command latency, journal lag in bytes and time,
-gaps, bytes and events sent, active sessions, and protocol errors. Session and
-command identifiers are included where safe; credentials and payload secrets
-are excluded.
+continuity issues, bytes and events sent, active sessions, and protocol errors.
+Session and command identifiers are included where safe; credentials and
+payload secrets are excluded.
 
 AgentD exposes no public listening port. Orion Server starts it through a
 short-lived SSH connection; AgentD then runs detached from SSH. Platform
@@ -376,8 +378,8 @@ platform implementations can be tested independently.
 | 3 | Launch authentication | 1-2 | Server identity, process lock, permit, in-memory reconnect token |
 | 4 | Session discovery | 1, host contracts | Startup recovery, reconciliation, local state classification |
 | 5 | Runtime and local control | 1, host process support | Native launch, workspace boundary, command client |
-| 6 | Journal reader | host journal and retention | Cursor reads, compressed blocks, tails, rotation, gaps |
-| 7 | Journal sync and resume | 3-4, 6 | Session streams, raw CBOR records, durable cursors, gaps, resume |
+| 6 | Journal reader | host journal and retention | Cursor reads, compressed blocks, tails, rotation |
+| 7 | Journal sync and resume | 3-4, 6 | Session streams, raw CBOR records, durable cursors, resume |
 | 8 | Command orchestration | 3-5 | Server command routing, results, retries, session statuses |
 | 9 | Status and resilience | 2-8 | Telemetry, fairness, backoff, failure isolation, shutdown |
 | 10 | Release and acceptance | 1-9, packaged host | Service packaging and end-to-end MVP scenarios |
@@ -393,7 +395,7 @@ after the control stream is stable.
 The MVP includes server-controlled launch authentication and connection, local
 session discovery, `NativeRuntime`, session-host launch, journal reading and
 forwarding, all five server commands, durable server cursors,
-reconnect/resume, explicit gaps, machine status, and AgentD restart recovery.
+reconnect/resume, machine status, and AgentD restart recovery.
 
 Docker execution, artifact transfer, workspace checkout, autoscaling, semantic
 terminal or harness parsing, complex credential providers, and multi-server HA
@@ -412,8 +414,9 @@ boundary.
 3. Disconnect the server long enough to exercise reconnect backoff while local
    sessions continue. Restore connectivity and catch up every retained event
    without starving heartbeat, commands, or quieter sessions.
-4. Keep the server offline past journal retention. Reconnect, let the server
-   record the exact gap, and continue at the first available record.
+4. Keep the server offline while local journals grow. Reconnect, resume from
+   the server's durable cursor, and advance local retention only after the
+   server confirms storage. Numeric EventId jumps must not be reported as loss.
 5. Corrupt or truncate one session tail and verify complete preceding records
    remain readable, that session becomes degraded, and other sessions continue
    synchronization.

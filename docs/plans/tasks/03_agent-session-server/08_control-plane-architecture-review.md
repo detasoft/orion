@@ -13,7 +13,7 @@ agent session server after both sides of the current MVP are complete.
 - Trace connection, agent instance, local session, server session, and stream
   ownership across disconnect, reconnect, replacement, shutdown, and recovery.
 - Identify the source of truth for session lifecycle, journal availability,
-  durable cursors, gaps, acknowledgements, and replay progress.
+  durable cursors, continuity uncertainty, acknowledgements, and replay progress.
 - Verify that command correlation, idempotency, retry identity, journaled
   effects, and result delivery form one coherent model.
 - Inspect registries, queues, state machines, snapshots, reconnect
@@ -36,7 +36,8 @@ agent session server after both sides of the current MVP are complete.
 ## Completion Criteria
 
 - The review follows representative launch, command, journal sync, reconnect,
-  gap, exit, and failure paths through both processes and durable storage.
+  continuity-uncertainty, exit, and failure paths through both processes and
+  durable storage.
 - Findings distinguish verified implementation behavior from protocol intent
   and explicitly identify any contract changes.
 - Remaining cross-module duplication and coordination have named owners or

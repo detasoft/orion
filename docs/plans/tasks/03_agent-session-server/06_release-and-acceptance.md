@@ -14,8 +14,8 @@ complete usable session history across transport and process failures.
   connection, grow the local journal, and resume after the exact committed ID.
 - Verify resent identical records create no duplicates and conflicting bytes
   for one `(sessionId, eventId)` fail as protocol or storage corruption.
-- Restart the server and verify cursors come from durable storage; exercise a
-  retention gap and continue from the first event still available on AgentD.
+- Restart the server and verify cursors come from durable storage. Accept
+  naturally spaced EventIds without reporting a false retention gap.
 - Catch up an exited session, synchronize multiple sessions fairly under a
   large backlog, and verify live consumers never observe an unpersisted event.
 - Document MVP configuration and explicitly deferred cleanup, semantic

@@ -33,10 +33,11 @@ tracked follow-up capabilities.
 
 ## Failure Boundary
 
-Invalid session state, unreachable control, a required-history gap, corrupt
+Invalid session state, unreachable control, a missing journal segment, corrupt
 complete journal data, output failure, or control failure produces a bounded
-session-local diagnostic. An incomplete active tail is a wait boundary, not an
-error. Closing local terminal mode never stops the host or child.
+session-local diagnostic. Numeric EventId jumps alone do not prove missing
+history. An incomplete active tail is a wait boundary, not an error. Closing
+local terminal mode never stops the host or child.
 
 ## Acceptance
 

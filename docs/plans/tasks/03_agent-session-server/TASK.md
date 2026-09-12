@@ -16,6 +16,7 @@ journal, route commands, and expose durable history and live events to clients.
 - Preserve unknown journal records without transport-layer interpretation and
   persist every event before making it visible to live consumers.
 - Reconcile agents and sessions after reconnect or server restart, including
-  connection takeover, completed-session catch-up, and retained-history gaps.
+  connection takeover and completed-session catch-up. Do not infer lost records
+  from numeric EventId jumps; verifiable continuity is deferred.
 - Defer semantic projections, local-session deletion, clustered deployment,
   and production object storage until the raw journal path is complete.

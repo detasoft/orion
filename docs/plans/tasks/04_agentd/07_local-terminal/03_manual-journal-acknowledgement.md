@@ -11,8 +11,9 @@ non-acknowledging attach behavior.
 - After a contiguous journal page is fully decoded and its terminal output is
   successfully written, send that page's last EventId through the monotonic
   `ACK_JOURNAL` retention control.
-- Never acknowledge an incomplete tail, gap, corrupt page, output failure, or
-  partially observed page.
+- Never acknowledge an incomplete tail, missing segment, corrupt page, output
+  failure, or partially observed page. Numeric EventId jumps alone do not prove
+  a missing record.
 - Keep watermarks monotonic only in memory for the current invocation. Do not
   persist a local replica cursor or imply server durability.
 - A repeated acknowledgement after ambiguous delivery is harmless. Report
