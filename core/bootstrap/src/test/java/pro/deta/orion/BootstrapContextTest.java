@@ -8,9 +8,18 @@ import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
 import pro.deta.orion.keymaterial.InMemoryKeyMaterialContentStore;
+import pro.deta.orion.keymaterial.KeyMaterialAlgorithm;
+import pro.deta.orion.keymaterial.KeyMaterialAlias;
+import pro.deta.orion.keymaterial.KeyMaterialDescriptor;
+import pro.deta.orion.keymaterial.KeyMaterialOptions;
+import pro.deta.orion.keymaterial.KeyMaterialPurpose;
+import pro.deta.orion.keymaterial.KeyMaterialScope;
+import pro.deta.orion.keymaterial.KeyMaterialService;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
+import pro.deta.orion.keymaterial.KeyMaterialVersion;
 import pro.deta.orion.keymaterial.OrionKeyMaterial;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.schema.config.SigningKeyReferenceConfig;
 import pro.deta.orion.schema.config.SshHostKeyReferenceConfig;
 
 import java.nio.charset.StandardCharsets;
@@ -79,6 +88,74 @@ class BootstrapContextTest {
                 .hasMessage("Bootstrap inputs are unavailable or invalid")
                 .rootCause()
                 .hasMessageContaining("missing-ssh-host-key");
+    }
+
+    @Test
+    void keepsExistingRuntimeWhenConfigurationReferencesUnstagedSigningMaterial() throws Exception {
+        OrionConfiguration initial = configuration();
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(
+                initial,
+                Map.of("orion.xml", bytes("configuration"), "material.p12", materialBytes(initial)));
+        OrionConfiguration next = configuration();
+        next.getBootstrap().getKeyMaterial().getServerSigning()
+                .setActive(new SigningKeyReferenceConfig("server-signing-v2", 2));
+        next.getBootstrap().getKeyMaterial().getServerSigning()
+                .setVerification(List.of(new SigningKeyReferenceConfig("server-signing-v1", 1)));
+        byte[] payload = bytes("bootstrap-rotation");
+        byte[] oldSignature;
+
+        try (BootstrapContext current = BootstrapContext.open(initial, ENVIRONMENT, backend)) {
+            oldSignature = current.serverIdentity().sign(payload);
+            assertThatThrownBy(() -> BootstrapContext.open(next, ENVIRONMENT, backend))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Bootstrap inputs are unavailable or invalid")
+                    .rootCause()
+                    .hasMessageContaining("server-signing-v2");
+            assertThat(current.serverIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
+
+            KeyMaterialDescriptor staged = new KeyMaterialDescriptor(
+                    new KeyMaterialAlias("server-signing-v2"),
+                    KeyMaterialPurpose.SERVER_SIGNING,
+                    KeyMaterialAlgorithm.RSA,
+                    new KeyMaterialVersion(2),
+                    KeyMaterialScope.cluster("orion"));
+            try (KeyMaterialOptions options = KeyMaterialOptions.pkcs12("correct-password".toCharArray());
+                 KeyMaterialService material = KeyMaterialService.open(
+                         new NativeGitKeyMaterialContentStore(
+                                 backend, "orion", "refs/heads/main", "material.p12"), options)) {
+                material.generateKeyIfMissing(staged, 2048);
+                material.save();
+            }
+
+            try (BootstrapContext activated = BootstrapContext.open(next, ENVIRONMENT, backend)) {
+                assertThat(activated.serverIdentity().activeKeyId()).isEqualTo("server-signing-v2");
+                assertThat(activated.serverIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
+            }
+        }
+
+        try (BootstrapContext restored = BootstrapContext.open(initial, ENVIRONMENT, backend)) {
+            assertThat(restored.serverIdentity().activeKeyId()).isEqualTo("server-signing-v1");
+            assertThat(restored.serverIdentity().verify("server-signing-v1", payload, oldSignature)).isTrue();
+        }
+    }
+
+    @Test
+    void doesNotRecreateLostMaterialForConfigurationWithRetainedIdentity() throws Exception {
+        OrionConfiguration configuration = configuration();
+        configuration.getBootstrap().getKeyMaterial().getServerSigning()
+                .setActive(new SigningKeyReferenceConfig("server-signing-v2", 2));
+        configuration.getBootstrap().getKeyMaterial().getServerSigning()
+                .setVerification(List.of(new SigningKeyReferenceConfig("server-signing-v1", 1)));
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(
+                configuration, Map.of("orion.xml", bytes("configuration")));
+
+        assertThatThrownBy(() -> BootstrapContext.open(configuration, ENVIRONMENT, backend))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap inputs are unavailable or invalid")
+                .rootCause()
+                .hasMessageContaining("retained server identities");
+        assertThat(new NativeGitKeyMaterialContentStore(
+                backend, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
     }
 
     @Test
