@@ -62,7 +62,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.FIN;
 import static pro.deta.orion.lifecycle.state.StandardStateDefinition.RUNNING;
 
-class InternalConfigurationRepositoryLifecycleTest {
+class InternalConfigurationRepositoryLifecycleIT {
     private static final String REPOSITORY_NAME = "internal/configuration";
     private static final String CONFIGURATION_REF = "refs/heads/configuration";
     private static final String ACL_PATH = "config/orion.xml";

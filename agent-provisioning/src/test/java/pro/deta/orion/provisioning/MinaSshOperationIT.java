@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class MinaSshOperationTest {
+class MinaSshOperationIT {
     @Test
     void verifiesHostAuthenticatesAndExchangesCommandInput(@TempDir Path root) throws Exception {
         KeyPair host = keyPair();

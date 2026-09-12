@@ -56,7 +56,7 @@ import pro.deta.orion.util.CertUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-class JettyHttp2LivePeerTest {
+class JettyHttp2LivePeerIT {
     private static final long TIMEOUT_SECONDS = 5;
     private static final AgentProtocolCodec CODEC = new AgentProtocolCodec(AgentProtocolLimits.defaults());
     private static final AgentMessage FIRST_MESSAGE = new AgentMessage.RequestSessionList();
@@ -466,9 +466,9 @@ class JettyHttp2LivePeerTest {
             transport.onSignal(signals::add);
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             await(signals, TransportSignal.Kind.CONNECTED);
-            transport.openSession(resetSession, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(resetSession, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(healthySession, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(healthySession, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             TransportSignal reset = await(signals, TransportSignal.Kind.STREAM_RESET);
@@ -483,7 +483,7 @@ class JettyHttp2LivePeerTest {
             transport.sendControlCbor(FIRST_RECORD).toCompletableFuture()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
-            transport.openSession(resetSession, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(resetSession, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             transport.sendSessionCbor(resetSession, SECOND_RECORD).toCompletableFuture()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -522,7 +522,7 @@ class JettyHttp2LivePeerTest {
             });
             try {
                 transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                         .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 assertThat(firstEntered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
 
@@ -568,7 +568,7 @@ class JettyHttp2LivePeerTest {
             });
             try {
                 transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                         .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 assertThat(entered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
                 transport.closeSession(sessionId);
@@ -577,7 +577,7 @@ class JettyHttp2LivePeerTest {
                         .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
                 assertThat(received.poll(100, TimeUnit.MILLISECONDS)).isNull();
-                transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                         .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isEqualTo(FIRST_MESSAGE);
             } finally {
@@ -610,7 +610,7 @@ class JettyHttp2LivePeerTest {
             JettyHttp2Transport transport = peer.transport(true);
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             CompletableFuture<Void> opening = transport
-                    .openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders).toCompletableFuture();
+                    .openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders).toCompletableFuture();
             assertThat(requested.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
             CompletableFuture<Void> queued = transport.sendSessionCbor(sessionId, FIRST_RECORD)
                     .toCompletableFuture();
@@ -626,7 +626,7 @@ class JettyHttp2LivePeerTest {
             assertThat(reset.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
             transport.sendControlCbor(FIRST_RECORD).toCompletableFuture()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             transport.sendSessionCbor(sessionId, SECOND_RECORD).toCompletableFuture()
                     .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -653,10 +653,10 @@ class JettyHttp2LivePeerTest {
             await(signals, TransportSignal.Kind.CONNECTED);
 
             CompletableFuture<Void> rejectedOpen = transport
-                    .openSession(rejected, JettyHttp2LivePeerTest::sessionHeaders).toCompletableFuture();
+                    .openSession(rejected, JettyHttp2LivePeerIT::sessionHeaders).toCompletableFuture();
             CompletableFuture<Void> rejectedSend = transport.sendSessionCbor(rejected, FIRST_RECORD)
                     .toCompletableFuture();
-            transport.openSession(healthy, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(healthy, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             assertThatThrownBy(() -> rejectedOpen.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
@@ -690,9 +690,9 @@ class JettyHttp2LivePeerTest {
             AgentProtocolLimits limits = AgentProtocolLimits.defaults().withMaxFrameBytes(256 * 1024);
             JettyHttp2Transport transport = peer.transport(true, limits, 8, 8);
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(stalled, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(stalled, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(healthy, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(healthy, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             CompletableFuture<Void> stalledSend = transport.sendSessionCbor(stalled, byteString(128 * 1024))
@@ -736,9 +736,9 @@ class JettyHttp2LivePeerTest {
             LinkedBlockingQueue<SessionItem> received = new LinkedBlockingQueue<>();
             transport.onSessionMessage((id, item) -> received.add(new SessionItem(id, item)));
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(first, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(first, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(second, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(second, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<SessionItem> initial = take(received, 3);
@@ -757,7 +757,7 @@ class JettyHttp2LivePeerTest {
             assertThatThrownBy(() -> transport.sendSessionCbor(first, FIRST_RECORD)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
                     .isInstanceOf(ExecutionException.class);
-            transport.openSession(first, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(first, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             assertThat(received.poll(TIMEOUT_SECONDS, TimeUnit.SECONDS).sessionId).isEqualTo(first);
             transport.sendSessionCbor(first, FIRST_RECORD).toCompletableFuture()
@@ -788,7 +788,7 @@ class JettyHttp2LivePeerTest {
             transport.onSessionMessage((id, message) -> received.add(new SessionItem(id, message)));
             transport.onSignal(signals::add);
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             assertThat(take(received, 2)).extracting(SessionItem::message)
@@ -821,9 +821,9 @@ class JettyHttp2LivePeerTest {
             transport.onSessionMessage((id, message) -> received.add(new SessionItem(id, message)));
             transport.onSignal(signals::add);
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(damaged, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(damaged, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(healthy, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(healthy, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             List<SessionItem> items = take(received, 2);
@@ -865,7 +865,7 @@ class JettyHttp2LivePeerTest {
                 }
             });
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             Stream stream = serverStream.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             stream.data(data(stream, FIRST_RECORD), Callback.NOOP);
@@ -907,7 +907,7 @@ class JettyHttp2LivePeerTest {
                 }
             });
             transport.connect().toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+            transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                     .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             Stream stream = serverStream.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             stream.data(data(stream, FIRST_RECORD), Callback.NOOP);
@@ -961,7 +961,7 @@ class JettyHttp2LivePeerTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(TIMEOUT_SECONDS);
         while (System.nanoTime() < deadline) {
             try {
-                transport.openSession(sessionId, JettyHttp2LivePeerTest::sessionHeaders)
+                transport.openSession(sessionId, JettyHttp2LivePeerIT::sessionHeaders)
                         .toCompletableFuture().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 return;
             } catch (ExecutionException failure) {
