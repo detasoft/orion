@@ -35,6 +35,13 @@ public final class OrionKeyMaterialFactory {
     public static OrionKeyMaterial open(
             OrionConfiguration configuration,
             Map<String, String> environment) throws IOException, GeneralSecurityException {
+        return open(configuration, environment, false);
+    }
+
+    public static OrionKeyMaterial open(
+            OrionConfiguration configuration,
+            Map<String, String> environment,
+            boolean createIfMissing) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }
@@ -44,13 +51,21 @@ public final class OrionKeyMaterialFactory {
         KeyMaterialResourceResolver resolver = KeyMaterialResourceResolver.standard(environment);
         String location = resolveAgainstBaseDirectory(material.getLocation(), baseDirectory, "location");
         KeyMaterialContentStore store = resolver.resolveStore(location);
-        return open(configuration, environment, store);
+        return open(configuration, environment, store, createIfMissing);
     }
 
     public static OrionKeyMaterial open(
             OrionConfiguration configuration,
             Map<String, String> environment,
             KeyMaterialContentStore store) throws IOException, GeneralSecurityException {
+        return open(configuration, environment, store, false);
+    }
+
+    public static OrionKeyMaterial open(
+            OrionConfiguration configuration,
+            Map<String, String> environment,
+            KeyMaterialContentStore store,
+            boolean createIfMissing) throws IOException, GeneralSecurityException {
         if (configuration == null) {
             throw new IllegalArgumentException("Orion configuration must not be null");
         }
@@ -65,7 +80,8 @@ public final class OrionKeyMaterialFactory {
                     store,
                     options,
                     signingMaterial,
-                    KeyMaterialConstants.RSA_KEY_SIZE_BITS);
+                    KeyMaterialConstants.RSA_KEY_SIZE_BITS,
+                    createIfMissing);
         }
     }
 

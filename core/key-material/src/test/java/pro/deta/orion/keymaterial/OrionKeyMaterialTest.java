@@ -22,7 +22,12 @@ class OrionKeyMaterialTest {
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
 
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048)) {
+        assertThatThrownBy(() -> OrionKeyMaterial.open(store, options(), signing, 2048))
+                .isInstanceOf(GeneralSecurityException.class)
+                .hasMessageContaining("creation was not requested");
+        assertThat(store.read()).isEmpty();
+
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), signing, 2048, true)) {
             ServerIdentityCapability identity = material.serverIdentity();
             signature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo("server-signing-v1");
@@ -77,7 +82,7 @@ class OrionKeyMaterialTest {
         byte[] nextSignature;
         SigningMaterialSet initial = new SigningMaterialSet(old, List.of());
 
-        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048)) {
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048, true)) {
             oldSignature = material.serverIdentity().sign(payload);
         }
         try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
@@ -155,7 +160,8 @@ class OrionKeyMaterialTest {
                 store,
                 options(),
                 new SigningMaterialSet(rsa("server-signing-v1", 1), List.of()),
-                2048);
+                2048,
+                true);
         KeyMaterialDescriptor account = descriptor(
                 "acme-account-v1", KeyMaterialPurpose.ACME_ACCOUNT, KeyMaterialAlgorithm.RSA, 1, CLUSTER);
         KeyMaterialDescriptor identity = descriptor(
@@ -195,7 +201,8 @@ class OrionKeyMaterialTest {
                     store,
                     options(),
                     new SigningMaterialSet(rsa("server-signing-v1", 1), List.of()),
-                    2048)) {
+                    2048,
+                    true)) {
             KeyMaterialDescriptor account = descriptor(
                     "acme-account-v1",
                     KeyMaterialPurpose.ACME_ACCOUNT,

@@ -217,7 +217,8 @@ class AcmeCertificateServiceTest {
                 store,
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(SIGNING, List.of()),
-                2048);
+                2048,
+                true);
     }
 
     private static KeyMaterialDescriptor descriptor(String alias, KeyMaterialPurpose purpose) {

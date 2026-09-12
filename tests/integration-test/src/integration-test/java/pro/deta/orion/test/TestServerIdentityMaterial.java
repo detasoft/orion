@@ -40,7 +40,7 @@ final class TestServerIdentityMaterial implements AutoCloseable {
                 baseDirectory.toRealPath().resolve("material.p12").toString());
         configuration.getBootstrap().getKeyMaterial().setPassword("env:" + PASSWORD_ENV);
         OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                configuration, Map.of(PASSWORD_ENV, PASSWORD));
+                configuration, Map.of(PASSWORD_ENV, PASSWORD), true);
         try {
             return new TestServerIdentityMaterial(
                     material,

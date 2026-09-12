@@ -79,6 +79,23 @@ class AppOptionsTest {
     }
 
     @Test
+    void createsMissingMaterialOnlyWhenRequestedAndForwardsServiceFlag() {
+        assertFalse(AppOptions.parse(new String[]{"run"}).createIfMissing());
+        for (String[] arguments : java.util.List.of(
+                new String[]{"--create-if-missing"},
+                new String[]{"run", "--create-if-missing"})) {
+            AppOptions options = AppOptions.parse(arguments);
+            assertTrue(options.createIfMissing());
+            assertTrue(options.applicationArguments().isEmpty());
+        }
+        for (String command : java.util.List.of("start", "restart")) {
+            AppOptions options = AppOptions.parse(new String[]{command, "--create-if-missing"});
+            assertTrue(options.createIfMissing());
+            assertEquals(java.util.List.of("--create-if-missing"), options.applicationArguments());
+        }
+    }
+
+    @Test
     void parsesStartCommandWithApplicationOptions() {
         AppOptions options = AppOptions.parse(new String[]{"start", "--config", "config.yml"});
 
@@ -181,6 +198,7 @@ class AppOptionsTest {
         assertTrue(usage.contains("restart"));
         assertTrue(usage.contains("verify"));
         assertTrue(usage.contains("--reset-root-pass"));
+        assertTrue(usage.contains("--create-if-missing"));
         assertFalse(usage.contains("Usage: orion verify [options]"));
     }
 
@@ -218,6 +236,18 @@ class AppOptionsTest {
                 () -> AppOptions.parse(new String[]{"--reset-root-pass", "--reset-root-pass"}));
 
         assertEquals("Root password reset is already requested", error.getMessage());
+    }
+
+    @Test
+    void rejectsDuplicateOrUnsupportedMaterialCreationFlag() {
+        IllegalArgumentException duplicate = assertThrows(
+                IllegalArgumentException.class,
+                () -> AppOptions.parse(new String[]{"--create-if-missing", "--create-if-missing"}));
+        assertEquals("Key material creation is already requested", duplicate.getMessage());
+        for (String command : java.util.List.of("stop", "status", "verify")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> AppOptions.parse(new String[]{command, "--create-if-missing"}, Map.of()));
+        }
     }
 
     @Test

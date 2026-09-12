@@ -153,7 +153,7 @@ class BootstrapContextTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bootstrap inputs are unavailable or invalid")
                 .rootCause()
-                .hasMessageContaining("retained server identities");
+                .hasMessageContaining("Bootstrap source path is unavailable: material");
         assertThat(new NativeGitKeyMaterialContentStore(
                 backend, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
     }
@@ -231,7 +231,7 @@ class BootstrapContextTest {
                 configuration,
                 Map.of("orion.xml", bytes("configuration")));
 
-        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend)) {
+        try (BootstrapContext context = BootstrapContext.open(configuration, ENVIRONMENT, backend, true)) {
             byte[] material = backend.find("orion")
                     .valueOrFailure("open repository")
                     .loadFiles("refs/heads/main", java.util.List.of("orion.xml", "material.p12"))
@@ -244,11 +244,26 @@ class BootstrapContextTest {
     }
 
     @Test
+    void rejectsMissingRepositoryMaterialWithoutExplicitCreationRequest() throws Exception {
+        OrionConfiguration configuration = configuration();
+        InMemoryNativeGitRepositoryProvider backend = repositoryWith(
+                configuration, Map.of("orion.xml", bytes("configuration")));
+
+        assertThatThrownBy(() -> BootstrapContext.open(configuration, ENVIRONMENT, backend))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap inputs are unavailable or invalid");
+        assertThat(new NativeGitKeyMaterialContentStore(
+                backend, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
+    }
+
+    @Test
     void preservesSpecificKeyMaterialFailureAsCause() throws Exception {
         OrionConfiguration configuration = configuration();
         InMemoryNativeGitRepositoryProvider backend = repositoryWith(
                 configuration,
-                Map.of("orion.xml", bytes("configuration")));
+                Map.of(
+                        "orion.xml", bytes("configuration"),
+                        "material.p12", materialBytes(configuration)));
 
         assertThatThrownBy(() -> BootstrapContext.open(configuration, Map.of(), backend))
                 .isInstanceOf(IllegalStateException.class)
@@ -397,7 +412,8 @@ class BootstrapContextTest {
         try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
                 configuration,
                 ENVIRONMENT,
-                store)) {
+                store,
+                true)) {
             // Generate the typed server identity in the test content store.
         }
         KeyMaterialSnapshot snapshot = store.read().orElseThrow();

@@ -103,7 +103,8 @@ class SshHostKeyLifecycleTest {
                 store,
                 KeyMaterialOptions.pkcs12("test-password".toCharArray()),
                 new SigningMaterialSet(serverSigning(), List.of()),
-                2_048);
+                2_048,
+                true);
     }
 
     private static KeyMaterialDescriptor serverSigning() {

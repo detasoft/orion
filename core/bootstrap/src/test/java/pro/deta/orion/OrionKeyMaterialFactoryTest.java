@@ -28,7 +28,7 @@ class OrionKeyMaterialFactoryTest {
         byte[] payload = "jwt-input".getBytes(StandardCharsets.UTF_8);
         byte[] signature;
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
-                configuration, Map.of(PASSWORD_ENV, "test-password"))) {
+                configuration, Map.of(PASSWORD_ENV, "test-password"), true)) {
             var identity = material.serverIdentity();
             signature = identity.sign(payload);
             assertThat(identity.activeKeyId()).isEqualTo("cluster-signing-v2");
@@ -54,7 +54,8 @@ class OrionKeyMaterialFactoryTest {
                 configuration,
                 Map.of(
                         "ORION_TEST_ROOT", tempDir.toString(),
-                        PASSWORD_ENV, "test-password"))) {
+                        PASSWORD_ENV, "test-password"),
+                true)) {
             // Opening the identity initializes the configured store.
         }
 
@@ -65,7 +66,7 @@ class OrionKeyMaterialFactoryTest {
     void resolvesConfiguredRetainedAliases() throws Exception {
         OrionConfiguration configuration = configuration();
         try (OrionKeyMaterial ignored = OrionKeyMaterialFactory.open(
-                configuration, Map.of(PASSWORD_ENV, "test-password"))) {
+                configuration, Map.of(PASSWORD_ENV, "test-password"), true)) {
             // Initialize the active alias in a new store.
         }
         configuration.getBootstrap()
@@ -98,7 +99,8 @@ class OrionKeyMaterialFactoryTest {
         try (OrionKeyMaterial material = OrionKeyMaterialFactory.open(
                 configuration,
                 Map.of(PASSWORD_ENV, "test-password"),
-                store)) {
+                store,
+                true)) {
             assertThat(material.serverIdentity().activeKeyId()).isEqualTo("cluster-signing-v2");
         }
 

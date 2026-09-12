@@ -15,6 +15,7 @@ record AppOptions(
         String configurationLocation,
         boolean helpRequested,
         boolean resetRootPassword,
+        boolean createIfMissing,
         List<String> applicationArguments,
         Path verificationArtifact,
         Path releasePublicKey,
@@ -55,7 +56,7 @@ record AppOptions(
                 return parseServiceCommand(Command.STATUS, args, 1);
             }
             if ("help".equals(args[0])) {
-                return commandOptions(Command.RUN, null, true, false);
+                return commandOptions(Command.RUN, null, true, false, false);
             }
         }
 
@@ -77,6 +78,7 @@ record AppOptions(
                 Options for run, start, and restart:
                   -c, --config <location>  Read configuration from a file path or classpath:// resource.
                   --reset-root-pass        Generate and persist a new privileged root password.
+                  --create-if-missing      Create key material on first start only when explicitly requested.
                   -h, --help               Show this help.
 
                 Use "orion verify --help" for signature verification options.
@@ -114,6 +116,7 @@ record AppOptions(
         String configurationLocation = null;
         boolean helpRequested = false;
         boolean resetRootPassword = false;
+        boolean createIfMissing = false;
         for (int i = startIndex; i < args.length; i++) {
             String arg = args[i];
             switch (arg) {
@@ -123,6 +126,12 @@ record AppOptions(
                         throw new IllegalArgumentException("Root password reset is already requested");
                     }
                     resetRootPassword = true;
+                }
+                case "--create-if-missing" -> {
+                    if (createIfMissing) {
+                        throw new IllegalArgumentException("Key material creation is already requested");
+                    }
+                    createIfMissing = true;
                 }
                 case "--config", "-c" -> {
                     i++;
@@ -147,7 +156,8 @@ record AppOptions(
                 command,
                 configurationLocation,
                 helpRequested,
-                resetRootPassword);
+                resetRootPassword,
+                createIfMissing);
     }
 
     private static AppOptions parseServiceCommand(Command command, String[] args, int startIndex) {
@@ -161,7 +171,7 @@ record AppOptions(
             }
         }
 
-        return commandOptions(command, null, helpRequested, false);
+        return commandOptions(command, null, helpRequested, false, false);
     }
 
     private static AppOptions parseVerify(String[] args, int startIndex, Map<String, String> environment) {
@@ -194,6 +204,7 @@ record AppOptions(
                 null,
                 helpRequested,
                 false,
+                false,
                 List.of(),
                 artifact,
                 publicKey,
@@ -213,13 +224,15 @@ record AppOptions(
             Command command,
             String configurationLocation,
             boolean helpRequested,
-            boolean resetRootPassword) {
+            boolean resetRootPassword,
+            boolean createIfMissing) {
         return new AppOptions(
                 command,
                 configurationLocation,
                 helpRequested,
                 resetRootPassword,
-                applicationArguments(command, configurationLocation, resetRootPassword),
+                createIfMissing,
+                applicationArguments(command, configurationLocation, resetRootPassword, createIfMissing),
                 null,
                 null,
                 null,
@@ -233,7 +246,8 @@ record AppOptions(
     private static List<String> applicationArguments(
             Command command,
             String configurationLocation,
-            boolean resetRootPassword) {
+            boolean resetRootPassword,
+            boolean createIfMissing) {
         List<String> arguments = new ArrayList<>();
         if (configurationLocation != null) {
             arguments.add("--config");
@@ -241,6 +255,9 @@ record AppOptions(
         }
         if (resetRootPassword && (command == Command.START || command == Command.RESTART)) {
             arguments.add("--reset-root-pass");
+        }
+        if (createIfMissing && (command == Command.START || command == Command.RESTART)) {
+            arguments.add("--create-if-missing");
         }
         return List.copyOf(arguments);
     }

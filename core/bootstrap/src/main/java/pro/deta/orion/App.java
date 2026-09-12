@@ -72,7 +72,7 @@ public class App {
         try {
             OrionConfiguration configuration = configurationProvider.readConfiguration();
             try (BootstrapContext bootstrap = BootstrapContext.open(
-                    configuration, Map.copyOf(System.getenv()))) {
+                    configuration, Map.copyOf(System.getenv()), options.createIfMissing())) {
                 OrionComponent orionComponent = DaggerOrionComponent.builder()
                         .configurationProvider(() -> configuration)
                         .runtimeOptions(options.runtimeOptions())

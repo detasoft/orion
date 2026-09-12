@@ -54,6 +54,13 @@ public final class BootstrapContext implements AutoCloseable {
     public static BootstrapContext open(
             OrionConfiguration configuration,
             Map<String, String> environment) {
+        return open(configuration, environment, false);
+    }
+
+    public static BootstrapContext open(
+            OrionConfiguration configuration,
+            Map<String, String> environment,
+            boolean createIfMissing) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(environment, "environment");
         ConfigurationContext configurationContext = new ConfigurationContext(configuration, environment);
@@ -63,7 +70,7 @@ public final class BootstrapContext implements AutoCloseable {
         } catch (IllegalArgumentException ignored) {
             backend = new InMemoryNativeGitRepositoryProvider();
         }
-        return open(configuration, environment, backend);
+        return open(configuration, environment, backend, createIfMissing);
     }
 
     @TestOnly
@@ -71,6 +78,15 @@ public final class BootstrapContext implements AutoCloseable {
             OrionConfiguration configuration,
             Map<String, String> environment,
             NativeGitRepositoryProvider backend) {
+        return open(configuration, environment, backend, false);
+    }
+
+    @TestOnly
+    static BootstrapContext open(
+            OrionConfiguration configuration,
+            Map<String, String> environment,
+            NativeGitRepositoryProvider backend,
+            boolean createIfMissing) {
         OrionKeyMaterial keyMaterial = null;
         try {
             ProxyAwareNativeGitRepositoryProvider provider =
@@ -91,12 +107,13 @@ public final class BootstrapContext implements AutoCloseable {
             ResolvedBootstrapSource materialSource = provider.resolveProvisional(
                     BootstrapRepositorySources.MATERIAL,
                     configuredMaterial,
-                    true);
+                    createIfMissing);
             keyMaterial = openKeyMaterial(
                     configuration,
                     environment,
                     provider,
-                    materialSource);
+                    materialSource,
+                    createIfMissing);
             SshHostKeyCapability sshHostKeys = SshHostKeyLifecycle.open(
                     keyMaterial.sshHostKeyMaterial(),
                     sshHostKeyReferences(configuration));
@@ -195,7 +212,8 @@ public final class BootstrapContext implements AutoCloseable {
             OrionConfiguration configuration,
             Map<String, String> environment,
             ProxyAwareNativeGitRepositoryProvider provider,
-            ResolvedBootstrapSource resolved) throws IOException, GeneralSecurityException {
+            ResolvedBootstrapSource resolved,
+            boolean createIfMissing) throws IOException, GeneralSecurityException {
         if (resolved.repositoryName().isPresent()) {
             return OrionKeyMaterialFactory.open(
                     configuration,
@@ -204,9 +222,10 @@ public final class BootstrapContext implements AutoCloseable {
                             provider,
                             resolved.repositoryName().orElseThrow(),
                             resolved.refName(),
-                            resolved.path()));
+                            resolved.path()),
+                    createIfMissing);
         }
-        return OrionKeyMaterialFactory.open(configuration, environment);
+        return OrionKeyMaterialFactory.open(configuration, environment, createIfMissing);
     }
 
     private static List<SshHostKeyReference> sshHostKeyReferences(OrionConfiguration configuration) {
