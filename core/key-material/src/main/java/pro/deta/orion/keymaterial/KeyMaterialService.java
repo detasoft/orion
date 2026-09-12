@@ -16,9 +16,7 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import javax.crypto.KeyGenerator;
@@ -34,7 +32,6 @@ public class KeyMaterialService implements AutoCloseable {
     private final KeyMaterialOptions options;
     private final KeyMaterialStorageCertificateFactory storageCertificateFactory;
     private final KeyStore keyStore;
-    private final Map<String, KeyMaterialSigningKeyConfig> signingKeys;
     private String version;
     private boolean closed;
 
@@ -43,44 +40,25 @@ public class KeyMaterialService implements AutoCloseable {
             KeyMaterialOptions options,
             KeyMaterialStorageCertificateFactory storageCertificateFactory,
             KeyStore keyStore,
-            String version,
-            Map<String, KeyMaterialSigningKeyConfig> signingKeys) {
+            String version) {
         this.store = store;
         this.options = options;
         this.storageCertificateFactory = storageCertificateFactory;
         this.keyStore = keyStore;
         this.version = version;
-        this.signingKeys = new LinkedHashMap<>(signingKeys);
     }
 
     public static synchronized KeyMaterialService open(
             KeyMaterialContentStore store,
             KeyMaterialOptions options)
             throws IOException, GeneralSecurityException {
-        return open(store, options, new KeyMaterialStorageCertificateFactory(), Map.of());
-    }
-
-    public static synchronized KeyMaterialService open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            Map<String, KeyMaterialSigningKeyConfig> signingKeys)
-            throws IOException, GeneralSecurityException {
-        return open(store, options, new KeyMaterialStorageCertificateFactory(), signingKeys);
+        return open(store, options, new KeyMaterialStorageCertificateFactory());
     }
 
     public static synchronized KeyMaterialService open(
             KeyMaterialContentStore store,
             KeyMaterialOptions options,
             KeyMaterialStorageCertificateFactory storageCertificateFactory)
-            throws IOException, GeneralSecurityException {
-        return open(store, options, storageCertificateFactory, Map.of());
-    }
-
-    public static synchronized KeyMaterialService open(
-            KeyMaterialContentStore store,
-            KeyMaterialOptions options,
-            KeyMaterialStorageCertificateFactory storageCertificateFactory,
-            Map<String, KeyMaterialSigningKeyConfig> signingKeys)
             throws IOException, GeneralSecurityException {
         if (store == null) {
             throw new IllegalArgumentException("Key material store must not be null");
@@ -91,7 +69,6 @@ public class KeyMaterialService implements AutoCloseable {
         if (storageCertificateFactory == null) {
             throw new IllegalArgumentException("Storage certificate factory must not be null");
         }
-        Map<String, KeyMaterialSigningKeyConfig> signingKeysCopy = copySigningKeys(signingKeys);
         KeyMaterialOptions ownedOptions = options.copy();
 
         try {
@@ -111,8 +88,7 @@ public class KeyMaterialService implements AutoCloseable {
                             ownedOptions,
                             storageCertificateFactory,
                             keyStore,
-                            snapshot.get().version(),
-                            signingKeysCopy);
+                            snapshot.get().version());
                 }
                 keyStore.load(null, password);
                 return new KeyMaterialService(
@@ -120,8 +96,7 @@ public class KeyMaterialService implements AutoCloseable {
                         ownedOptions,
                         storageCertificateFactory,
                         keyStore,
-                        null,
-                        signingKeysCopy);
+                        null);
             } finally {
                 clear(password);
             }
@@ -197,20 +172,6 @@ public class KeyMaterialService implements AutoCloseable {
             throw new GeneralSecurityException("Trusted certificate is not X.509: " + alias);
         }
         return x509Certificate;
-    }
-
-    public synchronized KeyPair getActiveSigningKey(String purpose) throws GeneralSecurityException {
-        requireOpen();
-        return getKeyPair(signingKeyConfig(purpose).activeAlias());
-    }
-
-    public synchronized List<KeyPair> getVerificationKeys(String purpose) throws GeneralSecurityException {
-        requireOpen();
-        List<KeyPair> keys = new ArrayList<>();
-        for (String alias : signingKeyConfig(purpose).verificationAliasesIncludingActive()) {
-            keys.add(getKeyPair(alias));
-        }
-        return List.copyOf(keys);
     }
 
     public synchronized void setPrivateKey(
@@ -474,20 +435,6 @@ public class KeyMaterialService implements AutoCloseable {
         save();
     }
 
-    public synchronized KeyMaterialSigningKeyConfig rotate(
-            String purpose,
-            String newAlias) throws GeneralSecurityException {
-        requireOpen();
-        requirePurpose(purpose);
-        requireAlias(newAlias);
-        if (!keyStore.entryInstanceOf(newAlias, KeyStore.PrivateKeyEntry.class)) {
-            throw new GeneralSecurityException("Signing key alias not found: " + newAlias);
-        }
-        KeyMaterialSigningKeyConfig rotated = signingKeyConfig(purpose).rotateTo(newAlias);
-        signingKeys.put(purpose, rotated);
-        return rotated;
-    }
-
     public synchronized String save() throws IOException, GeneralSecurityException {
         requireOpen();
         char[] password = options.password();
@@ -511,44 +458,12 @@ public class KeyMaterialService implements AutoCloseable {
             return;
         }
         options.close();
-        signingKeys.clear();
         closed = true;
-    }
-
-    private static Map<String, KeyMaterialSigningKeyConfig> copySigningKeys(
-            Map<String, KeyMaterialSigningKeyConfig> signingKeys) {
-        if (signingKeys == null) {
-            return Map.of();
-        }
-        Map<String, KeyMaterialSigningKeyConfig> copy = new LinkedHashMap<>();
-        for (Map.Entry<String, KeyMaterialSigningKeyConfig> entry : signingKeys.entrySet()) {
-            requirePurpose(entry.getKey());
-            if (entry.getValue() == null) {
-                throw new IllegalArgumentException("Signing key config must not be null: " + entry.getKey());
-            }
-            copy.put(entry.getKey(), entry.getValue());
-        }
-        return copy;
-    }
-
-    private KeyMaterialSigningKeyConfig signingKeyConfig(String purpose) throws GeneralSecurityException {
-        requirePurpose(purpose);
-        KeyMaterialSigningKeyConfig config = signingKeys.get(purpose);
-        if (config == null) {
-            throw new GeneralSecurityException("Signing key purpose is not configured: " + purpose);
-        }
-        return config;
     }
 
     private static void requireAlias(String alias) {
         if (alias == null || alias.isBlank()) {
             throw new IllegalArgumentException("Key material alias must not be empty");
-        }
-    }
-
-    private static void requirePurpose(String purpose) {
-        if (purpose == null || purpose.isBlank()) {
-            throw new IllegalArgumentException("Key material purpose must not be empty");
         }
     }
 

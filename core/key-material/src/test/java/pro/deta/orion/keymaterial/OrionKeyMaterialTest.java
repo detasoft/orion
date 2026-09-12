@@ -68,6 +68,51 @@ class OrionKeyMaterialTest {
     }
 
     @Test
+    void stagesActivatesAndRetiresSigningAliasWithoutDeletingStoredKey() throws Exception {
+        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
+        KeyMaterialDescriptor old = rsa("server-signing-v1", 1);
+        KeyMaterialDescriptor next = rsa("server-signing-v2", 2);
+        byte[] payload = "rotation-payload".getBytes(StandardCharsets.UTF_8);
+        byte[] oldSignature;
+        byte[] nextSignature;
+        SigningMaterialSet initial = new SigningMaterialSet(old, List.of());
+
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048)) {
+            oldSignature = material.serverIdentity().sign(payload);
+        }
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            service.generateKeyIfMissing(next, 2048);
+            service.save();
+        }
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), initial, 2048)) {
+            assertThat(material.serverIdentity().activeKeyId()).isEqualTo(old.alias().value());
+            assertThat(material.serverIdentity().hasVerificationKey(next.alias().value())).isFalse();
+        }
+
+        SigningMaterialSet retained = new SigningMaterialSet(next, List.of(old));
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retained, 2048)) {
+            ServerIdentityCapability identity = material.serverIdentity();
+            nextSignature = identity.sign(payload);
+            assertThat(identity.activeKeyId()).isEqualTo(next.alias().value());
+            assertThat(identity.verify(old.alias().value(), payload, oldSignature)).isTrue();
+            assertThat(identity.verify(next.alias().value(), payload, nextSignature)).isTrue();
+        }
+
+        SigningMaterialSet retired = new SigningMaterialSet(next, List.of());
+        try (OrionKeyMaterial material = OrionKeyMaterial.open(store, options(), retired, 2048)) {
+            ServerIdentityCapability identity = material.serverIdentity();
+            assertThat(identity.verify(old.alias().value(), payload, oldSignature)).isFalse();
+            assertThat(identity.verify(next.alias().value(), payload, nextSignature)).isTrue();
+            assertThat(identity.retainedPublicKeys()).isEmpty();
+        }
+        try (KeyMaterialService service = KeyMaterialService.open(store, options())) {
+            assertThat(service.containsAlias(old.alias().value())).isTrue();
+            assertThat(service.getKeyPair(old.alias().value()).getPublic().getEncoded()).isNotEmpty();
+            assertThat(service.containsAlias(next.alias().value())).isTrue();
+        }
+    }
+
+    @Test
     void doesNotGenerateMissingIdentityIntoAnExistingStore() throws Exception {
         InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
         KeyMaterialDescriptor existing = rsa("other-signing", 1);

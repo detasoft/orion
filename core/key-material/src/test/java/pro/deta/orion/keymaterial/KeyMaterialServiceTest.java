@@ -11,7 +11,6 @@ import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -200,46 +199,6 @@ class KeyMaterialServiceTest {
                 List.of(mismatchedChain)))
                 .isInstanceOf(Exception.class)
                 .hasMessageContaining("Certificate public key does not match");
-    }
-
-    @Test
-    void returnsConfiguredSigningKeysAndRotatesActiveAlias() throws Exception {
-        InMemoryKeyMaterialContentStore store = new InMemoryKeyMaterialContentStore();
-        KeyMaterialService service = KeyMaterialService.open(
-                store,
-                options(),
-                Map.of(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE, new KeyMaterialSigningKeyConfig(
-                        KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
-                        List.of(KeyMaterialTestConstants.SERVER_SIGNING_2026_04_ALIAS))));
-        service.generateKeyIfMissing(
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_04_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-        KeyPair active = service.generateKeyIfMissing(
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-        KeyPair next = service.generateKeyIfMissing(
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS,
-                KeyMaterialKeySpec.rsa(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE));
-
-        assertThat(service.getActiveSigningKey(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)
-                .getPublic()
-                .getEncoded())
-                .isEqualTo(active.getPublic().getEncoded());
-        assertThat(service.getVerificationKeys(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)).hasSize(2);
-
-        KeyMaterialSigningKeyConfig rotated = service.rotate(
-                KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE,
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
-
-        assertThat(rotated.activeAlias()).isEqualTo(KeyMaterialTestConstants.SERVER_SIGNING_2026_06_ALIAS);
-        assertThat(rotated.verificationAliases()).containsExactly(
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_05_ALIAS,
-                KeyMaterialTestConstants.SERVER_SIGNING_2026_04_ALIAS);
-        assertThat(service.getActiveSigningKey(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)
-                .getPublic()
-                .getEncoded())
-                .isEqualTo(next.getPublic().getEncoded());
-        assertThat(service.getVerificationKeys(KeyMaterialTestConstants.SERVER_SIGNING_PURPOSE)).hasSize(3);
     }
 
     @Test

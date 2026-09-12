@@ -40,26 +40,15 @@ class KeyMaterialDescriptorTest {
     }
 
     @Test
-    void rejectsUnsafeRotationTarget() {
-        SigningMaterialSet current = new SigningMaterialSet(
-                signing("server-signing-v2", 2),
-                List.of(signing("server-signing-v1", 1)));
-
-        assertThatThrownBy(() -> current.rotateTo(signing("server-signing-reused", 2)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("newer version");
-        assertThatThrownBy(() -> current.rotateTo(signing("server-signing-v1", 3)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("already belongs")
-                .hasMessageContaining("server-signing-v1");
-
+    void rejectsRetainedSigningMaterialFromAnotherScope() {
         KeyMaterialDescriptor wrongScope = new KeyMaterialDescriptor(
-                new KeyMaterialAlias("server-signing-node-v3"),
+                new KeyMaterialAlias("server-signing-node-v1"),
                 KeyMaterialPurpose.SERVER_SIGNING,
                 KeyMaterialAlgorithm.RSA,
-                new KeyMaterialVersion(3),
+                new KeyMaterialVersion(1),
                 KeyMaterialScope.node("orion-prod", "node-7"));
-        assertThatThrownBy(() -> current.rotateTo(wrongScope))
+        assertThatThrownBy(() -> new SigningMaterialSet(
+                signing("server-signing-v2", 2), List.of(wrongScope)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("scope");
     }

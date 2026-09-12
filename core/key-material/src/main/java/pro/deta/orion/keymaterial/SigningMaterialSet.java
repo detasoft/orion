@@ -38,27 +38,6 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
         verification = List.copyOf(validated);
     }
 
-    public SigningMaterialSet rotateTo(KeyMaterialDescriptor target) {
-        requireCompatible(active, target);
-        if (active.alias().equals(target.alias())) {
-            throw aliasAlreadyBelongs(target);
-        }
-        for (KeyMaterialDescriptor candidate : verification) {
-            if (candidate.alias().equals(target.alias())) {
-                throw aliasAlreadyBelongs(target);
-            }
-        }
-        if (target.version().compareTo(active.version()) <= 0) {
-            throw new IllegalArgumentException(
-                    "Rotation target must have a newer version than active material");
-        }
-        LinkedHashSet<KeyMaterialDescriptor> retained = new LinkedHashSet<>();
-        retained.add(active);
-        retained.addAll(verification);
-        retained.remove(target);
-        return new SigningMaterialSet(target, List.copyOf(retained));
-    }
-
     public List<KeyMaterialDescriptor> verificationIncludingActive() {
         LinkedHashSet<KeyMaterialDescriptor> all = new LinkedHashSet<>();
         all.add(active);
@@ -79,11 +58,6 @@ public record SigningMaterialSet(KeyMaterialDescriptor active, List<KeyMaterialD
         if (!candidate.scope().equals(expected.scope())) {
             throw new IllegalArgumentException("Signing material scope does not match active material");
         }
-    }
-
-    private static IllegalArgumentException aliasAlreadyBelongs(KeyMaterialDescriptor target) {
-        return new IllegalArgumentException(
-                "Rotation target alias already belongs to existing material: " + target.alias().value());
     }
 
     private static IllegalArgumentException conflictingAlias(KeyMaterialDescriptor descriptor) {
