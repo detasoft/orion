@@ -4,6 +4,7 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.proxy.BootstrapRepositorySources;
@@ -156,6 +157,37 @@ class BootstrapContextTest {
                 .hasMessageContaining("Bootstrap source path is unavailable: material");
         assertThat(new NativeGitKeyMaterialContentStore(
                 backend, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
+    }
+
+    @Test
+    void restoresPinnedConfigurationAndMaterialBytesWithoutChangingSigningIdentity() throws Exception {
+        OrionConfiguration configuration = configuration();
+        InMemoryNativeGitRepositoryProvider source = repositoryWith(
+                configuration,
+                Map.of("orion.xml", bytes("configuration"), "material.p12", materialBytes(configuration)));
+        byte[] payload = bytes("restored-identity");
+        byte[] signature;
+        try (BootstrapContext original = BootstrapContext.open(configuration, ENVIRONMENT, source)) {
+            signature = original.serverIdentity().sign(payload);
+        }
+        GitRepositoryFileSnapshot backup = source.find("orion")
+                .valueOrFailure("open repository")
+                .loadFiles("refs/heads/main", List.of("orion.xml", "material.p12"));
+        assertThat(backup.version()).isPresent();
+
+        InMemoryNativeGitRepositoryProvider incomplete = repositoryWith(
+                configuration, Map.of("orion.xml", backup.files().get("orion.xml")));
+        assertThatThrownBy(() -> BootstrapContext.open(configuration, ENVIRONMENT, incomplete))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap inputs are unavailable or invalid");
+        assertThat(new NativeGitKeyMaterialContentStore(
+                incomplete, "orion", "refs/heads/main", "material.p12").read()).isEmpty();
+
+        InMemoryNativeGitRepositoryProvider restored = repositoryWith(configuration, backup.files());
+        try (BootstrapContext runtime = BootstrapContext.open(configuration, ENVIRONMENT, restored)) {
+            assertThat(runtime.serverIdentity().activeKeyId()).isEqualTo("server-signing-v1");
+            assertThat(runtime.serverIdentity().verify("server-signing-v1", payload, signature)).isTrue();
+        }
     }
 
     @Test
