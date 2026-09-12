@@ -31,6 +31,10 @@
             <artifactId>transport</artifactId>
         </dependency>
         <dependency>
+            <groupId>pro.deta.orion.net</groupId>
+            <artifactId>git-transport</artifactId>
+        </dependency>
+        <dependency>
             <groupId>pro.deta.orion.core</groupId>
             <artifactId>acl</artifactId>
         </dependency>

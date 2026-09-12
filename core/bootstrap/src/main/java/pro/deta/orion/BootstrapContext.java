@@ -16,6 +16,7 @@ import pro.deta.orion.lifecycle.state.TestOnly;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.KeyMaterialConfig;
 import pro.deta.orion.schema.config.OrionConfiguration;
+import pro.deta.orion.transport.git.SshHostKeyLifecycle;
 import pro.deta.orion.util.ConfigurationContext;
 import pro.deta.orion.util.ResourceLocation;
 import pro.deta.orion.util.ResourceScheme;
@@ -96,7 +97,9 @@ public final class BootstrapContext implements AutoCloseable {
                     environment,
                     provider,
                     materialSource);
-            SshHostKeyCapability sshHostKeys = keyMaterial.sshHostKeys(sshHostKeyReferences(configuration));
+            SshHostKeyCapability sshHostKeys = SshHostKeyLifecycle.open(
+                    keyMaterial.sshHostKeyMaterial(),
+                    sshHostKeyReferences(configuration));
             BootstrapRepositorySources sources = new BootstrapRepositorySources(
                     List.of(configurationSource, materialSource));
             return new BootstrapContext(provider, sources, keyMaterial, sshHostKeys);
