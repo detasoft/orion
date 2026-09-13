@@ -12,11 +12,14 @@ Do not interpret an integrated foundation as completed synchronization.
 
 ## Design and delivery boundary
 
-The baseline reconciles compatible branches on attachment and then sends Orion
-updates upstream asynchronously. Local repository use remains available during
-outage/conflict. No automatic merge, force push, or continuous inbound import is
+The required result accepts branch changes in both Orion and GitHub. Compatible
+changes converge in both directions. Divergent histories merge automatically
+when conflict-free; actual merge conflicts preserve both histories for manual
+resolution. Local repository use remains available during outage/conflict.
+No automatic rebase, force push, choice of one conflicting side, or deletion is
 implied. Operational queues, observations, conflicts, and last-run state remain
-outside `orion.xml`.
+outside `orion.xml`. The claimed primary-upstream leaf remains the outbound
+foundation; its completion alone does not satisfy this stream.
 
 Transparent bootstrap proxies remain in
 [06](../06_remote-git-proxy-bootstrap/TASK.md). They have synchronous upstream
@@ -28,13 +31,15 @@ primary-upstream claim.
 
 ## Dependencies and acceptance
 
-First complete the baseline runtime and its setup journey. Branch filtering is
-an extension of that same runtime. The later GitHub replication leaf must reuse
-it for inbound/webhook behavior rather than create another queue, remote schema,
-or worker engine. SSH/GitHub App credentials, extra outbound remotes, and tags
-are extensions and must not block the initial HTTPS-token setup.
+Complete the baseline runtime, extend that runtime with scheduled/manual inbound
+synchronization, then verify the bidirectional setup journey. Inbound runtime
+must not depend on setup acceptance, which consumes it. Branch filtering and
+webhook wakeups extend the same runtime and do not block the first delivery.
+Reuse one queue/state owner and remote schema. SSH/GitHub App credentials, extra
+outbound remotes, and tags must not block the initial HTTPS-token setup.
 
-Acceptance covers initial import, outbound convergence, durable retry after
-restart, lost responses, upstream conflicts, safe diagnostics, and explicit
-operator retry through a configured repository. Inbound replication additionally
-requires explicit conflict and loop-prevention behavior before activation.
+Acceptance covers initial import, changes from both sides, durable retry after
+restart, lost responses, concurrent divergence, safe diagnostics, loop prevention,
+automatic clean merges, and manual reconciliation/retry through a configured
+repository when needed. Fast-forwards and conflict-free three-way merges require
+no confirmation; conflicting changes are never resolved by silently picking a side.

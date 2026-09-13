@@ -6,7 +6,9 @@ Status: active
 
 An operator can configure an existing GitHub repository as the upstream of an
 ordinary Orion repository, provide a credential safely, observe synchronization,
-and recover after an outage or restart. Remote bootstrap remains supported when
+and accept branch changes on both sides with automatic conflict-free reconciliation
+and manual resolution only when needed. Synchronization recovers after an outage
+or restart. Remote bootstrap remains supported when
 `orion.xml` and encrypted material themselves live in a Git repository.
 
 ## Current model and evidence
@@ -35,10 +37,14 @@ read and report write success only after upstream publication succeeds. Bootstra
 must fail before public transports start when required upstream inputs fail.
 
 An ordinary mirrored Orion repository owns its local refs and remains usable
-while GitHub is offline. The initial delivery reconciles compatible branches on
-attachment, then sends Orion changes upstream asynchronously. External changes
-are observed and reported for explicit reconciliation; automatic bidirectional
-sync belongs to the later work in [stream 07](../07_external-git-repository-sync/TASK.md).
+while GitHub is offline. The required delivery reconciles compatible branches on
+attachment and continuously synchronizes compatible changes in both directions.
+Orion updates trigger outbound work; scheduled upstream observation imports
+compatible GitHub changes. Divergent histories are merged automatically when a
+three-way merge is conflict-free, preserving both histories. Actual merge
+conflicts require manual resolution; no automatic rebase, force push, or choice
+of one side discards the other. Runtime behavior is owned by
+[stream 07](../07_external-git-repository-sync/TASK.md).
 
 A stable scoped proxy alias may be exposed through authorized Git HTTP/SSH routes.
 Its private cache name must never be accepted as a public repository identifier,
@@ -67,14 +73,19 @@ Operational queues, observations, conflicts, and retries remain outside XML.
 
 Mirror orchestration is owned by the claimed
 [07/01](../07_external-git-repository-sync/01_primary-upstream.md). Its claim is
-unchanged. GitHub setup depends on that orchestration and runtime credential
-resolution, not on completion of proxy UI, branch filtering, SSH mirror support,
-GitHub Apps, webhooks, or a general-purpose secret-provider framework.
+unchanged. That outbound foundation is an intermediate result. GitHub setup
+also requires [07/03 bidirectional runtime](../07_external-git-repository-sync/03_github-commit-replication.md)
+and runtime credential resolution, not completion of proxy UI, branch filtering,
+SSH mirror support, GitHub Apps, webhooks, or a general-purpose secret-provider
+framework.
 
 The aggregate result requires both transparent remote-bootstrap acceptance and
 the documented GitHub setup journey: attach an existing repository, clone from
-Orion, push to Orion, observe the same commit upstream, restart without duplicate
-configuration, rotate the credential, and recover from an explicit conflict.
+Orion, push to either side and observe the same commit on the other, restart
+without duplicate configuration or lost work, rotate the credential, and recover
+from concurrent edits through automatic clean merges or manual conflict
+resolution when necessary. Outbound-only synchronization does not satisfy this
+aggregate result.
 
 Use deterministic native upstreams in automated tests. A real GitHub smoke test
 uses only an operator-designated test repository and credential; its absence
