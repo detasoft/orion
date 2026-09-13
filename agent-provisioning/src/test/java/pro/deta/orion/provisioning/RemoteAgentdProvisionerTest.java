@@ -1,5 +1,6 @@
 package pro.deta.orion.provisioning;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.AgentGeneration;
@@ -23,6 +24,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RemoteAgentdProvisionerTest {
     private static final String PERMIT = "single-use-secret-permit";
+    private static KeyPair hostKey;
+    private static KeyPair clientKey;
+
+    @BeforeAll
+    static void prepareSshKeys() throws Exception {
+        hostKey = keyPair();
+        clientKey = keyPair();
+    }
 
     @Test
     void generatedLaunchArgumentsAreAcceptedByAgentdAndSelectBundledSessionHost() {
@@ -38,8 +47,6 @@ class RemoteAgentdProvisionerTest {
 
     @Test
     void uploadsVerifiesAndAtomicallyActivatesRuntimeBundle(@TempDir Path root) throws Exception {
-        KeyPair hostKey = keyPair();
-        KeyPair clientKey = keyPair();
         Path artifacts = Files.createDirectories(root.resolve("local"));
         RemoteRuntimeBundle bundle = bundle(artifacts, "1.2.3");
         Path installRoot = root.resolve("remote/orion");
@@ -64,8 +71,6 @@ class RemoteAgentdProvisionerTest {
 
     @Test
     void digestMismatchLeavesCurrentReleaseUnchanged(@TempDir Path root) throws Exception {
-        KeyPair hostKey = keyPair();
-        KeyPair clientKey = keyPair();
         Path artifacts = Files.createDirectories(root.resolve("local"));
         RemoteRuntimeBundle valid = bundle(artifacts, "old");
         RuntimeArtifact mismatchedAgentd = RuntimeArtifact.withExpectedDigest(
@@ -92,8 +97,6 @@ class RemoteAgentdProvisionerTest {
 
     @Test
     void retryReplacesOnlyItsOwnPartialStagingDirectory(@TempDir Path root) throws Exception {
-        KeyPair hostKey = keyPair();
-        KeyPair clientKey = keyPair();
         Path artifacts = Files.createDirectories(root.resolve("local"));
         RemoteRuntimeBundle bundle = bundle(artifacts, "retry");
         Path installRoot = root.resolve("remote/orion");
@@ -117,8 +120,6 @@ class RemoteAgentdProvisionerTest {
 
     @Test
     void unavailableRequestedVersionFailsBeforeRemoteMutation(@TempDir Path root) throws Exception {
-        KeyPair hostKey = keyPair();
-        KeyPair clientKey = keyPair();
         Path artifacts = Files.createDirectories(root.resolve("local"));
         RemoteRuntimeBundle available = bundle(artifacts, "available");
         Path installRoot = root.resolve("remote/orion");
@@ -138,8 +139,6 @@ class RemoteAgentdProvisionerTest {
 
     @Test
     void detachedAgentdUsesBundledSessionHostAfterSshCloses(@TempDir Path root) throws Exception {
-        KeyPair hostKey = keyPair();
-        KeyPair clientKey = keyPair();
         Path artifacts = Files.createDirectories(root.resolve("local"));
         RemoteRuntimeBundle bundle = fixtureBundle(artifacts, "detached");
         Path installRoot = root.resolve("remote/orion");
@@ -157,6 +156,7 @@ class RemoteAgentdProvisionerTest {
             assertThat(result.version()).isEqualTo("detached");
             assertThat(server.hasActiveSessions()).isFalse();
             assertThat(installRoot.resolve("agentd.marker")).doesNotExist();
+            Files.writeString(installRoot.resolve("launch.ready"), "");
             awaitFile(installRoot.resolve("session-host.marker"));
             assertThat(installRoot.resolve("agentd.marker")).hasContent("agentd-started");
             assertThat(installRoot.resolve("session-host.marker")).hasContent("session-host-started");
@@ -167,8 +167,6 @@ class RemoteAgentdProvisionerTest {
 
     @Test
     void launchSetupFailurePreservesCurrentAndKeepsVerifiedRelease(@TempDir Path root) throws Exception {
-        KeyPair hostKey = keyPair();
-        KeyPair clientKey = keyPair();
         Path artifacts = Files.createDirectories(root.resolve("local"));
         RemoteRuntimeBundle bundle = fixtureBundle(artifacts, "new");
         Path installRoot = root.resolve("remote/orion");

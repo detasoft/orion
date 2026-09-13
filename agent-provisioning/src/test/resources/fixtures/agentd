@@ -14,6 +14,11 @@ test -n "$permit"
 test -x "$session_host"
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 install_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
-sleep 1
+attempts=0
+while [ ! -f "$install_root/launch.ready" ]; do
+    test "$attempts" -lt 500 || exit 1
+    sleep 0.01
+    attempts=$((attempts + 1))
+done
 printf agentd-started > "$install_root/agentd.marker"
 "$session_host" "$install_root/session-host.marker"
