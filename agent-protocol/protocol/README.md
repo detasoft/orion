@@ -67,6 +67,10 @@ Termination modes are graceful `0` and force `1`.
 Established-session commands carry the server-assigned per-session
 `operationSequence` as an unsigned 64-bit value from 1 through `u64::MAX - 1`.
 `START_SESSION` has no operation sequence.
+An agent-to-server `COMMAND_RESULT` can report a transient delivery failure;
+only a durably replicated session-journal `COMMAND_RESULT` establishes the
+command's execution outcome. An empty native `RECEIVED` is admission evidence,
+not completion.
 
 `HELLO` and `WELCOME` negotiate the Agent protocol and session journal format
 independently. Version 1 uses protocol version `1` and journal version `1`.

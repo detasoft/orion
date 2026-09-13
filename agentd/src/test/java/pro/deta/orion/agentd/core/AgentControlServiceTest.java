@@ -18,6 +18,12 @@ import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.SessionStreamRequest;
 import pro.deta.orion.agentd.transport.TransportSignal;
 
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -32,6 +38,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -75,6 +83,78 @@ class AgentControlServiceTest {
         assertStartupFails(new AgentMessage.Welcome(
                 AgentProtocolVersion.CURRENT, JournalFormatVersion.CURRENT,
                 new ConnectionId("connection-1"), Map.of()));
+    }
+
+    @Test
+    void reportsMissingEstablishedSessionWithoutClaimingCommandCompletion() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of());
+        AgentControlService service = service(
+                transport, CODEC, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+        service.start();
+
+        transport.deliver(new AgentMessage.Resize(
+                new CommandId("command-1"), new SessionId("missing"), 80, 24, 7));
+
+        await(() -> !messages(transport.controls, AgentMessage.CommandResult.class).isEmpty());
+        AgentMessage.CommandResult report = first(transport.controls, AgentMessage.CommandResult.class);
+        assertThat(report.commandId()).isEqualTo(new CommandId("command-1"));
+        assertThat(report.sessionId()).contains(new SessionId("missing"));
+        assertThat(report.outcome()).isEqualTo(AgentMessage.CommandOutcome.FAILED);
+        assertThat(report.detail()).contains("connection");
+        service.close();
+    }
+
+    @Test
+    void deliversEstablishedCommandThroughSessionLaneWithoutReportingReceivedAsCompletion() throws Exception {
+        Path socket = temporaryDirectory.resolve("control.sock");
+        try (ServerSocketChannel server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+            server.bind(UnixDomainSocketAddress.of(socket));
+            ExecutorService executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+            try {
+                Future<List<Integer>> nativeRequests = executor.submit(() -> {
+                    List<Integer> types = new ArrayList<>();
+                    for (int index = 0; index < 4; index++) {
+                        try (SocketChannel peer = server.accept()) {
+                            byte[] request = readNativeRequest(peer);
+                            int type = Short.toUnsignedInt(ByteBuffer.wrap(request)
+                                    .order(ByteOrder.LITTLE_ENDIAN).getShort(8));
+                            types.add(type);
+                            ByteBuffer response = ByteBuffer.wrap(nativeResponse(
+                                    type == 9 ? 0x8005 : 0x8000,
+                                    ByteBuffer.wrap(request).order(ByteOrder.LITTLE_ENDIAN).getLong(16)));
+                            while (response.hasRemaining()) {
+                                peer.write(response);
+                            }
+                        }
+                    }
+                    return types;
+                });
+                FakeTransport transport = new FakeTransport();
+                transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+                SessionRegistry registry = new SessionRegistry();
+                try (AgentControlService service = service(
+                        transport, CODEC, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1))) {
+                    service.start();
+                    transport.deliver(new AgentMessage.Resize(
+                            new CommandId("command-1"), new SessionId("session-1"), 80, 24, 7));
+                    transport.deliver(new AgentMessage.Resize(
+                            new CommandId("command-2"), new SessionId("session-1"), 100, 30, 8));
+                    assertThat(nativeRequests).isNotDone();
+
+                    SessionRegistryFixture.publish(registry, Map.of(
+                            "session-1", session("session-1", ChildState.LIVE, socket)));
+
+                    assertThat(nativeRequests.get(3, TimeUnit.SECONDS)).containsExactly(9, 2, 9, 2);
+                    assertThat(messages(transport.controls, AgentMessage.CommandResult.class)).isEmpty();
+                }
+            } finally {
+                server.close();
+                executor.close();
+            }
+        }
     }
 
     @Test
@@ -518,6 +598,10 @@ class AgentControlServiceTest {
     }
 
     private static LocalSession session(String sessionId, ChildState childState) {
+        return session(sessionId, childState, Path.of("session", "control.sock"));
+    }
+
+    private static LocalSession session(String sessionId, ChildState childState, Path controlSocket) {
         SessionManifest manifest = new SessionManifest(
                 1, 1, 1, sessionId, 1, 2, List.of("sh"), "/workspace", 42,
                 OptionalLong.of(43), 80, 24, 80, 24, "xterm-256color",
@@ -525,10 +609,36 @@ class AgentControlServiceTest {
                 new ControlEndpoint(
                         ControlEndpoint.Transport.UNIX_DOMAIN_SOCKET,
                         "control.sock",
-                        java.nio.file.Path.of("session", "control.sock")));
+                        controlSocket));
         return new LocalSession(
                 java.nio.file.Path.of("session", sessionId), manifest,
                 HostObservation.live(childState), JournalObservation.READABLE, LocalSessionState.LIVE);
+    }
+
+    private static byte[] readNativeRequest(SocketChannel peer) throws java.io.IOException {
+        ByteBuffer header = ByteBuffer.allocate(32);
+        while (header.hasRemaining()) {
+            if (peer.read(header) < 0) {
+                throw new java.io.EOFException("native control header ended early");
+            }
+        }
+        int payloadLength = ByteBuffer.wrap(header.array()).order(ByteOrder.LITTLE_ENDIAN).getInt(24);
+        ByteBuffer payload = ByteBuffer.allocate(payloadLength);
+        while (payload.hasRemaining()) {
+            if (peer.read(payload) < 0) {
+                throw new java.io.EOFException("native control payload ended early");
+            }
+        }
+        return header.array();
+    }
+
+    private static byte[] nativeResponse(int type, long sequence) {
+        ByteBuffer response = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
+        response.put(new byte[]{'O', 'R', 'C', 'T'});
+        response.putShort((short) 1).putShort((short) 32);
+        response.putShort((short) type).putShort((short) 1);
+        response.putInt(0).putLong(sequence).putInt(0).putInt(0);
+        return response.array();
     }
 
     private static AgentMessage.Welcome welcome(String connectionId, byte tokenByte, long heartbeatMillis) {

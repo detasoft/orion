@@ -20,11 +20,16 @@ import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolException;
+import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
+import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agentd.session.DiscoverySnapshot;
+import pro.deta.orion.agentd.session.EstablishedSessionCommandDelivery;
+import pro.deta.orion.agentd.session.ControlResult;
 import pro.deta.orion.agentd.session.LocalSession;
+import pro.deta.orion.agentd.session.SessionControlClient;
 import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.TransportSignal;
@@ -33,6 +38,7 @@ public final class AgentControlService implements AgentService {
     private static final Duration DEFAULT_HANDSHAKE_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration DEFAULT_HEARTBEAT_INTERVAL = Duration.ofSeconds(10);
     private static final Duration MAXIMUM_HEARTBEAT_INTERVAL = Duration.ofDays(1);
+    private static final Duration SESSION_CONTROL_TIMEOUT = Duration.ofSeconds(2);
 
     private final AgentTransport transport;
     private final AgentProtocolCodec codec;
@@ -46,6 +52,8 @@ public final class AgentControlService implements AgentService {
     private final LongSupplier epochMillis;
     private final ControlConnectionLoop controlLoop;
     private final SessionRegistry registry;
+    private final SessionCommandLanes commandLanes = new SessionCommandLanes(4, 64, 32);
+    private final EstablishedSessionCommandDelivery commandDelivery;
     private final SessionRegistry.Observation registryObservation;
     private final AtomicReference<Exception> lastSessionReportingFailure = new AtomicReference<>();
     private Attempt attempt;
@@ -106,6 +114,8 @@ public final class AgentControlService implements AgentService {
             throw new IllegalArgumentException("handshake timeout must not be negative");
         }
         this.registry = Objects.requireNonNull(registry, "registry");
+        this.commandDelivery = new EstablishedSessionCommandDelivery(
+                registry, new SessionControlClient(SESSION_CONTROL_TIMEOUT));
         this.controlLoop = new ControlConnectionLoop(
                 this::reconnect, this::sendHeartbeat, nanoTime, RandomGenerator.getDefault());
         this.registryObservation = registry.observe(this::sessionsReplaced);
@@ -138,19 +148,26 @@ public final class AgentControlService implements AgentService {
     }
 
     @Override
-    public synchronized void close() {
-        if (closed) {
-            return;
+    public void close() {
+        synchronized (this) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            if (attempt != null) {
+                attempt.negotiated.completeExceptionally(
+                        new HandshakeException("AgentD control service closed"));
+            }
+            registryObservation.close();
+            controlLoop.close();
+            handshake.close();
+            context.close();
         }
-        closed = true;
-        if (attempt != null) {
-            attempt.negotiated.completeExceptionally(new HandshakeException("AgentD control service closed"));
+        try {
+            commandLanes.close();
+        } finally {
+            transport.close();
         }
-        registryObservation.close();
-        controlLoop.close();
-        handshake.close();
-        context.close();
-        transport.close();
     }
 
     private void performHandshake(boolean reconnect) throws HandshakeException {
@@ -215,6 +232,7 @@ public final class AgentControlService implements AgentService {
                     return;
                 }
                 controlLoop.connected(interval);
+                commandLanes.connected();
             }
             current.negotiated.complete(connection);
         } catch (Exception failure) {
@@ -224,8 +242,28 @@ public final class AgentControlService implements AgentService {
     }
 
     private void receiveAuthenticatedControl(SequenceDecodeResult.Outcome<AgentMessageRecord> outcome) {
-        if (!(outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded)
-                || !(decoded.value().message() instanceof AgentMessage.RequestSessionList)) {
+        if (!(outcome instanceof SequenceDecodeResult.Decoded<AgentMessageRecord> decoded)) {
+            return;
+        }
+        AgentMessageRecord record = decoded.value();
+        SessionId commandSession = establishedCommandSession(record.message());
+        if (commandSession != null) {
+            AgentConnection expected = onlineConnection();
+            if (expected != null) {
+                CompletionStage<SessionCommandLanes.Outcome<ControlResult>> delivery = commandLanes.submit(
+                        commandSession, () -> {
+                            registry.readySnapshot().toCompletableFuture().get();
+                            if (!current(expected)) {
+                                return null;
+                            }
+                            return commandDelivery.deliver(record);
+                        });
+                delivery.whenComplete((result, failure) ->
+                        reportCommandDelivery(expected, record.message(), result, failure));
+            }
+            return;
+        }
+        if (!(record.message() instanceof AgentMessage.RequestSessionList)) {
             return;
         }
         AgentConnection expected = onlineConnection();
@@ -239,6 +277,60 @@ public final class AgentControlService implements AgentService {
                 sendSessionList(expected, registry.snapshot());
             }
         });
+    }
+
+    private static SessionId establishedCommandSession(AgentMessage message) {
+        return switch (message) {
+            case AgentMessage.Input input -> input.sessionId();
+            case AgentMessage.Resize resize -> resize.sessionId();
+            case AgentMessage.Signal signal -> signal.sessionId();
+            case AgentMessage.Terminate terminate -> terminate.sessionId();
+            default -> null;
+        };
+    }
+
+    private void reportCommandDelivery(
+            AgentConnection expected,
+            AgentMessage message,
+            SessionCommandLanes.Outcome<ControlResult> result,
+            Throwable failure
+    ) {
+        if (!current(expected)) {
+            return;
+        }
+        AgentMessage.CommandOutcome outcome;
+        String detail;
+        if (failure != null) {
+            outcome = AgentMessage.CommandOutcome.FAILED;
+            detail = "native command delivery failed";
+        } else if (result instanceof SessionCommandLanes.Outcome.Discarded<ControlResult> discarded) {
+            outcome = AgentMessage.CommandOutcome.REJECTED;
+            detail = "command delivery " + discarded.reason().name().toLowerCase(java.util.Locale.ROOT);
+        } else {
+            ControlResult nativeResult =
+                    ((SessionCommandLanes.Outcome.Completed<ControlResult>) result).value();
+            if (nativeResult instanceof ControlResult.Rejected rejected) {
+                outcome = AgentMessage.CommandOutcome.REJECTED;
+                detail = "native command rejected with code " + rejected.errorCode();
+            } else if (nativeResult instanceof ControlResult.Failed failed) {
+                outcome = AgentMessage.CommandOutcome.FAILED;
+                detail = "native command delivery " + failed.kind().name().toLowerCase(java.util.Locale.ROOT);
+            } else {
+                return;
+            }
+        }
+        sendSessionReport(expected, new AgentMessage.CommandResult(
+                commandId(message), Optional.of(establishedCommandSession(message)), outcome, detail));
+    }
+
+    private static CommandId commandId(AgentMessage message) {
+        return switch (message) {
+            case AgentMessage.Input input -> input.commandId();
+            case AgentMessage.Resize resize -> resize.commandId();
+            case AgentMessage.Signal signal -> signal.commandId();
+            case AgentMessage.Terminate terminate -> terminate.commandId();
+            default -> throw new IllegalArgumentException("message is not an established-session command");
+        };
     }
 
     private void sessionsReplaced(DiscoverySnapshot previous, DiscoverySnapshot next) {
@@ -312,6 +404,7 @@ public final class AgentControlService implements AgentService {
             lastSessionReportingFailure.set(failure instanceof Exception exception
                     ? exception : new IllegalStateException("session reporting failed", failure));
             controlLoop.heartbeatFailed();
+            commandLanes.disconnected();
         }
     }
 
@@ -324,6 +417,7 @@ public final class AgentControlService implements AgentService {
                 return;
             }
             controlLoop.disconnected();
+            commandLanes.disconnected();
             if (attempt != null) {
                 attempt.negotiated.completeExceptionally(
                         new HandshakeException("AgentD transport disconnected"));
@@ -381,6 +475,7 @@ public final class AgentControlService implements AgentService {
                 return;
             }
             controlLoop.heartbeatFailed();
+            commandLanes.disconnected();
         }
     }
 
