@@ -1,6 +1,7 @@
 package pro.deta.orion.agent.server.registry;
 
 import pro.deta.orion.agent.protocol.AgentId;
+import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.lifecycle.state.TestOnly;
@@ -116,6 +117,19 @@ public final class FileSystemSessionRegistry implements AutoCloseable {
             }
         }
         publish(replacements);
+    }
+
+    public synchronized void reserveStart(AgentId agentId, SessionId sessionId)
+            throws SessionRegistryException {
+        requireOpen();
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(sessionId, "sessionId");
+        if (records.containsKey(sessionId)) {
+            throw conflict("Session ID already exists");
+        }
+        SessionDescriptor starting = new SessionDescriptor(sessionId,
+                AgentMessage.SessionState.STARTING, Optional.empty(), Optional.empty(), "");
+        publish(Map.of(sessionId, new SessionRecord(agentId, starting, Optional.empty())));
     }
 
     public synchronized void recordOutcome(

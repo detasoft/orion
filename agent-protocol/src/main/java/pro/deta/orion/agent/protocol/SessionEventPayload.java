@@ -4,6 +4,7 @@ import java.util.Objects;
 
 public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutput,
         SessionEventPayload.PtyInput, SessionEventPayload.PtyResize, SessionEventPayload.ProcessExited,
+        SessionEventPayload.ProcessStarted, SessionEventPayload.SessionStartFailed,
         SessionEventPayload.CommandResult, SessionEventPayload.HostWarning, SessionEventPayload.PtyClosed {
 
     record CommandResult(
@@ -76,5 +77,24 @@ public sealed interface SessionEventPayload permits SessionEventPayload.PtyOutpu
     }
 
     record ProcessExited(int exitCode) implements SessionEventPayload {
+    }
+
+    record ProcessStarted(long processId) implements SessionEventPayload {
+        public ProcessStarted {
+            if (processId == 0) {
+                throw new IllegalArgumentException("processId must be nonzero");
+            }
+        }
+    }
+
+    record SessionStartFailed(CommandId commandId, String diagnostic, long omittedByteCount)
+            implements SessionEventPayload {
+        public SessionStartFailed {
+            Objects.requireNonNull(commandId, "commandId");
+            Objects.requireNonNull(diagnostic, "diagnostic");
+            if (diagnostic.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 1024 * 1024) {
+                throw new IllegalArgumentException("diagnostic exceeds 1 MiB UTF-8 bytes");
+            }
+        }
     }
 }

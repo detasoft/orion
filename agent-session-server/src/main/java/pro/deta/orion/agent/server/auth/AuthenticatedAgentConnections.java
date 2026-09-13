@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
@@ -296,6 +297,37 @@ public final class AuthenticatedAgentConnections implements AutoCloseable {
             return session == null ? Optional.empty() : Optional.of(session.context);
         } finally {
             lock.unlock();
+        }
+    }
+
+    /** Initiates a send only while the selected connection remains authoritative. */
+    public Optional<CompletionStage<Void>> send(AgentId agentId, AgentMessage message) {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(message, "message");
+        ActiveSession candidate;
+        lock.lock();
+        try {
+            candidate = active.get(agentId);
+        } finally {
+            lock.unlock();
+        }
+        if (candidate == null) {
+            return Optional.empty();
+        }
+        candidate.lock();
+        try {
+            lock.lock();
+            try {
+                if (closed || active.get(agentId) != candidate || !candidate.authoritative
+                        || !available(agentId, clock.instant())) {
+                    return Optional.empty();
+                }
+            } finally {
+                lock.unlock();
+            }
+            return Optional.of(Objects.requireNonNull(candidate.context.connection().send(message), "command send"));
+        } finally {
+            candidate.unlock();
         }
     }
 

@@ -2,11 +2,16 @@ package pro.deta.orion.agent.server;
 
 import pro.deta.orion.agent.protocol.AgentId;
 import pro.deta.orion.agent.protocol.AgentMessage;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.server.auth.AgentControlAuthenticator;
 import pro.deta.orion.agent.server.auth.AgentdProvisioningControl;
 import pro.deta.orion.agent.server.auth.AuthenticatedAgentConnections;
 import pro.deta.orion.agent.server.auth.SessionReconciliationPublisher;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
+import pro.deta.orion.agent.server.command.SessionCommandService;
+import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
+import pro.deta.orion.agent.server.journal.JournalStorageConfig;
+import pro.deta.orion.agent.server.replication.SessionReplicationService;
 import pro.deta.orion.agent.server.registry.AgentRecord;
 import pro.deta.orion.agent.server.registry.AgentRegistryException;
 import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
@@ -19,6 +24,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Owns the durable and transient server-side state behind the Agent control endpoint. */
 public final class AgentSessionServer implements AgentControlHandler, ServiceLifecycle {
@@ -39,6 +45,8 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
     private FileSystemSessionRegistry sessionRegistry;
     private AuthenticatedAgentConnections connections;
     private AgentControlAuthenticator authenticator;
+    private FileSystemSessionJournalStorage journalStorage;
+    private SessionCommandService commandService;
 
     public AgentSessionServer(Path root) {
         this(root, Clock.systemUTC(), AuthenticatedAgentConnections.DEFAULT_HEARTBEAT_DEADLINE);
@@ -62,21 +70,36 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         }
         FileSystemAgentRegistry openedAgents = null;
         FileSystemSessionRegistry openedSessions = null;
+        FileSystemSessionJournalStorage openedJournals = null;
+        SessionCommandService openedCommands = null;
+        AuthenticatedAgentConnections openedConnections = null;
         try {
             openedAgents = new FileSystemAgentRegistry(root.resolve("agents"));
             openedSessions = new FileSystemSessionRegistry(root.resolve("sessions"));
+            openedJournals = new FileSystemSessionJournalStorage(
+                    root.resolve("journals"), new JournalStorageConfig(AgentProtocolLimits.journalDefaults()));
+            AtomicReference<SessionCommandService> commands = new AtomicReference<>();
             SessionReconciliationPublisher reconciliation =
-                    new SessionReconciliationPublisher(openedSessions, ignored -> TERMINAL_SESSION);
-            AuthenticatedAgentConnections openedConnections =
-                    AuthenticatedAgentConnections.withPolicy(
-                            reconciliation::publish, clock, heartbeatDeadline);
+                    new SessionReconciliationPublisher(openedSessions,
+                            context -> commands.get().controlSession(context.agentId()));
+            openedConnections = AuthenticatedAgentConnections.withPolicy(
+                    reconciliation::publish, clock, heartbeatDeadline);
+            openedCommands = new SessionCommandService(
+                    root.resolve("commands"), openedAgents, openedSessions,
+                    openedConnections, openedJournals);
+            commands.set(openedCommands);
             AgentControlAuthenticator openedAuthenticator =
                     new AgentControlAuthenticator(openedAgents, openedConnections::activate);
             agentRegistry = openedAgents;
             sessionRegistry = openedSessions;
             connections = openedConnections;
             authenticator = openedAuthenticator;
+            journalStorage = openedJournals;
+            commandService = openedCommands;
         } catch (Exception failure) {
+            close(openedCommands, failure);
+            close(openedConnections, failure);
+            close(openedJournals, failure);
             closeAfterFailedStart(openedSessions, openedAgents, failure);
             throw failure;
         }
@@ -87,6 +110,8 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         FileSystemAgentRegistry agents;
         FileSystemSessionRegistry sessions;
         AuthenticatedAgentConnections activeConnections;
+        SessionCommandService commands;
+        FileSystemSessionJournalStorage journals;
         synchronized (this) {
             authenticator = null;
             agents = agentRegistry;
@@ -95,9 +120,15 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             agentRegistry = null;
             sessionRegistry = null;
             connections = null;
+            commands = commandService;
+            journals = journalStorage;
+            commandService = null;
+            journalStorage = null;
         }
         Exception failure = null;
         failure = close(activeConnections, failure);
+        failure = close(commands, failure);
+        failure = close(journals, failure);
         failure = close(sessions, failure);
         failure = close(agents, failure);
         if (failure != null) {
@@ -132,6 +163,20 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
     public synchronized AgentRecord registerAgent(AgentId agentId, String displayName)
             throws AgentRegistryException {
         return requireAgentRegistry().register(agentId, displayName);
+    }
+
+    public synchronized SessionCommandService commandService() {
+        if (commandService == null) {
+            throw new IllegalStateException("Agent session server is not running");
+        }
+        return commandService;
+    }
+
+    public synchronized SessionReplicationService replicationService() {
+        if (journalStorage == null) {
+            throw new IllegalStateException("Agent session server is not running");
+        }
+        return new SessionReplicationService(journalStorage);
     }
 
     public synchronized AgentdProvisioningControl provisioningControl(

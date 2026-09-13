@@ -66,6 +66,18 @@ public final class SessionEventCodec {
                 writer.array(1);
                 writer.signed(value.exitCode());
             }
+            case SessionEventPayload.ProcessStarted value -> {
+                writer.unsigned(SessionEventType.PROCESS_STARTED);
+                writer.array(1);
+                writer.unsigned(value.processId());
+            }
+            case SessionEventPayload.SessionStartFailed value -> {
+                writer.unsigned(SessionEventType.SESSION_START_FAILED);
+                writer.array(3);
+                writer.text(value.commandId().value());
+                writer.text(value.diagnostic());
+                writer.unsigned(value.omittedByteCount());
+            }
         }
         return writer.toByteArray();
     }
@@ -165,6 +177,10 @@ public final class SessionEventCodec {
             }
             case SessionEventType.PROCESS_EXITED -> Optional.of(
                     decodeProcessExited(payloadArray(event, "PROCESS_EXITED")));
+            case SessionEventType.PROCESS_STARTED -> Optional.of(
+                    decodeProcessStarted(payloadArray(event, "PROCESS_STARTED")));
+            case SessionEventType.SESSION_START_FAILED -> Optional.of(
+                    decodeSessionStartFailed(payloadArray(event, "SESSION_START_FAILED")));
             default -> Optional.empty();
         };
     }
@@ -239,6 +255,29 @@ public final class SessionEventCodec {
             throws AgentProtocolException {
         requireFields(fields, 1, "PROCESS_EXITED");
         return new SessionEventPayload.ProcessExited(signedInt(fields.get(0), "PROCESS_EXITED exitCode"));
+    }
+
+    private SessionEventPayload.ProcessStarted decodeProcessStarted(List<CborReader.Value> fields)
+            throws AgentProtocolException {
+        requireFields(fields, 1, "PROCESS_STARTED");
+        long processId = unsignedLong(fields.get(0), "PROCESS_STARTED processId");
+        if (processId == 0) {
+            throw new AgentProtocolException(INVALID_FIELD, "PROCESS_STARTED processId must be nonzero");
+        }
+        return new SessionEventPayload.ProcessStarted(processId);
+    }
+
+    private SessionEventPayload.SessionStartFailed decodeSessionStartFailed(List<CborReader.Value> fields)
+            throws AgentProtocolException {
+        requireFields(fields, 3, "SESSION_START_FAILED");
+        try {
+            return new SessionEventPayload.SessionStartFailed(
+                    new CommandId(text(fields.get(0), "SESSION_START_FAILED commandId")),
+                    text(fields.get(1), "SESSION_START_FAILED diagnostic"),
+                    unsignedLong(fields.get(2), "SESSION_START_FAILED omittedByteCount"));
+        } catch (IllegalArgumentException failure) {
+            throw new AgentProtocolException(INVALID_FIELD, "SESSION_START_FAILED payload is invalid", failure);
+        }
     }
 
     private CborReader.Value payload(SessionEventRecord event) throws AgentProtocolException {

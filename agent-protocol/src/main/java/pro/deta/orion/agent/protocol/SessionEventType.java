@@ -7,6 +7,7 @@ public final class SessionEventType {
     public static final int PTY_INPUT = 0x0101;
     public static final int PTY_RESIZE = 0x0102;
     public static final int PTY_CLOSED = 0x0103;
+    public static final int PROCESS_STARTED = 0x0200;
     public static final int PROCESS_EXITED = 0x0201;
     public static final int SESSION_START_FAILED = 0x0203;
 

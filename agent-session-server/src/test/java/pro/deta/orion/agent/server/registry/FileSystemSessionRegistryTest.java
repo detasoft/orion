@@ -29,6 +29,23 @@ class FileSystemSessionRegistryTest {
     Path root;
 
     @Test
+    void startReservationSurvivesRestartAndRejectsForeignOwnership() throws Exception {
+        try (FileSystemSessionRegistry registry = new FileSystemSessionRegistry(root)) {
+            registry.reserveStart(AGENT, SESSION);
+            assertThatThrownBy(() -> registry.reserveStart(OTHER_AGENT, SESSION))
+                    .isInstanceOf(SessionRegistryException.class);
+        }
+        try (FileSystemSessionRegistry reopened = new FileSystemSessionRegistry(root)) {
+            assertThat(reopened.find(SESSION).orElseThrow().agentId()).isEqualTo(AGENT);
+            assertThat(reopened.find(SESSION).orElseThrow().descriptor().state())
+                    .isEqualTo(AgentMessage.SessionState.STARTING);
+            assertThatThrownBy(() -> reopened.reconcile(OTHER_AGENT, List.of(
+                    descriptor(SESSION, RUNNING, 1, 1, "foreign"))))
+                    .isInstanceOf(SessionRegistryException.class);
+        }
+    }
+
+    @Test
     void discoversSessionsIdempotentlyAndRestoresThemAfterRestart() throws Exception {
         SessionDescriptor running = descriptor(SESSION, RUNNING, 1, 4, "live");
         SessionDescriptor completed = descriptor(OTHER_SESSION, EXITED, 1, 8, "exit 0");
