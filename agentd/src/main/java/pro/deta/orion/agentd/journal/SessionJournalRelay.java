@@ -11,9 +11,12 @@ import org.eclipse.jetty.http.MetaData;
 import org.eclipse.jetty.http2.frames.HeadersFrame;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
+import pro.deta.orion.agent.protocol.AgentProtocolException;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.ConnectionId;
 import pro.deta.orion.agent.protocol.EventId;
+import pro.deta.orion.agent.protocol.SessionEventCodec;
 import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agentd.core.AgentService;
@@ -28,6 +31,7 @@ import pro.deta.orion.agentd.transport.TransportSignal;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
@@ -54,9 +58,11 @@ public final class SessionJournalRelay implements AgentService {
     private final Supplier<Optional<ConnectionId>> connection;
     private final URI endpoint;
     private final AgentProtocolCodec codec;
+    private final SessionEventCodec events;
     private final SessionControlClient control;
     private final int chunkBytes;
     private final Map<SessionId, Pump> pumps = new HashMap<>();
+    private final Map<SessionId, byte[]> startFailures = new HashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "agentd-journal-relay");
         thread.setDaemon(true);
@@ -73,6 +79,7 @@ public final class SessionJournalRelay implements AgentService {
         this.connection = Objects.requireNonNull(connection, "connection");
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.codec = new AgentProtocolCodec(limits);
+        this.events = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
         this.chunkBytes = Math.min(64 * 1024, limits.maxFrameBytes());
         this.control = Objects.requireNonNull(control, "control");
     }
@@ -85,6 +92,28 @@ public final class SessionJournalRelay implements AgentService {
         transport.onSessionMessage(this::receive);
         transport.onSignal(this::signal);
         scheduler.scheduleWithFixedDelay(this::reconcile, 0, 100, TimeUnit.MILLISECONDS);
+    }
+
+    public synchronized boolean registerStartFailure(SessionId id, CommandId commandId, String diagnostic)
+            throws AgentProtocolException {
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(commandId, "commandId");
+        Objects.requireNonNull(diagnostic, "diagnostic");
+        if (closed || registry.snapshot().sessions().containsKey(id.value())
+                || startFailures.containsKey(id) || startFailures.size() >= 64) {
+            return false;
+        }
+        byte[] bytes = diagnostic.getBytes(StandardCharsets.UTF_8);
+        int end = Math.min(bytes.length, 4096);
+        if (end < bytes.length) {
+            while (end > 0 && (bytes[end] & 0xc0) == 0x80) {
+                end--;
+            }
+        }
+        String bounded = new String(bytes, 0, end, StandardCharsets.UTF_8);
+        startFailures.put(id, events.encodeStartFailure(
+                new EventId(1), commandId, bounded, bytes.length - end));
+        return true;
     }
 
     private synchronized void reconcile() {
@@ -106,7 +135,7 @@ public final class SessionJournalRelay implements AgentService {
         var iterator = pumps.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<SessionId, Pump> entry = iterator.next();
-            if (!sessions.containsKey(entry.getKey().value())) {
+            if (!sessions.containsKey(entry.getKey().value()) && !startFailures.containsKey(entry.getKey())) {
                 entry.getValue().close();
                 iterator.remove();
             }
@@ -117,6 +146,17 @@ public final class SessionJournalRelay implements AgentService {
             if (existing == null || existing.retryReady()) {
                 Pump pump = new Pump(id, session);
                 pumps.put(id, pump);
+                pump.thread.start();
+            }
+        }
+        for (Map.Entry<SessionId, byte[]> failure : startFailures.entrySet()) {
+            if (sessions.containsKey(failure.getKey().value())) {
+                continue;
+            }
+            Pump existing = pumps.get(failure.getKey());
+            if (existing == null || existing.retryReady()) {
+                Pump pump = new Pump(failure.getKey(), failure.getValue());
+                pumps.put(failure.getKey(), pump);
                 pump.thread.start();
             }
         }
@@ -152,6 +192,7 @@ public final class SessionJournalRelay implements AgentService {
     private final class Pump implements Runnable {
         private final SessionId id;
         private final LocalSession session;
+        private final byte[] startFailure;
         private final Thread thread;
         private Optional<EventId> durable = Optional.empty();
         private Optional<EventId> offered = Optional.empty();
@@ -164,6 +205,14 @@ public final class SessionJournalRelay implements AgentService {
         private Pump(SessionId id, LocalSession session) {
             this.id = id;
             this.session = session;
+            this.startFailure = null;
+            thread = Thread.ofVirtual().name("agentd-journal-" + id.value()).unstarted(this);
+        }
+
+        private Pump(SessionId id, byte[] startFailure) {
+            this.id = id;
+            this.session = null;
+            this.startFailure = startFailure;
             thread = Thread.ofVirtual().name("agentd-journal-" + id.value()).unstarted(this);
         }
 
@@ -219,6 +268,29 @@ public final class SessionJournalRelay implements AgentService {
                             HttpVersion.HTTP_2, HttpFields.EMPTY), null, false));
                 }
                 await(opening);
+                if (startFailure != null) {
+                    EventId first = new EventId(1);
+                    send(codec.encode(new AgentMessage.SessionOpen(id,
+                            Optional.of(first), Optional.of(first), AgentMessage.SessionState.FAILED)));
+                    Optional<EventId> cursor = awaitCursor(null);
+                    if (compare(cursor, Optional.of(first)) > 0) {
+                        pause("server cursor exceeds the start failure journal");
+                        return;
+                    }
+                    if (cursor.isEmpty()) {
+                        synchronized (this) {
+                            offered = Optional.of(first);
+                        }
+                        send(startFailure);
+                        cursor = awaitCursor(cursor);
+                    }
+                    if (compare(cursor, Optional.of(first)) >= 0) {
+                        synchronized (SessionJournalRelay.this) {
+                            startFailures.remove(id, startFailure);
+                        }
+                    }
+                    return;
+                }
                 send(codec.encode(new AgentMessage.SessionOpen(id,
                         session.journal().firstAvailableEventId(), session.journal().lastAvailableEventId(),
                         session.descriptor().state())));

@@ -324,6 +324,16 @@ class SessionEventCodecTest {
     }
 
     @Test
+    void encodesStartFailureUsingTheNativeJournalRecordShape() throws Exception {
+        SessionEventCodec codec = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
+
+        byte[] encoded = codec.encodeStartFailure(new EventId(1),
+                new CommandId("00000000-0000-0000-0000-000000000001"), "xxx", 0);
+
+        assertThat(encoded).containsExactly(encodeSessionStartFailed(3));
+    }
+
+    @Test
     void rejectsStartFailureDiagnosticAboveSessionHostMaximum() throws Exception {
         byte[] encoded = encodeSessionStartFailed(SESSION_HOST_MAX_START_DIAGNOSTIC_BYTES + 1);
 
@@ -565,7 +575,7 @@ class SessionEventCodecTest {
         AgentProtocolLimits producerLimits = new AgentProtocolLimits(
                 AgentProtocolLimits.HARD_MAX_JOURNAL_RECORD_BYTES,
                 1_024,
-                diagnosticBytes,
+                Math.max(diagnosticBytes, 36),
                 AgentProtocolLimits.DEFAULT_MAX_MESSAGE_BYTES,
                 64);
         CborWriter writer = new CborWriter(producerLimits);

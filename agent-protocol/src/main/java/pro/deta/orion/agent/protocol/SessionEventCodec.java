@@ -93,6 +93,28 @@ public final class SessionEventCodec {
         return writer.toByteArray();
     }
 
+    public byte[] encodeStartFailure(EventId eventId, CommandId commandId, String diagnostic,
+            long omittedByteCount) throws AgentProtocolException {
+        Objects.requireNonNull(eventId, "eventId");
+        Objects.requireNonNull(commandId, "commandId");
+        Objects.requireNonNull(diagnostic, "diagnostic");
+        if (omittedByteCount < 0) {
+            throw new IllegalArgumentException("omittedByteCount must not be negative");
+        }
+        if (diagnostic.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 1024 * 1024) {
+            throw new AgentProtocolException(LIMIT_EXCEEDED, "SESSION_START_FAILED diagnostic exceeds 1 MiB");
+        }
+        CborWriter writer = new CborWriter(limits);
+        writer.array(3);
+        writer.unsigned(eventId);
+        writer.unsigned(SessionEventType.SESSION_START_FAILED);
+        writer.array(3);
+        writer.text(commandId.value());
+        writer.text(diagnostic);
+        writer.unsigned(omittedByteCount);
+        return writer.toByteArray();
+    }
+
     public SessionEventRecord decode(byte[] encoded) throws AgentProtocolException {
         Objects.requireNonNull(encoded, "encoded");
         return decode(encoded, 0, encoded.length);

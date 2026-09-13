@@ -7,6 +7,7 @@ import pro.deta.orion.agent.protocol.AgentMessageRecord;
 import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
 import pro.deta.orion.agent.protocol.ConnectionId;
+import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
@@ -51,6 +52,60 @@ class SessionJournalRelayTest {
     private static final AgentProtocolCodec CODEC = new AgentProtocolCodec(LIMITS);
     private static final SessionEventCodec EVENTS = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
     @TempDir Path root;
+
+    @Test
+    void repeatsInMemoryStartFailureUntilServerCommitThenDiscardsIt() throws Exception {
+        Peer peer = new Peer();
+        AtomicReference<Optional<ConnectionId>> connection = connected();
+        try (SessionJournalRelay relay = relay(peer, registry(), connection)) {
+            relay.start();
+            assertThat(relay.registerStartFailure(
+                    new SessionId("failed"), new CommandId("start-1"), "bad workspace")).isTrue();
+            peer.opened();
+            peer.sync("failed", null);
+            await(() -> peer.records.size() == 1);
+            byte[] expected = EVENTS.encodeStartFailure(
+                    new EventId(1), new CommandId("start-1"), "bad workspace", 0);
+            assertThat(peer.records).containsExactly(expected);
+            try (var entries = Files.list(root)) {
+                assertThat(entries.toList()).isEmpty();
+            }
+
+            connection.set(Optional.empty());
+            await(() -> peer.closed.contains(new SessionId("failed")));
+            peer.records.clear();
+            connection.set(Optional.of(new ConnectionId("second")));
+            peer.opened();
+            peer.sync("failed", null);
+            await(() -> peer.records.size() == 1);
+            assertThat(peer.records).containsExactly(expected);
+            peer.closed.clear();
+            peer.sync("failed", 1L);
+            await(() -> peer.closed.contains(new SessionId("failed")));
+            peer.opens.clear();
+            Thread.sleep(200);
+            assertThat(peer.opens).isEmpty();
+        }
+    }
+
+    @Test
+    void boundsInMemoryStartFailuresAndUtf8Diagnostics() throws Exception {
+        Peer peer = new Peer();
+        try (SessionJournalRelay relay = relay(peer, registry(), connected())) {
+            for (int index = 0; index < 64; index++) {
+                assertThat(relay.registerStartFailure(new SessionId("failed-" + index),
+                        new CommandId("start-" + index), "é".repeat(3000))).isTrue();
+            }
+            assertThat(relay.registerStartFailure(
+                    new SessionId("overflow"), new CommandId("overflow"), "failure")).isFalse();
+            relay.start();
+            await(() -> peer.opens.contains(new SessionId("failed-0")));
+            peer.sync("failed-0", null);
+            await(() -> !peer.records.isEmpty());
+            assertThat(peer.records).contains(EVENTS.encodeStartFailure(
+                    new EventId(1), new CommandId("start-0"), "é".repeat(2048), 1904));
+        }
+    }
 
     @Test
     void waitsForDurableCursorPreservesBytesAndResumesAfterReconnectAndRestart() throws Exception {
