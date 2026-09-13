@@ -4,6 +4,7 @@ final class OrionAdminPaths {
     static final String ADMIN = "/api/admin";
     static final String USERS = ADMIN + "/users";
     static final String REPOSITORIES = ADMIN + "/repositories";
+    static final String SESSIONS = ADMIN + "/sessions";
     static final String ACCESS_CONTROL = ADMIN + "/acl";
     static final String LIFECYCLE_STATE = ADMIN + "/lifecycle/state";
     static final String ROUTES = ADMIN + "/routes";

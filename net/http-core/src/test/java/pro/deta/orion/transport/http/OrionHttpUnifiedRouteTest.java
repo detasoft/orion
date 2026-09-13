@@ -7,8 +7,17 @@ import jakarta.servlet.WriteListener;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.EventId;
+import pro.deta.orion.agent.protocol.ProtocolBytes;
+import pro.deta.orion.agent.protocol.SessionEventCodec;
+import pro.deta.orion.agent.protocol.SessionEventPayload;
+import pro.deta.orion.agent.protocol.SessionEventRecord;
+import pro.deta.orion.agent.protocol.SessionId;
+import pro.deta.orion.agent.server.AgentSessionServer;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 
@@ -20,6 +29,7 @@ import java.io.PrintWriter;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,6 +47,49 @@ import static pro.deta.orion.transport.http.OrionHttpRouteDefinition.Method.POST
 
 class OrionHttpUnifiedRouteTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    @Test
+    void servesOnlyAdminAuthorizedRawSessionEventsAfterTheCursor(@TempDir Path root)
+            throws Exception {
+        AgentSessionServer server = new AgentSessionServer(root);
+        SessionId sessionId = new SessionId("session-1");
+        SessionEventCodec codec = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
+        SessionEventRecord first = codec.decode(codec.encode(
+                new EventId(10), new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{1}))));
+        SessionEventRecord unknown = codec.decode(codec.encodeOpaque(
+                new EventId(20), 50_000, ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}),
+                List.of(ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}))));
+        server.onStart();
+        try {
+            server.replicationService().append(sessionId, List.of(first, unknown));
+            OrionHttpRoute route = new SessionEventsRoute(server);
+            String path = "/api/admin/sessions/session-1/events";
+
+            ByteArrayOutputStream expectedAll = new ByteArrayOutputStream();
+            expectedAll.writeBytes(first.encodedRecord().toByteArray());
+            expectedAll.writeBytes(unknown.encodedRecord().toByteArray());
+            ResponseRecorder all = service(route, request("GET", path, adminContext(), null));
+            assertThat(all.body.toByteArray()).containsExactly(expectedAll.toByteArray());
+
+            ResponseRecorder replay = service(route, request("GET", path, adminContext(), "10"));
+            assertThat(replay.status).isEqualTo(HttpServletResponse.SC_OK);
+            assertThat(replay.contentType).isEqualTo("application/cbor-seq");
+            assertThat(replay.body.toByteArray()).containsExactly(unknown.encodedRecord().toByteArray());
+
+            ResponseRecorder exhausted = service(route, request("GET", path, adminContext(), "20"));
+            assertThat(exhausted.status).isEqualTo(HttpServletResponse.SC_OK);
+            assertThat(exhausted.body.toByteArray()).isEmpty();
+
+            assertThat(service(route, request("GET", path, authenticatedContext(), null)).status)
+                    .isEqualTo(HttpServletResponse.SC_FORBIDDEN);
+            assertThat(service(route, request("GET", path, adminContext(), "invalid")).status)
+                    .isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+            assertThat(service(route, request("GET", path, adminContext(), "18446744073709551616")).status)
+                    .isEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+        } finally {
+            server.onStop();
+        }
+    }
 
     @Test
     void sendsBufferedResponseThroughTheUnifiedExchange() throws Exception {
@@ -208,10 +261,19 @@ class OrionHttpUnifiedRouteTest {
             String method,
             String path,
             SecurityContext context) {
+        return request(method, path, context, null);
+    }
+
+    private static HttpServletRequest request(
+            String method,
+            String path,
+            SecurityContext context,
+            String after) {
         return stub(HttpServletRequest.class, (proxy, invokedMethod, args) ->
                 switch (invokedMethod.getName()) {
                     case "getMethod" -> method;
                     case "getPathInfo", "getRequestURI" -> path;
+                    case "getParameter" -> "after".equals(args[0]) ? after : null;
                     case "getAttribute" -> OrionAuthorizationFilter.SECURITY_CONTEXT_ATTRIBUTE.equals(args[0])
                             ? context
                             : null;

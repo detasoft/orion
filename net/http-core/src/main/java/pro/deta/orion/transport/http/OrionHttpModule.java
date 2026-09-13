@@ -116,4 +116,10 @@ public class OrionHttpModule {
         return route;
     }
 
+    @Provides
+    @IntoSet
+    static OrionHttpRoute sessionEventsRoute(SessionEventsRoute route) {
+        return route;
+    }
+
 }
