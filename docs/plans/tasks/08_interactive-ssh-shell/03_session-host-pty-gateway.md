@@ -5,7 +5,8 @@ Depends on: completed command-core-and-exec (3ed68b68),
 completed interactive-terminal (1f99a9ea),
 completed server control and registries (`3e4a6156`, `3758705a`, `490b458b`),
 completed command service (`e29d41d6`),
-../03_agent-session-server/04_live-event-api.md
+completed historical/live event API (`303e1915`, `ec085ade`, `4abe6ff9`;
+`LiveEventBroker` subscriptions and `SessionEventsLiveTest`).
 
 Implement `/session/<id> attach` by relaying the current SSH PTY through the
 Orion server to an existing session-host session.

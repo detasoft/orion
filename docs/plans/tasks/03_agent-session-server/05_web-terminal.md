@@ -1,7 +1,8 @@
 # Connect the First Web Terminal Consumer
 
 Status: todo
-Depends on: completed command service (`e29d41d6`), 04_live-event-api.md
+Depends on: completed command service (`e29d41d6`) and historical/live event API
+(`303e1915`, `ec085ade`, `4abe6ff9`; `SessionEventsRoute` follow mode verified by `SessionEventsLiveTest`).
 
 Build the first raw-journal projection by replaying terminal events in the web
 client and sending interactive commands through the server command service.

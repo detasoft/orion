@@ -75,6 +75,10 @@ public final class LiveEventBroker implements AutoCloseable {
             return !closed && notifications.poll(timeout.toNanos(), TimeUnit.NANOSECONDS) != null && !closed;
         }
 
+        public boolean isClosed() {
+            return closed;
+        }
+
         private void signal() {
             if (!closed) {
                 notifications.offer(Boolean.TRUE);
