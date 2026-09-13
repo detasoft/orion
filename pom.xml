@@ -393,7 +393,6 @@
         <maven.compiler.compilerReuseStrategy>reuseCreated</maven.compiler.compilerReuseStrategy>
         <maven.compiler.showCompilationChanges>true</maven.compiler.showCompilationChanges>
         <maven.compiler.skipMultiThreadWarning>true</maven.compiler.skipMultiThreadWarning>
-        <orion.testDurations.enabled>false</orion.testDurations.enabled>
       </properties>
       <build>
         <plugins>
