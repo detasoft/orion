@@ -112,6 +112,12 @@ AgentD is not responsible for:
 
 ### Identity and Persistent State
 
+The target replacement is specified in
+[unique labels and instance registration](../03_agent-session-server/03_agent-label-instance-registration.md):
+AgentD presents a unique label and fresh instance ID with a label-bound startup
+token; the server admits at most one registered instance per label. The following
+paragraph describes the existing contract to be replaced.
+
 The server-launched identity contract is integrated in the completed server
 control work, including launch provisioning (`3758705a`) and runtime composition
 (`490b458b`). Orion Server owns the stable `AgentId`, launch generation, and

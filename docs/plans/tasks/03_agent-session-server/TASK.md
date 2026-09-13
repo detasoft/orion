@@ -9,8 +9,9 @@ journal, route commands, and expose durable history and live events to clients.
 
 ## Scope
 
-- Keep persistent identity in `AgentId`, `AgentInstanceId`, `SessionId`,
-  `EventId`, and `CommandId`; treat HTTP/2 connections and streams as disposable.
+- Move agent identity to unique server-owned labels and per-launch
+  `AgentInstanceId` through [instance registration](03_agent-label-instance-registration.md).
+  Keep `SessionId`, `EventId`, and `CommandId`; treat HTTP/2 connections and streams as disposable.
 - Derive every resume cursor from committed server storage and make duplicate
   replication harmless while rejecting conflicting bytes for one event ID.
 - Preserve unknown journal records without transport-layer interpretation and
