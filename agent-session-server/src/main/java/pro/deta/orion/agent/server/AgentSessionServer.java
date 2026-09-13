@@ -51,6 +51,7 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
     private AuthenticatedAgentConnections connections;
     private AgentControlAuthenticator authenticator;
     private FileSystemSessionJournalStorage journalStorage;
+    private SessionReplicationService replicationService;
     private SessionCommandService commandService;
 
     public AgentSessionServer(Path root) {
@@ -76,6 +77,7 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         FileSystemAgentRegistry openedAgents = null;
         FileSystemSessionRegistry openedSessions = null;
         FileSystemSessionJournalStorage openedJournals = null;
+        SessionReplicationService openedReplication = null;
         SessionCommandService openedCommands = null;
         AuthenticatedAgentConnections openedConnections = null;
         try {
@@ -83,6 +85,7 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             openedSessions = new FileSystemSessionRegistry(root.resolve("sessions"));
             openedJournals = new FileSystemSessionJournalStorage(
                     root.resolve("journals"), new JournalStorageConfig(AgentProtocolLimits.journalDefaults()));
+            openedReplication = new SessionReplicationService(openedJournals);
             AtomicReference<SessionCommandService> commands = new AtomicReference<>();
             SessionReconciliationPublisher reconciliation =
                     new SessionReconciliationPublisher(openedSessions,
@@ -100,10 +103,12 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             connections = openedConnections;
             authenticator = openedAuthenticator;
             journalStorage = openedJournals;
+            replicationService = openedReplication;
             commandService = openedCommands;
         } catch (Exception failure) {
             close(openedCommands, failure);
             close(openedConnections, failure);
+            close(openedReplication, failure);
             close(openedJournals, failure);
             closeAfterFailedStart(openedSessions, openedAgents, failure);
             throw failure;
@@ -116,6 +121,7 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
         FileSystemSessionRegistry sessions;
         AuthenticatedAgentConnections activeConnections;
         SessionCommandService commands;
+        SessionReplicationService replication;
         FileSystemSessionJournalStorage journals;
         synchronized (this) {
             authenticator = null;
@@ -126,13 +132,16 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             sessionRegistry = null;
             connections = null;
             commands = commandService;
+            replication = replicationService;
             journals = journalStorage;
             commandService = null;
+            replicationService = null;
             journalStorage = null;
         }
         Exception failure = null;
         failure = close(activeConnections, failure);
         failure = close(commands, failure);
+        failure = close(replication, failure);
         failure = close(journals, failure);
         failure = close(sessions, failure);
         failure = close(agents, failure);
@@ -178,10 +187,10 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
     }
 
     public synchronized SessionReplicationService replicationService() {
-        if (journalStorage == null) {
+        if (replicationService == null) {
             throw new IllegalStateException("Agent session server is not running");
         }
-        return new SessionReplicationService(journalStorage);
+        return replicationService;
     }
 
     public synchronized JournalReadResult readSessionEvents(SessionId sessionId, Optional<EventId> after)

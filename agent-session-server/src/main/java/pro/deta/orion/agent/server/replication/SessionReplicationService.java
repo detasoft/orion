@@ -13,11 +13,21 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-public final class SessionReplicationService {
+public final class SessionReplicationService implements AutoCloseable {
     private final SessionJournalStorage storage;
+    private final LiveEventBroker liveEvents = new LiveEventBroker();
 
     public SessionReplicationService(SessionJournalStorage storage) {
         this.storage = Objects.requireNonNull(storage, "storage");
+    }
+
+    public LiveEventBroker.Subscription subscribe(SessionId sessionId) {
+        return liveEvents.subscribe(sessionId);
+    }
+
+    @Override
+    public void close() {
+        liveEvents.close();
     }
 
     public AgentMessage.SessionSync open(
@@ -51,6 +61,9 @@ public final class SessionReplicationService {
                     storage.append(sessionId, batch), "storage append result");
             EventId durableThrough = result.durableThrough().orElseThrow(
                     () -> new IllegalStateException("Non-empty append returned no durable cursor"));
+            if (!result.newlyStored().isEmpty()) {
+                liveEvents.publish(sessionId);
+            }
             return new AgentMessage.SessionSync(sessionId, Optional.of(durableThrough));
         } catch (JournalStorageException failure) {
             SessionReplicationException.Kind kind = switch (failure.reason()) {

@@ -25,6 +25,7 @@ import pro.deta.orion.provisioning.AgentdLaunchAttempt;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -33,6 +34,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -74,6 +77,21 @@ class AgentSessionServerTest {
                     .isEmpty();
         } finally {
             server.onStop();
+        }
+    }
+
+    @Test
+    void keepsOneReplicationServiceAndClosesLiveSubscriptionsOnStop() throws Exception {
+        AgentSessionServer server = new AgentSessionServer(root);
+        server.onStart();
+        var replication = server.replicationService();
+        assertThat(server.replicationService()).isSameAs(replication);
+
+        try (var subscription = replication.subscribe(new SessionId("session-1"));
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var waiting = executor.submit(() -> subscription.awaitChange(Duration.ofSeconds(5)));
+            server.onStop();
+            assertThat(waiting.get(5, TimeUnit.SECONDS)).isFalse();
         }
     }
 

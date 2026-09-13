@@ -17,6 +17,7 @@ import pro.deta.orion.agent.server.journal.JournalStorageException;
 import pro.deta.orion.agent.server.journal.SessionJournalStorage;
 
 import java.util.ArrayList;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -101,6 +102,44 @@ class SessionReplicationServiceTest {
 
         assertThat(acknowledgement.afterEventId()).contains(new EventId(9));
         assertThat(storage.appended).containsExactly(retried);
+    }
+
+    @Test
+    void signalsLiveReadersOnlyAfterNewEventsBecomeDurable() throws Exception {
+        RecordingStorage storage = new RecordingStorage(Optional.empty());
+        SessionEventRecord event = event(1, (byte) 1);
+        storage.appendResult = new JournalAppendResult(Optional.of(event.eventId()), List.of(event));
+        storage.blockAppend = true;
+        SessionReplicationService service = new SessionReplicationService(storage);
+
+        try (var subscription = service.subscribe(SESSION_ID);
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<AgentMessage.SessionSync> append = executor.submit(
+                    () -> service.append(SESSION_ID, List.of(event)));
+            assertThat(storage.appendEntered.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(subscription.awaitChange(Duration.ZERO)).isFalse();
+
+            storage.allowAppend.countDown();
+            assertThat(append.get(5, TimeUnit.SECONDS).afterEventId()).contains(event.eventId());
+            assertThat(subscription.awaitChange(Duration.ofSeconds(1))).isTrue();
+
+            storage.appendResult = new JournalAppendResult(Optional.of(event.eventId()), List.of());
+            service.append(SESSION_ID, List.of(event));
+            assertThat(subscription.awaitChange(Duration.ZERO)).isFalse();
+        }
+    }
+
+    @Test
+    void failedAppendDoesNotWakeLiveReaders() throws Exception {
+        RecordingStorage storage = new RecordingStorage(Optional.empty());
+        storage.appendFailure = new JournalStorageException(
+                JournalStorageException.Reason.IO_FAILURE, "append failed");
+        SessionReplicationService service = new SessionReplicationService(storage);
+        try (var subscription = service.subscribe(SESSION_ID)) {
+            assertThatThrownBy(() -> service.append(SESSION_ID, List.of(event(1, (byte) 1))))
+                    .isInstanceOf(SessionReplicationException.class);
+            assertThat(subscription.awaitChange(Duration.ZERO)).isFalse();
+        }
     }
 
     @Test

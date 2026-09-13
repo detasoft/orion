@@ -16,6 +16,7 @@ import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
 import pro.deta.orion.agent.server.journal.JournalStorageConfig;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -106,6 +107,27 @@ class SessionReplicationConcurrencyTest {
                             AgentMessage.SessionState.RUNNING));
 
             assertThat(synchronization.afterEventId()).contains(event.eventId());
+        }
+    }
+
+    @Test
+    void subscribeThenReplayCatchesConcurrentAppendWithoutDuplicateEvents() throws Exception {
+        SessionEventRecord event = event(1, (byte) 1);
+        try (var storage = storage();
+             var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            SessionReplicationService service = service(storage);
+            try (var subscription = service.subscribe(SESSION_ID)) {
+                var append = executor.submit(() -> service.append(SESSION_ID, List.of(event)));
+                List<SessionEventRecord> replay = storage.readAfter(SESSION_ID, Optional.empty()).records();
+                if (replay.isEmpty()) {
+                    assertThat(subscription.awaitChange(Duration.ofSeconds(5))).isTrue();
+                    replay = storage.readAfter(SESSION_ID, Optional.empty()).records();
+                }
+                append.get(5, TimeUnit.SECONDS);
+                assertThat(replay).containsExactly(event);
+                assertThat(storage.readAfter(SESSION_ID, Optional.of(event.eventId())).records())
+                        .isEmpty();
+            }
         }
     }
 
