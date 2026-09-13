@@ -1,7 +1,7 @@
 # Redact Session Launch Failure Diagnostics
 
 Status: todo
-Depends on: 04_command-orchestration.md
+Depends on: completed AgentD command orchestration (`16c71248`)
 Required before: 08_release-and-acceptance.md
 
 Sanitize `SESSION_START_FAILED` diagnostic text before journal encoding,
