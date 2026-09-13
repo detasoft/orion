@@ -11,6 +11,8 @@ import pro.deta.orion.agent.protocol.CommandId;
 import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
+import pro.deta.orion.agent.protocol.SessionCommandOutcome;
+import pro.deta.orion.agent.protocol.SessionCommandSource;
 import pro.deta.orion.agent.protocol.SessionEventCodec;
 import pro.deta.orion.agent.protocol.SessionEventPayload;
 import pro.deta.orion.agent.protocol.SessionId;
@@ -142,6 +144,31 @@ class SessionJournalRelayTest {
             Files.write(local.directory().resolve("00000001.cbor"), event(80), StandardOpenOption.APPEND);
             await(() -> peer.records.size() == 1);
             assertThat(peer.records).containsExactly(event(80));
+        }
+    }
+
+    @Test
+    void relaysJournalResultsAndProcessExitWithoutInterpretingOperationSequences() throws Exception {
+        byte[] manualFirst = EVENTS.encode(new EventId(10), new SessionEventPayload.CommandResult(
+                SessionCommandSource.MANUAL, 1, ProtocolBytes.copyOf(new byte[]{1}),
+                SessionCommandOutcome.SUCCEEDED, ""));
+        byte[] server = EVENTS.encode(new EventId(20), new SessionEventPayload.CommandResult(
+                SessionCommandSource.SERVER, 42, ProtocolBytes.copyOf(new byte[]{2}),
+                SessionCommandOutcome.SUCCEEDED, ""));
+        byte[] manualAgain = EVENTS.encode(new EventId(30), new SessionEventPayload.CommandResult(
+                SessionCommandSource.MANUAL, 1, ProtocolBytes.copyOf(new byte[]{3}),
+                SessionCommandOutcome.SUCCEEDED, ""));
+        byte[] exited = EVENTS.encode(new EventId(40), new SessionEventPayload.ProcessExited(7));
+        Peer peer = new Peer();
+        try (SessionJournalRelay relay = relay(peer,
+                registry(session("mixed", manualFirst, server, manualAgain, exited)), connected())) {
+            relay.start();
+            peer.opened();
+            peer.sync("mixed", null);
+            await(() -> peer.records.size() == 4);
+            assertThat(peer.records).containsExactly(manualFirst, server, manualAgain, exited);
+            peer.sync("mixed", 40L);
+            await(() -> peer.acknowledged.contains(40L));
         }
     }
 
