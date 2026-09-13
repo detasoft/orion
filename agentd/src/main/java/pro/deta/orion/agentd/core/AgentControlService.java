@@ -4,10 +4,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -431,29 +431,52 @@ public final class AgentControlService implements AgentService {
         if (!"native".equals(start.runtime())) {
             throw new IllegalArgumentException("unsupported runtime");
         }
-        Path workingDirectory = Path.of(start.workingDirectory());
-        if (!workingDirectory.isAbsolute()) {
-            throw new IllegalArgumentException("working directory must be absolute");
+        if (start.sessionId().value().indexOf(':') >= 0) {
+            throw new IllegalArgumentException("session ID is not supported by the native host");
         }
-        WorkspaceReference workspace = start.workspaceId().<WorkspaceReference>map(id ->
-                new WorkspaceReference.Managed(id, workingDirectory))
-                .orElseGet(() -> new WorkspaceReference.ExistingDirectory(workingDirectory));
-        Map<String, String> environment = new HashMap<>(start.environment());
+        if (start.workspaceId().isPresent()) {
+            throw new IllegalArgumentException("managed workspaces are not supported by the native runtime");
+        }
+        Path workingDirectory = Path.of(start.workingDirectory());
+        if (!workingDirectory.isAbsolute() || !Files.isDirectory(workingDirectory)) {
+            throw new IllegalArgumentException("working directory must be an existing absolute directory");
+        }
+        for (String argument : start.command()) {
+            if (argument.indexOf('\0') >= 0) {
+                throw new IllegalArgumentException("child command contains a NUL byte");
+            }
+        }
+        Map<String, String> environment = start.environment();
+        for (String key : environment.keySet()) {
+            if (!"TERM".equals(key) && !"COLORTERM".equals(key)) {
+                throw new IllegalArgumentException("unsupported environment entry");
+            }
+        }
         String terminalType = environment.getOrDefault("TERM", "xterm-256color");
-        Optional<String> colorTerminal = Optional.ofNullable(environment.remove("COLORTERM"));
-        environment.remove("TERM");
+        Optional<String> colorTerminal = Optional.ofNullable(environment.get("COLORTERM"));
+        if (!nativeTerminalValue(terminalType)
+                || colorTerminal.filter(value -> !nativeTerminalValue(value)).isPresent()) {
+            throw new IllegalArgumentException("invalid terminal environment value");
+        }
         SessionSpec.Sandbox sandbox;
         if ("none".equals(start.sandboxPolicy())) {
             sandbox = SessionSpec.Sandbox.none();
         } else {
             Path policy = Path.of(start.sandboxPolicy());
-            if (!policy.isAbsolute()) {
-                throw new IllegalArgumentException("sandbox policy path must be absolute");
+            if (!policy.isAbsolute() || !Files.isRegularFile(policy, LinkOption.NOFOLLOW_LINKS)
+                    || !Files.isReadable(policy)) {
+                throw new IllegalArgumentException("sandbox policy must be an absolute readable regular file");
             }
             sandbox = new SessionSpec.Sandbox(Optional.of(policy));
         }
-        return new SessionSpec(start.sessionId(), start.commandId(), start.command(), workspace,
-                environment, start.columns(), start.rows(), terminalType, colorTerminal, sandbox);
+        return new SessionSpec(start.sessionId(), start.commandId(), start.command(),
+                new WorkspaceReference.ExistingDirectory(workingDirectory),
+                Map.of(), start.columns(), start.rows(), terminalType, colorTerminal, sandbox);
+    }
+
+    private static boolean nativeTerminalValue(String value) {
+        int bytes = value.getBytes(StandardCharsets.UTF_8).length;
+        return bytes >= 1 && bytes <= 128 && value.indexOf('=') < 0 && value.indexOf('\0') < 0;
     }
 
     private static AgentMessage.CommandResult commandReport(

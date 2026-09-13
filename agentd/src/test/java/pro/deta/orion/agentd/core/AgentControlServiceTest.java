@@ -193,6 +193,56 @@ class AgentControlServiceTest {
     }
 
     @Test
+    void rejectsUnsupportedNativeStartFieldsBeforeCallingRuntime() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of());
+        AtomicInteger launches = new AtomicInteger();
+        try (AgentControlService service = service(
+                transport, CODEC, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+                SessionJournalRelay relay = relay(transport, registry, service)) {
+            service.configureSessionStart(spec -> {
+                launches.incrementAndGet();
+                return SessionLaunchResult.failed(
+                        SessionLaunchResult.FailureKind.INVALID_SPEC, "unexpected launch");
+            }, relay, temporaryDirectory);
+            service.start();
+
+            List<AgentMessage.StartSession> invalid = List.of(
+                    new AgentMessage.StartSession(new CommandId("start-managed"), new SessionId("managed"),
+                            Optional.of(new WorkspaceId("workspace")), List.of("/bin/true"),
+                            temporaryDirectory.toString(), Map.of(), 80, 24, "none", "native"),
+                    new AgentMessage.StartSession(new CommandId("start-environment"),
+                            new SessionId("environment"),
+                            Optional.empty(), List.of("/bin/true"), temporaryDirectory.toString(),
+                            Map.of("EXTRA", "value"), 80, 24, "none", "native"),
+                    new AgentMessage.StartSession(new CommandId("start-workdir"), new SessionId("workdir"),
+                            Optional.empty(), List.of("/bin/true"),
+                            temporaryDirectory.resolve("missing").toString(),
+                            Map.of(), 80, 24, "none", "native"),
+                    new AgentMessage.StartSession(new CommandId("start-policy"), new SessionId("policy"),
+                            Optional.empty(), List.of("/bin/true"), temporaryDirectory.toString(),
+                            Map.of(), 80, 24,
+                            temporaryDirectory.resolve("missing.policy").toString(), "native"),
+                    new AgentMessage.StartSession(new CommandId("start-command"), new SessionId("command"),
+                            Optional.empty(), List.of("/bin/\0true"), temporaryDirectory.toString(),
+                            Map.of(), 80, 24, "none", "native"),
+                    new AgentMessage.StartSession(new CommandId("start-colon"), new SessionId("bad:id"),
+                            Optional.empty(), List.of("/bin/true"), temporaryDirectory.toString(),
+                            Map.of(), 80, 24, "none", "native"),
+                    new AgentMessage.StartSession(new CommandId("start-term"), new SessionId("term"),
+                            Optional.empty(), List.of("/bin/true"), temporaryDirectory.toString(),
+                            Map.of("TERM", ""), 80, 24, "none", "native"));
+            for (AgentMessage.StartSession start : invalid) {
+                transport.deliver(start);
+                await(() -> relay.hasPendingStartFailure(start.sessionId()));
+            }
+            assertThat(launches).hasValue(0);
+        }
+    }
+
+    @Test
     void rejectsStartCollisionAndLeavesExistingNativeJournalAuthoritative() throws Exception {
         FakeTransport transport = new FakeTransport();
         transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
