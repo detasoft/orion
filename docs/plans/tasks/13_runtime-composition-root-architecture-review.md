@@ -3,7 +3,7 @@
 Status: todo
 Depends on:
 [hierarchical configuration acceptance](02_hierarchical-orion-configuration/03_administration-and-acceptance.md),
-[key-material rotation and bootstrap acceptance](01_unified-key-material-bootstrap/03_rotation-recovery-and-acceptance.md),
+completed key-material rotation and recovery (9a87d139, 406c4354),
 [the Git server transport review](11_git/04_server-transport-architecture-review.md)
 
 Perform a read-only architecture review of `core/bootstrap`, `net/transport`,

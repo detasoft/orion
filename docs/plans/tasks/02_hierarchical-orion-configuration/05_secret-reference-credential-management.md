@@ -26,10 +26,11 @@ reference handling as a common resolver helper, but does not define the secret
 store, credential record model, rotation behavior, access policy, or audit
 rules.
 
-[The key-material task](../01_unified-key-material-bootstrap/TASK.md) covers Orion-owned
-private keys and certificates: server signing keys, HTTPS keys, ACME account
-keys, SSH host keys, and CA material. It does not define generic provider
-tokens, S3 credentials, SSH client private keys, known-host entries, proxy
+Orion key material covers Orion-owned private keys and certificates: server
+signing keys, HTTPS keys, ACME account keys, and SSH host keys (rotation and
+recovery: 9a87d139, 406c4354). It will also hold issuer keys for the future
+[internal CA](../20_internal-certificate-authority.md). It does not define
+generic provider tokens, S3 credentials, SSH client private keys, known-host entries, proxy
 passwords, or OAuth client secrets.
 
 [The application-token model](../14_application-tokens/01_model-and-storage.md) covers inbound
