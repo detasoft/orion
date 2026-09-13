@@ -1,22 +1,36 @@
-# Migrate Git Integration Tests to Native Proxy Behavior
+# Verify Native Remote Bootstrap and Proxy Adoption
 
 Status: todo
-Depends on: 01_bootstrap-proxy-runtime.md,
-02_proxy-config-and-secrets.md,
-03_proxy-admin-ui.md
+Depends on: [06/01](01_bootstrap-proxy-runtime.md),
+[06/02](02_proxy-config-and-secrets.md),
+[06/05](05_git-configuration-integration-fixtures.md).
 
-Retain the remote configuration and ACL contracts while removing JGit-specific
-repository fixtures and assertions from runtime integration tests.
+## Requirements and design
 
-## Scope
+Verify remote bootstrap against a second local Orion runtime exposing native
+HTTP and SSH Git. Share deterministic fixture support from 06/05. Tests must
+assert public APIs, snapshots, and observable refs rather than JGit storage
+layout, a `config` file, an assumed `master` branch, or `jgit-runtime` lifecycle.
+Proxy UI and background GitHub mirroring are not prerequisites for these tests.
 
-- Use a second local Orion runtime as HTTP and SSH upstream instead of reading
-  or seeding JGit bare repository layout.
-- Verify direct remote launch, provisional proxy handoff, first-run persistence,
-  restart deduplication, reads, writes, and upstream compare-and-set conflicts.
-- Assert native repository behavior through public APIs and snapshots rather
-  than `config`, `master`, or filesystem layout assumptions.
-- Replace stale `jgit-runtime` lifecycle expectations with current native
-  transport state while preserving SSH and HTTP parity.
-- Cover invalid credentials, missing upstream state, encrypted credential
-  reload, and local locations that must not create proxies.
+## Implementation plan
+
+1. Seed configuration and encrypted material through native APIs and launch
+   the target using process configuration with independent source descriptors.
+2. Cover first adoption, unchanged configuration on restart, one alias for two
+   paths, independent upstreams, and local inputs without a proxy.
+3. Verify HTTP/SSH reads and upstream-CAS writes, including remote movement,
+   denied credentials, missing refs/paths, wrong material password, and failure
+   before public transport activation.
+4. Verify authorized stable aliases and rejection of internal cache access;
+   retain compressed Smart HTTP interoperability coverage.
+5. Remove migrated fixture/layout assumptions only after equivalent observable
+   coverage exists through the current runtime path.
+
+## Acceptance
+
+Remote configuration and material start correctly over both transports; bad
+inputs do not activate stale configuration. Adoption survives restart without
+secret exposure or duplicate entries. Focused integration scenarios and the
+full `mvn verify -Pdev -T 4` pass, or unrelated environment failures are reported
+explicitly. Docker-backed S3 coverage remains independent.
