@@ -7,10 +7,15 @@ import pro.deta.orion.agent.protocol.AgentId;
 import pro.deta.orion.agent.protocol.AgentInstanceId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolVersion;
+import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.EventId;
 import pro.deta.orion.agent.protocol.JournalFormatVersion;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.protocol.ProtocolBytes;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
+import pro.deta.orion.agent.protocol.SessionEventCodec;
+import pro.deta.orion.agent.protocol.SessionEventPayload;
+import pro.deta.orion.agent.protocol.SessionEventRecord;
 import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
@@ -37,6 +42,40 @@ class AgentSessionServerTest {
 
     @TempDir
     Path root;
+
+    @Test
+    void replaysCommittedRawEventsAfterAnExclusiveCursorAcrossRestart() throws Exception {
+        SessionId sessionId = new SessionId("session-1");
+        SessionEventCodec codec = new SessionEventCodec(AgentProtocolLimits.journalDefaults());
+        SessionEventRecord first = codec.decode(codec.encode(
+                new EventId(10), new SessionEventPayload.PtyOutput(ProtocolBytes.copyOf(new byte[]{1}))));
+        SessionEventRecord unknown = codec.decode(codec.encodeOpaque(
+                new EventId(20), 50_000, ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}),
+                List.of(ProtocolBytes.copyOf(new byte[]{(byte) 0xf6}))));
+        AgentSessionServer server = new AgentSessionServer(root);
+        server.onStart();
+        try {
+            server.replicationService().append(sessionId, List.of(first, unknown));
+            assertThat(server.readSessionEvents(sessionId, Optional.empty()).records())
+                    .containsExactly(first, unknown);
+            assertThat(server.readSessionEvents(sessionId, Optional.of(first.eventId())).records())
+                    .containsExactly(unknown);
+            assertThat(server.readSessionEvents(sessionId, Optional.of(unknown.eventId())).records())
+                    .isEmpty();
+        } finally {
+            server.onStop();
+        }
+
+        server.onStart();
+        try {
+            assertThat(server.readSessionEvents(sessionId, Optional.of(first.eventId())).records())
+                    .containsExactly(unknown);
+            assertThat(server.readSessionEvents(new SessionId("missing"), Optional.empty()).records())
+                    .isEmpty();
+        } finally {
+            server.onStop();
+        }
+    }
 
     @Test
     void composesAuthenticationConnectionOwnershipAndSessionReconciliation() throws Exception {

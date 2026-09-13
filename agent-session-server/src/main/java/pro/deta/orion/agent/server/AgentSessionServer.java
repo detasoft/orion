@@ -3,6 +3,8 @@ package pro.deta.orion.agent.server;
 import pro.deta.orion.agent.protocol.AgentId;
 import pro.deta.orion.agent.protocol.AgentMessage;
 import pro.deta.orion.agent.protocol.AgentProtocolLimits;
+import pro.deta.orion.agent.protocol.EventId;
+import pro.deta.orion.agent.protocol.SessionId;
 import pro.deta.orion.agent.server.auth.AgentControlAuthenticator;
 import pro.deta.orion.agent.server.auth.AgentdProvisioningControl;
 import pro.deta.orion.agent.server.auth.AuthenticatedAgentConnections;
@@ -11,6 +13,8 @@ import pro.deta.orion.agent.server.connection.AgentControlHandler;
 import pro.deta.orion.agent.server.command.SessionCommandService;
 import pro.deta.orion.agent.server.journal.FileSystemSessionJournalStorage;
 import pro.deta.orion.agent.server.journal.JournalStorageConfig;
+import pro.deta.orion.agent.server.journal.JournalReadResult;
+import pro.deta.orion.agent.server.journal.JournalStorageException;
 import pro.deta.orion.agent.server.replication.SessionReplicationService;
 import pro.deta.orion.agent.server.registry.AgentRecord;
 import pro.deta.orion.agent.server.registry.AgentRegistryException;
@@ -24,6 +28,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Owns the durable and transient server-side state behind the Agent control endpoint. */
@@ -177,6 +182,14 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             throw new IllegalStateException("Agent session server is not running");
         }
         return new SessionReplicationService(journalStorage);
+    }
+
+    public synchronized JournalReadResult readSessionEvents(SessionId sessionId, Optional<EventId> after)
+            throws JournalStorageException {
+        if (journalStorage == null) {
+            throw new IllegalStateException("Agent session server is not running");
+        }
+        return journalStorage.readAfter(sessionId, after);
     }
 
     public synchronized AgentdProvisioningControl provisioningControl(
