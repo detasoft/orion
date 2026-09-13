@@ -1,6 +1,8 @@
 # Route Commands to Connected Agents
 
 Status: todo
+- Owner: codex, session 01a099b8-4db9-7403-80a7-36ee3fac0070, branch `codex/agent-session-command-service-01a099b8`,
+  worktree `.worktrees/agent-session-command-service-01a099b8`, started 2026-09-13 09:44 Europe/Amsterdam.
 Depends on: completed server control and registries (`3e4a6156`, `3758705a`, `490b458b`)
 
 Send session commands only through the authoritative AgentD connection and
