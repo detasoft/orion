@@ -1,8 +1,13 @@
 package pro.deta.orion.agentd.core;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -25,9 +30,15 @@ import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agent.protocol.SequenceDecodeResult;
 import pro.deta.orion.agent.protocol.SessionDescriptor;
 import pro.deta.orion.agent.protocol.SessionId;
+import pro.deta.orion.agentd.journal.SessionJournalRelay;
+import pro.deta.orion.agentd.runtime.SessionLaunchResult;
+import pro.deta.orion.agentd.runtime.SessionRuntime;
+import pro.deta.orion.agentd.runtime.SessionSpec;
+import pro.deta.orion.agentd.runtime.WorkspaceReference;
+import pro.deta.orion.agentd.session.ControlResult;
 import pro.deta.orion.agentd.session.DiscoverySnapshot;
 import pro.deta.orion.agentd.session.EstablishedSessionCommandDelivery;
-import pro.deta.orion.agentd.session.ControlResult;
+import pro.deta.orion.agentd.session.FileSystemJournalProbe;
 import pro.deta.orion.agentd.session.LocalSession;
 import pro.deta.orion.agentd.session.SessionControlClient;
 import pro.deta.orion.agentd.session.SessionRegistry;
@@ -54,6 +65,7 @@ public final class AgentControlService implements AgentService {
     private final SessionRegistry registry;
     private final SessionCommandLanes commandLanes = new SessionCommandLanes(4, 64, 32);
     private final EstablishedSessionCommandDelivery commandDelivery;
+    private volatile SessionStartConfiguration sessionStart;
     private final SessionRegistry.Observation registryObservation;
     private final AtomicReference<Exception> lastSessionReportingFailure = new AtomicReference<>();
     private Attempt attempt;
@@ -145,6 +157,19 @@ public final class AgentControlService implements AgentService {
 
     public Optional<Exception> lastSessionReportingFailure() {
         return Optional.ofNullable(lastSessionReportingFailure.get());
+    }
+
+    void configureSessionStart(SessionRuntime runtime, SessionJournalRelay relay, Path sessionsDirectory) {
+        synchronized (this) {
+            if (attempt != null || closed || sessionStart != null) {
+                throw new IllegalStateException("session start must be configured before service start");
+            }
+            sessionStart = new SessionStartConfiguration(
+                    Objects.requireNonNull(runtime, "runtime"),
+                    Objects.requireNonNull(relay, "relay"),
+                    Objects.requireNonNull(sessionsDirectory, "sessionsDirectory")
+                            .toAbsolutePath().normalize());
+        }
     }
 
     @Override
@@ -246,17 +271,20 @@ public final class AgentControlService implements AgentService {
             return;
         }
         AgentMessageRecord record = decoded.value();
-        SessionId commandSession = establishedCommandSession(record.message());
+        SessionId commandSession = commandSession(record.message());
         if (commandSession != null) {
             AgentConnection expected = onlineConnection();
             if (expected != null) {
-                CompletionStage<SessionCommandLanes.Outcome<ControlResult>> delivery = commandLanes.submit(
-                        commandSession, () -> {
+                CompletionStage<SessionCommandLanes.Outcome<Optional<AgentMessage.CommandResult>>> delivery =
+                        commandLanes.submit(commandSession, () -> {
                             registry.readySnapshot().toCompletableFuture().get();
                             if (!current(expected)) {
-                                return null;
+                                return Optional.empty();
                             }
-                            return commandDelivery.deliver(record);
+                            if (record.message() instanceof AgentMessage.StartSession start) {
+                                return deliverStart(start);
+                            }
+                            return nativeCommandReport(record.message(), commandDelivery.deliver(record));
                         });
                 delivery.whenComplete((result, failure) ->
                         reportCommandDelivery(expected, record.message(), result, failure));
@@ -279,8 +307,9 @@ public final class AgentControlService implements AgentService {
         });
     }
 
-    private static SessionId establishedCommandSession(AgentMessage message) {
+    private static SessionId commandSession(AgentMessage message) {
         return switch (message) {
+            case AgentMessage.StartSession start -> start.sessionId();
             case AgentMessage.Input input -> input.sessionId();
             case AgentMessage.Resize resize -> resize.sessionId();
             case AgentMessage.Signal signal -> signal.sessionId();
@@ -292,45 +321,145 @@ public final class AgentControlService implements AgentService {
     private void reportCommandDelivery(
             AgentConnection expected,
             AgentMessage message,
-            SessionCommandLanes.Outcome<ControlResult> result,
+            SessionCommandLanes.Outcome<Optional<AgentMessage.CommandResult>> result,
             Throwable failure
     ) {
         if (!current(expected)) {
             return;
         }
-        AgentMessage.CommandOutcome outcome;
-        String detail;
         if (failure != null) {
-            outcome = AgentMessage.CommandOutcome.FAILED;
-            detail = "native command delivery failed";
-        } else if (result instanceof SessionCommandLanes.Outcome.Discarded<ControlResult> discarded) {
-            outcome = AgentMessage.CommandOutcome.REJECTED;
-            detail = "command delivery " + discarded.reason().name().toLowerCase(java.util.Locale.ROOT);
+            sendSessionReport(expected, commandReport(message, AgentMessage.CommandOutcome.FAILED,
+                    "command delivery failed"));
+        } else if (result instanceof SessionCommandLanes.Outcome.Discarded<?> discarded) {
+            sendSessionReport(expected, commandReport(message, AgentMessage.CommandOutcome.REJECTED,
+                    "command delivery " + discarded.reason().name().toLowerCase(java.util.Locale.ROOT)));
         } else {
-            ControlResult nativeResult =
-                    ((SessionCommandLanes.Outcome.Completed<ControlResult>) result).value();
-            if (nativeResult instanceof ControlResult.Rejected rejected) {
-                outcome = AgentMessage.CommandOutcome.REJECTED;
-                detail = "native command rejected with code " + rejected.errorCode();
-            } else if (nativeResult instanceof ControlResult.Failed failed) {
-                outcome = AgentMessage.CommandOutcome.FAILED;
-                detail = "native command delivery " + failed.kind().name().toLowerCase(java.util.Locale.ROOT);
-            } else {
-                return;
-            }
+            ((SessionCommandLanes.Outcome.Completed<Optional<AgentMessage.CommandResult>>) result)
+                    .value().ifPresent(report -> sendSessionReport(expected, report));
         }
-        sendSessionReport(expected, new AgentMessage.CommandResult(
-                commandId(message), Optional.of(establishedCommandSession(message)), outcome, detail));
+    }
+
+    private static Optional<AgentMessage.CommandResult> nativeCommandReport(
+            AgentMessage message, ControlResult nativeResult) {
+        if (nativeResult instanceof ControlResult.Rejected rejected) {
+            return Optional.of(commandReport(message, AgentMessage.CommandOutcome.REJECTED,
+                    "native command rejected with code " + rejected.errorCode()));
+        }
+        if (nativeResult instanceof ControlResult.Failed failed) {
+            return Optional.of(commandReport(message, AgentMessage.CommandOutcome.FAILED,
+                    "native command delivery " + failed.kind().name().toLowerCase(java.util.Locale.ROOT)));
+        }
+        return Optional.empty();
     }
 
     private static CommandId commandId(AgentMessage message) {
         return switch (message) {
+            case AgentMessage.StartSession start -> start.commandId();
             case AgentMessage.Input input -> input.commandId();
             case AgentMessage.Resize resize -> resize.commandId();
             case AgentMessage.Signal signal -> signal.commandId();
             case AgentMessage.Terminate terminate -> terminate.commandId();
-            default -> throw new IllegalArgumentException("message is not an established-session command");
+            default -> throw new IllegalArgumentException("message is not a session command");
         };
+    }
+
+    private Optional<AgentMessage.CommandResult> deliverStart(AgentMessage.StartSession start) {
+        SessionStartConfiguration configured = Objects.requireNonNull(
+                sessionStart, "session start configuration");
+        Path directory = configured.sessionsDirectory().resolve(start.sessionId().value()).normalize();
+        if (configured.relay().hasPendingStartFailure(start.sessionId())) {
+            return Optional.empty();
+        }
+        if (registry.snapshot().sessions().containsKey(start.sessionId().value())
+                || Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return Optional.of(commandReport(start, AgentMessage.CommandOutcome.REJECTED,
+                    "session already exists"));
+        }
+
+        SessionSpec spec;
+        try {
+            spec = startSpec(start);
+        } catch (IllegalArgumentException failure) {
+            return preJournalStartFailure(start, configured.relay(), "invalid start specification");
+        }
+        SessionLaunchResult result;
+        try {
+            result = configured.runtime().launch(spec);
+        } catch (RuntimeException failure) {
+            return Optional.of(commandReport(start, AgentMessage.CommandOutcome.FAILED,
+                    "session runtime failed ambiguously"));
+        }
+        if (result instanceof SessionLaunchResult.Started) {
+            return Optional.empty();
+        }
+        SessionLaunchResult.Failed failed = (SessionLaunchResult.Failed) result;
+        if (failed.kind() == SessionLaunchResult.FailureKind.SESSION_EXISTS) {
+            return Optional.of(commandReport(start, AgentMessage.CommandOutcome.REJECTED,
+                    "session already exists"));
+        }
+        try {
+            if (Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)
+                    && new FileSystemJournalProbe().probe(directory).readable()) {
+                return Optional.empty();
+            }
+        } catch (IOException failure) {
+            return Optional.of(commandReport(start, AgentMessage.CommandOutcome.FAILED,
+                    "session journal could not be inspected"));
+        }
+        if (failed.kind() == SessionLaunchResult.FailureKind.CLEANUP_FAILED) {
+            return Optional.of(commandReport(start, AgentMessage.CommandOutcome.FAILED,
+                    "session cleanup is unconfirmed"));
+        }
+        return preJournalStartFailure(start, configured.relay(), failed.detail());
+    }
+
+    private static Optional<AgentMessage.CommandResult> preJournalStartFailure(
+            AgentMessage.StartSession start, SessionJournalRelay relay, String detail) {
+        try {
+            if (relay.registerStartFailure(start.sessionId(), start.commandId(), detail)) {
+                return Optional.empty();
+            }
+        } catch (AgentProtocolException failure) {
+            return Optional.of(commandReport(start, AgentMessage.CommandOutcome.FAILED,
+                    "start failure journal could not be encoded"));
+        }
+        return Optional.of(commandReport(start, AgentMessage.CommandOutcome.FAILED,
+                "start failure journal has no capacity"));
+    }
+
+    private static SessionSpec startSpec(AgentMessage.StartSession start) {
+        if (!"native".equals(start.runtime())) {
+            throw new IllegalArgumentException("unsupported runtime");
+        }
+        Path workingDirectory = Path.of(start.workingDirectory());
+        if (!workingDirectory.isAbsolute()) {
+            throw new IllegalArgumentException("working directory must be absolute");
+        }
+        WorkspaceReference workspace = start.workspaceId().<WorkspaceReference>map(id ->
+                new WorkspaceReference.Managed(id, workingDirectory))
+                .orElseGet(() -> new WorkspaceReference.ExistingDirectory(workingDirectory));
+        Map<String, String> environment = new HashMap<>(start.environment());
+        String terminalType = environment.getOrDefault("TERM", "xterm-256color");
+        Optional<String> colorTerminal = Optional.ofNullable(environment.remove("COLORTERM"));
+        environment.remove("TERM");
+        SessionSpec.Sandbox sandbox;
+        if ("none".equals(start.sandboxPolicy())) {
+            sandbox = SessionSpec.Sandbox.none();
+        } else {
+            Path policy = Path.of(start.sandboxPolicy());
+            if (!policy.isAbsolute()) {
+                throw new IllegalArgumentException("sandbox policy path must be absolute");
+            }
+            sandbox = new SessionSpec.Sandbox(Optional.of(policy));
+        }
+        return new SessionSpec(start.sessionId(), start.commandId(), start.command(), workspace,
+                environment, start.columns(), start.rows(), terminalType, colorTerminal, sandbox);
+    }
+
+    private static AgentMessage.CommandResult commandReport(
+            AgentMessage message, AgentMessage.CommandOutcome outcome, String detail) {
+        return new AgentMessage.CommandResult(
+                commandId(message), Optional.of(commandSession(message)), outcome, detail);
     }
 
     private void sessionsReplaced(DiscoverySnapshot previous, DiscoverySnapshot next) {
@@ -520,5 +649,9 @@ public final class AgentControlService implements AgentService {
 
     private static final class Attempt {
         private final CompletableFuture<AgentConnection> negotiated = new CompletableFuture<>();
+    }
+
+    private record SessionStartConfiguration(
+            SessionRuntime runtime, SessionJournalRelay relay, Path sessionsDirectory) {
     }
 }

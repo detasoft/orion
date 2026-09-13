@@ -87,6 +87,36 @@ class AgentAssemblyTest {
         }
     }
 
+    @Test
+    void routesServerStartIntoTheExistingJournalRelay() throws Exception {
+        AgentConfiguration configuration = configuration();
+        AgentLaunchContext context = AgentLaunchContext.create(configuration, new LaunchPermit(new byte[32]));
+        RecordingTransport transport = new RecordingTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+
+        try (Agent agent = Agent.create(configuration, context, transport,
+                new MachineInfo("runner", "linux", "aarch64"))) {
+            agent.start();
+            SessionId id = new SessionId("missing-host");
+            transport.deliver(new AgentMessage.StartSession(new CommandId("start-missing-host"), id,
+                    java.util.Optional.empty(), List.of("/bin/true"), state.toString(),
+                    Map.of("TERM", "xterm-256color"), 80, 24, "none", "native"));
+
+            await(() -> !transport.sessionItems.isEmpty());
+            AgentMessage.SessionOpen open = (AgentMessage.SessionOpen) CODEC.decode(
+                    transport.sessionItems.getFirst());
+            assertThat(open.sessionId()).isEqualTo(id);
+            assertThat(open.state()).isEqualTo(AgentMessage.SessionState.FAILED);
+            assertThat(open.firstAvailableEventId()).contains(new EventId(1));
+            transport.sync(id, java.util.Optional.empty());
+            await(() -> transport.sessionItems.size() == 2);
+            SessionEventRecord event = new SessionEventCodec(AgentProtocolLimits.journalDefaults())
+                    .decode(transport.sessionItems.getLast());
+            assertThat(event.eventId()).isEqualTo(new EventId(1));
+            assertThat(event.eventType()).isEqualTo(SessionEventType.SESSION_START_FAILED);
+        }
+    }
+
     private AgentConfiguration configuration() {
         return new AgentConfiguration(
                 URI.create("https://agent.test"), state,
@@ -97,9 +127,11 @@ class AgentAssemblyTest {
 
     private static final class RecordingTransport implements AgentTransport {
         private final List<byte[]> controls = new CopyOnWriteArrayList<>();
+        private final List<byte[]> sessionItems = new CopyOnWriteArrayList<>();
         private int connectCalls;
         private AgentMessage reply;
         private Consumer<SequenceDecodeResult.Outcome<AgentMessageRecord>> controlReceiver;
+        private BiConsumer<SessionId, AgentMessage> sessionReceiver;
 
         @Override
         public CompletionStage<Void> connect() {
@@ -122,6 +154,7 @@ class AgentAssemblyTest {
 
         @Override
         public CompletionStage<Void> sendSessionCbor(SessionId id, byte[] item) {
+            sessionItems.add(item.clone());
             return CompletableFuture.completedFuture(null);
         }
 
@@ -141,6 +174,7 @@ class AgentAssemblyTest {
 
         @Override
         public void onSessionMessage(BiConsumer<SessionId, AgentMessage> receiver) {
+            sessionReceiver = receiver;
         }
 
         @Override
@@ -153,6 +187,10 @@ class AgentAssemblyTest {
 
         private void deliver(AgentMessage message) {
             controlReceiver.accept(decoded(message));
+        }
+
+        private void sync(SessionId id, java.util.Optional<EventId> cursor) {
+            sessionReceiver.accept(id, new AgentMessage.SessionSync(id, cursor));
         }
 
         private <T extends AgentMessage> List<T> messages(Class<T> type) throws AgentProtocolException {

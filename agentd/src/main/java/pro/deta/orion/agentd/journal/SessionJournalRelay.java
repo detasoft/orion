@@ -116,6 +116,10 @@ public final class SessionJournalRelay implements AgentService {
         return true;
     }
 
+    public synchronized boolean hasPendingStartFailure(SessionId id) {
+        return startFailures.containsKey(Objects.requireNonNull(id, "id"));
+    }
+
     private synchronized void reconcile() {
         if (closed) {
             return;

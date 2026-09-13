@@ -11,6 +11,7 @@ import pro.deta.orion.agent.protocol.AgentProtocolCodec;
 import pro.deta.orion.agent.protocol.MachineInfo;
 import pro.deta.orion.agentd.platform.LocalMachineInfo;
 import pro.deta.orion.agentd.journal.SessionJournalRelay;
+import pro.deta.orion.agentd.runtime.NativeRuntime;
 import pro.deta.orion.agentd.session.ControlHostProbe;
 import pro.deta.orion.agentd.session.FileSystemJournalProbe;
 import pro.deta.orion.agentd.session.JsonSessionManifestReader;
@@ -68,9 +69,13 @@ public final class Agent implements AutoCloseable {
                 machine,
                 java.util.Map.of(),
                 registry);
-        AgentService journal = new SessionJournalRelay(transport, registry,
+        SessionJournalRelay journal = new SessionJournalRelay(transport, registry,
                 () -> control.connection().map(AgentConnection::connectionId), configuration.serverUri(),
                 configuration.protocolLimits(), new SessionControlClient(SESSION_CONTROL_TIMEOUT));
+        control.configureSessionStart(new NativeRuntime(
+                configuration.sessionHostExecutable(), configuration.sessionsDirectory(),
+                Duration.ofSeconds(10), SESSION_CONTROL_TIMEOUT, Duration.ofSeconds(2)),
+                journal, configuration.sessionsDirectory());
         return new Agent(configuration, List.of(processLock, discovery, control, journal), context);
     }
 

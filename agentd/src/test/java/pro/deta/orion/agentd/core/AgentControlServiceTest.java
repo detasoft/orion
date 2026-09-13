@@ -3,6 +3,8 @@ package pro.deta.orion.agentd.core;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.agent.protocol.*;
+import pro.deta.orion.agentd.journal.SessionJournalRelay;
+import pro.deta.orion.agentd.runtime.SessionLaunchResult;
 import pro.deta.orion.agentd.session.ChildState;
 import pro.deta.orion.agentd.session.ControlEndpoint;
 import pro.deta.orion.agentd.session.HostObservation;
@@ -12,12 +14,14 @@ import pro.deta.orion.agentd.session.LocalSessionState;
 import pro.deta.orion.agentd.session.SessionDiscovery;
 import pro.deta.orion.agentd.session.SessionDiscoveryMonitor;
 import pro.deta.orion.agentd.session.SessionManifest;
+import pro.deta.orion.agentd.session.SessionControlClient;
 import pro.deta.orion.agentd.session.SessionRegistry;
 import pro.deta.orion.agentd.session.SessionRegistryFixture;
 import pro.deta.orion.agentd.transport.AgentTransport;
 import pro.deta.orion.agentd.transport.SessionStreamRequest;
 import pro.deta.orion.agentd.transport.TransportSignal;
 
+import java.net.URI;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
@@ -154,6 +158,77 @@ class AgentControlServiceTest {
                 server.close();
                 executor.close();
             }
+        }
+    }
+
+    @Test
+    void routesStartThroughNativeRuntimeAndKeepsPreJournalFailureForReplication() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of());
+        AtomicInteger launches = new AtomicInteger();
+        try (AgentControlService service = service(
+                transport, CODEC, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+                SessionJournalRelay relay = relay(transport, registry, service)) {
+            service.configureSessionStart(spec -> {
+                launches.incrementAndGet();
+                assertThat(spec.terminalType()).isEqualTo("xterm-256color");
+                assertThat(spec.environment()).isEmpty();
+                return SessionLaunchResult.failed(SessionLaunchResult.FailureKind.INVALID_WORKSPACE,
+                        "workspace missing");
+            }, relay, temporaryDirectory);
+            service.start();
+
+            transport.deliver(startCommand("failed"));
+            await(() -> relay.hasPendingStartFailure(new SessionId("failed")));
+            transport.deliver(startCommand("failed"));
+            transport.deliver(new AgentMessage.Resize(
+                    new CommandId("after-start"), new SessionId("failed"), 80, 24, 7));
+            await(() -> !messages(transport.controls, AgentMessage.CommandResult.class).isEmpty());
+            assertThat(launches).hasValue(1);
+            assertThat(first(transport.controls, AgentMessage.CommandResult.class).commandId())
+                    .isEqualTo(new CommandId("after-start"));
+        }
+    }
+
+    @Test
+    void rejectsStartCollisionAndLeavesExistingNativeJournalAuthoritative() throws Exception {
+        FakeTransport transport = new FakeTransport();
+        transport.reply = AgentHandshakeTest.welcome("connection-1", (byte) 9);
+        SessionRegistry registry = new SessionRegistry();
+        SessionRegistryFixture.publish(registry, Map.of());
+        AtomicInteger launches = new AtomicInteger();
+        Files.createDirectory(temporaryDirectory.resolve("collision"));
+        try (AgentControlService service = service(
+                transport, CODEC, AgentHandshakeTest.context(), registry, Duration.ofSeconds(1));
+                SessionJournalRelay relay = relay(transport, registry, service)) {
+            service.configureSessionStart(spec -> {
+                launches.incrementAndGet();
+                try {
+                    Path directory = Files.createDirectory(
+                            temporaryDirectory.resolve(spec.sessionId().value()));
+                    Files.write(directory.resolve("00000001.cbor"), new byte[0]);
+                } catch (Exception failure) {
+                    throw new IllegalStateException(failure);
+                }
+                return SessionLaunchResult.failed(SessionLaunchResult.FailureKind.INITIALIZATION_FAILED,
+                        "native journal exists");
+            }, relay, temporaryDirectory);
+            service.start();
+
+            transport.deliver(startCommand("collision"));
+            await(() -> !messages(transport.controls, AgentMessage.CommandResult.class).isEmpty());
+            assertThat(first(transport.controls, AgentMessage.CommandResult.class).outcome())
+                    .isEqualTo(AgentMessage.CommandOutcome.REJECTED);
+            assertThat(launches).hasValue(0);
+
+            transport.deliver(startCommand("journaled"));
+            await(() -> launches.get() == 1);
+            transport.deliver(new AgentMessage.Resize(
+                    new CommandId("after-journal"), new SessionId("journaled"), 80, 24, 7));
+            await(() -> messages(transport.controls, AgentMessage.CommandResult.class).size() == 2);
+            assertThat(relay.hasPendingStartFailure(new SessionId("journaled"))).isFalse();
         }
     }
 
@@ -595,6 +670,20 @@ class AgentControlServiceTest {
                 transport, codec, new AgentHandshake(), context, "2.4.1",
                 new MachineInfo("runner-1", "Linux", "aarch64"), Map.of("pty", "true"),
                 registry, timeout, nanoTime);
+    }
+
+    private static SessionJournalRelay relay(
+            FakeTransport transport, SessionRegistry registry, AgentControlService service) {
+        return new SessionJournalRelay(transport, registry,
+                () -> service.connection().map(AgentConnection::connectionId),
+                URI.create("https://localhost"), AgentProtocolLimits.defaults(),
+                new SessionControlClient(Duration.ofSeconds(1)));
+    }
+
+    private AgentMessage.StartSession startCommand(String id) {
+        return new AgentMessage.StartSession(new CommandId("start-" + id), new SessionId(id),
+                Optional.empty(), List.of("/bin/true"), temporaryDirectory.toString(),
+                Map.of("TERM", "xterm-256color"), 80, 24, "none", "native");
     }
 
     private static LocalSession session(String sessionId, ChildState childState) {
