@@ -72,7 +72,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         this.pusher = Objects.requireNonNull(pusher, "pusher");
     }
 
-    public ResolvedBootstrapSource resolveProvisional(
+    public synchronized ResolvedBootstrapSource resolveProvisional(
             String sourceId,
             BootstrapSourceConfig source,
             boolean allowMissing) {
@@ -93,28 +93,40 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
 
         boolean remote = BootstrapGitLocation.isRemote(location);
         BootstrapGitLocation remoteLocation = remote ? BootstrapGitLocation.parse(source) : null;
+        boolean sourceAdded = !provisionalSources.containsKey(id);
         String repositoryName = remote
                 ? prepareProvisional(id, source)
                 : prepareLocal(id, location);
         String refName = remote ? remoteLocation.refName() : refName(source.selectedRef());
-        NativeGitRepository repository = backend.find(repositoryName)
-                .valueOrFailure("Cannot open bootstrap repository");
-        if (!repository.refs().containsKey(refName)) {
-            if (allowMissing) {
-                return resolved(id, repositoryName, refName, paths, Optional.empty(), allowMissing);
-            }
-            throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
-        }
         try {
-            GitRepositoryFileSnapshot snapshot = repository.loadFiles(refName, paths);
-            return resolved(id, repositoryName, refName, paths, snapshot.version(), allowMissing);
-        } catch (GitRepositoryFileNotFoundException error) {
-            if (allowMissing && primaryPathIsMissing(repository, refName, paths)) {
-                return resolved(id, repositoryName, refName, paths, Optional.empty(), allowMissing);
+            NativeGitRepository repository = backend.find(repositoryName)
+                    .valueOrFailure("Cannot open bootstrap repository");
+            if (!repository.refs().containsKey(refName)) {
+                if (allowMissing) {
+                    return resolved(id, repositoryName, refName, paths, Optional.empty(), allowMissing);
+                }
+                throw new IllegalStateException("Bootstrap source ref is unavailable: " + id);
             }
-            throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
-        } catch (GitOperationException error) {
-            throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
+            try {
+                GitRepositoryFileSnapshot snapshot = repository.loadFiles(refName, paths);
+                return resolved(id, repositoryName, refName, paths, snapshot.version(), allowMissing);
+            } catch (GitRepositoryFileNotFoundException error) {
+                if (allowMissing && primaryPathIsMissing(repository, refName, paths)) {
+                    return resolved(id, repositoryName, refName, paths, Optional.empty(), allowMissing);
+                }
+                throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
+            } catch (GitOperationException error) {
+                throw new IllegalStateException("Bootstrap source path is unavailable: " + id);
+            }
+        } catch (RuntimeException error) {
+            if (sourceAdded) {
+                provisionalSources.remove(id, repositoryName);
+                if (remote && !provisionalSources.containsValue(repositoryName)) {
+                    provisionalBindings.remove(repositoryName);
+                    provisionalLocations.remove(repositoryName);
+                }
+            }
+            throw error;
         }
     }
 

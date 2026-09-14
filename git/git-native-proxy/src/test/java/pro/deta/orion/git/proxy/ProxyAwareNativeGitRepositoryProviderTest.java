@@ -403,6 +403,68 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertUnavailableCache(provider, name);
     }
 
+    @Test
+    void missingRequiredRefLeavesNoProvisionalBinding() {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        ProxyAwareNativeGitRepositoryProvider provider = provider(backend);
+        BootstrapSourceConfig source = remoteSource("orion.xml");
+
+        assertThatThrownBy(() -> provider.resolveProvisional("configuration", source, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap source ref is unavailable: configuration");
+
+        assertUnavailableCache(provider, BootstrapGitLocation.parse(source).proxyName());
+        assertThatThrownBy(() -> provider.provisionalRepositoryName("configuration"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(provider.resolveProvisional("configuration", source, true).revision()).isEmpty();
+    }
+
+    @Test
+    void missingRequiredPathLeavesNoProvisionalBinding() throws Exception {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        BootstrapSourceConfig source = remoteSource("orion.xml");
+        String name = BootstrapGitLocation.parse(source).proxyName();
+        NativeGitRepository repository = backend.create(name).valueOrFailure("cache");
+        repository.saveFiles("main", Map.of("other.xml", new byte[]{1}), "seed", GitCommitAuthor.EMPTY);
+        ProxyAwareNativeGitRepositoryProvider provider = provider(backend);
+
+        assertThatThrownBy(() -> provider.resolveProvisional("configuration", source, false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap source path is unavailable: configuration");
+
+        assertUnavailableCache(provider, name);
+        assertThatThrownBy(() -> provider.provisionalRepositoryName("configuration"))
+                .isInstanceOf(IllegalStateException.class);
+        repository.saveFiles("main", Map.of("orion.xml", new byte[]{2}), "repair", GitCommitAuthor.EMPTY);
+        assertThat(provider.resolveProvisional("configuration", source, false).revision()).isPresent();
+    }
+
+    @Test
+    void failedSharedSourcePreservesPreviouslyResolvedBinding() throws Exception {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        BootstrapSourceConfig configuration = remoteSource("orion.xml");
+        String name = BootstrapGitLocation.parse(configuration).proxyName();
+        backend.create(name).valueOrFailure("cache").saveFiles(
+                "main", Map.of("orion.xml", new byte[]{1}), "seed", GitCommitAuthor.EMPTY);
+        ProxyAwareNativeGitRepositoryProvider provider = provider(backend);
+        ResolvedBootstrapSource resolved = provider.resolveProvisional("configuration", configuration, false);
+        NativeGitRepository retained = provider.openForRead(name).valueOrFailure("proxy handle");
+
+        assertThatThrownBy(() -> provider.resolveProvisional("material", remoteSource("material.p12"), false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap source path is unavailable: material");
+
+        assertThatThrownBy(() -> provider.provisionalRepositoryName("material"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> provider.resolveProvisional(
+                "configuration", remoteSource("missing.xml"), false))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Bootstrap source path is unavailable: configuration");
+        assertThat(provider.provisionalRepositoryName("configuration")).isEqualTo(name);
+        assertThat(retained.loadFiles("main", List.of("orion.xml")).version()).isEqualTo(resolved.revision());
+        assertThat(provider.resolveProvisional("configuration", configuration, false)).isEqualTo(resolved);
+    }
+
     private static void assertUnavailableCache(ProxyAwareNativeGitRepositoryProvider provider, String name) {
         for (String spelling : List.of(name, name.replace("/", "%2F"))) {
             assertThat(provider.exists(spelling)).isFalse();
