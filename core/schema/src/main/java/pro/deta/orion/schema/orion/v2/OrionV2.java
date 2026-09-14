@@ -12,6 +12,7 @@ import jakarta.xml.bind.annotation.XmlType;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 import java.util.List;
 
@@ -36,15 +37,31 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"accessControl", "https"})
+    @XmlType(propOrder = {"accessControl", "https", "secrets"})
     public static final class SystemConfiguration {
         @XmlElement(name = "accessControl", required = true)
         private AccessControl accessControl;
         private Https https;
+        @XmlElementWrapper(name = "secrets")
+        @XmlElement(name = "secret")
+        private List<Secret> secrets;
 
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, null);
+            this(accessControl, null, null);
         }
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"envelope"})
+    public static final class Secret {
+        @XmlAttribute(required = true)
+        private String id;
+        @XmlElement(required = true)
+        @ToString.Exclude
+        private String envelope;
     }
 
     @Data
@@ -122,7 +139,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams"})
+    @XmlType(propOrder = {"displayName", "users", "grants", "roles", "teams", "secrets"})
     public static final class Organization {
         @XmlAttribute(name = "id", required = true)
         private String id;
@@ -139,6 +156,9 @@ public class OrionV2 {
         @XmlElementWrapper(name = "teams", required = true)
         @XmlElement(name = "team")
         private List<Team> teams;
+        @XmlElementWrapper(name = "secrets")
+        @XmlElement(name = "secret")
+        private List<Secret> secrets;
     }
 
     @Data
@@ -202,7 +222,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes", "grants", "roles"})
+    @XmlType(propOrder = {"displayName", "defaultBranch", "policy", "remotes", "grants", "roles", "secrets"})
     public static final class Repository {
         @XmlAttribute(name = "id", required = true)
         private String id;
@@ -218,6 +238,9 @@ public class OrionV2 {
         @XmlElementWrapper(name = "roles")
         @XmlElement(name = "role")
         private List<ScopedRole> roles;
+        @XmlElementWrapper(name = "secrets")
+        @XmlElement(name = "secret")
+        private List<Secret> secrets;
     }
 
     @Data

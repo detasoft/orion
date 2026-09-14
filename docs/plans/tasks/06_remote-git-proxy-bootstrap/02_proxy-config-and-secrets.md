@@ -1,6 +1,7 @@
 # Persist Proxy Bindings and Resolve Git Credentials
 
 Status: todo
+- Owner: codex, session 01a09f53-ace6-7771-bae0-ceb63ee2e54e, started 2026-09-14 15:22 Europe/Amsterdam.
 Depends on: completed bootstrap runtime boundaries (`ac2f610f`, `79dd66b4`),
 existing configuration cipher and repository-remote schema (`d17476ab`, `146b9e76`).
 
@@ -19,6 +20,15 @@ shared Git credential storage/resolution boundary with
 An extension for bootstrap system scope must be explicit and validated; existing
 organization/repository references keep their meaning. Do not build a second
 secret framework or put credentials into `RepositoryRemote` URIs.
+
+Persist secret envelopes as `ConfigurationSecret(id, envelope)` in `secrets`
+collections on the existing system, organization, and repository nodes. The
+containing node supplies the owner; secret IDs are canonical and unique within
+that owner. Absent collections in existing XML mean no stored secrets. The
+schema carries an opaque envelope; the credential owner must parse, authenticate,
+and decrypt it through the existing configuration cipher before use. Preserve
+these collections when updating ACL data. This is the shared Git storage boundary
+for 02/05, not a separate proxy-only credential store.
 
 Bootstrap credentials remain external on every launch. Match adoption by
 canonical upstream URI and selected ref, reject duplicate/colliding identities,

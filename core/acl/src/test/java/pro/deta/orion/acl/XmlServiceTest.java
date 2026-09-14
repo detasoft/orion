@@ -157,7 +157,8 @@ class XmlServiceTest {
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(
                         ACLUtil.generateDefaultAccessControl("root-password-hash"),
-                        Optional.of(https)),
+                        Optional.of(https),
+                        List.of()),
                 List.of());
         ByteArrayOutputStream output = new ByteArrayOutputStream();
 

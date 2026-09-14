@@ -130,7 +130,8 @@ class OrionXmlTest {
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),
-                        Optional.of(https)),
+                        Optional.of(https),
+                        List.of()),
                 List.of());
 
         String serialized = write(document);
@@ -620,11 +621,13 @@ class OrionXmlTest {
                         RepositoryPolicy.safeDefaults(),
                         List.of(),
                         List.of(),
+                        List.of(),
                         List.of());
         OrionDocument.Team team =
                 new OrionDocument.Team(new TeamId("team"), null, List.of(), List.of(), List.of(repository));
         return new OrionDocument.Organization(
-                new OrganizationId(id), null, List.of(), List.of(), List.of(), List.of(team));
+                new OrganizationId(id), null, List.of(), List.of(), List.of(), List.of(team),
+                List.of());
     }
 
     private static OrionDocument documentWithRemotes(List<RepositoryRemote> remotes) {
@@ -634,6 +637,7 @@ class OrionXmlTest {
                 OrionDocument.Repository.DEFAULT_BRANCH,
                 RepositoryPolicy.safeDefaults(),
                 remotes,
+                List.of(),
                 List.of(),
                 List.of());
         OrionDocument.Team team = new OrionDocument.Team(
@@ -648,7 +652,8 @@ class OrionXmlTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                List.of(team));
+                List.of(team),
+                List.of());
         return document(new AccessControl(), List.of(organization));
     }
 

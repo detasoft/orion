@@ -207,7 +207,7 @@ class AcmeCertificateServiceTest {
                 Optional.of(acme));
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
-                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https)),
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.of(https), List.of()),
                 List.of()), Optional.of("test-revision"));
         return desiredState;
     }

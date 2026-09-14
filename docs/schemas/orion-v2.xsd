@@ -21,6 +21,13 @@
     <xs:sequence>
       <xs:element name="accessControl" type="accessControl"/>
       <xs:element name="https" type="https" minOccurs="0"/>
+      <xs:element name="secrets" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="secret" type="secret" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
     </xs:sequence>
   </xs:complexType>
 
@@ -175,6 +182,13 @@
     </xs:sequence>
   </xs:complexType>
 
+  <xs:complexType name="secret" final="extension restriction">
+    <xs:sequence>
+      <xs:element name="envelope" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
   <xs:complexType name="organization" final="extension restriction">
     <xs:sequence>
       <xs:element name="displayName" type="xs:string" minOccurs="0"/>
@@ -203,6 +217,13 @@
         <xs:complexType>
           <xs:sequence>
             <xs:element name="team" type="team" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="secrets" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="secret" type="secret" minOccurs="0" maxOccurs="unbounded"/>
           </xs:sequence>
         </xs:complexType>
       </xs:element>
@@ -341,6 +362,13 @@
         <xs:complexType>
           <xs:sequence>
             <xs:element name="role" type="scopedRole" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="secrets" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="secret" type="secret" minOccurs="0" maxOccurs="unbounded"/>
           </xs:sequence>
         </xs:complexType>
       </xs:element>

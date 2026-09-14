@@ -19,7 +19,8 @@ class OrionDocumentTest {
         OrionDocument.Team team = new OrionDocument.Team(
                 new TeamId("platform"), "Platform", List.of(), List.of(), List.of(repository));
         OrionDocument.Organization organization = new OrionDocument.Organization(
-                new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), List.of(team));
+                new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), List.of(team),
+                List.of());
 
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(accessControl),
@@ -43,7 +44,8 @@ class OrionDocumentTest {
                 new TeamId("platform"), "Platform", List.of(), List.of(), repositories);
         List<OrionDocument.Team> teams = new ArrayList<>(List.of(team));
         OrionDocument.Organization organization = new OrionDocument.Organization(
-                new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), teams);
+                new OrganizationId("acme"), "Acme", List.of(), List.of(), List.of(), teams,
+                List.of());
         List<OrionDocument.Organization> organizations = new ArrayList<>(List.of(organization));
         OrionDocument document = new OrionDocument(
                 new OrionDocument.SystemConfiguration(new AccessControl()),
@@ -125,7 +127,8 @@ class OrionDocumentTest {
         assertThatThrownBy(() -> new OrionDocument(null, List.of()))
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OrionDocument.Organization(
-                new OrganizationId("acme"), null, List.of(), List.of(), List.of(), null))
+                new OrganizationId("acme"), null, List.of(), List.of(), List.of(), null,
+                List.of()))
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> new OrionDocument.Team(
                 new TeamId("platform"),
@@ -138,7 +141,8 @@ class OrionDocumentTest {
 
     private static OrionDocument.Organization organization(String id, List<OrionDocument.Team> teams) {
         return new OrionDocument.Organization(
-                new OrganizationId(id), null, List.of(), List.of(), List.of(), teams);
+                new OrganizationId(id), null, List.of(), List.of(), List.of(), teams,
+                List.of());
     }
 
     private static OrionDocument.Team team(String id, List<OrionDocument.Repository> repositories) {
@@ -155,6 +159,7 @@ class OrionDocumentTest {
                 displayName,
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of());

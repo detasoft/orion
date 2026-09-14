@@ -108,11 +108,11 @@ class OrionV2MapperTest {
     @Test
     void declaresCanonicalScopedIdentityXmlShape() throws NoSuchFieldException {
         assertThat(propOrder(OrionV2.Organization.class))
-                .containsExactly("displayName", "users", "grants", "roles", "teams");
+                .containsExactly("displayName", "users", "grants", "roles", "teams", "secrets");
         assertThat(propOrder(OrionV2.Team.class))
                 .containsExactly("displayName", "grants", "roles", "repositories");
         assertThat(propOrder(OrionV2.Repository.class))
-                .containsExactly("displayName", "defaultBranch", "policy", "remotes", "grants", "roles");
+                .containsExactly("displayName", "defaultBranch", "policy", "remotes", "grants", "roles", "secrets");
         assertThat(propOrder(OrionV2.OrganizationUser.class))
                 .containsExactly("first", "last", "email", "credentials", "memberships", "roles");
         assertThat(propOrder(OrionV2.ScopedRole.class))
@@ -369,6 +369,7 @@ class OrionV2MapperTest {
                 new RepositoryPolicy(true, false, true),
                 List.of(upstream),
                 List.of(),
+                List.of(),
                 List.of());
         OrionDocument source = document(new AccessControl(), List.of(
                 organization("acme", List.of(team("platform", List.of(repository))))));
@@ -427,6 +428,7 @@ class OrionV2MapperTest {
                 RepositoryPolicy.safeDefaults(),
                 List.of(zeta, alpha),
                 List.of(),
+                List.of(),
                 List.of());
         OrionDocument source = document(new AccessControl(), List.of(
                 organization("acme", List.of(team("platform", List.of(repository))))));
@@ -456,6 +458,7 @@ class OrionV2MapperTest {
                 OrionDocument.Repository.DEFAULT_BRANCH,
                 RepositoryPolicy.safeDefaults(),
                 List.of(zeta, alpha),
+                List.of(),
                 List.of(),
                 List.of());
         OrionDocument source = document(new AccessControl(), List.of(
@@ -806,7 +809,8 @@ class OrionV2MapperTest {
             List<ScopedRole> roles,
             List<OrionDocument.Team> teams) {
         return new OrionDocument.Organization(
-                new OrganizationId(id), id + " name", users, grants, roles, teams);
+                new OrganizationId(id), id + " name", users, grants, roles, teams,
+                List.of());
     }
 
     private static OrionDocument.Team domainTeam(
@@ -823,7 +827,8 @@ class OrionV2MapperTest {
             List<ScopedRole> roles) {
         return new OrionDocument.Repository(
                 new RepositoryId(id), id + " name", OrionDocument.Repository.DEFAULT_BRANCH,
-                RepositoryPolicy.safeDefaults(), List.of(), grants, roles);
+                RepositoryPolicy.safeDefaults(), List.of(), grants, roles,
+                List.of());
     }
 
     private static ScopedRole domainRole(
@@ -864,7 +869,8 @@ class OrionV2MapperTest {
 
     private static OrionDocument.Organization organization(String id, List<OrionDocument.Team> teams) {
         return new OrionDocument.Organization(
-                new OrganizationId(id), id + " name", List.of(), List.of(), List.of(), teams);
+                new OrganizationId(id), id + " name", List.of(), List.of(), List.of(), teams,
+                List.of());
     }
 
     private static OrionDocument.Team team(String id, List<OrionDocument.Repository> repositories) {
@@ -877,6 +883,7 @@ class OrionV2MapperTest {
                 id + " name",
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of());
@@ -903,7 +910,7 @@ class OrionV2MapperTest {
     }
 
     private static OrionV2.Organization wireOrganization(String id) {
-        return new OrionV2.Organization(id, null, null, null, null, List.of());
+        return new OrionV2.Organization(id, null, null, null, null, List.of(), List.of());
     }
 
     private static OrionV2.OrganizationUser wireOrganizationUser(String id) {

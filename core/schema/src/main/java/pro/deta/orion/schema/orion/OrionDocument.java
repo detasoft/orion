@@ -27,7 +27,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
 
     public OrionDocument replaceAccessControl(AccessControl accessControl) {
         return new OrionDocument(
-                new SystemConfiguration(accessControl, system.https()),
+                new SystemConfiguration(accessControl, system.https(), system.secrets()),
                 organizations);
     }
 
@@ -45,14 +45,16 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
 
     public record SystemConfiguration(
             AccessControl accessControl,
-            Optional<OrionHttpsConfiguration> https) {
+            Optional<OrionHttpsConfiguration> https,
+            List<ConfigurationSecret> secrets) {
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, Optional.empty());
+            this(accessControl, Optional.empty(), List.of());
         }
 
         public SystemConfiguration {
             Objects.requireNonNull(accessControl, "accessControl");
             https = Objects.requireNonNullElseGet(https, Optional::empty);
+            secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
         }
     }
 
@@ -62,13 +64,15 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             List<OrganizationUser> users,
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
-            List<Team> teams) {
+            List<Team> teams,
+            List<ConfigurationSecret> secrets) {
         public Organization {
             Objects.requireNonNull(id, "id");
             users = copyUnique(users, OrganizationUser::id, "user");
             grants = copyUnique(grants, ScopedGrant::id, "grant");
             roles = copyUnique(roles, ScopedRole::id, "role");
             teams = copyTeams(teams);
+            secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
         }
 
         private static List<Team> copyTeams(List<Team> source) {
@@ -117,7 +121,8 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             RepositoryPolicy policy,
             List<RepositoryRemote> remotes,
             List<ScopedGrant> grants,
-            List<ScopedRole> roles) {
+            List<ScopedRole> roles,
+            List<ConfigurationSecret> secrets) {
         public static final String DEFAULT_BRANCH = "refs/heads/main";
 
         public Repository {
@@ -125,6 +130,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
             defaultBranch = RemoteRefMapping.requireConcreteBranch(defaultBranch, "default branch");
             Objects.requireNonNull(policy, "repository policy");
             remotes = copyRemotes(remotes);
+            secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
             grants = copyUnique(grants, ScopedGrant::id, "grant");
             roles = copyUnique(roles, ScopedRole::id, "role");
         }

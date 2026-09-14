@@ -381,7 +381,7 @@ class OrionAuthorizationModelTest {
             List<ScopedGrant> grants,
             List<ScopedRole> roles,
             List<OrionDocument.Team> teams) {
-        return new OrionDocument.Organization(new OrganizationId(id), null, users, grants, roles, teams);
+        return new OrionDocument.Organization(new OrganizationId(id), null, users, grants, roles, teams, List.of());
     }
 
     private static OrionDocument.Team team(
@@ -401,7 +401,8 @@ class OrionAuthorizationModelTest {
                 RepositoryPolicy.safeDefaults(),
                 List.of(),
                 grants,
-                roles);
+                roles,
+                List.of());
     }
 
     private static OrganizationUser user(

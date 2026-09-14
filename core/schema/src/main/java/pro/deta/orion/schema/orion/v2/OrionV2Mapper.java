@@ -1,6 +1,7 @@
 package pro.deta.orion.schema.orion.v2;
 
 import pro.deta.orion.schema.acl.AccessControl;
+import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
 import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
@@ -56,7 +57,8 @@ public final class OrionV2Mapper {
         return new OrionDocument(
                 new OrionDocument.SystemConfiguration(
                         accessControl,
-                        Optional.ofNullable(system.getHttps()).map(OrionV2Mapper::toCurrent)),
+                        Optional.ofNullable(system.getHttps()).map(OrionV2Mapper::toCurrent),
+                        toCurrentSecrets(system.getSecrets())),
                 toCurrentOrganizations(source.getOrganizations()));
     }
 
@@ -66,7 +68,8 @@ public final class OrionV2Mapper {
                 OrionV2.SchemaVersion.V2,
                 new OrionV2.SystemConfiguration(
                         fromCurrent(source.system().accessControl()),
-                        source.system().https().map(OrionV2Mapper::fromCurrent).orElse(null)),
+                        source.system().https().map(OrionV2Mapper::fromCurrent).orElse(null),
+                        fromCurrentSecrets(source.system().secrets())),
                 fromCurrentOrganizations(source.organizations()));
     }
 
@@ -167,7 +170,8 @@ public final class OrionV2Mapper {
                     toCurrentOrganizationUsers(organization.getUsers()),
                     toCurrentScopedGrants(organization.getGrants()),
                     toCurrentScopedRoles(organization.getRoles()),
-                    toCurrentTeams(organization.getTeams())));
+                    toCurrentTeams(organization.getTeams()),
+                    toCurrentSecrets(organization.getSecrets())));
         }
         return organizations;
     }
@@ -206,7 +210,8 @@ public final class OrionV2Mapper {
                     toCurrent(repository.getPolicy()),
                     toCurrentRemotes(repository.getRemotes()),
                     toCurrentScopedGrants(repository.getGrants()),
-                    toCurrentScopedRoles(repository.getRoles())));
+                    toCurrentScopedRoles(repository.getRoles()),
+                    toCurrentSecrets(repository.getSecrets())));
         }
         return repositories;
     }
@@ -368,6 +373,25 @@ public final class OrionV2Mapper {
         return remotes;
     }
 
+    private static List<ConfigurationSecret> toCurrentSecrets(List<OrionV2.Secret> source) {
+        List<ConfigurationSecret> secrets = new ArrayList<>();
+        for (OrionV2.Secret secret : listOrEmpty(source)) {
+            secrets.add(new ConfigurationSecret(secret.getId(), secret.getEnvelope()));
+        }
+        return secrets;
+    }
+
+    private static List<OrionV2.Secret> fromCurrentSecrets(List<ConfigurationSecret> source) {
+        if (source.isEmpty()) {
+            return null;
+        }
+        List<OrionV2.Secret> secrets = new ArrayList<>();
+        for (ConfigurationSecret secret : sorted(source, Comparator.comparing(ConfigurationSecret::id))) {
+            secrets.add(new OrionV2.Secret(secret.id(), secret.envelope()));
+        }
+        return secrets;
+    }
+
     private static ConfigurationSecretReference toCurrent(OrionV2.SecretReference source) {
         Objects.requireNonNull(source, "remote credential");
         return new ConfigurationSecretReference(
@@ -508,7 +532,8 @@ public final class OrionV2Mapper {
                     fromCurrentOrganizationUsers(organization.users()),
                     fromCurrentScopedGrants(organization.grants()),
                     fromCurrentScopedRoles(organization.roles()),
-                    fromCurrentTeams(organization.teams())));
+                    fromCurrentTeams(organization.teams()),
+                    fromCurrentSecrets(organization.secrets())));
         }
         return organizations;
     }
@@ -543,7 +568,8 @@ public final class OrionV2Mapper {
                     fromCurrent(repository.policy()),
                     fromCurrentRemotes(repository.remotes()),
                     fromCurrentScopedGrants(repository.grants()),
-                    fromCurrentScopedRoles(repository.roles())));
+                    fromCurrentScopedRoles(repository.roles()),
+                    fromCurrentSecrets(repository.secrets())));
         }
         return repositories;
     }

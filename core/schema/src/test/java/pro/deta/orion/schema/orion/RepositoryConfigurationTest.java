@@ -23,6 +23,7 @@ class RepositoryConfigurationTest {
                 RepositoryPolicy.safeDefaults(),
                 List.of(upstream),
                 List.of(),
+                List.of(),
                 List.of());
 
         assertThat(repository.remotes()).containsExactly(upstream);
@@ -73,6 +74,7 @@ class RepositoryConfigurationTest {
                 "Project",
                 "main",
                 RepositoryPolicy.safeDefaults(),
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of()))
@@ -147,6 +149,7 @@ class RepositoryConfigurationTest {
                 "refs/heads/main",
                 RepositoryPolicy.safeDefaults(),
                 remotes,
+                List.of(),
                 List.of(),
                 List.of());
     }
