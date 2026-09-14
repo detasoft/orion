@@ -37,7 +37,7 @@ public class OrionV2 {
     @NoArgsConstructor
     @AllArgsConstructor
     @XmlAccessorType(XmlAccessType.FIELD)
-    @XmlType(propOrder = {"accessControl", "https", "secrets"})
+    @XmlType(propOrder = {"accessControl", "https", "secrets", "proxies"})
     public static final class SystemConfiguration {
         @XmlElement(name = "accessControl", required = true)
         private AccessControl accessControl;
@@ -45,10 +45,32 @@ public class OrionV2 {
         @XmlElementWrapper(name = "secrets")
         @XmlElement(name = "secret")
         private List<Secret> secrets;
+        @XmlElementWrapper(name = "proxies")
+        @XmlElement(name = "proxy")
+        private List<GitProxy> proxies;
 
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, null, null);
+            this(accessControl, null, null, null);
         }
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @XmlAccessorType(XmlAccessType.FIELD)
+    @XmlType(propOrder = {"upstream", "ref", "credentialKind", "secret", "username", "knownHosts"})
+    public static final class GitProxy {
+        @XmlAttribute(required = true)
+        private String alias;
+        @XmlElement(required = true)
+        private String upstream;
+        @XmlElement(required = true)
+        private String ref;
+        @XmlElement(required = true)
+        private pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind credentialKind;
+        private String secret;
+        private String username;
+        private String knownHosts;
     }
 
     @Data

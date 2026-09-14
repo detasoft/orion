@@ -21,9 +21,11 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.ConfigurationScope;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
+import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.OrganizationId;
 import pro.deta.orion.schema.orion.OrionDocument;
 import pro.deta.orion.schema.orion.OrionXml;
+import pro.deta.orion.schema.orion.RemoteAlias;
 import pro.deta.orion.schema.orion.RepositoryAddress;
 import pro.deta.orion.schema.orion.RepositoryId;
 import pro.deta.orion.schema.orion.RepositoryPolicy;
@@ -33,6 +35,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.List;
@@ -118,6 +121,28 @@ class ConfigurationSecretsTest {
     }
 
     @Test
+    void preservesProxyIdentityWhenCreatingAndRotatingSystemSecrets() {
+        current.set(secrets.createSystem(current.get(), "bootstrap-token", "old-token".toCharArray()));
+        GitProxyBinding proxy = new GitProxyBinding(new RemoteAlias("configuration"),
+                URI.create("https://git.example/config"), "main", GitProxyBinding.CredentialKind.HTTP_BEARER,
+                Optional.of("bootstrap-token"), Optional.empty(), Optional.empty());
+        OrionDocument before = current.get();
+        current.set(new OrionDocument(new OrionDocument.SystemConfiguration(before.system().accessControl(),
+                before.system().https(), before.system().secrets(), List.of(proxy)), before.organizations()));
+
+        current.set(secrets.createSystem(current.get(), "other-token", "other".toCharArray()));
+        current.set(secrets.replaceSystem(current.get(), "bootstrap-token", "rotated-token".toCharArray()));
+
+        assertThat(current.get().system().proxies()).containsExactly(proxy);
+        char[] resolved = secrets.resolveSystem(proxy.secret().orElseThrow());
+        try {
+            assertThat(resolved).isEqualTo("rotated-token".toCharArray());
+        } finally {
+            java.util.Arrays.fill(resolved, '\0');
+        }
+    }
+
+    @Test
     void preservesOtherOwnersWhenReplacingSystemAndOrganizationSecrets() {
         ConfigurationScope organization = ConfigurationScope.organization(new OrganizationId("acme"));
         current.set(secrets.createSystem(current.get(), "github-token", "system-old".toCharArray()));
@@ -180,7 +205,7 @@ class ConfigurationSecretsTest {
         String envelope = repository(current.get()).secrets().getFirst().envelope();
         OrionDocument.SystemConfiguration system = new OrionDocument.SystemConfiguration(
                 current.get().system().accessControl(), current.get().system().https(),
-                List.of(new ConfigurationSecret("github-token", envelope)));
+                List.of(new ConfigurationSecret("github-token", envelope)), List.of());
         current.set(new OrionDocument(system, current.get().organizations()));
         assertThatThrownBy(() -> secrets.resolveSystem("github-token"))
                 .isInstanceOf(IllegalStateException.class)

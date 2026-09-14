@@ -1,6 +1,8 @@
 package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.GitProxyBinding;
+import pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -18,7 +20,7 @@ import java.util.Set;
 record BootstrapGitLocation(
         URI remoteUri,
         String refName,
-        BootstrapGitCredentialKind credentialKind,
+        CredentialKind credentialKind,
         String credentialReference,
         String credentialUsername,
         Path knownHosts,
@@ -81,11 +83,11 @@ record BootstrapGitLocation(
         }
         Map<String, String> auth = Objects.requireNonNull(config.getAuth(), "auth");
         boolean fileTransport = "git+file".equals(scheme);
-        BootstrapGitCredentialKind credentialKind = BootstrapGitCredentialKind.parse(
+        CredentialKind credentialKind = parseCredentialKind(
                 auth.get("credentialKind"),
                 fileTransport);
-        validateCredentialKind(scheme, credentialKind);
-        String credential = credentialKind == BootstrapGitCredentialKind.NONE
+        credentialKind.requireTransport(scheme.substring(PREFIX.length()));
+        String credential = credentialKind == CredentialKind.NONE
                 ? absentCredential(auth.get("credential"))
                 : externalReference(auth.get("credential"), "Remote Git credential");
         String credentialUsername = credentialUsername(auth, credentialKind);
@@ -109,64 +111,20 @@ record BootstrapGitLocation(
     }
 
     private static String canonicalIdentity(URI remote) {
-        String scheme = remote.getScheme().toLowerCase(Locale.ROOT);
-        if ("file".equals(scheme)) {
-            try {
-                return Path.of(remote).toAbsolutePath().normalize().toUri().toASCIIString();
-            } catch (RuntimeException failure) {
-                throw new IllegalArgumentException("Invalid remote Git bootstrap URI");
+        return GitProxyBinding.canonicalUpstream(remote).toASCIIString();
+    }
+
+    private static CredentialKind parseCredentialKind(String value, boolean fileTransport) {
+        if (value == null || value.isBlank()) {
+            if (fileTransport) {
+                return CredentialKind.NONE;
             }
+            throw new IllegalArgumentException("Remote Git credential kind must be configured");
         }
-        URI normalized = remote.normalize();
-        String host = normalized.getHost();
-        if (host == null || host.isBlank()) {
-            throw new IllegalArgumentException("Remote Git bootstrap URI must include a host");
-        }
-        StringBuilder identity = new StringBuilder(scheme).append("://");
-        if (normalized.getRawUserInfo() != null) {
-            identity.append(normalized.getRawUserInfo()).append('@');
-        }
-        identity.append(canonicalHost(host));
-        int port = canonicalPort(scheme, normalized.getPort());
-        if (port >= 0) {
-            identity.append(':').append(port);
-        }
-        String rawPath = normalized.getRawPath();
-        if (rawPath != null) {
-            identity.append(rawPath);
-        }
-        return identity.toString();
-    }
-
-    private static String canonicalHost(String host) {
-        String normalized = host.toLowerCase(Locale.ROOT);
-        return normalized.indexOf(':') >= 0 && !normalized.startsWith("[")
-                ? "[" + normalized + "]"
-                : normalized;
-    }
-
-    private static int canonicalPort(String scheme, int port) {
-        if (("http".equals(scheme) && port == 80)
-                || ("https".equals(scheme) && port == 443)
-                || ("ssh".equals(scheme) && port == 22)) {
-            return -1;
-        }
-        return port;
-    }
-
-    private static void validateCredentialKind(
-            String scheme,
-            BootstrapGitCredentialKind credentialKind) {
-        boolean compatible = switch (scheme) {
-            case "git+file" -> credentialKind == BootstrapGitCredentialKind.NONE;
-            case "git+http", "git+https" -> credentialKind == BootstrapGitCredentialKind.HTTP_BEARER
-                    || credentialKind == BootstrapGitCredentialKind.HTTP_BASIC;
-            case "git+ssh" -> credentialKind == BootstrapGitCredentialKind.SSH_PASSWORD
-                    || credentialKind == BootstrapGitCredentialKind.SSH_PRIVATE_KEY;
-            default -> false;
-        };
-        if (!compatible) {
-            throw new IllegalArgumentException("Remote Git credential kind does not match transport");
+        try {
+            return CredentialKind.valueOf(value.replace('-', '_').toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("Unsupported remote Git credential kind");
         }
     }
 
@@ -179,9 +137,9 @@ record BootstrapGitLocation(
 
     private static String credentialUsername(
             Map<String, String> auth,
-            BootstrapGitCredentialKind credentialKind) {
+            CredentialKind credentialKind) {
         String username = auth.get("credentialUsername");
-        if (credentialKind == BootstrapGitCredentialKind.HTTP_BASIC) {
+        if (credentialKind == CredentialKind.HTTP_BASIC) {
             if (username == null || username.isBlank()) {
                 throw new IllegalArgumentException("Remote Git basic credential username must be configured");
             }
@@ -266,33 +224,11 @@ record BootstrapGitLocation(
     }
 
     private static String refName(String selectedRef) {
-        if ("HEAD".equals(selectedRef)) {
-            throw invalidRef();
+        try {
+            return GitProxyBinding.canonicalRef(selectedRef);
+        } catch (IllegalArgumentException failure) {
+            throw new IllegalArgumentException("Remote Git bootstrap ref must be a full Git ref name");
         }
-        String refName = selectedRef.startsWith("refs/")
-                ? selectedRef
-                : "refs/heads/" + selectedRef;
-        if (refName.length() == "refs/".length()
-                || refName.endsWith("/")
-                || refName.contains("//")
-                || refName.contains("..")
-                || refName.contains("@{")) {
-            throw invalidRef();
-        }
-        for (int index = 0; index < refName.length(); index++) {
-            char character = refName.charAt(index);
-            if (character <= 0x20
-                    || character >= 0x7f
-                    || "~^:?*[\\".indexOf(character) >= 0) {
-                throw invalidRef();
-            }
-        }
-        return refName;
-    }
-
-    private static IllegalArgumentException invalidRef() {
-        return new IllegalArgumentException(
-                "Remote Git bootstrap ref must be a full Git ref name");
     }
 
     private static String firstNonBlank(String... values) {

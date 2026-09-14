@@ -2,6 +2,7 @@ package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind;
 
 import java.net.URI;
 import java.util.Map;
@@ -48,7 +49,7 @@ class BootstrapGitLocationTest {
                 URI.create("https://example.test/team/orion.git"));
         assertThat(location.refName()).isEqualTo("refs/heads/configuration");
         assertThat(location.credentialReference()).isEqualTo("env:ORION_GIT_CREDENTIAL");
-        assertThat(location.credentialKind()).isEqualTo(BootstrapGitCredentialKind.HTTP_BEARER);
+        assertThat(location.credentialKind()).isEqualTo(CredentialKind.HTTP_BEARER);
         assertThat(location.safeDescription()).isEqualTo(
                 "git+https://example.test/team/orion.git");
     }
@@ -69,7 +70,7 @@ class BootstrapGitLocationTest {
                 "git+file:///srv/git/config.git",
                 fileAuth()));
 
-        assertThat(location.credentialKind()).isEqualTo(BootstrapGitCredentialKind.NONE);
+        assertThat(location.credentialKind()).isEqualTo(CredentialKind.NONE);
         assertThat(location.credentialReference()).isNull();
     }
 
@@ -161,11 +162,11 @@ class BootstrapGitLocationTest {
         assertThat(BootstrapGitLocation.parse(config(
                 "git+ssh://git@example.test/repo.git",
                 auth("ssh-password", "env:SSH_PASSWORD"))).credentialKind())
-                .isEqualTo(BootstrapGitCredentialKind.SSH_PASSWORD);
+                .isEqualTo(CredentialKind.SSH_PASSWORD);
         assertThat(BootstrapGitLocation.parse(config(
                 "git+ssh://git@example.test/repo.git",
                 auth("ssh-private-key", "file:/run/secrets/git-key"))).credentialKind())
-                .isEqualTo(BootstrapGitCredentialKind.SSH_PRIVATE_KEY);
+                .isEqualTo(CredentialKind.SSH_PRIVATE_KEY);
     }
 
     @Test

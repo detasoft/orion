@@ -131,7 +131,7 @@ class OrionXmlTest {
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),
                         Optional.of(https),
-                        List.of()),
+                        List.of(), List.of()),
                 List.of());
 
         String serialized = write(document);

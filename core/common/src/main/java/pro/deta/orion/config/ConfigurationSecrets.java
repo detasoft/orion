@@ -186,7 +186,8 @@ public final class ConfigurationSecrets {
             List<ConfigurationSecret> secrets) {
         if (owner.isEmpty()) {
             return new OrionDocument(new OrionDocument.SystemConfiguration(
-                    document.system().accessControl(), document.system().https(), secrets),
+                    document.system().accessControl(), document.system().https(),
+                    secrets, document.system().proxies()),
                     document.organizations());
         }
         ConfigurationScope scope = owner.orElseThrow();

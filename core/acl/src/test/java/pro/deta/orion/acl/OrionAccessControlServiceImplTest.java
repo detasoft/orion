@@ -77,7 +77,7 @@ class OrionAccessControlServiceImplTest {
                 new OrionDocument.SystemConfiguration(
                         new AccessControl(),
                         Optional.of(https),
-                        List.of()),
+                        List.of(), List.of()),
                 List.of());
         InMemoryStorage storage = new InMemoryStorage(new AccessControlSnapshot(
                 Map.of(ACL_PATH, serialize(initial)),

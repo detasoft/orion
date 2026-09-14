@@ -39,6 +39,16 @@ produce unpublished document candidates and consume the supplied characters;
 the configuration update owner must persist them with its revision check.
 The resolver does not cache plaintext or publish configuration itself.
 
+Bootstrap proxy metadata belongs to `SystemConfiguration.proxies`. Each
+`GitProxyBinding` has a stable `RemoteAlias`, canonical upstream URI and selected
+ref, credential kind, and an optional ID in the existing system secret collection.
+HTTP basic auth also carries its username; SSH may retain an external local
+known-hosts file URI as trust input. No credential value or bootstrap cache name
+belongs in this record. The model rejects duplicate aliases, duplicate canonical
+upstream/ref pairs, missing system secrets, and inconsistent transport/auth fields.
+Bootstrap and persistent bindings share URI/ref canonicalization and credential
+kinds. Organization/repository secret references keep their existing scope rules.
+
 Bootstrap credentials remain external on every launch. Match adoption by
 canonical upstream URI and selected ref, reject duplicate/colliding identities,
 and retain the already-resolved source handles. Add absent metadata/credentials

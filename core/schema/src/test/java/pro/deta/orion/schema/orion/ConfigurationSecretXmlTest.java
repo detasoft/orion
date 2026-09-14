@@ -58,7 +58,7 @@ class ConfigurationSecretXmlTest {
         ConfigurationSecret secret = new ConfigurationSecret("github-token", ENVELOPE);
         List<ConfigurationSecret> source = new ArrayList<>(List.of(secret));
         OrionDocument.SystemConfiguration system = new OrionDocument.SystemConfiguration(
-                new AccessControl(), Optional.empty(), source);
+                new AccessControl(), Optional.empty(), source, List.of());
         OrionDocument.Organization organization = new OrionDocument.Organization(
                 new OrganizationId("acme"), null, List.of(), List.of(), List.of(), List.of(), source);
         OrionDocument.Repository repository = new OrionDocument.Repository(

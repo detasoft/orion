@@ -27,7 +27,7 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
 
     public OrionDocument replaceAccessControl(AccessControl accessControl) {
         return new OrionDocument(
-                new SystemConfiguration(accessControl, system.https(), system.secrets()),
+                new SystemConfiguration(accessControl, system.https(), system.secrets(), system.proxies()),
                 organizations);
     }
 
@@ -46,15 +46,32 @@ public record OrionDocument(SystemConfiguration system, List<Organization> organ
     public record SystemConfiguration(
             AccessControl accessControl,
             Optional<OrionHttpsConfiguration> https,
-            List<ConfigurationSecret> secrets) {
+            List<ConfigurationSecret> secrets,
+            List<GitProxyBinding> proxies) {
         public SystemConfiguration(AccessControl accessControl) {
-            this(accessControl, Optional.empty(), List.of());
+            this(accessControl, Optional.empty(), List.of(), List.of());
         }
 
         public SystemConfiguration {
             Objects.requireNonNull(accessControl, "accessControl");
             https = Objects.requireNonNullElseGet(https, Optional::empty);
             secrets = copyUnique(secrets, ConfigurationSecret::id, "secret");
+            proxies = new ArrayList<>(copyUnique(proxies, GitProxyBinding::alias, "proxy"));
+            proxies.sort(Comparator.comparing(proxy -> proxy.alias().value()));
+            proxies = List.copyOf(proxies);
+            Set<String> upstreams = new HashSet<>();
+            Set<String> secretIds = new HashSet<>();
+            for (ConfigurationSecret secret : secrets) {
+                secretIds.add(secret.id());
+            }
+            for (GitProxyBinding proxy : proxies) {
+                if (!upstreams.add(proxy.upstream().toASCIIString() + "#" + proxy.ref())) {
+                    throw new IllegalArgumentException("duplicate proxy upstream/ref");
+                }
+                if (proxy.secret().isPresent() && !secretIds.contains(proxy.secret().orElseThrow())) {
+                    throw new IllegalArgumentException("proxy secret is unavailable in system scope");
+                }
+            }
         }
     }
 

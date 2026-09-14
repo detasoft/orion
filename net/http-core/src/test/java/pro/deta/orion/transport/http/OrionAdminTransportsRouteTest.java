@@ -94,7 +94,7 @@ class OrionAdminTransportsRouteTest {
                 new OrionHttpResponseWriter(new ObjectMapper()));
         OrionDesiredState desiredState = new OrionDesiredState();
         desiredState.publish(new OrionDocument(
-                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of()),
+                new OrionDocument.SystemConfiguration(new AccessControl(), Optional.empty(), List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
                 configuration, desiredState, TlsCapability.unavailable(), servlet, null);
@@ -137,7 +137,7 @@ class OrionAdminTransportsRouteTest {
                                 OrionHttpsConfiguration.ClientAuthentication.DISABLED,
                                 List.of(),
                                 Optional.empty())),
-                        List.of()),
+                        List.of(), List.of()),
                 List.of()), Optional.of("test-revision"));
         JettyHTTPServer server = new JettyHTTPServer(
                 configuration, desiredState, TlsCapability.unavailable(), null, null) {

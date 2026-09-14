@@ -3,6 +3,7 @@ package pro.deta.orion.schema.orion.v2;
 import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.orion.ConfigurationSecret;
 import pro.deta.orion.schema.orion.ConfigurationSecretReference;
+import pro.deta.orion.schema.orion.GitProxyBinding;
 import pro.deta.orion.schema.orion.GrantAddress;
 import pro.deta.orion.schema.orion.GrantId;
 import pro.deta.orion.schema.orion.OrganizationId;
@@ -58,7 +59,8 @@ public final class OrionV2Mapper {
                 new OrionDocument.SystemConfiguration(
                         accessControl,
                         Optional.ofNullable(system.getHttps()).map(OrionV2Mapper::toCurrent),
-                        toCurrentSecrets(system.getSecrets())),
+                        toCurrentSecrets(system.getSecrets()),
+                        toCurrentProxies(system.getProxies())),
                 toCurrentOrganizations(source.getOrganizations()));
     }
 
@@ -69,7 +71,8 @@ public final class OrionV2Mapper {
                 new OrionV2.SystemConfiguration(
                         fromCurrent(source.system().accessControl()),
                         source.system().https().map(OrionV2Mapper::fromCurrent).orElse(null),
-                        fromCurrentSecrets(source.system().secrets())),
+                        fromCurrentSecrets(source.system().secrets()),
+                        fromCurrentProxies(source.system().proxies())),
                 fromCurrentOrganizations(source.organizations()));
     }
 
@@ -379,6 +382,38 @@ public final class OrionV2Mapper {
             secrets.add(new ConfigurationSecret(secret.getId(), secret.getEnvelope()));
         }
         return secrets;
+    }
+
+    private static List<GitProxyBinding> toCurrentProxies(List<OrionV2.GitProxy> source) {
+        List<GitProxyBinding> proxies = new ArrayList<>();
+        for (OrionV2.GitProxy proxy : listOrEmpty(source)) {
+            proxies.add(new GitProxyBinding(new RemoteAlias(proxy.getAlias()), safeProxyUri(proxy.getUpstream()),
+                    proxy.getRef(), proxy.getCredentialKind(), Optional.ofNullable(proxy.getSecret()),
+                    Optional.ofNullable(proxy.getUsername()),
+                    Optional.ofNullable(proxy.getKnownHosts()).map(OrionV2Mapper::safeProxyUri)));
+        }
+        return proxies;
+    }
+
+    private static List<OrionV2.GitProxy> fromCurrentProxies(List<GitProxyBinding> source) {
+        if (source.isEmpty()) {
+            return null;
+        }
+        List<OrionV2.GitProxy> proxies = new ArrayList<>();
+        for (GitProxyBinding proxy : source) {
+            proxies.add(new OrionV2.GitProxy(proxy.alias().value(), proxy.upstream().toASCIIString(), proxy.ref(),
+                    proxy.credentialKind(), proxy.secret().orElse(null), proxy.username().orElse(null),
+                    proxy.knownHosts().map(URI::toASCIIString).orElse(null)));
+        }
+        return proxies;
+    }
+
+    private static URI safeProxyUri(String source) {
+        try {
+            return URI.create(source);
+        } catch (RuntimeException failure) {
+            throw new IllegalArgumentException("Invalid proxy URI");
+        }
     }
 
     private static List<OrionV2.Secret> fromCurrentSecrets(List<ConfigurationSecret> source) {

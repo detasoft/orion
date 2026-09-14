@@ -12,6 +12,7 @@ import pro.deta.orion.git.client.GitSmartHttpClientTransport;
 import pro.deta.orion.git.client.GitSshClientTransport;
 import pro.deta.orion.git.client.GitSshSessionAuthenticator;
 import pro.deta.orion.lifecycle.state.TestOnly;
+import pro.deta.orion.schema.orion.GitProxyBinding.CredentialKind;
 
 import java.io.CharArrayReader;
 import java.io.IOException;
@@ -43,7 +44,7 @@ final class BootstrapGitTransportFactory {
             TransportOperation<T> operation) throws Exception {
         Objects.requireNonNull(location, "location");
         Objects.requireNonNull(operation, "operation");
-        if (location.credentialKind() == BootstrapGitCredentialKind.NONE) {
+        if (location.credentialKind() == CredentialKind.NONE) {
             return operation.run(new GitFileClientTransport());
         }
         try (BootstrapSecret secret = secretResolver.resolve(
@@ -87,7 +88,7 @@ final class BootstrapGitTransportFactory {
     private static String authorization(
             BootstrapGitLocation location,
             char[] credential) {
-        if (location.credentialKind() == BootstrapGitCredentialKind.HTTP_BEARER) {
+        if (location.credentialKind() == CredentialKind.HTTP_BEARER) {
             return "Bearer " + new String(credential);
         }
         char[] combined = new char[
