@@ -14,12 +14,13 @@ import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.git.parser.wire.advertisement.GitAdvertisedRef;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
@@ -332,92 +333,15 @@ public final class DefaultGitNativeRepositoryService
         NativeGitRepository repository = check(
                 repositoryPath,
                 receiveRepository(repositoryPath, accessHook));
-        List<ReceivePackStatus> statuses = new ArrayList<>(commands.size());
-        List<LooseRefStore.Update> validUpdates = new ArrayList<>();
-        List<Integer> validIndexes = new ArrayList<>();
-        boolean commandFailure = false;
-        for (int index = 0; index < commands.size(); index++) {
-            LegacyReceiveCommand command = commands.get(index);
-            if (command.type() != LegacyReceiveCommand.Type.DELETE
-                    && !repository.hasCompleteObjectClosure(
-                            command.newObjectId(),
-                            receivePack.quarantine())) {
-                statuses.add(new ReceivePackStatus(
-                        command.refName(),
-                        false,
-                        "missing-necessary-objects"));
-                commandFailure = true;
-                continue;
-            }
-            try {
-                accessHook.beforeUpdate(
-                        repositoryPath,
-                        command.refName(),
-                        isForceUpdate(repository, receivePack, command));
-            } catch (GitNativeRepositoryAccessHook.AccessDeniedException error) {
-                statuses.add(new ReceivePackStatus(
-                        command.refName(),
-                        false,
-                        "ACCESS_DENIED"));
-                commandFailure = true;
-                continue;
-            }
-            statuses.add(null);
-            validIndexes.add(index);
-            validUpdates.add(new LooseRefStore.Update(
-                    command.refName(),
-                    command.oldObjectId().value(),
-                    command.newObjectId().value()));
+        List<LooseRefStore.Update> updates = new ArrayList<>(commands.size());
+        for (LegacyReceiveCommand command : commands) {
+            updates.add(new LooseRefStore.Update(
+                    command.refName(), command.oldObjectId().value(), command.newObjectId().value()));
         }
-        boolean atomic = receivePack.commandSection()
-                .negotiated(GitCapability.ATOMIC);
-        if (atomic && commandFailure) {
-            for (int index : validIndexes) {
-                statuses.set(index, new ReceivePackStatus(
-                        commands.get(index).refName(),
-                        false,
-                        "atomic-push-failure"));
-            }
-            return List.copyOf(statuses);
-        }
-        List<RefUpdateResult> results = repositoryProvider.publish(
-                repositoryPath,
-                receivePack.quarantine(),
-                validUpdates,
-                atomic);
-        boolean atomicRefFailure = atomic
-                && results.contains(RefUpdateResult.STALE);
-        for (int resultIndex = 0;
-                resultIndex < results.size();
-                resultIndex++) {
-            int commandIndex = validIndexes.get(resultIndex);
-            LegacyReceiveCommand command = commands.get(commandIndex);
-            RefUpdateResult result = results.get(resultIndex);
-            statuses.set(commandIndex, new ReceivePackStatus(
-                    command.refName(),
-                    !atomicRefFailure && result != RefUpdateResult.STALE,
-                    result == RefUpdateResult.STALE
-                            ? "stale"
-                            : atomicRefFailure
-                                    ? "atomic-push-failure"
-                                    : ""));
-        }
-        return List.copyOf(statuses);
-    }
-
-    private static boolean isForceUpdate(
-            NativeGitRepository repository,
-            LegacyReceivePack receivePack,
-            LegacyReceiveCommand command) {
-        if (command.type() != LegacyReceiveCommand.Type.UPDATE) {
-            return false;
-        }
-        NativeObjectClosure closure = new NativeObjectClosure(objectId ->
-                receivePack.quarantine().read(objectId)
-                        .or(() -> repository.readObject(objectId)));
-        return !closure.allRootsReachAny(
-                List.of(command.newObjectId()),
-                List.of(command.oldObjectId()));
+        boolean atomic = receivePack.commandSection().negotiated(GitCapability.ATOMIC);
+        return NativeGitReceivePack.complete(
+                repositoryPath, repository, receivePack.quarantine(), updates, atomic, accessHook,
+                valid -> repositoryProvider.publish(repositoryPath, receivePack.quarantine(), valid, atomic));
     }
 
     @Override

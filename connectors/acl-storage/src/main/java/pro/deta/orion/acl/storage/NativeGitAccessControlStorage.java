@@ -7,7 +7,9 @@ import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.GitRepositoryConcurrentUpdateException;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.git.proxy.ResolvedBootstrapSource;
 import pro.deta.orion.util.Result;
 
@@ -72,15 +74,15 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                         snapshot.files(),
                         request.message(),
                         author);
-                List<RefUpdateResult> results = repositoryProvider.publishPack(
+                List<ReceivePackStatus> results = repositoryProvider.publishPack(
                         repositoryName,
                         update.pack(),
                         update.refUpdates(),
-                        true);
-                if (results.contains(RefUpdateResult.STALE)) {
-                    throw new AccessControlConcurrentUpdateException(
-                            "ACL configuration changed concurrently",
-                            null);
+                        true, GitNativeRepositoryAccessHook.ALLOW_ALL);
+                try {
+                    ReceivePackStatus.requireSuccess(results);
+                } catch (GitRepositoryConcurrentUpdateException conflict) {
+                    throw new AccessControlConcurrentUpdateException("ACL configuration changed concurrently", conflict);
                 }
             } else {
                 repositoryProvider.saveFiles(

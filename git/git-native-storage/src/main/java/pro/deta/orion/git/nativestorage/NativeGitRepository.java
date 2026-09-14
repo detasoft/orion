@@ -24,6 +24,9 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectClosure;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSource;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.NativeGitReceivePack;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -250,12 +253,16 @@ public class NativeGitRepository implements AutoCloseable {
         return publishObjectsAndRefs(quarantinedObjects, updates, true);
     }
 
-    public List<RefUpdateResult> publishPack(
+    public List<ReceivePackStatus> publishPack(
             byte[] pack,
             List<LooseRefStore.Update> updates,
-            boolean atomic) throws GitOperationException {
+            boolean atomic,
+            GitNativeRepositoryAccessHook accessHook) throws GitOperationException {
         Objects.requireNonNull(pack, "pack");
         Objects.requireNonNull(updates, "updates");
+        Objects.requireNonNull(accessHook, "accessHook");
+        accessHook.beforeReceive(name());
+        accessHook.beforeWrite(name());
         ByteBuf input = Unpooled.wrappedBuffer(pack);
         try (PackIngestionSession session = beginPackIngestion(
                 new PackIngestionLimits(Math.max(1, pack.length), Integer.MAX_VALUE, Integer.MAX_VALUE))) {
@@ -269,7 +276,9 @@ public class NativeGitRepository implements AutoCloseable {
             if (!(result instanceof PackIngestionResult.Complete complete)) {
                 throw new GitOperationException("Incomplete file update pack");
             }
-            return publishObjectsAndRefs(complete.quarantine(), updates, atomic);
+            return NativeGitReceivePack.complete(
+                    name(), this, complete.quarantine(), updates, atomic, accessHook,
+                    valid -> publishObjectsAndRefs(complete.quarantine(), valid, atomic));
         } finally {
             input.release();
         }

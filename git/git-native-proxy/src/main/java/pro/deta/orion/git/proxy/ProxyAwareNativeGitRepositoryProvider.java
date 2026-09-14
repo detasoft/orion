@@ -13,6 +13,8 @@ import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.schema.config.BootstrapConfigurationSourceConfig;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.schema.orion.RepositoryName;
@@ -293,11 +295,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         NativeGitRepository repository = backend.find(canonicalName)
                 .valueOrFailure("Cannot open native repository " + canonicalName);
         NativeGitFileUpdate update = repository.prepareProxyFileUpdate(refName, files, message, author);
-        List<RefUpdateResult> results = new PolicyBoundNativeGitRepository(this, repository)
-                .publishPack(update.pack(), update.refUpdates(), true);
-        if (results.contains(RefUpdateResult.STALE)) {
-            throw new GitOperationException("Cannot update Git repository: stale ref");
-        }
+        List<ReceivePackStatus> results = new PolicyBoundNativeGitRepository(this, repository)
+                .publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL);
+        ReceivePackStatus.requireSuccess(results);
     }
 
     @Override

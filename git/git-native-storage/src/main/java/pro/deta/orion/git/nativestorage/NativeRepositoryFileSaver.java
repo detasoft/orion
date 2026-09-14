@@ -6,7 +6,8 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 
 import java.io.ByteArrayOutputStream;
@@ -51,14 +52,11 @@ final class NativeRepositoryFileSaver {
     }
 
     private void publish(NativeGitFileUpdate update) throws GitOperationException {
-        List<RefUpdateResult> results = repository.publishPack(
+        List<ReceivePackStatus> results = repository.publishPack(
                 update.pack(),
                 update.refUpdates(),
-                true);
-        if (results.contains(RefUpdateResult.STALE)) {
-            throw new GitRepositoryConcurrentUpdateException(
-                    "Cannot update Git repository: stale ref");
-        }
+                true, GitNativeRepositoryAccessHook.ALLOW_ALL);
+        ReceivePackStatus.requireSuccess(results);
     }
 
     NativeGitFileUpdate prepareFiles(

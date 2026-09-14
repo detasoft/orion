@@ -21,7 +21,8 @@ import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
@@ -475,7 +476,7 @@ class DefaultGitNativeRepositoryServiceTest {
                 ObjectType.BLOB,
                 "feature".getBytes(StandardCharsets.US_ASCII));
 
-        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+        List<ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
                         receivePack(
                                 service,
@@ -494,9 +495,9 @@ class DefaultGitNativeRepositoryServiceTest {
 
         assertThat(statuses)
                 .containsExactly(
-                        new GitNativeRepositoryService.ReceivePackStatus(
+                        new ReceivePackStatus(
                                 "refs/heads/main", false, "stale"),
-                        new GitNativeRepositoryService.ReceivePackStatus(
+                        new ReceivePackStatus(
                                 "refs/heads/feature", true, ""));
         assertThat(repository.refs())
                 .containsEntry("refs/heads/main", MAIN_ID)
@@ -517,7 +518,7 @@ class DefaultGitNativeRepositoryServiceTest {
                 ObjectType.BLOB,
                 "feature".getBytes(StandardCharsets.US_ASCII));
 
-        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+        List<ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
                         receivePack(
                                 service,
@@ -531,7 +532,7 @@ class DefaultGitNativeRepositoryServiceTest {
 
         assertThat(provider.publishCalls).isEqualTo(1);
         assertThat(statuses).containsExactly(
-                new GitNativeRepositoryService.ReceivePackStatus(
+                new ReceivePackStatus(
                         "refs/heads/feature", false, "stale"));
         assertThat(repository.refs()).isEmpty();
         assertThat(repository.readObject(feature)).isEmpty();
@@ -552,7 +553,7 @@ class DefaultGitNativeRepositoryServiceTest {
         RecordingAccessHook accessHook = new RecordingAccessHook();
         accessHook.rejectUpdates();
 
-        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+        List<ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
                         receivePack(
                                 service,
@@ -565,7 +566,7 @@ class DefaultGitNativeRepositoryServiceTest {
                         accessHook);
 
         assertThat(statuses).containsExactly(
-                new GitNativeRepositoryService.ReceivePackStatus(
+                new ReceivePackStatus(
                         "refs/heads/feature", false, "ACCESS_DENIED"));
         assertThat(repository.refs()).doesNotContainKey("refs/heads/feature");
         assertThat(accessHook.calls()).contains("update demo refs/heads/feature false");
@@ -589,7 +590,7 @@ class DefaultGitNativeRepositoryServiceTest {
                 "new".getBytes(StandardCharsets.US_ASCII));
         RecordingAccessHook accessHook = new RecordingAccessHook();
 
-        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+        List<ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
                         receivePack(
                                 service,
@@ -602,7 +603,7 @@ class DefaultGitNativeRepositoryServiceTest {
                         accessHook);
 
         assertThat(statuses).containsExactly(
-                new GitNativeRepositoryService.ReceivePackStatus(
+                new ReceivePackStatus(
                         "refs/heads/main", true, ""));
         assertThat(accessHook.calls()).contains("update demo refs/heads/main true");
     }
@@ -624,7 +625,7 @@ class DefaultGitNativeRepositoryServiceTest {
                 service,
                 pack(incoming, feature));
 
-        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+        List<ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
                         receivePack(
                                 service,
@@ -643,9 +644,9 @@ class DefaultGitNativeRepositoryServiceTest {
 
         assertThat(statuses)
                 .containsExactly(
-                        new GitNativeRepositoryService.ReceivePackStatus(
+                        new ReceivePackStatus(
                                 "refs/heads/main", false, "stale"),
-                        new GitNativeRepositoryService.ReceivePackStatus(
+                        new ReceivePackStatus(
                                 "refs/heads/feature", false, "atomic-push-failure"));
         assertThat(repository.refs())
                 .containsExactly(Map.entry("refs/heads/main", MAIN_ID));
@@ -674,7 +675,7 @@ class DefaultGitNativeRepositoryServiceTest {
                 ObjectType.COMMIT,
                 incompleteCommit(missingTree).getBytes(StandardCharsets.US_ASCII));
 
-        List<GitNativeRepositoryService.ReceivePackStatus> statuses =
+        List<ReceivePackStatus> statuses =
                 service.completeLegacyReceivePack(
                         receivePack(
                                 service,
@@ -687,7 +688,7 @@ class DefaultGitNativeRepositoryServiceTest {
                         GitNativeRepositoryAccessHook.ALLOW_ALL);
 
         assertThat(statuses).containsExactly(
-                new GitNativeRepositoryService.ReceivePackStatus(
+                new ReceivePackStatus(
                         "refs/heads/main", false, "missing-necessary-objects"));
         assertThat(repository.refs()).isEmpty();
         assertThat(repository.readObject(incompleteCommit)).isPresent();

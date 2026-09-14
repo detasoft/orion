@@ -7,7 +7,9 @@ import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.GitRepositoryConcurrentUpdateException;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.keymaterial.KeyMaterialContentStore;
 import pro.deta.orion.keymaterial.KeyMaterialSnapshot;
 import pro.deta.orion.keymaterial.KeyMaterialStoreConflictException;
@@ -78,12 +80,14 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
                     Map.of(path, bytes),
                     SAVE_MESSAGE,
                     GitCommitAuthor.EMPTY);
-            List<RefUpdateResult> results = repositoryProvider.publishPack(
+            List<ReceivePackStatus> results = repositoryProvider.publishPack(
                     repositoryName,
                     update.pack(),
                     update.refUpdates(),
-                    true);
-            if (results.contains(RefUpdateResult.STALE)) {
+                    true, GitNativeRepositoryAccessHook.ALLOW_ALL);
+            try {
+                ReceivePackStatus.requireSuccess(results);
+            } catch (GitRepositoryConcurrentUpdateException conflict) {
                 throw conflict();
             }
             String version = update.refUpdates().getFirst().newId();

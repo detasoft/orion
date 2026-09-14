@@ -7,10 +7,10 @@ import pro.deta.orion.auth.check.resource.RepositoryResource;
 import pro.deta.orion.auth.check.rule.BranchAccessRules;
 import pro.deta.orion.auth.check.rule.RepositoryAccessRules;
 import pro.deta.orion.auth.check.rule.SubjectAccessRules;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 
 import java.util.List;
 import java.util.Objects;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 
 import static pro.deta.orion.auth.check.AccessEnforcer.accessEnforcer;
 

@@ -12,6 +12,8 @@ import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 import pro.deta.orion.util.Result;
 
@@ -25,6 +27,33 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
+    @Test
+    void checksRefAccessBeforeForwardingAnInternalPack() throws Exception {
+        AtomicInteger pushes = new AtomicInteger();
+        ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), pushes);
+        String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+        NativeGitRepository repository = provider.openForWrite(name).valueOrFailure("repository");
+        var prepared = repository.prepareFileUpdate("refs/heads/main",
+                Map.of("orion.xml", "updated".getBytes(StandardCharsets.UTF_8)), "update", GitCommitAuthor.EMPTY);
+        Map<String, String> initialRefs = repository.refs();
+        GitNativeRepositoryAccessHook denied = new GitNativeRepositoryAccessHook() {
+            @Override
+            public void beforeUpdate(String repositoryName, String refName, boolean force) {
+                assertThat(repositoryName).isEqualTo(name);
+                throw new AccessDeniedException("denied", null);
+            }
+        };
+
+        assertThat(provider.publishPack(name, prepared.pack(), prepared.refUpdates(), true, denied))
+                .containsExactly(new ReceivePackStatus("refs/heads/main", false, "ACCESS_DENIED"));
+        assertThat(pushes).hasValue(0);
+        assertThat(repository.refs()).isEqualTo(initialRefs);
+
+        ReceivePackStatus.requireSuccess(provider.publishPack(
+                name, prepared.pack(), prepared.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL));
+        assertThat(pushes).hasValue(1);
+    }
+
     @Test
     void keepsActiveBootstrapCacheInternalWhileOrdinaryNamesRemainPublic() {
         ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), new AtomicInteger());

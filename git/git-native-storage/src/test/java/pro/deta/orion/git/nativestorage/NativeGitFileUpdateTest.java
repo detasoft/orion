@@ -8,7 +8,6 @@ import org.eclipse.jgit.lib.NullProgressMonitor;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
-import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -16,6 +15,8 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -90,8 +91,8 @@ class NativeGitFileUpdateTest {
         NativeGitRepository another = new InMemoryNativeGitRepositoryProvider()
                 .create("another").valueOrFailure("repository");
         for (NativeGitRepository target : List.of(repository, another)) {
-            assertThat(target.publishPack(update.pack(), update.refUpdates(), true))
-                    .containsExactly(RefUpdateResult.CREATED);
+            assertThat(target.publishPack(update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
+                    .containsExactly(new ReceivePackStatus("refs/heads/main", true, ""));
             assertThat(target.loadFiles("main", List.of("config.txt")).files())
                     .containsAllEntriesOf(files("prepared"));
         }
@@ -108,7 +109,8 @@ class NativeGitFileUpdateTest {
         byte[] incomplete = Arrays.copyOf(update.pack(), corrupt.length - 1);
 
         for (byte[] rejected : List.of(corrupt, incomplete)) {
-            assertThatThrownBy(() -> repository.publishPack(rejected, update.refUpdates(), true))
+            assertThatThrownBy(() -> repository.publishPack(
+                    rejected, update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
                     .isInstanceOf(GitOperationException.class);
             assertThat(repository.refs()).isEmpty();
             assertThat(repository.publishedPacks()).isEmpty();

@@ -4,7 +4,6 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitNativeRepositoryService;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 import pro.deta.orion.git.parser.wire.GitWireConfiguration;
@@ -24,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 
 @Slf4j
 @Singleton

@@ -28,6 +28,8 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUriSelection;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -607,8 +609,8 @@ class NativeGitRepositoryTest {
 
         assertThat(repository.refs()).isEmpty();
         assertThat(repository.publishPack(
-                update.pack(), update.refUpdates(), true))
-                .containsExactly(RefUpdateResult.CREATED);
+                update.pack(), update.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL))
+                .containsExactly(new ReceivePackStatus("refs/heads/main", true, ""));
         assertThat(repository.loadFiles("main", List.of("orion.xml")).files())
                 .containsEntry(
                         "orion.xml",

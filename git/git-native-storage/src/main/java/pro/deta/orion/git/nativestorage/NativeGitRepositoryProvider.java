@@ -4,6 +4,8 @@ import pro.deta.orion.util.Result;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 
 import java.util.List;
 import java.util.Map;
@@ -54,14 +56,15 @@ public interface NativeGitRepositoryProvider {
                 .prepareFileUpdate(refName, expectedRefRevision, files, message, author);
     }
 
-    default List<RefUpdateResult> publishPack(
+    default List<ReceivePackStatus> publishPack(
             String repositoryName,
             byte[] pack,
             List<LooseRefStore.Update> updates,
-            boolean atomic) throws GitOperationException {
+            boolean atomic,
+            GitNativeRepositoryAccessHook accessHook) throws GitOperationException {
         return openForWrite(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName)
-                .publishPack(pack, updates, atomic);
+                .publishPack(pack, updates, atomic, accessHook);
     }
 
     default List<RefUpdateResult> publish(

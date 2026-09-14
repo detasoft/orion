@@ -5,11 +5,11 @@ import pro.deta.orion.schema.acl.AccessControl;
 import pro.deta.orion.schema.acl.AccessControlDraft;
 import pro.deta.orion.auth.InternalUserImpl;
 import pro.deta.orion.auth.SecurityContext;
-import pro.deta.orion.git.parser.wire.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitWireBootstrap;
 
 import java.util.ArrayList;
 import java.util.List;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

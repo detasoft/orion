@@ -11,6 +11,8 @@ import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.git.nativestorage.upload.NativeFetchResponse;
 import pro.deta.orion.git.nativestorage.upload.NativeObjectFilter;
 import pro.deta.orion.git.nativestorage.upload.NativePackfileUri;
+import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
+import pro.deta.orion.git.nativestorage.receive.ReceivePackStatus;
 import pro.deta.orion.git.parser.wire.advertisement.GitLsRefsResponse;
 import pro.deta.orion.git.parser.wire.advertisement.GitV1Advertisement;
 import pro.deta.orion.git.parser.wire.capability.GitCapability;
@@ -901,7 +903,7 @@ public final class GitBlockingWireSession {
             throws IOException {
         List<GitBlockingWireTransport.ReceiveCommandStatus> outputStatuses =
                 new ArrayList<>();
-        for (GitNativeRepositoryService.ReceivePackStatus status
+        for (ReceivePackStatus status
                 : repositoryService.completeLegacyReceivePack(
                         receivePack,
                         accessHook)) {
