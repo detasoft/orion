@@ -23,6 +23,8 @@ package pro.deta.orion.git.parser.v2.storage;
  *
  * <p>Preliminary methods:
  * <ul>
+ *   <li>{@code quarantine(BufferedByteInput source)} - receive one raw pack through its checksum and return
+ *       PackScanIndex without closing the caller's input, consuming subsequent bytes, or waiting for EOF.</li>
  *   <li>{@code publish(packId)} - publish the quarantined pack after object resolution and index preparation.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
