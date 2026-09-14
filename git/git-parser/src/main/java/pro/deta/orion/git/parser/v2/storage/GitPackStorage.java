@@ -6,11 +6,15 @@ package pro.deta.orion.git.parser.v2.storage;
  * Pack parsing, quarantine, and receive policy belong to the calling operation; storing a pack does not
  * update refs or imply that a push was accepted.
  *
- * <p>Publication receives a prepared pack whose packId is its verified checksum. For a file-backed store,
- * locking by packId protects publication after ingestion, not reception of the incoming stream. Separate
- * uploads use isolated temporary areas until their pack IDs are known. Under the publication lock, check
- * whether the same pack is already published and reuse it; different pack IDs publish independently.
+ * <p>Publication receives a prepared pack whose packId is its verified checksum. Separate uploads use isolated
+ * temporary areas until their pack IDs are known. Coordination protects publication after ingestion, not
+ * reception of the incoming stream. Different pack IDs publish independently.
  * Refs remain subject to each operation's own checks and conditional updates even when pack data is reused.
+ *
+ * <p>All publishers of one repository share an internal GitLock. Acquire ownership for the verified packId,
+ * then check the manifest and either reuse the published pack or publish the prepared data. Release ownership
+ * after all publication writes and failure cleanup finish. Awakening after another attempt does not prove
+ * success; only the owner rechecks the manifest and may retry publication using its own prepared pack.
  *
  * <p>Preliminary methods:
  * <ul>
