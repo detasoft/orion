@@ -1,5 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.data.RefUpdate;
+import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 
@@ -17,7 +19,7 @@ import java.util.Map;
  *   <li>{@code snapshotRefs()} - return a consistent snapshot of ref names and object IDs.</li>
  *   <li>{@code defaultHead()} - return the configured default HEAD target.</li>
  *   <li>{@code updateRefs(List<RefUpdate> updates, boolean atomic)} - conditionally update refs
- *       and return per-ref results; the result type remains to be defined.</li>
+ *       and return one RefUpdateResult containing the original update per input, in request order.</li>
  *   <li>{@code publishPack(receivedPack)} - retain a validated pack and make its objects readable.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
@@ -29,6 +31,10 @@ import java.util.Map;
  * objects needed by a ref update must be available before that update becomes visible.
  */
 public final class GitStorageApi {
+    public List<RefUpdateResult> updateRefs(List<RefUpdate> updates, boolean atomic) {
+        throw new UnsupportedOperationException("Ref updates are not implemented");
+    }
+
     /**
      * Planned lookup of published packs containing each requested object, including external delta bases.
      * Returns object IDs mapped to lists of containing pack IDs; an object can occur in multiple packs.
