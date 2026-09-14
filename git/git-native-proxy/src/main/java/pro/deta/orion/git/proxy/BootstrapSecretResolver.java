@@ -181,21 +181,28 @@ final class BootstrapSecretResolver {
     }
 
     private static char[] decode(byte[] bytes) {
-        CharBuffer decoded = null;
+        return decode(bytes, new char[bytes.length]);
+    }
+
+    @TestOnly
+    static char[] decode(byte[] bytes, char[] scratch) {
+        CharBuffer decoded = CharBuffer.wrap(scratch);
         try {
-            decoded = StandardCharsets.UTF_8.newDecoder()
+            var result = StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes));
+                    .decode(ByteBuffer.wrap(bytes), decoded, true);
+            if (!result.isUnderflow()) {
+                result.throwException();
+            }
+            decoded.flip();
             char[] value = new char[decoded.remaining()];
             decoded.get(value);
             return trimLineEnding(value);
         } catch (CharacterCodingException error) {
             throw new IllegalArgumentException("Bootstrap secret file is not valid UTF-8");
         } finally {
-            if (decoded != null && decoded.hasArray()) {
-                Arrays.fill(decoded.array(), '\0');
-            }
+            Arrays.fill(scratch, '\0');
         }
     }
 

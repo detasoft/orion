@@ -19,9 +19,15 @@ same provider and typed material capabilities to the runtime. The provider
 refreshes logical handles and publishes upstream with expected object IDs.
 Smart HTTP gzip decoding already exists in `GitHttpRequestBody`.
 
+Bootstrap binding rollback and native HTTP/SSH boundary acceptance are verified
+by `ac2f610f` and `79dd66b4`. The native acceptance covers shared inputs, refreshed
+reads, upstream publication and stale-write rejection, cache-name isolation,
+identity preservation on reopening, and unavailable upstreams.
+
 `PersistentProxyCatalog` and `PersistentProxyCredentialResolver` currently have
-no production activation consumer. Hiding bindings from enumeration does not
-prevent opening their repository names through ordinary Git transport.
+no production activation consumer. Public Git transports reject internal
+bootstrap cache names independently of binding state; persistent alias adoption
+remains pending.
 `BootstrapContext` already preserves failure causes (`9b0bb402`). These are
 implementation observations, not evidence that all acceptance checks passed.
 

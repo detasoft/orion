@@ -174,18 +174,22 @@ public final class KeyMaterialResourceResolver {
     }
 
     private static char[] decodePassword(byte[] bytes) throws IOException {
-        CharBuffer characters;
+        CharBuffer characters = CharBuffer.allocate(bytes.length);
+        char[] decoded;
         try {
-            characters = StandardCharsets.UTF_8.newDecoder()
+            var result = StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(bytes));
+                    .decode(ByteBuffer.wrap(bytes), characters, true);
+            if (!result.isUnderflow()) {
+                result.throwException();
+            }
+            characters.flip();
+            decoded = new char[characters.remaining()];
+            characters.get(decoded);
         } catch (CharacterCodingException e) {
             throw new IOException("Key material password is not valid UTF-8");
-        }
-        char[] decoded = new char[characters.remaining()];
-        characters.get(decoded);
-        if (characters.hasArray()) {
+        } finally {
             Arrays.fill(characters.array(), '\0');
         }
         int length = decoded.length;

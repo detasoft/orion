@@ -16,6 +16,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -32,6 +34,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BootstrapGitTransportFactoryTest {
+    @Test
+    void clearsBasicAuthenticationBytesAfterEncodingTheRemainingBuffer() {
+        byte[] bytes = "skipuser:password".getBytes(StandardCharsets.UTF_8);
+        ByteBuffer credentials = ByteBuffer.wrap(bytes);
+        credentials.position(4);
+
+        assertThat(BootstrapGitTransportFactory.basicAuthorization(credentials))
+                .isEqualTo("Basic dXNlcjpwYXNzd29yZA==");
+        assertThat(bytes).containsOnly((byte) 0);
+    }
+
+    @Test
+    void sendsUtf8BasicCredentialsWithoutChangingTheirContent() throws Exception {
+        assertHttpAuthorization("http-basic", Map.of("credentialUsername", "user"), "päss🔑",
+                "Basic " + Base64.getEncoder().encodeToString("user:päss🔑".getBytes(StandardCharsets.UTF_8)));
+    }
+
     @Test
     void closesOwnedHttpClientAfterOperationReturns() throws Exception {
         assertHttpClientClosed(false);

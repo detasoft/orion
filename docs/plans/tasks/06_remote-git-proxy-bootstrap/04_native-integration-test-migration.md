@@ -1,7 +1,7 @@
 # Verify Native Remote Bootstrap and Proxy Adoption
 
 Status: todo
-Depends on: [06/01](01_bootstrap-proxy-runtime.md),
+Depends on: completed bootstrap runtime boundaries and native transport acceptance (`79dd66b4`),
 [06/02](02_proxy-config-and-secrets.md),
 [06/05](05_git-configuration-integration-fixtures.md).
 

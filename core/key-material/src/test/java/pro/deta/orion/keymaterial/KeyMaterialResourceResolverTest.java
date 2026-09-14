@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -16,6 +17,31 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class KeyMaterialResourceResolverTest {
     @TempDir
     private Path tempDir;
+
+    @Test
+    void decodesUnicodePasswordAndTrimsOneLineEnding() throws Exception {
+        Path file = tempDir.toRealPath().resolve("password");
+        Files.write(file, bytes("sëcret🔑\r\n"));
+        setOwnerOnly(file);
+
+        assertThat(KeyMaterialResourceResolver.standard().resolvePassword(file.toUri().toString()))
+                .isEqualTo("sëcret🔑".toCharArray());
+    }
+
+    @Test
+    void rejectsPasswordFilesWithInvalidOrTruncatedUtf8() throws Exception {
+        Path file = tempDir.toRealPath().resolve("password");
+        for (byte[] encoded : List.of(new byte[]{'s', (byte) 0xc3, 0x28},
+                new byte[]{'s', (byte) 0xe2, (byte) 0x82})) {
+            Files.write(file, encoded);
+            setOwnerOnly(file);
+
+            assertThatThrownBy(() -> KeyMaterialResourceResolver.standard()
+                    .resolvePassword(file.toUri().toString()))
+                    .isInstanceOf(java.io.IOException.class)
+                    .hasMessage("Key material password is not valid UTF-8");
+        }
+    }
 
     @Test
     void resolvesPlainFileAndEnvironmentLocationsToWritableStores() throws Exception {

@@ -11,6 +11,7 @@ import pro.deta.orion.git.client.GitHttpRequestConfigurer;
 import pro.deta.orion.git.client.GitSmartHttpClientTransport;
 import pro.deta.orion.git.client.GitSshClientTransport;
 import pro.deta.orion.git.client.GitSshSessionAuthenticator;
+import pro.deta.orion.lifecycle.state.TestOnly;
 
 import java.io.CharArrayReader;
 import java.io.IOException;
@@ -91,7 +92,6 @@ final class BootstrapGitTransportFactory {
         }
         char[] combined = new char[
                 location.credentialUsername().length() + credential.length + 1];
-        byte[] encoded = null;
         try {
             location.credentialUsername().getChars(
                     0,
@@ -105,16 +105,22 @@ final class BootstrapGitTransportFactory {
                     combined,
                     location.credentialUsername().length() + 1,
                     credential.length);
-            ByteBuffer utf8 = StandardCharsets.UTF_8.encode(CharBuffer.wrap(combined));
-            byte[] bytes = new byte[utf8.remaining()];
-            utf8.get(bytes);
-            encoded = Base64.getEncoder().encode(bytes);
-            Arrays.fill(bytes, (byte) 0);
-            return "Basic " + new String(encoded, StandardCharsets.US_ASCII);
+            return basicAuthorization(StandardCharsets.UTF_8.encode(CharBuffer.wrap(combined)));
         } finally {
             Arrays.fill(combined, '\0');
+        }
+    }
+
+    @TestOnly
+    static String basicAuthorization(ByteBuffer utf8) {
+        ByteBuffer encoded = null;
+        try {
+            encoded = Base64.getEncoder().encode(utf8);
+            return "Basic " + new String(encoded.array(), StandardCharsets.US_ASCII);
+        } finally {
+            Arrays.fill(utf8.array(), (byte) 0);
             if (encoded != null) {
-                Arrays.fill(encoded, (byte) 0);
+                Arrays.fill(encoded.array(), (byte) 0);
             }
         }
     }

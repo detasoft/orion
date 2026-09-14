@@ -7,8 +7,8 @@ Depends on: completed key-material rotation and recovery (406c4354),
 Extend the existing `KeyMaterialContentStore` boundary with an S3-compatible
 writable adapter. This is a follow-up to the completed Orion-owned key migration;
 it does not reintroduce private-key files or a second keystore owner. Remote
-Git-backed bootstrap and material access remain in the existing
-[remote Git bootstrap task](06_remote-git-proxy-bootstrap/01_bootstrap-proxy-runtime.md).
+Git-backed bootstrap and material access use the existing native bootstrap runtime,
+verified through native HTTP and SSH in `79dd66b4`.
 
 ## Requirements
 

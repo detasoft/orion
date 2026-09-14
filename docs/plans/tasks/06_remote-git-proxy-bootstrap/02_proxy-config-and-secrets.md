@@ -1,8 +1,8 @@
 # Persist Proxy Bindings and Resolve Git Credentials
 
 Status: todo
-Depends on: [06/01](01_bootstrap-proxy-runtime.md), existing configuration cipher
-and repository-remote schema (`d17476ab`, `146b9e76`).
+Depends on: completed bootstrap runtime boundaries (`ac2f610f`, `79dd66b4`),
+existing configuration cipher and repository-remote schema (`d17476ab`, `146b9e76`).
 
 ## Required result
 

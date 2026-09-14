@@ -6,10 +6,12 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.Field;
 import java.nio.channels.Channels;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -18,6 +20,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class BootstrapSecretResolverTest {
     @TempDir
     private Path tempDir;
+
+    @Test
+    void clearsUtf8ScratchCharactersAfterSuccessfulDecoding() {
+        byte[] encoded = "sëcret🔑\r\n".getBytes(StandardCharsets.UTF_8);
+        char[] scratch = new char[encoded.length];
+        Arrays.fill(scratch, 'x');
+
+        assertThat(BootstrapSecretResolver.decode(encoded, scratch)).isEqualTo("sëcret🔑".toCharArray());
+        assertThat(scratch).containsOnly('\0');
+    }
+
+    @Test
+    void clearsPartiallyDecodedSecretWhenUtf8IsInvalidOrTruncated() {
+        for (byte[] encoded : List.of(new byte[]{'s', (byte) 0xc3, 0x28},
+                new byte[]{'s', (byte) 0xe2, (byte) 0x82})) {
+            char[] scratch = new char[encoded.length];
+
+            assertThatThrownBy(() -> BootstrapSecretResolver.decode(encoded, scratch))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Bootstrap secret file is not valid UTF-8");
+            assertThat(scratch).containsOnly('\0');
+        }
+    }
 
     @Test
     void resolvesEnvironmentAndClearsOwnedCharacters() throws Exception {
