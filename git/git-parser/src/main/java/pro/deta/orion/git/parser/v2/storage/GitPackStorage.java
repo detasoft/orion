@@ -7,7 +7,8 @@ package pro.deta.orion.git.parser.v2.storage;
  * The calling operation owns object resolution and receive policy; storing a pack does not update refs or
  * imply that a push was accepted.
  *
- * <p>Reception returns the verified PackId and a preliminary scan index after all pack bytes are stored.
+ * <p>Reception returns a PackScanIndex with the verified PackId, full pack size, and entries in physical order
+ * after all pack bytes are stored. Entry metadata includes payload offsets, inflated sizes, CRC32, and encoding.
  * Incomplete reception is identified only inside storage. Callers address quarantined packs by PackId;
  * concurrent receptions of identical content require storage-owned coordination and cleanup so one operation
  * cannot discard another operation's data. No upload identifiers, files, or paths cross the API.
