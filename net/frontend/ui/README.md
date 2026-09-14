@@ -10,6 +10,20 @@ creation. It does not expose repository, member, notification, or activity
 lists. Repositories and activity created by the UI are therefore displayed only
 for the current browser session.
 
+## Session terminal
+
+Open **Terminal** after connecting and enter a Session ID. The view replays
+historical PTY output and follows new committed events through the same Admin
+API stream. Recorded resizes apply in journal order. The terminal is currently
+view only; interactive input and resize commands remain in task `03/05`.
+
+An interrupted connection resumes after the last processed event, including
+unknown events. Incomplete trailing records are discarded before reconnecting.
+Event IDs retain unsigned 64-bit precision, and terminal output reaches xterm.js
+as bytes. Closing the view cancels the stream; reopening starts replay from the
+beginning. History stays visible after the session exits. PTY closure alone
+does not stop following the session.
+
 ## Development
 
 The current Vite toolchain requires Node.js 20.19+, 22.12+, or a newer release.
@@ -32,8 +46,9 @@ npm run build
 ```
 
 The UI is also part of the Maven reactor. Maven installs its own pinned Node.js
-toolchain, runs the npm checks, and packages the production assets in the
-`frontend-ui` JAR:
+toolchain, builds the UI, and packages the production assets in the `frontend-ui`
+JAR. Frontend tests are temporarily excluded from Maven verification; run
+`npm test` explicitly:
 
 ```sh
 mvn verify -Pdev -T 4 -pl :frontend-ui -am

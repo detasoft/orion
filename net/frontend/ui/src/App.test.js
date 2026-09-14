@@ -49,6 +49,18 @@ beforeEach(() => {
 })
 
 describe('Orion connection', () => {
+  it('offers the terminal and requires a connection before opening a session', async () => {
+    const wrapper = mountApp()
+    const terminal = wrapper.findAll('.primary-nav .nav-item')
+      .find((item) => item.text() === 'Terminal')
+
+    expect(terminal).toBeDefined()
+    await terminal.trigger('click')
+    expect(wrapper.text()).toContain('Connect to Orion first')
+    expect(wrapper.find('input[aria-label="Session ID"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows verified server data after connecting', async () => {
     client.repositories.mockResolvedValue({
       repositories: [{ name: 'internal/configuration' }, { name: 'existing/project' }],

@@ -9,6 +9,22 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('opens an authenticated live journal with an exact unsigned cursor and cancellation', async () => {
+    const response = new Response(new Uint8Array([0x80]), {
+      headers: { 'Content-Type': 'application/cbor-seq' },
+    })
+    const fetchImpl = vi.fn().mockResolvedValue(response)
+    const signal = new AbortController().signal
+    const client = createOrionClient({ token: 'secret-token', fetchImpl })
+
+    expect(await client.sessionEvents('session 1', '18446744073709551614', signal)).toBe(response)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('/api/admin/sessions/session%201/events?follow=true&after=18446744073709551614')
+    expect(init.headers.get('Authorization')).toBe('Bearer secret-token')
+    expect(init.signal).toBe(signal)
+    expect(response.bodyUsed).toBe(false)
+  })
+
   it('loads repository discovery from the Admin API', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ repositories: [] }), {
       status: 200,

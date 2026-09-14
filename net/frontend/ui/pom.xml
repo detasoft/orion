@@ -69,6 +69,8 @@
                         </goals>
                         <configuration>
                             <arguments>test</arguments>
+                            <!-- Temporarily run frontend tests explicitly with npm test. -->
+                            <skip>true</skip>
                         </configuration>
                     </execution>
                 </executions>

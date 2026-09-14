@@ -17,7 +17,11 @@ defineProps({
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <template v-if="name === 'overview'">
+    <template v-if="name === 'terminal'">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="m7 9 3 3-3 3m6 0h4" />
+    </template>
+    <template v-else-if="name === 'overview'">
       <rect x="3" y="3" width="7" height="7" rx="2" />
       <rect x="14" y="3" width="7" height="7" rx="2" />
       <rect x="3" y="14" width="7" height="7" rx="2" />

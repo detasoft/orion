@@ -27,7 +27,7 @@ export function createOrionClient(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   let token = options.token ?? ''
 
-  async function request(path, init = {}) {
+  async function openResponse(path, init = {}) {
     const headers = new Headers(init.headers)
     if (token) {
       headers.set('Authorization', `Bearer ${token}`)
@@ -44,6 +44,11 @@ export function createOrionClient(options = {}) {
       throw error
     }
 
+    return response
+  }
+
+  async function request(path, init = {}) {
+    const response = await openResponse(path, init)
     const contentType = response.headers.get('content-type') ?? ''
     return contentType.includes('application/json') ? response.json() : response.text()
   }
@@ -51,6 +56,11 @@ export function createOrionClient(options = {}) {
   return {
     setToken(value) {
       token = value
+    },
+    sessionEvents(sessionId, after, signal) {
+      const query = new URLSearchParams({ follow: 'true' })
+      if (after !== null) query.set('after', after)
+      return openResponse(`/api/admin/sessions/${encodeURIComponent(sessionId)}/events?${query}`, { signal })
     },
     routes() {
       return request('/api/admin/routes')
