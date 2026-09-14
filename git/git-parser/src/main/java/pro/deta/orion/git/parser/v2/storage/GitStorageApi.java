@@ -1,6 +1,7 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 import pro.deta.orion.git.parser.v2.data.ObjectRead;
+import pro.deta.orion.git.parser.v2.data.PackRead;
 import pro.deta.orion.git.parser.v2.data.PackScanIndex;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
@@ -25,6 +26,8 @@ import java.util.Optional;
  * storage neither waits for connection EOF nor closes the input. It returns only after storing the pack and
  * checking format and checksum, without resolving external bases or publishing objects. Reception failures
  * are IOException and release only resources owned by that attempt, preserving other operations' data.
+ * Pack reads return caller-owned PackRead handles that keep original pack bytes available until closed.
+ * Absence is Optional.empty(); opening or reading failures are IOException rather than absence.
  *
  * <p>Preliminary methods:
  * <ul>
@@ -33,10 +36,12 @@ import java.util.Optional;
  *       and return one RefUpdateResult containing the original update per input, in request order.</li>
  *   <li>{@code quarantinePack(BufferedByteInput source)} - store one pack and return its PackScanIndex
  *       for subsequent resolution by the calling operation.</li>
+ *   <li>{@code openQuarantinedPack(packId)} - open original quarantined pack bytes for positional reads
+ *       during resolution.</li>
  *   <li>{@code publishPack(PackId packId)} - publish a quarantined pack after object resolution and final
  *       index preparation; callers pass no upload identifiers, files, or paths.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
- *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
+ *   <li>{@code openPublishedPack(packId)} - open original published pack bytes as a PackRead.</li>
  *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing the requested objects.</li>
  *   <li>{@code readObject(objectId)} - open an ObjectRead owned and closed by the caller, or return absence;
  *       opening and reading failures are IOException, not absence.</li>
@@ -48,6 +53,14 @@ import java.util.Optional;
 public final class GitStorageApi {
     public PackScanIndex quarantinePack(BufferedByteInput source) throws IOException {
         throw new UnsupportedOperationException("Pack quarantine is not implemented");
+    }
+
+    public Optional<PackRead> openQuarantinedPack(PackId packId) throws IOException {
+        throw new UnsupportedOperationException("Quarantined pack reads are not implemented");
+    }
+
+    public Optional<PackRead> openPublishedPack(PackId packId) throws IOException {
+        throw new UnsupportedOperationException("Published pack reads are not implemented");
     }
 
     public void publishPack(PackId packId) throws IOException {

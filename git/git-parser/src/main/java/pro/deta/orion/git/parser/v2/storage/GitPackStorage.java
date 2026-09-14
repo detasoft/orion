@@ -12,6 +12,7 @@ package pro.deta.orion.git.parser.v2.storage;
  * Incomplete reception is identified only inside storage. Callers address quarantined packs by PackId;
  * concurrent receptions of identical content require storage-owned coordination and cleanup so one operation
  * cannot discard another operation's data. No upload identifiers, files, or paths cross the API.
+ * Open PackRead handles retain unchanged original bytes until closed, including during publication or cleanup.
  * A checked checksum does not imply that all objects are resolved. Publication requires the final object
  * index and external-base dependencies produced by resolution. Different pack IDs publish independently.
  * Refs remain subject to each operation's own checks and conditional updates even when pack data is reused.
@@ -25,9 +26,10 @@ package pro.deta.orion.git.parser.v2.storage;
  * <ul>
  *   <li>{@code quarantine(BufferedByteInput source)} - receive one raw pack through its checksum and return
  *       PackScanIndex without closing the caller's input, consuming subsequent bytes, or waiting for EOF.</li>
+ *   <li>{@code openQuarantinedPack(packId)} - open original quarantined bytes as a caller-owned PackRead.</li>
  *   <li>{@code publish(packId)} - publish the quarantined pack after object resolution and index preparation.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
- *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
+ *   <li>{@code openPublishedPack(packId)} - open original published bytes as a caller-owned PackRead.</li>
  * </ul>
  * Method names and signatures are provisional. Storage locates prepared data and external-base dependencies
  * by PackId. Stored objects must remain readable after the ingestion session closes, including when a
