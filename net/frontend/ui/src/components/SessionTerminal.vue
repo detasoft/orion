@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { createOrionClient } from '../lib/orion-api.js'
 import { followSessionTerminal } from '../lib/session-terminal.js'
+import { createSessionCommands } from '../lib/session-commands.js'
 
 const props = defineProps({ token: { type: String, required: true } })
 const emit = defineEmits(['authorization-error'])
@@ -11,6 +12,10 @@ const sessionId = ref('')
 const openedSession = ref('')
 const container = ref(null)
 const status = ref('')
+const commandError = ref('')
+const available = ref(false)
+const columns = ref(80)
+const rows = ref(24)
 let active
 
 function detach() {
@@ -19,6 +24,22 @@ function detach() {
   active = null
   openedSession.value = ''
   status.value = ''
+  commandError.value = ''
+  available.value = false
+}
+
+function sendBytes(current, bytes) {
+  if (active !== current || !available.value || commandError.value) return
+  for (let offset = 0; offset < bytes.length; offset += 8192) {
+    current.commands.send({
+      operation: 'input', bytes: btoa(String.fromCharCode(...bytes.subarray(offset, offset + 8192))),
+    })
+  }
+}
+
+function resize() {
+  if (!active || !available.value || commandError.value) return
+  active.commands.send({ operation: 'resize', columns: columns.value, rows: rows.value })
 }
 
 async function openSession() {
@@ -27,18 +48,34 @@ async function openSession() {
   detach()
   const terminal = new Terminal({ disableStdin: true, cursorBlink: false, scrollback: 10000 })
   const current = { terminal, abort: new AbortController() }
+  const client = createOrionClient({ token: props.token })
+  current.commands = createSessionCommands({
+    client, sessionId: id, signal: current.abort.signal,
+    onFailure(message) {
+      if (active !== current) return
+      commandError.value = message
+      terminal.options.disableStdin = true
+    },
+  })
   active = current
   openedSession.value = id
   try {
     await nextTick()
     if (active !== current) return
     terminal.open(container.value)
+    terminal.onData((data) => sendBytes(current, new TextEncoder().encode(data)))
+    terminal.onBinary((data) => sendBytes(current, Uint8Array.from(data, (char) => char.charCodeAt(0))))
     await followSessionTerminal({
-      client: createOrionClient({ token: props.token }),
+      client,
       sessionId: id,
       terminal,
       signal: current.abort.signal,
       onStatus(value) { if (active === current) status.value = value },
+      onAvailability(value) {
+        if (active !== current) return
+        available.value = value
+        terminal.options.disableStdin = !value || Boolean(commandError.value)
+      },
     })
   } catch (error) {
     if (active !== current) return
@@ -59,8 +96,18 @@ onBeforeUnmount(detach)
       <button v-if="openedSession" type="button" class="secondary-button" @click="detach">Close</button>
     </form>
     <p v-if="!openedSession">Open a session to view its terminal history and live output.</p>
-    <p v-else>Session {{ openedSession }} · View only</p>
+    <p v-else>Session {{ openedSession }}</p>
+    <form v-if="openedSession" class="terminal-controls" @submit.prevent="resize">
+      <label>Columns
+        <input v-model.number="columns" aria-label="Columns" type="number" min="1" max="65535" required />
+      </label>
+      <label>Rows
+        <input v-model.number="rows" aria-label="Rows" type="number" min="1" max="65535" required />
+      </label>
+      <button class="secondary-button" :disabled="!available || Boolean(commandError)">Resize terminal</button>
+    </form>
     <p role="status">{{ status }}</p>
+    <p v-if="commandError" role="alert">{{ commandError }}</p>
     <div v-show="openedSession" ref="container" class="terminal-viewport" aria-label="Session terminal" />
   </section>
 </template>

@@ -13,9 +13,11 @@ for the current browser session.
 ## Session terminal
 
 Open **Terminal** after connecting and enter a Session ID. The view replays
-historical PTY output and follows new committed events through the same Admin
-API stream. Recorded resizes apply in journal order. The terminal is currently
-view only; interactive input and resize commands remain in task `03/05`.
+historical PTY output, then follows new committed events after the replay cursor.
+Input stays disabled during history replay so old terminal queries cannot send
+commands. Type or paste into the terminal after it starts following the session.
+Use **Columns**, **Rows**, and **Resize terminal** to request a resize; dimensions
+change when the corresponding journal event arrives.
 
 An interrupted connection resumes after the last processed event, including
 unknown events. Incomplete trailing records are discarded before reconnecting.
@@ -23,6 +25,22 @@ Event IDs retain unsigned 64-bit precision, and terminal output reaches xterm.js
 as bytes. Closing the view cancels the stream; reopening starts replay from the
 beginning. History stays visible after the session exits. PTY closure alone
 does not stop following the session.
+
+Input and resize use the existing server command service. Each command has a
+fresh ID; requests are serialized and their existing server statuses are polled
+until confirmed or failed. Up to 64 commands may await delivery or confirmation.
+Failures pause input and report the affected command. Reopen the session to
+continue; unsent queued input is discarded and failed or uncertain commands are
+never automatically resubmitted.
+
+The authenticated Admin endpoint is `/api/admin/sessions/{sessionId}/commands`.
+POST JSON contains `commandId` and either `operation: "input"` with base64 `bytes`,
+or `operation: "resize"` with integer `columns` and `rows` (1–65535). Bodies are
+limited to 64 KiB. The server resolves session ownership from its registry.
+GET with `?commandId=...` reads the existing command status. Responses expose
+`commandId`, `sessionId`, decimal-string `operationSequence`, `phase`, `outcome`,
+and `detail`; `SENT` alone does not establish execution success. Only a durable
+journal result yields `CONFIRMED`.
 
 ## Development
 

@@ -20,6 +20,7 @@ import pro.deta.orion.agent.server.registry.AgentRecord;
 import pro.deta.orion.agent.server.registry.AgentRegistryException;
 import pro.deta.orion.agent.server.registry.FileSystemAgentRegistry;
 import pro.deta.orion.agent.server.registry.FileSystemSessionRegistry;
+import pro.deta.orion.agent.server.registry.SessionRegistryException;
 import pro.deta.orion.lifecycle.state.ServiceLifecycleStateMachineAdapter.ServiceLifecycle;
 import pro.deta.orion.lifecycle.state.TestOnly;
 
@@ -184,6 +185,14 @@ public final class AgentSessionServer implements AgentControlHandler, ServiceLif
             throw new IllegalStateException("Agent session server is not running");
         }
         return commandService;
+    }
+
+    public synchronized Optional<AgentId> sessionOwner(SessionId sessionId)
+            throws SessionRegistryException {
+        if (sessionRegistry == null) {
+            throw new IllegalStateException("Agent session server is not running");
+        }
+        return sessionRegistry.find(sessionId).map(record -> record.agentId());
     }
 
     public synchronized SessionReplicationService replicationService() {

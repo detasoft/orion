@@ -57,10 +57,19 @@ export function createOrionClient(options = {}) {
     setToken(value) {
       token = value
     },
-    sessionEvents(sessionId, after, signal) {
-      const query = new URLSearchParams({ follow: 'true' })
+    sessionEvents(sessionId, after, signal, follow) {
+      const query = new URLSearchParams({ follow: String(follow) })
       if (after !== null) query.set('after', after)
       return openResponse(`/api/admin/sessions/${encodeURIComponent(sessionId)}/events?${query}`, { signal })
+    },
+    sendSessionCommand(sessionId, command, signal) {
+      return request(`/api/admin/sessions/${encodeURIComponent(sessionId)}/commands`, {
+        method: 'POST', body: JSON.stringify(command), signal,
+      })
+    },
+    sessionCommandStatus(sessionId, commandId, signal) {
+      const query = new URLSearchParams({ commandId })
+      return request(`/api/admin/sessions/${encodeURIComponent(sessionId)}/commands?${query}`, { signal })
     },
     routes() {
       return request('/api/admin/routes')

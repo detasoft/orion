@@ -4,7 +4,7 @@ import { encode } from 'cbor2'
 
 const { terminals, client } = vi.hoisted(() => ({
   terminals: [],
-  client: { sessionEvents: vi.fn() },
+  client: { sessionEvents: vi.fn(), sendSessionCommand: vi.fn(), sessionCommandStatus: vi.fn() },
 }))
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
@@ -14,6 +14,8 @@ vi.mock('@xterm/xterm', () => ({
       this.dispose = vi.fn()
       this.write = vi.fn((bytes, done) => done())
       this.resize = vi.fn()
+      this.onData = vi.fn((listener) => { this.data = listener })
+      this.onBinary = vi.fn((listener) => { this.binary = listener })
       terminals.push(this)
     }
   },
@@ -28,9 +30,16 @@ const sources = []
 beforeEach(() => {
   terminals.length = 0
   sources.length = 0
-  client.sessionEvents.mockReset().mockImplementation(() => Promise.resolve(new Response(new ReadableStream({
-    start(controller) { sources.push(controller) },
-  }), { headers: { 'Content-Type': 'application/cbor-seq' } })))
+  client.sendSessionCommand.mockReset().mockResolvedValue({ phase: 'CONFIRMED', outcome: 'SUCCEEDED' })
+  client.sessionCommandStatus.mockReset()
+  client.sessionEvents.mockReset().mockImplementation((id, after, signal, follow) => {
+    return Promise.resolve(new Response(new ReadableStream({
+      start(controller) {
+        if (follow) sources.push(controller)
+        else controller.close()
+      },
+    }), { headers: { 'Content-Type': 'application/cbor-seq' } }))
+  })
   wrapper = mount(SessionTerminal, { props: { token: 'token' } })
 })
 
@@ -43,10 +52,34 @@ async function open(id = 'session-1') {
 }
 
 describe('terminal view lifecycle', () => {
+  it('suppresses terminal replies during history and enables input after the cursor handoff', async () => {
+    let history
+    client.sessionEvents.mockImplementationOnce(() => Promise.resolve(new Response(new ReadableStream({
+      start(controller) { history = controller },
+    }), { headers: { 'Content-Type': 'application/cbor-seq' } })))
+    await open()
+    expect(terminals[0].options.disableStdin).toBe(true)
+    terminals[0].write.mockImplementation((bytes, done) => {
+      terminals[0].data('reply to old terminal query')
+      done()
+    })
+    history.enqueue(encode([10, 0x100, Uint8Array.of(27, 91, 54, 110)]))
+    await flushPromises()
+    expect(client.sendSessionCommand).not.toHaveBeenCalled()
+    history.close()
+    await flushPromises()
+    expect(client.sessionEvents.mock.calls[1].slice(0, 2)).toEqual(['session-1', '10'])
+    expect(client.sessionEvents.mock.calls[1][3]).toBe(true)
+    expect(terminals[0].options.disableStdin).toBe(false)
+    terminals[0].data('a')
+    await flushPromises()
+    expect(client.sendSessionCommand).toHaveBeenCalledOnce()
+  })
+
   it('opens the entered session, renders output and retains an exited terminal', async () => {
     await open()
     expect(client.sessionEvents.mock.calls[0].slice(0, 2)).toEqual(['session-1', null])
-    expect(terminals[0].options.disableStdin).toBe(true)
+    expect(terminals[0].options.disableStdin).toBe(false)
     expect(terminals[0].open).toHaveBeenCalledWith(wrapper.get('.terminal-viewport').element)
     sources[0].enqueue(encode([1, 0x100, Uint8Array.of(65)]))
     sources[0].enqueue(encode([2, 0x201, [0]]))
@@ -54,6 +87,56 @@ describe('terminal view lifecycle', () => {
     expect(terminals[0].write).toHaveBeenCalledOnce()
     expect(wrapper.get('[role="status"]').text()).toBe('Session exited (0)')
     expect(terminals[0].dispose).not.toHaveBeenCalled()
+    expect(terminals[0].options.disableStdin).toBe(true)
+  })
+
+  it('sends Unicode input and binary input without changing the bytes', async () => {
+    await open()
+    terminals[0].data('ж\r')
+    terminals[0].binary('\x00\xff')
+    await flushPromises()
+    expect(client.sendSessionCommand.mock.calls[0][1]).toMatchObject({ operation: 'input', bytes: '0LYN' })
+    expect(client.sendSessionCommand.mock.calls[1][1]).toMatchObject({ operation: 'input', bytes: 'AP8=' })
+  })
+
+  it('splits a paste into bounded commands without changing its UTF-8 bytes', async () => {
+    await open()
+    const paste = 'ж'.repeat(9000)
+    terminals[0].data(paste)
+    await flushPromises()
+    const actual = client.sendSessionCommand.mock.calls.map(([, command]) => atob(command.bytes)).join('')
+    expect(Array.from(actual, (char) => char.charCodeAt(0))).toEqual(Array.from(new TextEncoder().encode(paste)))
+    expect(client.sendSessionCommand).toHaveBeenCalledTimes(3)
+  })
+
+  it('sends a resize and applies dimensions only from the journal event', async () => {
+    await open()
+    await wrapper.get('input[aria-label="Columns"]').setValue(120)
+    await wrapper.get('input[aria-label="Rows"]').setValue(40)
+    await wrapper.findAll('form')[1].trigger('submit')
+    await flushPromises()
+    expect(client.sendSessionCommand.mock.calls[0][1]).toMatchObject({
+      operation: 'resize', columns: 120, rows: 40,
+    })
+    expect(terminals[0].resize).not.toHaveBeenCalled()
+    sources[0].enqueue(encode([1, 0x102, [120, 40]]))
+    await flushPromises()
+    expect(terminals[0].resize).toHaveBeenCalledWith(120, 40)
+    expect(client.sendSessionCommand).toHaveBeenCalledOnce()
+  })
+
+  it('shows delivery failure and disables further input while retaining output', async () => {
+    client.sendSessionCommand.mockResolvedValue({ phase: 'DELIVERY_FAILED', detail: 'agent offline' })
+    await open()
+    terminals[0].data('a')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('agent offline')
+    expect(terminals[0].options.disableStdin).toBe(true)
+    terminals[0].data('b')
+    expect(client.sendSessionCommand).toHaveBeenCalledOnce()
+    sources[0].enqueue(encode([1, 0x100, Uint8Array.of(65)]))
+    await flushPromises()
+    expect(terminals[0].write).toHaveBeenCalledOnce()
   })
 
   it('aborts the old session before opening another and cancels on close', async () => {
@@ -64,7 +147,7 @@ describe('terminal view lifecycle', () => {
     expect(terminals[0].dispose).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('Session session-2')
     await wrapper.get('button[type="button"]').trigger('click')
-    expect(client.sessionEvents.mock.calls[1][2].aborted).toBe(true)
+    expect(client.sessionEvents.mock.calls[3][2].aborted).toBe(true)
     expect(terminals[1].dispose).toHaveBeenCalledOnce()
     expect(wrapper.get('[role="status"]').text()).toBe('')
   })

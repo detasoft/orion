@@ -9,6 +9,23 @@ describe('formatRelativeDate', () => {
 })
 
 describe('createOrionClient', () => {
+  it('sends command identities and reads their existing server status', async () => {
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(new Response('{}', {
+      headers: { 'Content-Type': 'application/json' },
+    })))
+    const signal = new AbortController().signal
+    const client = createOrionClient({ token: 'token', fetchImpl })
+    const command = { commandId: 'input-1', operation: 'input', bytes: 'AP8=' }
+    await client.sendSessionCommand('session-1', command, signal)
+    await client.sessionCommandStatus('session-1', 'input-1', signal)
+    expect(fetchImpl.mock.calls[0][0]).toBe('/api/admin/sessions/session-1/commands')
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual(command)
+    expect(fetchImpl.mock.calls[0][1].method).toBe('POST')
+    expect(fetchImpl.mock.calls[0][1].headers.get('Authorization')).toBe('Bearer token')
+    expect(fetchImpl.mock.calls[1][0]).toBe('/api/admin/sessions/session-1/commands?commandId=input-1')
+    expect(fetchImpl.mock.calls[1][1].signal).toBe(signal)
+  })
+
   it('opens an authenticated live journal with an exact unsigned cursor and cancellation', async () => {
     const response = new Response(new Uint8Array([0x80]), {
       headers: { 'Content-Type': 'application/cbor-seq' },
@@ -17,7 +34,7 @@ describe('createOrionClient', () => {
     const signal = new AbortController().signal
     const client = createOrionClient({ token: 'secret-token', fetchImpl })
 
-    expect(await client.sessionEvents('session 1', '18446744073709551614', signal)).toBe(response)
+    expect(await client.sessionEvents('session 1', '18446744073709551614', signal, true)).toBe(response)
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('/api/admin/sessions/session%201/events?follow=true&after=18446744073709551614')
     expect(init.headers.get('Authorization')).toBe('Bearer secret-token')

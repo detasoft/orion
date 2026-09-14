@@ -117,7 +117,7 @@ describe('session terminal replay', () => {
       headers: { 'Content-Type': 'application/cbor-seq' },
     })])
     const running = test.run()
-    await vi.waitFor(() => expect(test.onStatus).toHaveBeenCalledWith('Following session'))
+    await vi.waitFor(() => expect(test.onStatus).toHaveBeenCalledWith('Replaying history'))
     test.abort.abort()
     await running
     expect(cancel).toHaveBeenCalledOnce()

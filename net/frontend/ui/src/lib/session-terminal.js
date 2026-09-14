@@ -2,14 +2,19 @@ import { decodeSequence, getEncoded } from 'cbor2'
 
 const MAX_RECORD_BYTES = 16 * 1024 * 1024 + 4096
 
-export async function followSessionTerminal({ client, sessionId, terminal, signal, onStatus }) {
+export async function followSessionTerminal({
+  client, sessionId, terminal, signal, onStatus, onAvailability = () => {},
+}) {
   let cursor = null
+  let terminalClosed = false
+  let history = true
   let retryDelay = 1000
   while (!signal.aborted) {
     onStatus(cursor === null ? 'Connecting…' : 'Reconnecting…')
+    onAvailability(false)
     let response
     try {
-      response = await client.sessionEvents(sessionId, cursor?.toString() ?? null, signal)
+      response = await client.sessionEvents(sessionId, cursor?.toString() ?? null, signal, !history)
     } catch (error) {
       if (signal.aborted) return
       if (error.status && error.status < 500 && error.status !== 408 && error.status !== 429) throw error
@@ -24,11 +29,13 @@ export async function followSessionTerminal({ client, sessionId, terminal, signa
         await response.body?.cancel()
         throw new Error('Expected a session journal stream')
       }
-      onStatus('Following session')
+      onStatus(history ? 'Replaying history' : 'Following session')
+      onAvailability(!history && !terminalClosed)
       const reader = response.body.getReader()
       const cancel = () => { reader.cancel().catch(() => {}) }
       signal.addEventListener('abort', cancel, { once: true })
       let pending = new Uint8Array()
+      let completed = false
       try {
         while (!signal.aborted) {
           let chunk
@@ -37,7 +44,11 @@ export async function followSessionTerminal({ client, sessionId, terminal, signa
           } catch {
             break
           }
-          if (chunk.done || signal.aborted) break
+          if (signal.aborted) break
+          if (chunk.done) {
+            completed = pending.length === 0
+            break
+          }
           const bytes = new Uint8Array(pending.length + chunk.value.length)
           bytes.set(pending)
           bytes.set(chunk.value, pending.length)
@@ -84,6 +95,8 @@ export async function followSessionTerminal({ client, sessionId, terminal, signa
                 terminal.resize(payload[0], payload[1])
                 break
               case 0x0103:
+                terminalClosed = true
+                onAvailability(false)
                 onStatus('Terminal closed; waiting for session exit')
                 break
               case 0x0201:
@@ -103,9 +116,14 @@ export async function followSessionTerminal({ client, sessionId, terminal, signa
           }
         }
       } finally {
+        onAvailability(false)
         signal.removeEventListener('abort', cancel)
         await reader.cancel().catch(() => {})
         reader.releaseLock()
+      }
+      if (history && completed) {
+        history = false
+        continue
       }
     }
     if (signal.aborted) return

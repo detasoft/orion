@@ -122,4 +122,10 @@ public class OrionHttpModule {
         return route;
     }
 
+    @Provides
+    @IntoSet
+    static OrionHttpRoute sessionCommandsRoute(SessionCommandsRoute route) {
+        return route;
+    }
+
 }
