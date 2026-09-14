@@ -242,6 +242,11 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     }
 
     @Override
+    public boolean isPublicRepositoryName(String repositoryName) {
+        return !isBootstrapCache(repositoryName(repositoryName));
+    }
+
+    @Override
     public boolean exists(String repositoryName) {
         String canonicalName = repositoryName(repositoryName);
         return (!isBootstrapCache(canonicalName) || binding(canonicalName) != null)

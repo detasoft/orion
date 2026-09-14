@@ -56,6 +56,29 @@ class DefaultGitNativeRepositoryServiceTest {
     private static final String TAG_ID = "2".repeat(40);
 
     @Test
+    void rejectsInternalRepositoryForReadsAndReceiveEvenWhenAccessHookAllowsIt() {
+        InMemoryNativeGitRepositoryProvider backend = providerWithMainRef();
+        RecordingProvider provider = new RecordingProvider(backend);
+        provider.publicName = false;
+        GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
+
+        assertThatThrownBy(() -> legacyUploadPackAdvertisement(service, request("demo")))
+                .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
+        assertThatThrownBy(() -> lsRefs(service, request("demo"),
+                new LsRefsRequest(false, false, false, List.of())))
+                .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
+        assertThatThrownBy(() -> legacyReceivePackAdvertisement(service, receiveRequest("demo")))
+                .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
+        assertThatThrownBy(() -> service.beginLegacyReceivePack(
+                receiveRequest("demo"), GitNativeRepositoryAccessHook.ALLOW_ALL))
+                .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
+        assertThatThrownBy(() -> legacyReceivePackAdvertisement(service, receiveRequest("new")))
+                .isInstanceOf(GitNativeRepositoryAccessHook.AccessDeniedException.class);
+        assertThat(backend.exists("new")).isFalse();
+        assertThat(provider.readCalls).isZero();
+    }
+
+    @Test
     void uploadPackAdvertisementFailsWhenRepositoryIsMissing() {
         InMemoryNativeGitRepositoryProvider provider = new InMemoryNativeGitRepositoryProvider();
         GitNativeRepositoryService service = new DefaultGitNativeRepositoryService(provider);
@@ -1246,6 +1269,12 @@ class DefaultGitNativeRepositoryServiceTest {
         private int readCalls;
         private int publishCalls;
         private boolean rejectPublication;
+        private boolean publicName = true;
+
+        @Override
+        public boolean isPublicRepositoryName(String repositoryName) {
+            return publicName;
+        }
 
         private RecordingProvider(NativeGitRepositoryProvider backend) {
             this.backend = backend;

@@ -26,6 +26,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
     @Test
+    void keepsActiveBootstrapCacheInternalWhileOrdinaryNamesRemainPublic() {
+        ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), new AtomicInteger());
+        String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+
+        assertThat(provider.isPublicRepositoryName(name)).isFalse();
+        assertThat(provider.isPublicRepositoryName(name.replace("/", "%2F"))).isFalse();
+        assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
+        assertThat(provider.isPublicRepositoryName("team/repo")).isTrue();
+        provider.activate(ignored -> Map.of(), ignored -> new char[0]);
+        assertThat(provider.isPublicRepositoryName(name)).isFalse();
+    }
+
+    @Test
     void canonicalizesBeforeProxyBindingLookupAndBackendAccess() throws Exception {
         InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
         backend.create("team/repo").valueOrFailure("repository");

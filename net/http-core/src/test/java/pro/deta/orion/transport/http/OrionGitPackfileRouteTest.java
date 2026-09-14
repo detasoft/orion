@@ -50,6 +50,24 @@ class OrionGitPackfileRouteTest {
     private Path tempDir;
 
     @Test
+    void hidesInternalPackEvenFromReaderWithRepositoryGrant() throws Exception {
+        FileNativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(tempDir);
+        NativeGitRepository repository = backend.create("team/project").valueOrFailure("repository");
+        PublishedPackFixture pack = publishPack(repository);
+        RecordingProvider provider = new RecordingProvider(backend);
+        provider.publicName = false;
+        ResponseRecorder response = new ResponseRecorder();
+
+        service(new OrionGitPackfileRoute(provider), request("GET",
+                "/r/team/project.git/objects/pack/" + pack.publishedPack().packId() + ".pack",
+                repositorySecurityContext("team/project")), response.proxy());
+
+        assertThat(response.status).isEqualTo(HttpServletResponse.SC_NOT_FOUND);
+        assertThat(response.body.size()).isZero();
+        assertThat(provider.readCalls).isZero();
+    }
+
+    @Test
     void usesTheSameCanonicalNameForAuthorizationAndProviderRead() throws Exception {
         FileNativeGitRepositoryProvider backend =
                 new FileNativeGitRepositoryProvider(tempDir);
@@ -281,6 +299,12 @@ class OrionGitPackfileRouteTest {
         private final NativeGitRepositoryProvider backend;
         private int readCalls;
         private String lastReadName;
+        private boolean publicName = true;
+
+        @Override
+        public boolean isPublicRepositoryName(String repositoryName) {
+            return publicName;
+        }
 
         private RecordingProvider(NativeGitRepositoryProvider backend) {
             this.backend = backend;

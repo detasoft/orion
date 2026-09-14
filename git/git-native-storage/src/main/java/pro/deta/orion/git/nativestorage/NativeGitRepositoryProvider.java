@@ -13,6 +13,10 @@ public interface NativeGitRepositoryProvider {
         return List.of();
     }
 
+    default boolean isPublicRepositoryName(String repositoryName) {
+        return true;
+    }
+
     boolean exists(String repositoryName);
 
     Result<NativeGitRepository> find(String repositoryName);

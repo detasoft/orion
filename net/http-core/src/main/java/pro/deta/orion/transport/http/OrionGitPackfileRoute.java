@@ -88,6 +88,9 @@ public final class OrionGitPackfileRoute implements OrionHttpRoute {
 
     private Optional<NativeGitRepository> repository(
             String repositoryName) {
+        if (!repositoryProvider.isPublicRepositoryName(repositoryName)) {
+            return Optional.empty();
+        }
         return switch (repositoryProvider.openForRead(repositoryName)) {
             case Result.Success(NativeGitRepository repository) ->
                     Optional.of(repository);

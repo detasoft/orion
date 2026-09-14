@@ -87,6 +87,7 @@ public final class DefaultGitNativeRepositoryService
             String repositoryPath,
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(accessHook, "accessHook");
+        requirePublicRepository(repositoryPath);
         accessHook.beforeRead(repositoryPath);
         return check(repositoryPath, repositoryProvider.openForRead(repositoryPath));
     }
@@ -753,8 +754,16 @@ public final class DefaultGitNativeRepositoryService
             String repositoryName,
             GitNativeRepositoryAccessHook accessHook) {
         Objects.requireNonNull(accessHook, "accessHook");
+        requirePublicRepository(repositoryName);
         accessHook.beforeReceive(repositoryName);
         return findOrCreate(repositoryName, accessHook);
+    }
+
+    private void requirePublicRepository(String repositoryName) {
+        if (!repositoryProvider.isPublicRepositoryName(repositoryName)) {
+            throw new GitNativeRepositoryAccessHook.AccessDeniedException(
+                    "Repository is not publicly accessible", null);
+        }
     }
 
     private static String failureMessage(
