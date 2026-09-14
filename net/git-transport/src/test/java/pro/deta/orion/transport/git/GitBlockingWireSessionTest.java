@@ -6,6 +6,10 @@ import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
+import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
+import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
 import pro.deta.orion.git.parser.wire.GitBlockingWireSession;
@@ -14,6 +18,7 @@ import pro.deta.orion.git.parser.wire.GitWireConfiguration;
 import pro.deta.orion.git.parser.wire.NativePackfileUriSourceFactory;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestData;
 import pro.deta.orion.git.parser.wire.exchange.InitialRequestService;
+import pro.deta.orion.util.Result;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -32,6 +37,49 @@ class GitBlockingWireSessionTest {
     private static final String MAIN_ID = "1".repeat(40);
     private static final String WANT = "2".repeat(40);
     private static final String NULL_ID = "0".repeat(40);
+
+    @Test
+    void receivePreservesOriginalPackThroughTheWireAndProvider() throws Exception {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        NativeGitRepository repository = backend.create("project").valueOrFailure("repository");
+        var prepared = repository.prepareFileUpdate("main", Map.of("config.txt", new byte[]{1}),
+                "prepared", GitCommitAuthor.EMPTY);
+        byte[] original = prepared.pack();
+        NativeGitRepositoryProvider provider = new NativeGitRepositoryProvider() {
+            @Override
+            public boolean exists(String name) {
+                return backend.exists(name);
+            }
+
+            @Override
+            public Result<NativeGitRepository> find(String name) {
+                return backend.find(name);
+            }
+
+            @Override
+            public Result<NativeGitRepository> create(String name) {
+                return backend.create(name);
+            }
+
+            @Override
+            public List<RefUpdateResult> publish(String name, PackIngestionResult.Complete received,
+                    List<LooseRefStore.Update> updates, boolean atomic) {
+                assertThat(received.packBytes()).isEqualTo(original);
+                return NativeGitRepositoryProvider.super.publish(name, received, updates, atomic);
+            }
+        };
+        try (QueueBufferedByteInput input = new QueueBufferedByteInput(Duration.ofSeconds(1))) {
+            RecordingBufferedByteOutput output = new RecordingBufferedByteOutput();
+            input.feed(legacyReceiveRequest(NULL_ID + " " + prepared.refUpdates().getFirst().newId()
+                    + " refs/heads/main\0report-status\n"));
+            input.feed(original);
+
+            session(input, output, provider).serveSmartHttpPost(receiveV1Request());
+
+            assertThat(output.ascii()).contains("ok refs/heads/main\n");
+            assertThat(repository.refs()).containsEntry("refs/heads/main", prepared.refUpdates().getFirst().newId());
+        }
+    }
 
     @Test
     void advertiseWritesProtocolV2Capabilities() throws Exception {
@@ -950,7 +998,7 @@ class GitBlockingWireSessionTest {
     private static GitBlockingWireSession session(
             QueueBufferedByteInput input,
             RecordingBufferedByteOutput output,
-            InMemoryNativeGitRepositoryProvider provider) {
+            NativeGitRepositoryProvider provider) {
         GitBlockingWireTransport wire =
                 new GitBlockingWireTransport(input, output);
         return new GitBlockingWireSession(

@@ -7,6 +7,7 @@ import io.netty.buffer.Unpooled;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestor;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.client.GitReceivePackResult;
@@ -17,6 +18,8 @@ import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
 import java.nio.file.Files;
@@ -24,6 +27,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,7 +41,15 @@ class NativeBootstrapGitPusherTest {
     void runtimeProxyPushesNativeCommitToFileUpstream() throws Exception {
         Upstream upstream = upstream("success", "first");
         BootstrapGitLocation location = location(upstream.bare());
-        NativeGitRepository repository = repository(location);
+        AtomicInteger rebuiltPacks = new AtomicInteger();
+        NativeGitRepository repository = new NativeGitRepository(
+                location.proxyName(), new LooseRefStore(), new LooseObjectStore(), location.refName()) {
+            @Override
+            public NativePackProducer fetch(NativeFetchRequest request) {
+                rebuiltPacks.incrementAndGet();
+                return super.fetch(request);
+            }
+        };
         NativeBootstrapGitFetcher fetcher = new NativeBootstrapGitFetcher();
         fetcher.fetch(location, new GitFileClientTransport(), repository);
         NativeGitFileUpdate update = repository.prepareFileUpdate(
@@ -53,11 +65,12 @@ class NativeBootstrapGitPusherTest {
                 new NativeBootstrapGitPusher());
 
         List<RefUpdateResult> results = proxy.publish(
-                unpack(repository, update),
+                ingest(repository, update),
                 update.refUpdates(),
                 true);
 
         assertThat(results).doesNotContain(RefUpdateResult.STALE);
+        assertThat(rebuiltPacks).hasValue(0);
         try (Git bareGit = Git.open(upstream.bare().toFile())) {
             assertThat(repository.refs().get(location.refName()))
                     .isEqualTo(bareGit.getRepository().resolve(location.refName()).name());
@@ -78,7 +91,8 @@ class NativeBootstrapGitPusherTest {
                 Map.of("orion.xml", "proxy change".getBytes()),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
-        repository.publishObjects(unpack(repository, update));
+        PackIngestionResult.Complete received = ingest(repository, update);
+        repository.publishObjects(received.quarantine());
         Files.writeString(upstream.worktree().resolve("orion.xml"), "upstream change");
         upstream.git().add().addFilepattern("orion.xml").call();
         upstream.git().commit().setMessage("upstream update")
@@ -89,6 +103,7 @@ class NativeBootstrapGitPusherTest {
                 location,
                 new GitFileClientTransport(),
                 repository,
+                received,
                 update.refUpdates(),
                 true);
 
@@ -164,15 +179,15 @@ class NativeBootstrapGitPusherTest {
 
     private record Upstream(Git git, Path worktree, Path bare) {
     }
-    private static LooseObjectStore unpack(NativeGitRepository repository, NativeGitFileUpdate update) {
+
+    private static PackIngestionResult.Complete ingest(NativeGitRepository repository, NativeGitFileUpdate update) {
         byte[] pack = update.pack();
         ByteBuf input = Unpooled.wrappedBuffer(pack);
         try (PackIngestor ingestor = new PackIngestor(
                 new PackIngestionLimits(pack.length, 100, 1024 * 1024), repository::readObject)) {
-            return ingestor.ingest(input, repository::readObject);
+            return (PackIngestionResult.Complete) ingestor.accept(input);
         } finally {
             input.release();
         }
     }
-
 }

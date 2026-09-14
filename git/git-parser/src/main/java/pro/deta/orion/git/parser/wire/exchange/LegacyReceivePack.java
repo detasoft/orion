@@ -1,14 +1,14 @@
 package pro.deta.orion.git.parser.wire.exchange;
 
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 
 import java.util.Objects;
 
 public record LegacyReceivePack(
         LegacyReceiveCommandSection commandSection,
-        LooseObjectStore quarantine) {
+        PackIngestionResult.Complete pack) {
     public LegacyReceivePack {
         Objects.requireNonNull(commandSection, "commandSection");
-        Objects.requireNonNull(quarantine, "quarantine");
+        Objects.requireNonNull(pack, "pack");
     }
 }

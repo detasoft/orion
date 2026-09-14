@@ -13,6 +13,7 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PublishedPackContent;
 import pro.deta.orion.git.nativestorage.pack.PublishedPackManifest;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
@@ -117,7 +118,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
         provider.requireBinding(repositoryName);
         return provider.publish(
                 repositoryName,
-                new LooseObjectStore(),
+                new PackIngestionResult.Complete(new LooseObjectStore()),
                 List.of(new LooseRefStore.Update(refName, expectedOldId, newId)),
                 true).getFirst();
     }
@@ -158,11 +159,20 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     }
 
     @Override
+    public List<RefUpdateResult> publishReceivedPack(
+            PackIngestionResult.Complete received,
+            List<LooseRefStore.Update> updates,
+            boolean atomic) {
+        provider.requireBinding(repositoryName);
+        return provider.publish(repositoryName, received, updates, atomic);
+    }
+
+    @Override
     public List<RefUpdateResult> publishObjectsAndRefs(
             LooseObjectStore objects,
             List<LooseRefStore.Update> updates) {
         provider.requireBinding(repositoryName);
-        return provider.publish(repositoryName, objects, updates, true);
+        return provider.publish(repositoryName, new PackIngestionResult.Complete(objects), updates, true);
     }
 
     @Override
@@ -171,7 +181,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             List<LooseRefStore.Update> updates,
             boolean atomic) {
         provider.requireBinding(repositoryName);
-        return provider.publish(repositoryName, objects, updates, atomic);
+        return provider.publish(repositoryName, new PackIngestionResult.Complete(objects), updates, atomic);
     }
 
     @Override

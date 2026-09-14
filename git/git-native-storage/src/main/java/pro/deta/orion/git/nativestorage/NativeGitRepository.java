@@ -278,10 +278,17 @@ public class NativeGitRepository implements AutoCloseable {
             }
             return NativeGitReceivePack.complete(
                     name(), this, complete.quarantine(), updates, atomic, accessHook,
-                    valid -> publishObjectsAndRefs(complete.quarantine(), valid, atomic));
+                    valid -> publishReceivedPack(complete, valid, atomic));
         } finally {
             input.release();
         }
+    }
+
+    public List<RefUpdateResult> publishReceivedPack(
+            PackIngestionResult.Complete received,
+            List<LooseRefStore.Update> updates,
+            boolean atomic) {
+        return publishObjectsAndRefs(received.quarantine(), updates, atomic);
     }
 
     public List<RefUpdateResult> publishObjectsAndRefs(

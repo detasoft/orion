@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
@@ -48,10 +49,11 @@ final class BootstrapGitRuntimeProxy implements RuntimeGitProxyBinding {
 
     @Override
     public synchronized List<RefUpdateResult> publish(
-            LooseObjectStore objects,
+            PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
-        Objects.requireNonNull(objects, "objects");
+        Objects.requireNonNull(received, "received");
+        LooseObjectStore objects = received.quarantine();
         Objects.requireNonNull(updates, "updates");
         refresh();
         List<RefUpdateResult> preview = repository.previewRefUpdates(updates, atomic);
@@ -71,7 +73,7 @@ final class BootstrapGitRuntimeProxy implements RuntimeGitProxyBinding {
             return preview;
         }
         repository.publishObjects(objects);
-        List<Boolean> accepted = push(candidates, atomic);
+        List<Boolean> accepted = push(received, candidates, atomic);
         if (accepted.size() != candidates.size()) {
             throw new BootstrapGitProxyException("upstream ref publication");
         }
@@ -101,12 +103,13 @@ final class BootstrapGitRuntimeProxy implements RuntimeGitProxyBinding {
     }
 
     private List<Boolean> push(
+            PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
         try {
             return transportFactory.withTransport(
                     location,
-                    transport -> pusher.push(location, transport, repository, updates, atomic));
+                    transport -> pusher.push(location, transport, repository, received, updates, atomic));
         } catch (BootstrapGitProxyException error) {
             throw error;
         } catch (Exception error) {

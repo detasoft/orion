@@ -1,6 +1,6 @@
 package pro.deta.orion.git.proxy;
 
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 
@@ -10,7 +10,7 @@ public interface RuntimeGitProxyBinding {
     void refresh();
 
     List<RefUpdateResult> publish(
-            LooseObjectStore objects,
+            PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic);
 }

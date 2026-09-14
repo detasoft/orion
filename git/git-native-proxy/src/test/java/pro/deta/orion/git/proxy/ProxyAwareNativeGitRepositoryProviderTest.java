@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
@@ -27,6 +28,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProxyAwareNativeGitRepositoryProviderTest {
+    @Test
+    void passesPreparedPackUnchangedToTheUpstreamPusher() throws Exception {
+        java.util.ArrayList<byte[]> forwarded = new java.util.ArrayList<>();
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
+                new InMemoryNativeGitRepositoryProvider(), new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> { },
+                (location, transport, repository, received, updates, atomic) -> {
+                    forwarded.add(received.packBytes());
+                    return java.util.Collections.nCopies(updates.size(), true);
+                });
+        String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+        NativeGitRepository repository = provider.openForWrite(name).valueOrFailure("repository");
+        var prepared = repository.prepareFileUpdate("main", Map.of("orion.xml", new byte[]{1}),
+                "prepared", GitCommitAuthor.EMPTY);
+
+        ReceivePackStatus.requireSuccess(provider.publishPack(
+                name, prepared.pack(), prepared.refUpdates(), true, GitNativeRepositoryAccessHook.ALLOW_ALL));
+
+        assertThat(forwarded).hasSize(1);
+        assertThat(forwarded.getFirst()).isEqualTo(prepared.pack());
+    }
+
     @Test
     void checksRefAccessBeforeForwardingAnInternalPack() throws Exception {
         AtomicInteger pushes = new AtomicInteger();
@@ -81,7 +104,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
             @Override
             public List<RefUpdateResult> publish(
-                    LooseObjectStore objects,
+                    PackIngestionResult.Complete received,
                     List<LooseRefStore.Update> updates,
                     boolean atomic) {
                 publishes.incrementAndGet();
@@ -92,7 +115,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 backend,
                 new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
-                (location, transport, repository, updates, atomic) -> List.of());
+                (location, transport, repository, received, updates, atomic) -> List.of());
         provider.activate(ignored -> Map.of("team/repo", binding), ignored -> new char[0]);
 
         NativeGitRepository repository = provider.openForRead("team%2Frepo")
@@ -290,7 +313,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 backend,
                 new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> refreshes.incrementAndGet(),
-                (location, transport, repository, updates, atomic) ->
+                (location, transport, repository, received, updates, atomic) ->
                         java.util.Collections.nCopies(updates.size(), true));
 
         provider.saveFiles(
@@ -313,7 +336,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 backend,
                 new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
-                (location, transport, repository, updates, atomic) -> List.of());
+                (location, transport, repository, received, updates, atomic) -> List.of());
         RecordingBinding first = new RecordingBinding();
         RecordingBinding second = new RecordingBinding();
 
@@ -335,7 +358,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 backend,
                 new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
-                (location, transport, repository, updates, atomic) -> List.of());
+                (location, transport, repository, received, updates, atomic) -> List.of());
 
         assertThatThrownBy(() -> provider.activate(
                 ignored -> Map.of("team%2Frepo", new RecordingBinding()),
@@ -393,7 +416,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
                 backend, new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { throw new IllegalStateException("upstream unavailable"); },
-                (location, transport, repository, updates, atomic) -> List.of());
+                (location, transport, repository, received, updates, atomic) -> List.of());
         BootstrapSourceConfig source = remoteSource("orion.xml");
 
         assertThatThrownBy(() -> provider.prepareProvisional("configuration", source))
@@ -486,7 +509,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         return new ProxyAwareNativeGitRepositoryProvider(
                 backend, new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
-                (location, transport, repository, updates, atomic) ->
+                (location, transport, repository, received, updates, atomic) ->
                         java.util.Collections.nCopies(updates.size(), true));
     }
 
@@ -504,7 +527,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 new InMemoryNativeGitRepositoryProvider(),
                 new BootstrapSecretResolver(environment),
                 (location, transport, repository) -> refreshes.incrementAndGet(),
-                (location, transport, repository, updates, atomic) -> {
+                (location, transport, repository, received, updates, atomic) -> {
                     pushes.incrementAndGet();
                     return java.util.Collections.nCopies(updates.size(), true);
                 });
@@ -552,7 +575,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
 
         @Override
         public List<RefUpdateResult> publish(
-                LooseObjectStore objects,
+                PackIngestionResult.Complete received,
                 List<LooseRefStore.Update> updates,
                 boolean atomic) {
             return java.util.Collections.nCopies(updates.size(), RefUpdateResult.STALE);

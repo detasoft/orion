@@ -612,7 +612,7 @@ public final class GitBlockingWireSession {
         try {
             receivePack = section.requiresPack()
                     ? readLegacyReceivePack(section)
-                    : new LegacyReceivePack(section, new LooseObjectStore());
+                    : new LegacyReceivePack(section, new PackIngestionResult.Complete(new LooseObjectStore()));
         } catch (IOException error) {
             if (!isReceivePackInputFailure(error)) {
                 throw error;
@@ -896,7 +896,7 @@ public final class GitBlockingWireSession {
     private static LegacyReceivePack receivePack(
             LegacyReceiveCommandSection section,
             PackIngestionResult.Complete complete) {
-        return new LegacyReceivePack(section, complete.quarantine());
+        return new LegacyReceivePack(section, complete);
     }
 
     private void completeLegacyReceivePack(LegacyReceivePack receivePack)

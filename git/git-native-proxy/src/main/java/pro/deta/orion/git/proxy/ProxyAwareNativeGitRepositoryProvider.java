@@ -1,5 +1,6 @@
 package pro.deta.orion.git.proxy;
 
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import jakarta.inject.Singleton;
@@ -315,15 +316,15 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     @Override
     public List<RefUpdateResult> publish(
             String repositoryName,
-            LooseObjectStore objects,
+            PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
         String canonicalName = repositoryName(repositoryName);
         RuntimeGitProxyBinding proxy = binding(canonicalName);
         if (proxy == null) {
-            return NativeGitRepositoryProvider.super.publish(canonicalName, objects, updates, atomic);
+            return NativeGitRepositoryProvider.super.publish(canonicalName, received, updates, atomic);
         }
-        return proxy.publish(objects, updates, atomic);
+        return proxy.publish(received, updates, atomic);
     }
 
     private Result<NativeGitRepository> policyBound(String repositoryName) {

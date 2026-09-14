@@ -2,6 +2,7 @@ package pro.deta.orion.git.proxy;
 
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 
 import java.util.List;
@@ -12,6 +13,7 @@ interface BootstrapGitPusher {
             BootstrapGitLocation location,
             GitClientTransport transport,
             NativeGitRepository repository,
+            PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) throws Exception;
 }

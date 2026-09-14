@@ -1214,7 +1214,7 @@ class DefaultGitNativeRepositoryServiceTest {
                         commands,
                         capabilities,
                         advertisement),
-                quarantine);
+                new PackIngestionResult.Complete(quarantine));
     }
 
     private static PackIngestionResult.Complete ingestReceivePack(
@@ -1310,14 +1310,14 @@ class DefaultGitNativeRepositoryServiceTest {
         @Override
         public List<RefUpdateResult> publish(
                 String repositoryName,
-                LooseObjectStore objects,
+                PackIngestionResult.Complete received,
                 List<LooseRefStore.Update> updates,
                 boolean atomic) {
             publishCalls++;
             if (!rejectPublication) {
                 return NativeGitRepositoryProvider.super.publish(
                         repositoryName,
-                        objects,
+                        received,
                         updates,
                         atomic);
             }

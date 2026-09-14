@@ -1,7 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.util.Result;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.nativestorage.receive.GitNativeRepositoryAccessHook;
@@ -69,11 +69,11 @@ public interface NativeGitRepositoryProvider {
 
     default List<RefUpdateResult> publish(
             String repositoryName,
-            LooseObjectStore objects,
+            PackIngestionResult.Complete received,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
         return openForWrite(repositoryName)
                 .valueOrFailure("Cannot open native repository " + repositoryName)
-                .publishObjectsAndRefs(objects, updates, atomic);
+                .publishReceivedPack(received, updates, atomic);
     }
 }

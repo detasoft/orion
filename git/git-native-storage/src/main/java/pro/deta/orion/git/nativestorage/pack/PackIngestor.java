@@ -502,7 +502,7 @@ public final class PackIngestor implements PackIngestionSession {
         }
         Optional<PublishedPack> pack = publishPack();
         quarantineTransferred = true;
-        return new PackIngestionResult.Complete(quarantine, pack);
+        return new PackIngestionResult.Complete(quarantine, pack, rawPack.toByteArray(), externalBaseIds);
     }
 
     private Optional<PublishedPack> publishPack() {
