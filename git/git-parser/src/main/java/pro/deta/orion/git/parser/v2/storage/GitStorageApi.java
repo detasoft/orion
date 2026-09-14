@@ -1,14 +1,17 @@
 package pro.deta.orion.git.parser.v2.storage;
 
+import pro.deta.orion.git.parser.v2.data.ObjectRead;
 import pro.deta.orion.git.parser.v2.data.RefUpdate;
 import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Provides the single external API for storage operations belonging to one repository.
@@ -24,13 +27,18 @@ import java.util.Map;
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
  *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing the requested objects.</li>
- *   <li>{@code readObject(objectId)} - return the object's type and full content, or absence.</li>
+ *   <li>{@code readObject(objectId)} - open an ObjectRead owned and closed by the caller, or return absence;
+ *       opening and reading failures are IOException, not absence.</li>
  *   <li>{@code readObjectPrefix(objectId, maxDataBytes)} - return type, full size, and a bounded prefix.</li>
  * </ul>
  * Method names and signatures are provisional. All operations must address the same repository;
  * objects needed by a ref update must be available before that update becomes visible.
  */
 public final class GitStorageApi {
+    public Optional<ObjectRead> readObject(ObjectId objectId) throws IOException {
+        throw new UnsupportedOperationException("Object reads are not implemented");
+    }
+
     public RefsSnapshot snapshotRefs() {
         throw new UnsupportedOperationException("Ref snapshots are not implemented");
     }

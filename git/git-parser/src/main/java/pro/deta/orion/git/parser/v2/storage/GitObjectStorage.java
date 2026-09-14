@@ -7,7 +7,8 @@ package pro.deta.orion.git.parser.v2.storage;
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code read(objectId)} - return the object's type and full content, or absence.</li>
+ *   <li>{@code read(objectId)} - open an ObjectRead for positional reads into caller-owned ByteBuffers,
+ *       or return absence; I/O failures remain errors.</li>
  *   <li>{@code readPrefix(objectId, maxDataBytes)} - return type, full size, and a bounded content prefix.</li>
  * </ul>
  * Method names and signatures are provisional. This view includes objects published through GitPackStorage;
