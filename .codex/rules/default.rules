@@ -9,3 +9,4 @@ prefix_rule(pattern=["git", "diff", "--cached", "--name-status"], decision="allo
 prefix_rule(pattern=["git", "cherry-pick"], decision="allow")
 prefix_rule(pattern=["git", "branch", "-D"], decision="allow")
 prefix_rule(pattern=["git", "worktree"], decision="allow")
+prefix_rule(pattern=["/bin/zsh", "-lc", "mvn test -Pdev -T 4 > /tmp/orion-0601-full.log 2>&1"], decision="allow")
