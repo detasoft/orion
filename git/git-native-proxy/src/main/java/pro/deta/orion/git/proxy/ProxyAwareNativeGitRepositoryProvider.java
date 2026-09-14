@@ -201,6 +201,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
 
     private String prepareLocal(String sourceId, String location) {
         String repositoryName = repositoryName(location.substring("local:".length()));
+        if (isBootstrapCache(repositoryName)) {
+            throw new IllegalArgumentException("Bootstrap cache cannot be used as a local repository");
+        }
         String previous = provisionalSources.putIfAbsent(sourceId, repositoryName);
         if (previous != null && !previous.equals(repositoryName)) {
             throw new IllegalStateException("Bootstrap source is already bound: " + sourceId);
@@ -231,7 +234,7 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         Map<String, RuntimeGitProxyBinding> hidden = activePhase ? activeBindings : provisionalBindings;
         java.util.ArrayList<String> visible = new java.util.ArrayList<>();
         for (String repositoryName : backend.repositoryNames()) {
-            if (!hidden.containsKey(repositoryName)) {
+            if (!isBootstrapCache(repositoryName) && !hidden.containsKey(repositoryName)) {
                 visible.add(repositoryName);
             }
         }
@@ -241,7 +244,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     @Override
     public boolean exists(String repositoryName) {
         String canonicalName = repositoryName(repositoryName);
-        return backend.exists(canonicalName);
+        return (!isBootstrapCache(canonicalName) || binding(canonicalName) != null)
+                && backend.exists(canonicalName);
     }
 
     @Override
@@ -252,6 +256,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
     @Override
     public Result<NativeGitRepository> create(String repositoryName) {
         String canonicalName = repositoryName(repositoryName);
+        if (isBootstrapCache(canonicalName)) {
+            return new Result.Failure<>(Result.FailureCode.NOT_SUPPORTED, "Bootstrap cache is internal");
+        }
         return backend.create(canonicalName);
     }
 
@@ -305,6 +312,9 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         String canonicalName = repositoryName(repositoryName);
         RuntimeGitProxyBinding proxy = binding(canonicalName);
         if (proxy == null) {
+            if (isBootstrapCache(canonicalName)) {
+                return new Result.Failure<>(Result.FailureCode.NOT_FOUND, "Bootstrap binding is unavailable");
+            }
             return backend.find(canonicalName);
         }
         proxy.refresh();
@@ -315,6 +325,16 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
                             repository));
             case Result.Failure<NativeGitRepository> failure -> failure;
         };
+    }
+
+    void requireBinding(String repositoryName) {
+        if (binding(repositoryName) == null) {
+            throw new IllegalStateException("Proxy binding is unavailable");
+        }
+    }
+
+    private static boolean isBootstrapCache(String repositoryName) {
+        return repositoryName.startsWith(BootstrapGitLocation.CACHE_PREFIX);
     }
 
     private RuntimeGitProxyBinding binding(String repositoryName) {

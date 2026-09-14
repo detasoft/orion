@@ -58,6 +58,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             Map<String, byte[]> files,
             String message,
             GitCommitAuthor author) throws GitOperationException {
+        provider.requireBinding(repositoryName);
         provider.saveFiles(repositoryName, branch, files, message, author);
     }
 
@@ -113,6 +114,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
 
     @Override
     public RefUpdateResult updateRef(String refName, String expectedOldId, String newId) {
+        provider.requireBinding(repositoryName);
         return provider.publish(
                 repositoryName,
                 new LooseObjectStore(),
@@ -159,6 +161,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     public List<RefUpdateResult> publishObjectsAndRefs(
             LooseObjectStore objects,
             List<LooseRefStore.Update> updates) {
+        provider.requireBinding(repositoryName);
         return provider.publish(repositoryName, objects, updates, true);
     }
 
@@ -167,6 +170,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
             LooseObjectStore objects,
             List<LooseRefStore.Update> updates,
             boolean atomic) {
+        provider.requireBinding(repositoryName);
         return provider.publish(repositoryName, objects, updates, atomic);
     }
 
@@ -216,6 +220,7 @@ final class PolicyBoundNativeGitRepository extends NativeGitRepository {
     }
 
     private NativeGitRepository repository() {
+        provider.requireBinding(repositoryName);
         return repository;
     }
 }

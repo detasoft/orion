@@ -1,17 +1,22 @@
 package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import pro.deta.orion.git.nativestorage.FileNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.GitObjectId;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
+import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
+import pro.deta.orion.util.Result;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -298,16 +303,87 @@ class ProxyAwareNativeGitRepositoryProviderTest {
     }
 
     @Test
-    void activationRemovesUnadoptedProvisionalBindings() {
+    void activationMakesUnadoptedProvisionalCachesUnavailable() {
         AtomicInteger refreshes = new AtomicInteger();
         ProxyAwareNativeGitRepositoryProvider provider = provider(refreshes, new AtomicInteger());
         provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         String repositoryName = provider.provisionalRepositoryName("configuration");
 
         provider.activate(ignored -> Map.of(), ignored -> new char[0]);
-        provider.openForRead(repositoryName).valueOrFailure("direct repository");
+        assertUnavailableCache(provider, repositoryName);
 
         assertThat(refreshes).hasValue(1);
+    }
+
+    @Test
+    void retainedHandleCannotReadOrPublishAfterItsBootstrapBindingIsRemoved() {
+        AtomicInteger pushes = new AtomicInteger();
+        ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), pushes);
+        String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
+        NativeGitRepository retained = provider.openForWrite(name).valueOrFailure("proxy handle");
+        provider.activate(ignored -> Map.of(), ignored -> new char[0]);
+
+        assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> retained.saveFiles(
+                "refs/heads/main", Map.of("orion.xml", new byte[]{1}), "save", GitCommitAuthor.EMPTY))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> retained.publishObjectsAndRefs(new LooseObjectStore(), List.of(), true))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(pushes).hasValue(0);
+    }
+
+    @Test
+    void hidesCacheAfterProviderRestartAndAllowsBootstrapToRebindIt(@TempDir Path root) {
+        NativeGitRepositoryProvider backend = new FileNativeGitRepositoryProvider(root);
+        ProxyAwareNativeGitRepositoryProvider original = provider(backend);
+        String name = original.prepareProvisional("configuration", remoteSource("orion.xml"));
+        ProxyAwareNativeGitRepositoryProvider restarted = provider(new FileNativeGitRepositoryProvider(root));
+
+        assertUnavailableCache(restarted, name);
+        assertThat(restarted.prepareProvisional("configuration", remoteSource("orion.xml"))).isEqualTo(name);
+        assertThat(restarted.openForRead(name)).isInstanceOf(Result.Success.class);
+        assertThat(restarted.repositoryNames()).doesNotContain(name);
+    }
+
+    @Test
+    void failedBootstrapRefreshLeavesNoAccessibleCache() {
+        InMemoryNativeGitRepositoryProvider backend = new InMemoryNativeGitRepositoryProvider();
+        ProxyAwareNativeGitRepositoryProvider provider = new ProxyAwareNativeGitRepositoryProvider(
+                backend, new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> { throw new IllegalStateException("upstream unavailable"); },
+                (location, transport, repository, updates, atomic) -> List.of());
+        BootstrapSourceConfig source = remoteSource("orion.xml");
+
+        assertThatThrownBy(() -> provider.prepareProvisional("configuration", source))
+                .isInstanceOf(BootstrapGitProxyException.class);
+        String name = BootstrapGitLocation.parse(source).proxyName();
+        assertThat(backend.exists(name)).isTrue();
+        assertUnavailableCache(provider, name);
+    }
+
+    private static void assertUnavailableCache(ProxyAwareNativeGitRepositoryProvider provider, String name) {
+        for (String spelling : List.of(name, name.replace("/", "%2F"))) {
+            assertThat(provider.exists(spelling)).isFalse();
+            assertThat(provider.find(spelling)).isInstanceOf(Result.Failure.class);
+            assertThat(provider.openForRead(spelling)).isInstanceOf(Result.Failure.class);
+            assertThat(provider.openForWrite(spelling)).isInstanceOf(Result.Failure.class);
+            assertThat(provider.create(spelling)).isEqualTo(new Result.Failure<>(
+                    Result.FailureCode.NOT_SUPPORTED, "Bootstrap cache is internal"));
+            assertThatThrownBy(() -> provider.saveFiles(
+                    spelling, "refs/heads/main", Map.of("orion.xml", new byte[]{1}),
+                    "save", GitCommitAuthor.EMPTY)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> provider.resolveProvisional("local", localSource(spelling), true))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(provider.repositoryNames()).doesNotContain(name);
+    }
+
+    private static ProxyAwareNativeGitRepositoryProvider provider(NativeGitRepositoryProvider backend) {
+        return new ProxyAwareNativeGitRepositoryProvider(
+                backend, new BootstrapSecretResolver(Map.of()),
+                (location, transport, repository) -> { },
+                (location, transport, repository, updates, atomic) ->
+                        java.util.Collections.nCopies(updates.size(), true));
     }
 
     private static ProxyAwareNativeGitRepositoryProvider provider(

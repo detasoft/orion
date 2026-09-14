@@ -2,12 +2,12 @@
 
 Status: foundation integrated; remaining boundaries and acceptance pending
 
-- Owner: codex, session bpr-7f31c2, started 2026-09-02 17:32 Europe/Amsterdam.
+- Owner: codex, session 01a09c7d-adbb-7993-aac7-4ebcee6a0514, started 2026-09-13 22:41 Europe/Amsterdam.
 
 ## Current evidence
 
-The foundation is integrated as `e7eac547`; the existing claim is preserved and
-this update does not take over its execution. Revalidate the remaining result
+The foundation is integrated as `e7eac547`; execution was transferred to the
+current session with user authorization. Revalidate the remaining result
 against current code rather than replaying the old branch implementation plan.
 `BootstrapContext`, `OrionKeyMaterialFactory`, proxy-bound native handles, and
 bootstrap tests already exist. Material creation is explicit in current startup.

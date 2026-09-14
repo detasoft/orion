@@ -24,6 +24,7 @@ record BootstrapGitLocation(
         Path knownHosts,
         String proxyName,
         String safeDescription) {
+    static final String CACHE_PREFIX = "bootstrap/proxy-";
     private static final String PREFIX = "git+";
     private static final Set<String> REMOTE_SCHEMES = Set.of(
             "git+ssh", "git+http", "git+https", "git+file");
@@ -103,7 +104,7 @@ record BootstrapGitLocation(
                 credential,
                 credentialUsername,
                 knownHosts,
-                "bootstrap/proxy-" + sha256(canonicalIdentity(remote) + "#" + refName),
+                CACHE_PREFIX + sha256(canonicalIdentity(remote) + "#" + refName),
                 safe);
     }
 
