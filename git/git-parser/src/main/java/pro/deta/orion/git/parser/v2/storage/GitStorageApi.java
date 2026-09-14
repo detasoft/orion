@@ -6,7 +6,6 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
-import pro.deta.orion.git.parser.v2.id.PackUploadId;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -17,15 +16,16 @@ import java.util.Optional;
 /**
  * Provides the single external API for storage operations belonging to one repository.
  * Commands use this API directly; ref, pack, and object stores remain internal implementation details.
- * Receive validation, access checks, and upstream forwarding belong to the operations using this API.
+ * Storage receives pack bytes into quarantine and checks physical format and checksum before returning PackId.
+ * Object resolution, operation-specific validation, access checks, and upstream forwarding belong to callers.
  *
  * <p>Preliminary methods:
  * <ul>
  *   <li>{@code snapshotRefs()} - return refs and symbolic or detached HEAD from one consistent state.</li>
  *   <li>{@code updateRefs(List<RefUpdate> updates, boolean atomic)} - conditionally update refs
  *       and return one RefUpdateResult containing the original update per input, in request order.</li>
- *   <li>{@code publishPack(PackUploadId uploadId)} - publish a completed, validated upload already held
- *       by repository storage and return its verified PackId; callers pass no files or paths.</li>
+ *   <li>{@code publishPack(PackId packId)} - publish a quarantined pack after object resolution and final
+ *       index preparation; callers pass no upload identifiers, files, or paths.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
  *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing the requested objects.</li>
@@ -37,7 +37,7 @@ import java.util.Optional;
  * objects needed by a ref update must be available before that update becomes visible.
  */
 public final class GitStorageApi {
-    public PackId publishPack(PackUploadId uploadId) throws IOException {
+    public void publishPack(PackId packId) throws IOException {
         throw new UnsupportedOperationException("Pack publication is not implemented");
     }
 

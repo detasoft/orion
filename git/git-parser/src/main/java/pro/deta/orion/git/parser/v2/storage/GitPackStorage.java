@@ -3,14 +3,16 @@ package pro.deta.orion.git.parser.v2.storage;
 /**
  * Stores validated packs internally behind GitStorageApi for reuse and delivery.
  * Callers outside this package access these operations only through GitStorageApi.
- * Pack parsing, quarantine, and receive policy belong to the calling operation; storing a pack does not
- * update refs or imply that a push was accepted.
+ * Receives bytes into quarantine and checks physical pack format and checksum without reading external bases.
+ * The calling operation owns object resolution and receive policy; storing a pack does not update refs or
+ * imply that a push was accepted.
  *
- * <p>Publication receives a PackUploadId identifying a completed, validated upload inside repository storage.
- * Its prepared data includes the verified PackId, pack bytes, index, and external-base object IDs.
- * Separate uploads have distinct upload IDs even when their verified PackIds match; no files or paths cross
- * the publication API. Coordination uses the verified PackId and protects publication after ingestion, not
- * reception of the incoming stream. Different pack IDs publish independently.
+ * <p>Reception returns the verified PackId and a preliminary scan index after all pack bytes are stored.
+ * Incomplete reception is identified only inside storage. Callers address quarantined packs by PackId;
+ * concurrent receptions of identical content require storage-owned coordination and cleanup so one operation
+ * cannot discard another operation's data. No upload identifiers, files, or paths cross the API.
+ * A checked checksum does not imply that all objects are resolved. Publication requires the final object
+ * index and external-base dependencies produced by resolution. Different pack IDs publish independently.
  * Refs remain subject to each operation's own checks and conditional updates even when pack data is reused.
  *
  * <p>All publishers of one repository share an internal GitLock. Acquire ownership for the verified packId,
@@ -20,12 +22,12 @@ package pro.deta.orion.git.parser.v2.storage;
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code publish(uploadId)} - retain the validated upload's pack and return its verified PackId.</li>
+ *   <li>{@code publish(packId)} - publish the quarantined pack after object resolution and index preparation.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
  * </ul>
  * Method names and signatures are provisional. Storage locates prepared data and external-base dependencies
- * by upload ID. Stored objects must remain readable after the ingestion session closes, including when a
+ * by PackId. Stored objects must remain readable after the ingestion session closes, including when a
  * thin pack depends on existing objects. A later ref rejection need not remove an already published pack.
  */
 final class GitPackStorage {
