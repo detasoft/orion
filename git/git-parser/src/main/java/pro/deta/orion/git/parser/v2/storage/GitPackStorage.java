@@ -1,7 +1,8 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 /**
- * Stores validated packs and exposes their content for reuse and delivery.
+ * Stores validated packs internally behind GitStorageApi for reuse and delivery.
+ * Callers outside this package access these operations only through GitStorageApi.
  * Pack parsing, quarantine, and receive policy belong to the calling operation; storing a pack does not
  * update refs or imply that a push was accepted.
  *
@@ -15,5 +16,5 @@ package pro.deta.orion.git.parser.v2.storage;
  * dependencies. Stored objects must remain readable after the ingestion session closes, including when a
  * thin pack depends on existing objects. A later ref rejection need not remove an already published pack.
  */
-public final class GitPackStorage {
+final class GitPackStorage {
 }

@@ -1,7 +1,8 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 /**
- * Reads repository refs and applies conditional ref updates.
+ * Implements ref reads and conditional updates internally behind GitStorageApi.
+ * Callers outside this package access these operations only through GitStorageApi.
  * Expected old object IDs are checked at publication time, including for force updates and internal writes.
  *
  * <p>Preliminary methods:
@@ -14,5 +15,5 @@ package pro.deta.orion.git.parser.v2.storage;
  * entire batch from being applied; otherwise commands may succeed independently. This does not imply crash
  * recovery for a partially persisted batch. Access and ancestry checks belong to the calling operation.
  */
-public final class GitRefsStorage {
+final class GitRefsStorage {
 }

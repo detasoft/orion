@@ -1,7 +1,8 @@
 package pro.deta.orion.git.parser.v2.storage;
 
 /**
- * Reads Git objects by ID independently of their loose or packed representation.
+ * Reads Git objects internally behind GitStorageApi independently of their loose or packed representation.
+ * Callers outside this package access these operations only through GitStorageApi.
  * Provides the object view used by graph validation, file loading, and outgoing pack construction.
  *
  * <p>Preliminary methods:
@@ -12,5 +13,5 @@ package pro.deta.orion.git.parser.v2.storage;
  * Method names and signatures are provisional. This view includes objects published through GitPackStorage;
  * callers must not need to know which pack contains an object or how its delta bases are resolved.
  */
-public final class GitObjectStorage {
+final class GitObjectStorage {
 }
