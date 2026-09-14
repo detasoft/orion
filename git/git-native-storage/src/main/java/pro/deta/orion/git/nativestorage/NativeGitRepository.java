@@ -228,7 +228,7 @@ public class NativeGitRepository implements AutoCloseable {
             PackIngestionLimits limits) {
         return new PackIngestor(
                 Objects.requireNonNull(limits, "limits"),
-                looseObjectStore,
+                this::readObject,
                 packPublicationStore);
     }
 
@@ -344,7 +344,7 @@ public class NativeGitRepository implements AutoCloseable {
         Objects.requireNonNull(request, "request");
         return new NativeFetchPackBuilder(
                 looseRefStore,
-                looseObjectStore,
+                this::readObject,
                 defaultHead,
                 Objects.requireNonNull(
                         packfileUriSource,

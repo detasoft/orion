@@ -1,8 +1,8 @@
 package pro.deta.orion.git.nativestorage.upload;
 
 import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.object.GitObjectReader;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.DeltaPackBuilder;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
@@ -23,7 +23,7 @@ public final class NativeFetchPackBuilder {
     private static final String DEFAULT_HEAD = "refs/heads/main";
 
     private final LooseRefStore refs;
-    private final LooseObjectStore objects;
+    private final GitObjectReader objects;
     private final String defaultHead;
     private final NoDeltaPackBuilder noDeltaPackBuilder;
     private final DeltaPackBuilder deltaPackBuilder;
@@ -31,7 +31,7 @@ public final class NativeFetchPackBuilder {
 
     public NativeFetchPackBuilder(
             LooseRefStore refs,
-            LooseObjectStore objects) {
+            GitObjectReader objects) {
         this(
                 refs,
                 objects,
@@ -43,7 +43,7 @@ public final class NativeFetchPackBuilder {
 
     NativeFetchPackBuilder(
             LooseRefStore refs,
-            LooseObjectStore objects,
+            GitObjectReader objects,
             String defaultHead,
             NoDeltaPackBuilder noDeltaPackBuilder,
             DeltaPackBuilder deltaPackBuilder) {
@@ -58,7 +58,7 @@ public final class NativeFetchPackBuilder {
 
     public NativeFetchPackBuilder(
             LooseRefStore refs,
-            LooseObjectStore objects,
+            GitObjectReader objects,
             NativePackfileUriSource packfileUriSource) {
         this(
                 refs,
@@ -69,7 +69,7 @@ public final class NativeFetchPackBuilder {
 
     public NativeFetchPackBuilder(
             LooseRefStore refs,
-            LooseObjectStore objects,
+            GitObjectReader objects,
             String defaultHead,
             NativePackfileUriSource packfileUriSource) {
         this(
@@ -83,7 +83,7 @@ public final class NativeFetchPackBuilder {
 
     NativeFetchPackBuilder(
             LooseRefStore refs,
-            LooseObjectStore objects,
+            GitObjectReader objects,
             String defaultHead,
             NoDeltaPackBuilder noDeltaPackBuilder,
             DeltaPackBuilder deltaPackBuilder,

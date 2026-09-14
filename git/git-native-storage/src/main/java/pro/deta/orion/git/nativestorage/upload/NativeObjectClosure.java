@@ -1,8 +1,8 @@
 package pro.deta.orion.git.nativestorage.upload;
 
 import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.object.GitObjectReader;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 
 import java.nio.charset.StandardCharsets;
@@ -17,19 +17,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 
 public final class NativeObjectClosure {
     private static final int RAW_OBJECT_ID_BYTES = 20;
 
-    private final Function<GitObjectId, Optional<LooseObject>> objectReader;
-
-    public NativeObjectClosure(LooseObjectStore objects) {
-        this(Objects.requireNonNull(objects, "objects")::read);
-    }
+    private final GitObjectReader objectReader;
 
     public NativeObjectClosure(
-            Function<GitObjectId, Optional<LooseObject>> objectReader) {
+            GitObjectReader objectReader) {
         this.objectReader = Objects.requireNonNull(
                 objectReader,
                 "objectReader");
@@ -193,7 +188,7 @@ public final class NativeObjectClosure {
     }
 
     private boolean isCommit(GitObjectId objectId) {
-        LooseObject object = objectReader.apply(objectId).orElse(null);
+        LooseObject object = objectReader.read(objectId).orElse(null);
         return object != null && object.type() == ObjectType.COMMIT;
     }
 
@@ -206,7 +201,7 @@ public final class NativeObjectClosure {
             if (distances.containsKey(current.objectId())) {
                 continue;
             }
-            LooseObject object = objectReader.apply(current.objectId()).orElse(null);
+            LooseObject object = objectReader.read(current.objectId()).orElse(null);
             if (object == null || object.type() != ObjectType.COMMIT) {
                 continue;
             }
@@ -229,7 +224,7 @@ public final class NativeObjectClosure {
             if (directWants.contains(id)) {
                 continue;
             }
-            LooseObject object = objectReader.apply(id)
+            LooseObject object = objectReader.read(id)
                     .orElseThrow(NativeObjectClosure::missingObject);
             if (objectFilter == NativeObjectFilter.BLOB_NONE
                     && object.type() == ObjectType.BLOB) {
@@ -248,7 +243,7 @@ public final class NativeObjectClosure {
             if (!visited.add(id)) {
                 continue;
             }
-            LooseObject object = objectReader.apply(id).orElse(null);
+            LooseObject object = objectReader.read(id).orElse(null);
             if (object == null) {
                 if (ignoreMissing) {
                     continue;
@@ -299,7 +294,7 @@ public final class NativeObjectClosure {
 
         while (!pending.isEmpty()) {
             ShallowPendingObject current = pending.removeFirst();
-            LooseObject object = objectReader.apply(current.objectId())
+            LooseObject object = objectReader.read(current.objectId())
                     .orElseThrow(NativeObjectClosure::missingObject);
             switch (object.type()) {
                 case COMMIT -> addShallowCommit(
@@ -450,7 +445,7 @@ public final class NativeObjectClosure {
             Set<GitObjectId> includedCommits) {
         Set<GitObjectId> boundaries = new LinkedHashSet<>(stoppedBoundaries);
         for (GitObjectId commitId : includedCommits) {
-            LooseObject object = objectReader.apply(commitId)
+            LooseObject object = objectReader.read(commitId)
                     .orElseThrow(NativeObjectClosure::missingObject);
             CommitReferences references = commitReferences(object.data());
             for (GitObjectId parent : references.parents()) {
@@ -468,7 +463,7 @@ public final class NativeObjectClosure {
         Set<GitObjectId> reachable = traverse(roots, true);
         Set<GitObjectId> commits = new LinkedHashSet<>();
         for (GitObjectId id : reachable) {
-            LooseObject object = objectReader.apply(id).orElse(null);
+            LooseObject object = objectReader.read(id).orElse(null);
             if (object != null && object.type() == ObjectType.COMMIT) {
                 commits.add(id);
             }
@@ -486,7 +481,7 @@ public final class NativeObjectClosure {
                     || shallowBoundaries.contains(commitId)) {
                 continue;
             }
-            LooseObject object = objectReader.apply(commitId).orElse(null);
+            LooseObject object = objectReader.read(commitId).orElse(null);
             if (object == null || object.type() != ObjectType.COMMIT) {
                 continue;
             }
@@ -508,7 +503,7 @@ public final class NativeObjectClosure {
         if (deepenSince < 0) {
             return false;
         }
-        LooseObject object = objectReader.apply(commitId)
+        LooseObject object = objectReader.read(commitId)
                 .orElseThrow(NativeObjectClosure::missingObject);
         if (object.type() != ObjectType.COMMIT) {
             return false;

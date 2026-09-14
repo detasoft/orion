@@ -1,6 +1,7 @@
 package pro.deta.orion.git.nativestorage.pack;
 
 import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.object.GitObjectReader;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
 
@@ -8,10 +9,8 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.Optional;
 
-public interface PackObjectDirectory {
+public interface PackObjectDirectory extends GitObjectReader {
     PackObjectDirectory NONE = id -> Optional.empty();
-
-    Optional<LooseObject> read(GitObjectId id);
 
     default Optional<LooseObjectPrefix> readPrefix(
             GitObjectId id,

@@ -2,6 +2,7 @@ package pro.deta.orion.git.nativestorage.pack;
 
 import io.netty.buffer.ByteBuf;
 import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.object.GitObjectReader;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
@@ -54,7 +55,7 @@ public final class PackIngestor implements PackIngestionSession {
     }
 
     private final PackIngestionLimits limits;
-    private final LooseObjectStore baseStore;
+    private final GitObjectReader baseReader;
     private final PackPublicationStore publicationStore;
     private LooseObjectStore quarantine = new LooseObjectStore();
     private final MessageDigest packDigest = sha1Digest();
@@ -103,16 +104,16 @@ public final class PackIngestor implements PackIngestionSession {
 
     public PackIngestor(
             PackIngestionLimits limits,
-            LooseObjectStore baseStore) {
-        this(limits, baseStore, PackPublicationStore.NONE);
+            GitObjectReader baseReader) {
+        this(limits, baseReader, PackPublicationStore.NONE);
     }
 
     public PackIngestor(
             PackIngestionLimits limits,
-            LooseObjectStore baseStore,
+            GitObjectReader baseReader,
             PackPublicationStore publicationStore) {
         this.limits = Objects.requireNonNull(limits, "limits");
-        this.baseStore = Objects.requireNonNull(baseStore, "baseStore");
+        this.baseReader = Objects.requireNonNull(baseReader, "baseReader");
         this.publicationStore = Objects.requireNonNull(
                 publicationStore,
                 "publicationStore");
@@ -124,11 +125,11 @@ public final class PackIngestor implements PackIngestionSession {
 
     public LooseObjectStore ingest(
             ByteBuf packBuffer,
-            LooseObjectStore publishedObjects) {
+            GitObjectReader publishedObjects) {
         Objects.requireNonNull(packBuffer, "packBuffer");
         PackIngestor session = new PackIngestor(
                 limits,
-                Objects.requireNonNull(publishedObjects, "baseStore"),
+                Objects.requireNonNull(publishedObjects, "baseReader"),
                 publicationStore);
         PackIngestionResult result = session.accept(packBuffer);
         if (result instanceof PackIngestionResult.NeedInput) {
@@ -646,7 +647,7 @@ public final class PackIngestor implements PackIngestionSession {
         if (quarantined.isPresent()) {
             return quarantined.get();
         }
-        Optional<LooseObject> base = baseStore.read(id);
+        Optional<LooseObject> base = baseReader.read(id);
         if (base.isPresent()) {
             externalBaseIds.add(id);
             return base.get();

@@ -4,7 +4,14 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import pro.deta.orion.git.nativestorage.GitObjectId;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
+import pro.deta.orion.git.nativestorage.pack.NoDeltaPackBuilder;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchOptions;
+import pro.deta.orion.git.nativestorage.upload.NativeFetchRequest;
+import pro.deta.orion.net.io.OutputStreamBufferedByteOutput;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
@@ -23,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.CRC32;
 import java.util.zip.DeflaterOutputStream;
 
@@ -317,6 +325,152 @@ class FileNativeGitRepositoryProviderTest {
                     assertThat(prefix.dataPrefix()).isEqualTo(
                             "hello n".getBytes(StandardCharsets.UTF_8));
                 });
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void fetchesPublishedPackGraphAndAnnotatedTag(
+            boolean ofsDelta, @TempDir Path rootDirectory) throws IOException {
+        LooseObjectStore source = new LooseObjectStore();
+        GitObjectId blob = source.write(ObjectType.BLOB, "packed README".getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream treeBytes = new ByteArrayOutputStream();
+        treeBytes.writeBytes("100644 README.md\0".getBytes(StandardCharsets.UTF_8));
+        treeBytes.writeBytes(HexFormat.of().parseHex(blob.value()));
+        GitObjectId tree = source.write(ObjectType.TREE, treeBytes.toByteArray());
+        GitObjectId commit = source.write(ObjectType.COMMIT, (
+                "tree " + tree.value() + "\n"
+                        + "author A <a@example.com> 1 +0000\n"
+                        + "committer A <a@example.com> 1 +0000\n\nInitial\n")
+                .getBytes(StandardCharsets.UTF_8));
+        GitObjectId tag = source.write(ObjectType.TAG, (
+                "object " + commit.value() + "\ntype commit\ntag v1\n\nRelease\n")
+                .getBytes(StandardCharsets.UTF_8));
+        Set<GitObjectId> ids = Set.of(blob, tree, commit, tag);
+        NativeGitRepository repository = new FileNativeGitRepositoryProvider(rootDirectory)
+                .create("packed").valueOrFailure("repository");
+        try (PackIngestionSession session = repository.beginPackIngestion(LIMITS)) {
+            assertThat(accept(session, produce(new NoDeltaPackBuilder().producer(source, ids))))
+                    .isInstanceOf(PackIngestionResult.Complete.class);
+        }
+        repository.updateRef("refs/heads/main", NULL_ID, commit.value());
+        repository.updateRef("refs/tags/v1", NULL_ID, tag.value());
+        NativeGitRepository reopened = new FileNativeGitRepositoryProvider(rootDirectory)
+                .find("packed").valueOrFailure("repository");
+        // Quarantine was never copied to loose storage; only the published pack survives reopening.
+        for (GitObjectId id : ids) {
+            assertThat(reopened.readObject(id)).isPresent();
+        }
+
+        byte[] fetched = produce(reopened.fetch(new NativeFetchRequest(
+                Set.of(commit), Set.of(), true, Set.of(),
+                NativeFetchOptions.initial(false, ofsDelta, true))));
+
+        NativeGitRepository receiver = new FileNativeGitRepositoryProvider(rootDirectory)
+                .create("receiver").valueOrFailure("repository");
+        try (PackIngestionSession session = receiver.beginPackIngestion(LIMITS)) {
+            assertThat(accept(session, fetched)).isInstanceOf(PackIngestionResult.Complete.class);
+        }
+        for (GitObjectId id : ids) {
+            assertThat(receiver.readObject(id)).isPresent();
+            assertThat(receiver.readObject(id).orElseThrow().data())
+                    .isEqualTo(source.read(id).orElseThrow().data());
+        }
+    }
+
+    @Test
+    void ingestsThinPackUsingBaseOnlyInPublishedPack(@TempDir Path rootDirectory) {
+        NativeGitRepository repository = new FileNativeGitRepositoryProvider(rootDirectory)
+                .create("packed").valueOrFailure("repository");
+        byte[] base = "hello world".getBytes(StandardCharsets.UTF_8);
+        byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
+        GitObjectId baseId = GitObjectId.of(blobId(base));
+        try (PackIngestionSession session = repository.beginPackIngestion(LIMITS)) {
+            assertThat(accept(session, pack(base))).isInstanceOf(PackIngestionResult.Complete.class);
+        }
+        NativeGitRepository reopened = new FileNativeGitRepositoryProvider(rootDirectory)
+                .find("packed").valueOrFailure("repository");
+        assertPublishedObject(reopened, baseId.value(), base);
+
+        try (PackIngestionSession session = reopened.beginPackIngestion(LIMITS)) {
+            assertThat(accept(session, packWithReferenceDelta(baseId.value(), base, target)))
+                    .isInstanceOf(PackIngestionResult.Complete.class);
+        }
+
+        NativeGitRepository afterIngestion = new FileNativeGitRepositoryProvider(rootDirectory)
+                .find("packed").valueOrFailure("repository");
+        assertPublishedObject(afterIngestion, blobId(target), target);
+        assertThat(afterIngestion.publishedPacks()).anySatisfy(manifest -> {
+            assertThat(manifest.selfContained()).isFalse();
+            assertThat(manifest.externalBaseIds()).containsExactly(baseId);
+        });
+    }
+
+    @Test
+    void fetchesLooseObjectWithThinDeltaAgainstPackedHave(@TempDir Path rootDirectory) throws IOException {
+        NativeGitRepository repository = new FileNativeGitRepositoryProvider(rootDirectory)
+                .create("packed").valueOrFailure("repository");
+        byte[] base = "shared file content line\n".repeat(100).getBytes(StandardCharsets.UTF_8);
+        byte[] target = base.clone();
+        target[target.length - 2] = '!';
+        GitObjectId baseId = GitObjectId.of(blobId(base));
+        try (PackIngestionSession session = repository.beginPackIngestion(LIMITS)) {
+            assertThat(accept(session, pack(base))).isInstanceOf(PackIngestionResult.Complete.class);
+        }
+        GitObjectId targetId = repository.writeObject(ObjectType.BLOB, target);
+
+        byte[] fetched = produce(repository.fetch(new NativeFetchRequest(
+                Set.of(targetId), Set.of(baseId), true, Set.of(),
+                NativeFetchOptions.initial(true, true, false))));
+
+        assertThat((fetched[12] >>> 4) & 7).isEqualTo(7); // REF_DELTA needs the receiver's base.
+        NativeGitRepository receiver = new FileNativeGitRepositoryProvider(rootDirectory)
+                .create("receiver").valueOrFailure("repository");
+        try (PackIngestionSession session = receiver.beginPackIngestion(LIMITS)) {
+            assertThat(accept(session, pack(base))).isInstanceOf(PackIngestionResult.Complete.class);
+        }
+        try (PackIngestionSession session = receiver.beginPackIngestion(LIMITS)) {
+            assertThat(accept(session, fetched)).isInstanceOf(PackIngestionResult.Complete.class);
+        }
+        assertPublishedObject(receiver, targetId.value(), target);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void rejectsThinPackWithMissingOrCorruptPublishedBase(
+            boolean corrupt, @TempDir Path rootDirectory) throws IOException {
+        NativeGitRepository repository = new FileNativeGitRepositoryProvider(rootDirectory)
+                .create("packed").valueOrFailure("repository");
+        byte[] base = "hello world".getBytes(StandardCharsets.UTF_8);
+        byte[] target = "hello native".getBytes(StandardCharsets.UTF_8);
+        if (corrupt) {
+            try (PackIngestionSession session = repository.beginPackIngestion(LIMITS)) {
+                assertThat(accept(session, pack(base))).isInstanceOf(PackIngestionResult.Complete.class);
+            }
+            Path packFile = singlePathWithSuffix(rootDirectory, ".pack");
+            byte[] damaged = Files.readAllBytes(packFile);
+            damaged[damaged.length - 1] ^= 1;
+            Files.write(packFile, damaged);
+        }
+        List<Path> manifests = pathsWithSuffix(rootDirectory, ".json");
+
+        try (PackIngestionSession session = repository.beginPackIngestion(LIMITS)) {
+            PackIngestionResult result = accept(session, packWithReferenceDelta(blobId(base), base, target));
+            assertThat(result).isInstanceOf(PackIngestionResult.Failed.class);
+            assertThat(((PackIngestionResult.Failed) result).failure().getMessage())
+                    .contains(corrupt ? "checksum" : "base object is unavailable");
+        }
+
+        assertThat(pathsWithSuffix(rootDirectory, ".json")).containsExactlyInAnyOrderElementsOf(manifests);
+        assertThat(repository.refs()).isEmpty();
+    }
+
+    private static byte[] produce(NativePackProducer producer) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (producer) {
+            assertThat(producer.produce(new OutputStreamBufferedByteOutput(bytes)))
+                    .isEqualTo(NativePackProducer.Result.COMPLETED);
+        }
+        return bytes.toByteArray();
     }
 
     @Test

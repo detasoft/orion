@@ -25,7 +25,7 @@ import java.util.function.BiConsumer;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
-public final class LooseObjectStore {
+public final class LooseObjectStore implements GitObjectReader {
     private static final int MAX_OBJECT_HEADER_BYTES = 64;
 
     private final ConcurrentHashMap<String, byte[]> store = new ConcurrentHashMap<>();
@@ -50,6 +50,7 @@ public final class LooseObjectStore {
         return GitObjectId.of(id);
     }
 
+    @Override
     public Optional<LooseObject> read(GitObjectId id) {
         Objects.requireNonNull(id, "id");
         byte[] compressed = readCompressed(id.value());

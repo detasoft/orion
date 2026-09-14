@@ -2,8 +2,8 @@ package pro.deta.orion.git.nativestorage.pack;
 
 import io.netty.buffer.ByteBuf;
 import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.object.GitObjectReader;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
@@ -19,7 +19,7 @@ import java.util.zip.Deflater;
 
 public final class NoDeltaPackBuilder {
     public NativePackProducer producer(
-            LooseObjectStore objects,
+            GitObjectReader objects,
             Collection<GitObjectId> objectIds) {
         Objects.requireNonNull(objects, "objects");
         Objects.requireNonNull(objectIds, "objectIds");
@@ -38,7 +38,7 @@ public final class NoDeltaPackBuilder {
         private static final int PACK_VERSION = 2;
         private static final int SCRATCH_SIZE = 8 * 1024;
 
-        private final LooseObjectStore objects;
+        private final GitObjectReader objects;
         private final List<GitObjectId> objectIds;
         private final MessageDigest digest = sha1();
         private final byte[] scratch = new byte[SCRATCH_SIZE];
@@ -53,7 +53,7 @@ public final class NoDeltaPackBuilder {
         private boolean closed;
 
         private Producer(
-                LooseObjectStore objects,
+                GitObjectReader objects,
                 List<GitObjectId> objectIds) {
             this.objects = objects;
             this.objectIds = objectIds;

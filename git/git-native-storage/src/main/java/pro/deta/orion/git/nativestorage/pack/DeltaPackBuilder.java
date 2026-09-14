@@ -2,8 +2,8 @@ package pro.deta.orion.git.nativestorage.pack;
 
 import io.netty.buffer.ByteBuf;
 import pro.deta.orion.git.nativestorage.GitObjectId;
+import pro.deta.orion.git.nativestorage.object.GitObjectReader;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
@@ -32,13 +32,13 @@ public final class DeltaPackBuilder {
     private static final int SCRATCH_SIZE = 8 * 1024;
 
     public NativePackProducer producer(
-            LooseObjectStore objects,
+            GitObjectReader objects,
             Collection<GitObjectId> objectIds) {
         return producer(objects, objectIds, List.of());
     }
 
     public NativePackProducer producer(
-            LooseObjectStore objects,
+            GitObjectReader objects,
             Collection<GitObjectId> objectIds,
             Collection<GitObjectId> externalBaseIds) {
         Objects.requireNonNull(objects, "objects");
@@ -58,7 +58,7 @@ public final class DeltaPackBuilder {
     }
 
     private static List<PackEntry> plan(
-            LooseObjectStore objects,
+            GitObjectReader objects,
             List<GitObjectId> objectIds,
             List<GitObjectId> externalBaseIds) {
         List<PackEntry> entries = new ArrayList<>(objectIds.size());
@@ -100,7 +100,7 @@ public final class DeltaPackBuilder {
     }
 
     private static Map<ObjectType, List<BaseCandidate>> externalBaseCandidates(
-            LooseObjectStore objects,
+            GitObjectReader objects,
             List<GitObjectId> externalBaseIds) {
         Map<ObjectType, List<BaseCandidate>> bases =
                 new EnumMap<>(ObjectType.class);
