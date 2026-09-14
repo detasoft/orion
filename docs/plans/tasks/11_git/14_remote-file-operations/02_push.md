@@ -1,5 +1,11 @@
 # Native Remote Git Single File Push
 
+Depends on: ../02_client-architecture-simplification/08_force-and-force-with-lease.md
+
+Use the shared client push policy for ordinary, force, and force-with-lease
+updates. Preserve explicit caller expectations across discovery and retries;
+do not implement a second force/lease mechanism in the file API.
+
 ## Goal
 
 Add a JGit-free way to update one file in a remote Git repository through the Git
@@ -87,7 +93,7 @@ Request fields:
 - maximum outgoing pack bytes;
 - maximum input file bytes;
 - stale-ref retry policy;
-- force update flag, default false.
+- shared push mode, default ordinary; force-with-lease includes the caller's expected ref value.
 
 Result fields:
 
@@ -412,7 +418,7 @@ Request fields:
 - branch creation policy;
 - no-op policy;
 - symlink and executable mode policy;
-- force update flag, default false.
+- shared push mode, default ordinary; force-with-lease includes the caller's expected ref value.
 
 Each file change contains:
 

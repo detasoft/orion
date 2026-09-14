@@ -257,7 +257,7 @@ Inputs:
 - object validation result;
 - fast-forward result;
 - requested capabilities;
-- explicit force marker where the service can infer it;
+- update classification derived from refs and object ancestry, not a wire force marker;
 - repository policy configuration.
 
 Decisions:
@@ -279,7 +279,11 @@ results for report-status.
 
 ## Force Push Policy
 
-Force updates must be explicit.
+Force intent must be explicit in the originating client API. Standard
+receive-pack carries neither a force flag nor a force-with-lease flag; the
+server authorizes the actual ref change without claiming to know which client
+option selected it. Client intent and lease handling belong to
+[the client push semantics task](02_client-architecture-simplification/08_force-and-force-with-lease.md).
 
 Default:
 
@@ -289,14 +293,13 @@ Default:
   allows it;
 - tag rewrites are denied by default.
 
-The policy layer should distinguish:
-
-- non-fast-forward update without force;
-- explicit force requested but denied;
-- explicit force allowed.
-
-Native receive-pack can infer force when command old id does not match an
-ancestor relationship and policy/config says force is required.
+The policy layer distinguishes ordinary updates from changes requiring force
+permission and returns an authorization decision for each ref. It cannot infer
+whether the caller used force or force-with-lease from the received command.
+For branch updates, derive non-fast-forward status from object ancestry.
+Preserve the old-ID comparison for every mode; a force grant does not override
+a stale ref. Reuse `GitNativeRepositoryAccessHook` for internal calls, including
+explicit `ALLOW_ALL` for trusted callers, without bypassing old-ID checks.
 
 ## Delete Policy
 

@@ -6,6 +6,9 @@ Make one remote Git operation use one coherent advertisement and exchange,
 model Smart HTTP without pretending it is a continuous duplex stream, and
 keep client failures and timeout ownership factual.
 
+Make caller intent explicit for ordinary, force, and force-with-lease pushes,
+while preserving standard receive-pack encoding and server authorization.
+
 ## Constraints
 
 - Public Git client API compatibility is not required before production

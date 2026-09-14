@@ -6,10 +6,11 @@ Depends on: 01_single-session-request-planning.md,
 03_factual-failure-model.md,
 04_session-inactivity-timeouts.md,
 05_smart-http-ssh-behavior.md,
+08_force-and-force-with-lease.md,
 ../01_wire-architecture-simplification/03_parser-storage-boundary.md
 
-Repeat the read-only Git client simplification review after the four preceding
-changes and the parser/storage boundary are complete. Record already removed
+Repeat the read-only Git client simplification review after its client
+dependencies and the parser/storage boundary are complete. Record already removed
 items and create focused implementation tasks for every remaining deletion;
 do not mix speculative code removal into the audit.
 
