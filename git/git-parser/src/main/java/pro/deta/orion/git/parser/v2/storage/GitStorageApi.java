@@ -6,6 +6,7 @@ import pro.deta.orion.git.parser.v2.data.RefUpdateResult;
 import pro.deta.orion.git.parser.v2.data.RefsSnapshot;
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 import pro.deta.orion.git.parser.v2.id.PackId;
+import pro.deta.orion.git.parser.v2.id.PackUploadId;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -23,7 +24,8 @@ import java.util.Optional;
  *   <li>{@code snapshotRefs()} - return refs and symbolic or detached HEAD from one consistent state.</li>
  *   <li>{@code updateRefs(List<RefUpdate> updates, boolean atomic)} - conditionally update refs
  *       and return one RefUpdateResult containing the original update per input, in request order.</li>
- *   <li>{@code publishPack(receivedPack)} - retain a validated pack and make its objects readable.</li>
+ *   <li>{@code publishPack(PackUploadId uploadId)} - publish a completed, validated upload already held
+ *       by repository storage and return its verified PackId; callers pass no files or paths.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
  *   <li>{@code findPacksByObjectIds(objectIds)} - find published packs containing the requested objects.</li>
@@ -35,6 +37,10 @@ import java.util.Optional;
  * objects needed by a ref update must be available before that update becomes visible.
  */
 public final class GitStorageApi {
+    public PackId publishPack(PackUploadId uploadId) throws IOException {
+        throw new UnsupportedOperationException("Pack publication is not implemented");
+    }
+
     public Optional<ObjectRead> readObject(ObjectId objectId) throws IOException {
         throw new UnsupportedOperationException("Object reads are not implemented");
     }

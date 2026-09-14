@@ -6,8 +6,10 @@ package pro.deta.orion.git.parser.v2.storage;
  * Pack parsing, quarantine, and receive policy belong to the calling operation; storing a pack does not
  * update refs or imply that a push was accepted.
  *
- * <p>Publication receives a prepared pack whose packId is its verified checksum. Separate uploads use isolated
- * temporary areas until their pack IDs are known. Coordination protects publication after ingestion, not
+ * <p>Publication receives a PackUploadId identifying a completed, validated upload inside repository storage.
+ * Its prepared data includes the verified PackId, pack bytes, index, and external-base object IDs.
+ * Separate uploads have distinct upload IDs even when their verified PackIds match; no files or paths cross
+ * the publication API. Coordination uses the verified PackId and protects publication after ingestion, not
  * reception of the incoming stream. Different pack IDs publish independently.
  * Refs remain subject to each operation's own checks and conditional updates even when pack data is reused.
  *
@@ -18,12 +20,12 @@ package pro.deta.orion.git.parser.v2.storage;
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code publish(receivedPack)} - retain a validated pack and make its objects readable.</li>
+ *   <li>{@code publish(uploadId)} - retain the validated upload's pack and return its verified PackId.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
  * </ul>
- * Method names and signatures are provisional. The received pack carries its bytes and external-base
- * dependencies. Stored objects must remain readable after the ingestion session closes, including when a
+ * Method names and signatures are provisional. Storage locates prepared data and external-base dependencies
+ * by upload ID. Stored objects must remain readable after the ingestion session closes, including when a
  * thin pack depends on existing objects. A later ref rejection need not remove an already published pack.
  */
 final class GitPackStorage {
