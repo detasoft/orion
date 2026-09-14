@@ -2,6 +2,11 @@ package pro.deta.orion.git.proxy;
 
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
+import pro.deta.orion.git.nativestorage.pack.PackIngestor;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitFileClientTransport;
 import pro.deta.orion.git.client.GitReceivePackResult;
@@ -48,7 +53,7 @@ class NativeBootstrapGitPusherTest {
                 new NativeBootstrapGitPusher());
 
         List<RefUpdateResult> results = proxy.publish(
-                update.objects(),
+                unpack(repository, update),
                 update.refUpdates(),
                 true);
 
@@ -73,7 +78,7 @@ class NativeBootstrapGitPusherTest {
                 Map.of("orion.xml", "proxy change".getBytes()),
                 "proxy update",
                 GitCommitAuthor.EMPTY);
-        repository.publishObjects(update.objects());
+        repository.publishObjects(unpack(repository, update));
         Files.writeString(upstream.worktree().resolve("orion.xml"), "upstream change");
         upstream.git().add().addFilepattern("orion.xml").call();
         upstream.git().commit().setMessage("upstream update")
@@ -159,4 +164,15 @@ class NativeBootstrapGitPusherTest {
 
     private record Upstream(Git git, Path worktree, Path bare) {
     }
+    private static LooseObjectStore unpack(NativeGitRepository repository, NativeGitFileUpdate update) {
+        byte[] pack = update.pack();
+        ByteBuf input = Unpooled.wrappedBuffer(pack);
+        try (PackIngestor ingestor = new PackIngestor(
+                new PackIngestionLimits(pack.length, 100, 1024 * 1024), repository::readObject)) {
+            return ingestor.ingest(input, repository::readObject);
+        } finally {
+            input.release();
+        }
+    }
+
 }

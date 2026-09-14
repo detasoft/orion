@@ -606,8 +606,8 @@ class NativeGitRepositoryTest {
                 GitCommitAuthor.EMPTY);
 
         assertThat(repository.refs()).isEmpty();
-        assertThat(repository.publishObjectsAndRefs(
-                update.objects(), update.refUpdates(), true))
+        assertThat(repository.publishPack(
+                update.pack(), update.refUpdates(), true))
                 .containsExactly(RefUpdateResult.CREATED);
         assertThat(repository.loadFiles("main", List.of("orion.xml")).files())
                 .containsEntry(

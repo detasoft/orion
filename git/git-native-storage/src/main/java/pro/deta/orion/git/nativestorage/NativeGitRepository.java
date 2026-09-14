@@ -1,5 +1,7 @@
 package pro.deta.orion.git.nativestorage;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import lombok.extern.slf4j.Slf4j;
 import pro.deta.orion.git.nativestorage.object.LooseObject;
 import pro.deta.orion.git.nativestorage.object.LooseObjectPrefix;
@@ -8,6 +10,7 @@ import pro.deta.orion.git.nativestorage.object.ObjectType;
 import pro.deta.orion.git.nativestorage.pack.NativePackProducer;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
 import pro.deta.orion.git.nativestorage.pack.PackIngestionSession;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionResult;
 import pro.deta.orion.git.nativestorage.pack.PackIngestor;
 import pro.deta.orion.git.nativestorage.pack.PackObjectDirectory;
 import pro.deta.orion.git.nativestorage.pack.PackPublicationStore;
@@ -245,6 +248,31 @@ public class NativeGitRepository implements AutoCloseable {
             LooseObjectStore quarantinedObjects,
             List<LooseRefStore.Update> updates) {
         return publishObjectsAndRefs(quarantinedObjects, updates, true);
+    }
+
+    public List<RefUpdateResult> publishPack(
+            byte[] pack,
+            List<LooseRefStore.Update> updates,
+            boolean atomic) throws GitOperationException {
+        Objects.requireNonNull(pack, "pack");
+        Objects.requireNonNull(updates, "updates");
+        ByteBuf input = Unpooled.wrappedBuffer(pack);
+        try (PackIngestionSession session = beginPackIngestion(
+                new PackIngestionLimits(Math.max(1, pack.length), Integer.MAX_VALUE, Integer.MAX_VALUE))) {
+            PackIngestionResult result = session.accept(input);
+            if (result instanceof PackIngestionResult.NeedInput) {
+                result = session.endOfInput();
+            }
+            if (result instanceof PackIngestionResult.Failed failed) {
+                throw new GitOperationException("Cannot ingest file update pack", failed.failure());
+            }
+            if (!(result instanceof PackIngestionResult.Complete complete)) {
+                throw new GitOperationException("Incomplete file update pack");
+            }
+            return publishObjectsAndRefs(complete.quarantine(), updates, atomic);
+        } finally {
+            input.release();
+        }
     }
 
     public List<RefUpdateResult> publishObjectsAndRefs(

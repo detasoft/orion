@@ -78,9 +78,9 @@ final class NativeGitKeyMaterialContentStore implements KeyMaterialContentStore 
                     Map.of(path, bytes),
                     SAVE_MESSAGE,
                     GitCommitAuthor.EMPTY);
-            List<RefUpdateResult> results = repositoryProvider.publish(
+            List<RefUpdateResult> results = repositoryProvider.publishPack(
                     repositoryName,
-                    update.objects(),
+                    update.pack(),
                     update.refUpdates(),
                     true);
             if (results.contains(RefUpdateResult.STALE)) {

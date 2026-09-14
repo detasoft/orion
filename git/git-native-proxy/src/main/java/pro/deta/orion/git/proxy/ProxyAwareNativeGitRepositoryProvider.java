@@ -293,7 +293,8 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         NativeGitRepository repository = backend.find(canonicalName)
                 .valueOrFailure("Cannot open native repository " + canonicalName);
         NativeGitFileUpdate update = repository.prepareProxyFileUpdate(refName, files, message, author);
-        List<RefUpdateResult> results = proxy.publish(update.objects(), update.refUpdates(), true);
+        List<RefUpdateResult> results = new PolicyBoundNativeGitRepository(this, repository)
+                .publishPack(update.pack(), update.refUpdates(), true);
         if (results.contains(RefUpdateResult.STALE)) {
             throw new GitOperationException("Cannot update Git repository: stale ref");
         }

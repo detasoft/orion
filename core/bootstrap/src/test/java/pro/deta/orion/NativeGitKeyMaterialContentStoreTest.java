@@ -4,11 +4,11 @@ import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
+import pro.deta.orion.git.nativestorage.GitOperationException;
 import pro.deta.orion.git.nativestorage.GitRepositoryFileSnapshot;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitRepository;
 import pro.deta.orion.git.nativestorage.NativeGitRepositoryProvider;
-import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
 import pro.deta.orion.git.nativestorage.ref.LooseRefStore;
 import pro.deta.orion.git.nativestorage.ref.RefUpdateResult;
 import pro.deta.orion.git.proxy.ProxyAwareNativeGitRepositoryProvider;
@@ -193,16 +193,16 @@ class NativeGitKeyMaterialContentStoreTest {
         }
 
         @Override
-        public List<RefUpdateResult> publish(
+        public List<RefUpdateResult> publishPack(
                 String repositoryName,
-                LooseObjectStore objects,
+                byte[] pack,
                 List<LooseRefStore.Update> updates,
-                boolean atomic) {
+                boolean atomic) throws GitOperationException {
             if (!interleaved) {
                 interleaved = true;
                 beforePublish.run();
             }
-            return delegate.publish(repositoryName, objects, updates, atomic);
+            return delegate.publishPack(repositoryName, pack, updates, atomic);
         }
     }
 }

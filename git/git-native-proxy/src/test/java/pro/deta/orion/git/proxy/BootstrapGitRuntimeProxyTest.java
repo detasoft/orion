@@ -1,6 +1,11 @@
 package pro.deta.orion.git.proxy;
 
 import org.junit.jupiter.api.Test;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import pro.deta.orion.git.nativestorage.object.LooseObjectStore;
+import pro.deta.orion.git.nativestorage.pack.PackIngestionLimits;
+import pro.deta.orion.git.nativestorage.pack.PackIngestor;
 import pro.deta.orion.git.nativestorage.GitCommitAuthor;
 import pro.deta.orion.git.nativestorage.InMemoryNativeGitRepositoryProvider;
 import pro.deta.orion.git.nativestorage.NativeGitFileUpdate;
@@ -41,7 +46,7 @@ class BootstrapGitRuntimeProxyTest {
                         java.util.Collections.nCopies(updates.size(), false));
 
         List<RefUpdateResult> results = proxy.publish(
-                update.objects(),
+                unpack(repository, update),
                 update.refUpdates(),
                 true);
 
@@ -57,4 +62,15 @@ class BootstrapGitRuntimeProxyTest {
         config.setAuth(Map.of());
         return BootstrapGitLocation.parse(config);
     }
+    private static LooseObjectStore unpack(NativeGitRepository repository, NativeGitFileUpdate update) {
+        byte[] pack = update.pack();
+        ByteBuf input = Unpooled.wrappedBuffer(pack);
+        try (PackIngestor ingestor = new PackIngestor(
+                new PackIngestionLimits(pack.length, 100, 1024 * 1024), repository::readObject)) {
+            return ingestor.ingest(input, repository::readObject);
+        } finally {
+            input.release();
+        }
+    }
+
 }

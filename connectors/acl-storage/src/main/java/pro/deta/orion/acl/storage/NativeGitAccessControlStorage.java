@@ -72,9 +72,9 @@ public final class NativeGitAccessControlStorage implements AccessControlStorage
                         snapshot.files(),
                         request.message(),
                         author);
-                List<RefUpdateResult> results = repositoryProvider.publish(
+                List<RefUpdateResult> results = repositoryProvider.publishPack(
                         repositoryName,
-                        update.objects(),
+                        update.pack(),
                         update.refUpdates(),
                         true);
                 if (results.contains(RefUpdateResult.STALE)) {

@@ -54,6 +54,16 @@ public interface NativeGitRepositoryProvider {
                 .prepareFileUpdate(refName, expectedRefRevision, files, message, author);
     }
 
+    default List<RefUpdateResult> publishPack(
+            String repositoryName,
+            byte[] pack,
+            List<LooseRefStore.Update> updates,
+            boolean atomic) throws GitOperationException {
+        return openForWrite(repositoryName)
+                .valueOrFailure("Cannot open native repository " + repositoryName)
+                .publishPack(pack, updates, atomic);
+    }
+
     default List<RefUpdateResult> publish(
             String repositoryName,
             LooseObjectStore objects,
