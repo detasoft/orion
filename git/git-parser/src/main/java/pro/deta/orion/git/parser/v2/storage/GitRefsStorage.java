@@ -9,8 +9,7 @@ package pro.deta.orion.git.parser.v2.storage;
  *
  * <p>Preliminary methods:
  * <ul>
- *   <li>{@code snapshot()} - return a consistent snapshot of ref names and their object IDs.</li>
- *   <li>{@code defaultHead()} - return the configured default HEAD target.</li>
+ *   <li>{@code snapshot()} - return a RefsSnapshot containing refs and HEAD read from one consistent state.</li>
  *   <li>{@code updateAll(commands, atomic)} - apply ref/expected-old/new commands and return per-ref results.</li>
  * </ul>
  * Method names and signatures are provisional. Atomic updates publish the whole batch or none of it;
