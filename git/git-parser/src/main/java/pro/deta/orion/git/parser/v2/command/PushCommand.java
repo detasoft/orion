@@ -5,6 +5,11 @@ package pro.deta.orion.git.parser.v2.command;
  * Creates and closes PackIngestionSession, backed by PackIngestor, within execution. Reuses existing shared
  * receive-pack validation rather than duplicating it. The session and reader do not manage ingestion state.
  *
+ * <p>During an ordinary push, the pack checksum arrives in the trailer and is not known before reception.
+ * Receive into an isolated temporary area identified by an upload ID, computing the checksum incrementally.
+ * After complete reception and checksum verification, pass the prepared pack and verified packId to storage
+ * for publication. The upload ID identifies this attempt; it is not the pack's content identity.
+ *
  * <p>Preliminary methods:
  * <ul>
  *   <li>{@code execute(PushRequest, BufferedByteInput)} - consume any required pack and return PushResponse.</li>
