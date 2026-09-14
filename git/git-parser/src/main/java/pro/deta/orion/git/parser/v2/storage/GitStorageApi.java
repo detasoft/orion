@@ -16,7 +16,8 @@ import java.util.Map;
  * <ul>
  *   <li>{@code snapshotRefs()} - return a consistent snapshot of ref names and object IDs.</li>
  *   <li>{@code defaultHead()} - return the configured default HEAD target.</li>
- *   <li>{@code updateRefs(commands, atomic)} - conditionally update refs and return per-ref results.</li>
+ *   <li>{@code updateRefs(List<RefUpdate> updates, boolean atomic)} - conditionally update refs
+ *       and return per-ref results; the result type remains to be defined.</li>
  *   <li>{@code publishPack(receivedPack)} - retain a validated pack and make its objects readable.</li>
  *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
  *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
