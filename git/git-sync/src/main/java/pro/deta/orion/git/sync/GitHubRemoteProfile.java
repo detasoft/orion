@@ -1,5 +1,6 @@
 package pro.deta.orion.git.sync;
 
+import pro.deta.orion.config.ConfigurationSecrets;
 import pro.deta.orion.git.client.GitClientOptions;
 import pro.deta.orion.git.client.GitClientTransport;
 import pro.deta.orion.git.client.GitHttpRequestConfigurer;
@@ -7,6 +8,7 @@ import pro.deta.orion.git.client.GitReceivePackClient;
 import pro.deta.orion.git.client.GitSmartHttpClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.schema.orion.RemoteProvider;
+import pro.deta.orion.schema.orion.RepositoryAddress;
 import pro.deta.orion.schema.orion.RepositoryRemote;
 
 import java.nio.charset.StandardCharsets;
@@ -19,11 +21,13 @@ public final class GitHubRemoteProfile implements GitRemoteProfile {
     private static final String GITHUB_HOST = "github.com";
     private static final String USERNAME = "x-access-token";
 
-    private final GitCredentialResolver credentials;
+    private final RepositoryAddress repository;
+    private final ConfigurationSecrets credentials;
     private final TransportFactory transports;
 
-    public GitHubRemoteProfile(GitCredentialResolver credentials) {
+    public GitHubRemoteProfile(RepositoryAddress repository, ConfigurationSecrets credentials) {
         this(
+                repository,
                 credentials,
                 configurer -> new GitSmartHttpClientTransport(
                         null,
@@ -32,8 +36,10 @@ public final class GitHubRemoteProfile implements GitRemoteProfile {
     }
 
     GitHubRemoteProfile(
-            GitCredentialResolver credentials,
+            RepositoryAddress repository,
+            ConfigurationSecrets credentials,
             TransportFactory transports) {
+        this.repository = Objects.requireNonNull(repository, "repository");
         this.credentials = Objects.requireNonNull(credentials, "credentials");
         this.transports = Objects.requireNonNull(transports, "transports");
     }
@@ -41,7 +47,7 @@ public final class GitHubRemoteProfile implements GitRemoteProfile {
     @Override
     public GitRemoteConnection open(RepositoryRemote remote) {
         RepositoryRemote checked = requireGitHubRemote(remote);
-        Secret secret = new Secret(credentials.resolve(checked.credential()));
+        Secret secret = new Secret(credentials.resolve(repository, checked.credential()));
         try {
             GitHttpRequestConfigurer configurer = request ->
                     request.header("Authorization", authorization(secret));

@@ -63,7 +63,7 @@ class BootstrapProxyTransportIT {
             String upstreamCache = upstreamProvider.prepareProvisional(
                     "cache-isolation-probe", configuration.getBootstrap().getAccessControl());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
-            upstreamProvider.activate(ignored -> Map.of(), ignored -> new char[0]);
+            upstreamProvider.activate(() -> Map.of());
             assertCacheIsNotRoutable(configuration, environment, upstreamCache);
 
             byte[] payload = bytes("bootstrap identity survives restart");

@@ -86,7 +86,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         assertThat(provider.isPublicRepositoryName(name.replace("/", "%2F"))).isFalse();
         assertThat(provider.openForRead(name)).isInstanceOf(Result.Success.class);
         assertThat(provider.isPublicRepositoryName("team/repo")).isTrue();
-        provider.activate(ignored -> Map.of(), ignored -> new char[0]);
+        provider.activate(() -> Map.of());
         assertThat(provider.isPublicRepositoryName(name)).isFalse();
     }
 
@@ -116,7 +116,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 new BootstrapSecretResolver(Map.of()),
                 (location, transport, repository) -> { },
                 (location, transport, repository, received, updates, atomic) -> List.of());
-        provider.activate(ignored -> Map.of("team/repo", binding), ignored -> new char[0]);
+        provider.activate(() -> Map.of("team/repo", binding));
 
         NativeGitRepository repository = provider.openForRead("team%2Frepo")
                 .valueOrFailure("proxy repository");
@@ -340,9 +340,9 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         RecordingBinding first = new RecordingBinding();
         RecordingBinding second = new RecordingBinding();
 
-        provider.activate(ignored -> Map.of("persistent/first", first), ignored -> new char[0]);
+        provider.activate(() -> Map.of("persistent/first", first));
         provider.openForRead("persistent/first").valueOrFailure("first proxy");
-        provider.activate(ignored -> Map.of("persistent/second", second), ignored -> new char[0]);
+        provider.activate(() -> Map.of("persistent/second", second));
         provider.openForRead("persistent/first").valueOrFailure("direct first repository");
         provider.openForRead("persistent/second").valueOrFailure("second proxy");
 
@@ -361,8 +361,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
                 (location, transport, repository, received, updates, atomic) -> List.of());
 
         assertThatThrownBy(() -> provider.activate(
-                ignored -> Map.of("team%2Frepo", new RecordingBinding()),
-                ignored -> new char[0]))
+                () -> Map.of("team%2Frepo", new RecordingBinding())))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not canonical");
     }
@@ -374,7 +373,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         String repositoryName = provider.provisionalRepositoryName("configuration");
 
-        provider.activate(ignored -> Map.of(), ignored -> new char[0]);
+        provider.activate(() -> Map.of());
         assertUnavailableCache(provider, repositoryName);
 
         assertThat(refreshes).hasValue(1);
@@ -386,7 +385,7 @@ class ProxyAwareNativeGitRepositoryProviderTest {
         ProxyAwareNativeGitRepositoryProvider provider = provider(new AtomicInteger(), pushes);
         String name = provider.prepareProvisional("configuration", remoteSource("orion.xml"));
         NativeGitRepository retained = provider.openForWrite(name).valueOrFailure("proxy handle");
-        provider.activate(ignored -> Map.of(), ignored -> new char[0]);
+        provider.activate(() -> Map.of());
 
         assertThatThrownBy(retained::refs).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> retained.saveFiles(

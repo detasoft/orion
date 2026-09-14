@@ -4,5 +4,5 @@ import java.util.Map;
 
 @FunctionalInterface
 public interface PersistentProxyCatalog {
-    Map<String, RuntimeGitProxyBinding> load(PersistentProxyCredentialResolver credentialResolver);
+    Map<String, RuntimeGitProxyBinding> load();
 }

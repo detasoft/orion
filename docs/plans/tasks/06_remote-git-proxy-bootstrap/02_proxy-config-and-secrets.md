@@ -30,6 +30,15 @@ and decrypt it through the existing configuration cipher before use. Preserve
 these collections when updating ACL data. This is the shared Git storage boundary
 for 02/05, not a separate proxy-only credential store.
 
+`ConfigurationSecrets` in `core/common` is the shared credential owner over
+the current configuration snapshot and `ConfigurationCipherCapability`.
+Repository consumers resolve only their own repository or its organization;
+system secrets use an explicit separate entry point. Authenticate the full
+owner address and secret ID in the existing cipher context. Create and replace
+produce unpublished document candidates and consume the supplied characters;
+the configuration update owner must persist them with its revision check.
+The resolver does not cache plaintext or publish configuration itself.
+
 Bootstrap credentials remain external on every launch. Match adoption by
 canonical upstream URI and selected ref, reject duplicate/colliding identities,
 and retain the already-resolved source handles. Add absent metadata/credentials

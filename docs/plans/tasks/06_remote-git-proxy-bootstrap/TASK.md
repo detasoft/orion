@@ -24,8 +24,9 @@ by `ac2f610f` and `79dd66b4`. The native acceptance covers shared inputs, refres
 reads, upstream publication and stale-write rejection, cache-name isolation,
 identity preservation on reopening, and unavailable upstreams.
 
-`PersistentProxyCatalog` and `PersistentProxyCredentialResolver` currently have
-no production activation consumer. Public Git transports reject internal
+`PersistentProxyCatalog` currently has no production activation consumer.
+`ConfigurationSecrets` owns stored credential resolution for the GitHub profile;
+the proxy catalog will use that same owner. Public Git transports reject internal
 bootstrap cache names independently of binding state; persistent alias adoption
 remains pending.
 `BootstrapContext` already preserves failure causes (`9b0bb402`). These are

@@ -185,13 +185,10 @@ public final class ProxyAwareNativeGitRepositoryProvider implements NativeGitRep
         return repositoryName;
     }
 
-    public void activate(
-            PersistentProxyCatalog catalog,
-            PersistentProxyCredentialResolver credentialResolver) {
+    public void activate(PersistentProxyCatalog catalog) {
         Objects.requireNonNull(catalog, "catalog");
-        Objects.requireNonNull(credentialResolver, "credentialResolver");
         Map<String, RuntimeGitProxyBinding> loaded = Objects.requireNonNull(
-                catalog.load(credentialResolver),
+                catalog.load(),
                 "catalog bindings");
         Map<String, RuntimeGitProxyBinding> candidate = new java.util.LinkedHashMap<>();
         for (Map.Entry<String, RuntimeGitProxyBinding> entry : loaded.entrySet()) {
