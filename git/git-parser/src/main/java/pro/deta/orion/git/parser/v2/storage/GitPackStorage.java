@@ -1,0 +1,19 @@
+package pro.deta.orion.git.parser.v2.storage;
+
+/**
+ * Stores validated packs and exposes their content for reuse and delivery.
+ * Pack parsing, quarantine, and receive policy belong to the calling operation; storing a pack does not
+ * update refs or imply that a push was accepted.
+ *
+ * <p>Preliminary methods:
+ * <ul>
+ *   <li>{@code publish(receivedPack)} - retain a validated pack and make its objects readable.</li>
+ *   <li>{@code publishedPacks()} - list the metadata of published packs.</li>
+ *   <li>{@code openPublishedPack(packId)} - open a published pack for reading.</li>
+ * </ul>
+ * Method names and signatures are provisional. The received pack carries its bytes and external-base
+ * dependencies. Stored objects must remain readable after the ingestion session closes, including when a
+ * thin pack depends on existing objects. A later ref rejection need not remove an already published pack.
+ */
+public final class GitPackStorage {
+}
