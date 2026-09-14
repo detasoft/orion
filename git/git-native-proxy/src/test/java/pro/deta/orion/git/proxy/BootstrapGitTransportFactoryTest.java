@@ -4,12 +4,15 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import pro.deta.orion.git.client.GitClientOptions;
+import pro.deta.orion.git.client.GitClientTransport;
+import pro.deta.orion.git.client.GitClientService;
 import pro.deta.orion.git.client.GitClientResult;
 import pro.deta.orion.git.client.GitSshClientTransport;
 import pro.deta.orion.git.client.GitUploadPackClient;
 import pro.deta.orion.git.client.GitRemoteAdvertisement;
 import pro.deta.orion.schema.config.BootstrapSourceConfig;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -22,12 +25,64 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class BootstrapGitTransportFactoryTest {
+    @Test
+    void closesOwnedHttpClientAfterOperationReturns() throws Exception {
+        assertHttpClientClosed(false);
+    }
+
+    @Test
+    void closesOwnedHttpClientWhenOperationThrows() throws Exception {
+        assertHttpClientClosed(true);
+    }
+
+    private static void assertHttpClientClosed(boolean failOperation) throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/repository.git", exchange -> {
+            requests.incrementAndGet();
+            exchange.sendResponseHeaders(401, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/repository.git");
+            BootstrapGitLocation location = httpLocation(
+                    uri, "http-basic", Map.of("credentialUsername", "orion"));
+            BootstrapGitTransportFactory factory = new BootstrapGitTransportFactory(
+                    new BootstrapSecretResolver(Map.of("GIT_CREDENTIAL", "password")));
+            AtomicReference<GitClientTransport> retained = new AtomicReference<>();
+            IOException failure = new IOException("operation failed");
+            BootstrapGitTransportFactory.TransportOperation<Void> operation = transport -> {
+                retained.set(transport);
+                assertThat(new GitUploadPackClient(transport).discover(uri, GitClientOptions.defaults()))
+                        .isInstanceOf(GitClientResult.Failed.class);
+                if (failOperation) {
+                    throw failure;
+                }
+                return null;
+            };
+            if (failOperation) {
+                assertThatThrownBy(() -> factory.withTransport(location, operation)).isSameAs(failure);
+            } else {
+                factory.withTransport(location, operation);
+            }
+            assertThat(requests).hasValue(1);
+            assertThatThrownBy(() -> retained.get().open(
+                    GitClientService.UPLOAD_PACK, uri, GitClientOptions.defaults()))
+                    .isInstanceOf(Exception.class);
+            assertThat(requests).hasValue(1);
+        } finally {
+            server.stop(0);
+        }
+    }
+
     @Test
     void sendsBearerCredentialOnSmartHttpDiscovery() throws Exception {
         assertHttpAuthorization(

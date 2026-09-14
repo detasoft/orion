@@ -49,44 +49,38 @@ final class BootstrapGitTransportFactory {
                 "Remote Git credential",
                 location.credentialReference())) {
             char[] characters = secret.copy();
-            GitClientTransport transport = null;
             try {
-                transport = transport(location, characters);
-                return operation.run(transport);
+                return switch (location.credentialKind()) {
+                    case HTTP_BEARER, HTTP_BASIC -> withHttpTransport(location, characters, operation);
+                    case SSH_PASSWORD, SSH_PRIVATE_KEY -> {
+                        try (GitSshClientTransport transport = sshTransport(location, characters)) {
+                            yield operation.run(transport);
+                        }
+                    }
+                    case NONE -> operation.run(new GitFileClientTransport());
+                };
             } finally {
-                try {
-                    close(transport);
-                } finally {
-                    Arrays.fill(characters, '\0');
-                }
+                Arrays.fill(characters, '\0');
             }
         }
     }
 
-    private static GitClientTransport transport(
+    private static <T> T withHttpTransport(
             BootstrapGitLocation location,
-            char[] credential) {
-        return switch (location.credentialKind()) {
-            case HTTP_BEARER, HTTP_BASIC -> httpTransport(location, credential);
-            case SSH_PASSWORD, SSH_PRIVATE_KEY -> sshTransport(location, credential);
-            case NONE -> new GitFileClientTransport();
-        };
-    }
-
-    private static GitClientTransport httpTransport(
-            BootstrapGitLocation location,
-            char[] credential) {
+            char[] credential,
+            TransportOperation<T> operation) throws Exception {
         GitHttpRequestConfigurer authentication = request -> request.header(
                 "Authorization",
                 authorization(location, credential));
-        HttpClient client = HttpClient.newBuilder()
+        try (HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(OPTIONS.connectTimeout())
                 .followRedirects(HttpClient.Redirect.NEVER)
-                .build();
-        return new GitSmartHttpClientTransport(
-                client,
-                authentication,
-                "http".equals(location.remoteUri().getScheme()));
+                .build()) {
+            return operation.run(new GitSmartHttpClientTransport(
+                    client,
+                    authentication,
+                    "http".equals(location.remoteUri().getScheme())));
+        }
     }
 
     private static String authorization(
@@ -125,7 +119,7 @@ final class BootstrapGitTransportFactory {
         }
     }
 
-    private static GitClientTransport sshTransport(
+    private static GitSshClientTransport sshTransport(
             BootstrapGitLocation location,
             char[] credential) {
         if (location.knownHosts() == null) {
@@ -171,16 +165,6 @@ final class BootstrapGitTransportFactory {
             throw error;
         } catch (Exception error) {
             throw new BootstrapGitProxyException("SSH private-key validation");
-        }
-    }
-
-    private static void close(GitClientTransport transport) {
-        if (transport instanceof AutoCloseable closeable) {
-            try {
-                closeable.close();
-            } catch (Exception error) {
-                throw new BootstrapGitProxyException("transport cleanup");
-            }
         }
     }
 
