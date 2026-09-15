@@ -75,6 +75,14 @@ class GitCapabilityTest {
     }
 
     @Test
+    void exposesProtocolV2FetchFlagsAsStandardCapabilities() {
+        assertThat(GitCapability.WAIT_FOR_DONE.wireToken()).isEqualTo("wait-for-done");
+        assertThat(GitCapability.SIDEBAND_ALL.wireToken()).isEqualTo("sideband-all");
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.custom("wait-for-done"));
+        assertThatIllegalArgumentException().isThrownBy(() -> GitCapability.custom("sideband-all"));
+    }
+
+    @Test
     void supportsCustomBareAndValuedCapabilities() {
         assertThat(List.of(
                 GitCapability.custom("bundle-uri"),

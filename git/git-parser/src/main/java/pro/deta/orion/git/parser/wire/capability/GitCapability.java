@@ -9,6 +9,8 @@ public final class GitCapability {
     public static final GitCapability MULTI_ACK_DETAILED =
             bare("multi_ack_detailed");
     public static final GitCapability NO_DONE = bare("no-done");
+    public static final GitCapability WAIT_FOR_DONE = bare("wait-for-done");
+    public static final GitCapability SIDEBAND_ALL = bare("sideband-all");
     public static final GitCapability THIN_PACK = bare("thin-pack");
     public static final GitCapability NO_THIN = bare("no-thin");
     public static final GitCapability SIDE_BAND = bare("side-band");
@@ -39,6 +41,8 @@ public final class GitCapability {
             "multi_ack",
             "multi_ack_detailed",
             "no-done",
+            "wait-for-done",
+            "sideband-all",
             "thin-pack",
             "no-thin",
             "side-band",

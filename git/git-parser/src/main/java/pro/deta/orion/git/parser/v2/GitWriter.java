@@ -1,7 +1,6 @@
 package pro.deta.orion.git.parser.v2;
 
-import pro.deta.orion.git.parser.v2.data.NegotiationResponse;
-import pro.deta.orion.git.parser.v2.fetch.FetchNegotiator;
+import pro.deta.orion.git.parser.v2.fetch.NegotiationResponse;
 import pro.deta.orion.net.io.BufferedByteOutput;
 
 import java.io.IOException;
@@ -27,19 +26,17 @@ import java.util.Objects;
  * bytes and does not itself encode a Git flush-pkt. Protocol response framing remains to be specified.
  * Other method names and signatures are provisional; native storage types must not enter this contract.
  */
-public final class GitWriter implements FetchNegotiator.Output {
+public final class GitWriter {
     private final BufferedByteOutput output;
 
     public GitWriter(BufferedByteOutput output) {
         this.output = Objects.requireNonNull(output, "output");
     }
 
-    @Override
     public void writeNegotiationResponse(NegotiationResponse response) throws IOException {
         throw new UnsupportedOperationException("Negotiation response encoding is not implemented");
     }
 
-    @Override
     public void flush() throws IOException {
         throw new UnsupportedOperationException("Negotiation output flushing is not implemented");
     }

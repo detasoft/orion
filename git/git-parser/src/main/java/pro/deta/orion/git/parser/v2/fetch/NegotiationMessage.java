@@ -1,4 +1,4 @@
-package pro.deta.orion.git.parser.v2.data;
+package pro.deta.orion.git.parser.v2.fetch;
 
 import pro.deta.orion.git.parser.v2.id.ObjectId;
 
