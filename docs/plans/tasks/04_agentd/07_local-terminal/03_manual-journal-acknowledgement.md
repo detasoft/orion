@@ -5,7 +5,9 @@ Depends on: completed local terminal attach `8667378a`
 
 - Owner: codex, session 01a09f52-b1d0-7522-bbed-2c6c389576b6,
   branch `codex/local-journal-ack-01a09f52`,
-  worktree `.worktrees/local-journal-ack-01a09f52`, started 2026-09-15 16:25 Europe/Amsterdam.
+  worktree `.worktrees/local-journal-ack-01a09f52`, paused 2026-09-15 17:40 Europe/Amsterdam;
+  next: rerun focused terminal tests after unrelated native timeouts are resolved, then
+  run `mvn test -Pdev -T 4` and finish review of the unstaged implementation.
 
 Add an opt-in `--ack-journal` testing mode without changing the default
 non-acknowledging attach behavior.
